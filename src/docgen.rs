@@ -1,0 +1,728 @@
+//! The document kit: the embedded JavaScript document kit and its `rules.json` vocabulary,
+//! compiled in once and materialized on demand. The kit runner's `run` and `probe` entry points
+//! serve `crate::tools::document` alone, while the rules and mark tables are shared by the
+//! document readers and by rasterization.
+//!
+//! The kit (`assets/docgen/document-kit.js`, built from `assets/docgen/kit.js` and the shared
+//! `assets/docgen/rules.json`) is a self-contained bundle that runs on the managed bun runtime.
+//! It is not a prompt asset: it is megabytes of raw bytes, and the prompt folder pins LF
+//! endings and is not for binaries — so the bundle and the PDF text font it embeds
+//! (`assets/docgen/NotoSans-Regular.ttf`) are compiled in with `include_bytes!` and written out
+//! at run time.
+//!
+//! # Protocol
+//!
+//! A request is a JSON object naming the operation (`op`), the paths it reads and writes, and any
+//! data its refusals need. The runner always writes that object to a `request-<nonce>.json` file,
+//! always points the kit at a `result-<nonce>.json` file, and always reads the RESULT FILE —
+//! never stdout, which is only the run's diagnostics. Both live in the kit's `scratch/`, emptied
+//! when the kit is prepared. A result is `{"ok", "outputs", "missing", "placeholders",
+//! "unsupported", "notes", "losses", "class", "error"}`: `placeholders` is a `fill_template`
+//! result only; `unsupported` lists the distinct characters the embedded PDF font could not
+//! draw; `notes` are already-bracketed, user-facing caveats the reply appends verbatim; `losses`
+//! are the subset of those saying part of what the call asked for is NOT in the produced file. A
+//! note about the input's own properties — a signature that no longer matches, a chart or pivot
+//! cache nothing recomputes — is not a loss. `class` is present only on a failure the kit blamed
+//! on the request ("usage": the caller can fix it, see [`read_result`]). A failure of the run
+//! itself (a timeout, a kill, a spawn failure) never reaches the result file and is reported by
+//! the runner with its own class token.
+//!
+//! # Containment
+//!
+//! The materialized kit directory is a subdirectory of the product's storage root. In the
+//! product's own layout that is a place no workspace, no tool-accessible root and no OS temp root
+//! an agent may write covers. It is out of reach of every pipeline role and of a guest, but not
+//! of the admin's Assistant, which reaches the machine by design (see
+//! [`crate::tools::path::PathAccess`]) — the accepted limit of a location rule. A sandbox launch
+//! that points `HOME` at a temp root puts the storage root there too, where a read-only agent may
+//! write, and the guarantee is only as good as the layout.
+//!
+//! The kit runs with that directory as its cwd, never the caller's workspace: bun auto-loads
+//! `$cwd/bunfig.toml` and runs its `preload` scripts (verified — `--config` does not suppress
+//! it), so a workspace holding a `bunfig.toml` would run attacker-authored code as the OS owner.
+//! The invocation also passes `--no-install` and `--no-env-file`.
+
+use anyhow::Result;
+use serde_json::{Value, json};
+use sha2::{Digest as _, Sha256};
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+/// The committed, self-contained kit bundle — raw bytes rather than a prompt asset.
+const KIT_SCRIPT: &[u8] = include_bytes!("../assets/docgen/document-kit.js");
+
+/// The Cyrillic-covering general-text font the product ships (see
+/// `assets/docgen/NotoSans-LICENSE.txt`): the kit embeds it into the PDFs it writes or annotates,
+/// and the rasterizer answers text naming no family — or one the machine cannot supply — with it
+/// (see [`crate::tools::rasterize`]).
+pub(crate) const TEXT_FONT_DATA: &[u8] = include_bytes!("../assets/docgen/NotoSans-Regular.ttf");
+
+/// The shared statement of the input rules, the bounds and the marks the document readers print:
+/// one file rather than a copy per side, read by the kit, the `document` tool and the readers
+/// alike. The kit imports it, and bun inlines it into the committed bundle.
+const RULES_JSON: &str = include_str!("../assets/docgen/rules.json");
+
+/// [`RULES_JSON`] parsed once; each consumer deserializes the shape it needs out of the result.
+pub(crate) fn rules() -> &'static Value {
+    static RULES: OnceLock<Value> = OnceLock::new();
+    RULES.get_or_init(|| {
+        serde_json::from_str(RULES_JSON).expect("assets/docgen/rules.json must be valid JSON")
+    })
+}
+
+/// The marks a slide carries in what a presentation reader prints. The editing side names the
+/// same words in its refusals, so one statement of them lives in [`RULES_JSON`].
+#[derive(serde::Deserialize)]
+pub(crate) struct PptMarks {
+    pub(crate) title: String,
+    pub(crate) hidden_slide: String,
+    pub(crate) diagram_text: String,
+    pub(crate) diagram_text_lost: String,
+    pub(crate) no_text: String,
+}
+
+/// [`PptMarks`] out of [`rules`]. An entry the file lost is a build fault, caught by the tests
+/// that read a slide rather than by a call.
+pub(crate) fn ppt_marks() -> &'static PptMarks {
+    static MARKS: OnceLock<PptMarks> = OnceLock::new();
+    MARKS.get_or_init(|| {
+        serde::Deserialize::deserialize(&rules()["ppt_marks"])
+            .expect("assets/docgen/rules.json must carry the ppt_marks the reader prints")
+    })
+}
+
+/// The headers a presentation reader prints a slide's block, its speaker-notes block and its
+/// comments under, each with `{n}` for the slide's number. The editing side names the same
+/// headers in its refusals, so one statement of them lives in [`RULES_JSON`].
+#[derive(serde::Deserialize)]
+pub(crate) struct PptSlideLabels {
+    pub(crate) slide: String,
+    pub(crate) notes: String,
+    pub(crate) comments: String,
+}
+
+pub(crate) fn ppt_slide_labels() -> &'static PptSlideLabels {
+    static LABELS: OnceLock<PptSlideLabels> = OnceLock::new();
+    LABELS.get_or_init(|| {
+        serde::Deserialize::deserialize(&rules()["ppt_slide_labels"])
+            .expect("assets/docgen/rules.json must carry the ppt_slide_labels a reader prints")
+    })
+}
+
+/// The words a PDF form's field list names a field's kind by. The reading prints them and the
+/// kit's own refusal lists the same fields, so one statement of them lives in [`RULES_JSON`].
+#[derive(serde::Deserialize)]
+pub(crate) struct PdfFieldKinds {
+    pub(crate) text: String,
+    pub(crate) checkbox: String,
+    pub(crate) radio: String,
+    pub(crate) choice: String,
+}
+
+impl PdfFieldKinds {
+    pub(crate) fn spelled(&self) -> String {
+        format!(
+            "`{}`, `{}`, `{}` and `{}`",
+            self.text, self.checkbox, self.radio, self.choice
+        )
+    }
+}
+
+pub(crate) fn pdf_field_kinds() -> &'static PdfFieldKinds {
+    static KINDS: OnceLock<PdfFieldKinds> = OnceLock::new();
+    KINDS.get_or_init(|| {
+        serde::Deserialize::deserialize(&rules()["pdf_field_kinds"])
+            .expect("assets/docgen/rules.json must carry the pdf_field_kinds a form list prints")
+    })
+}
+
+/// The words a PDF form reading prints: the section heading, the empty-value marker, the one
+/// for a field a fill cannot reach, and the name of a field the file gives none. The reading and
+/// the prompt describing it both take them from [`RULES_JSON`], so the vocabulary the model is
+/// told to expect cannot drift from the one the reader emits.
+#[derive(serde::Deserialize)]
+pub(crate) struct PdfFormWords {
+    pub(crate) fields: String,
+    pub(crate) no_value: String,
+    pub(crate) not_fillable: String,
+    pub(crate) unnamed: String,
+}
+
+pub(crate) fn pdf_form_words() -> &'static PdfFormWords {
+    static WORDS: OnceLock<PdfFormWords> = OnceLock::new();
+    WORDS.get_or_init(|| {
+        serde::Deserialize::deserialize(&rules()["pdf_form_words"])
+            .expect("assets/docgen/rules.json must carry the pdf_form_words a form list prints")
+    })
+}
+
+/// The spellings a PDF metadata date accepts, as one model-facing sentence. The schema, the
+/// boundary's refusal, the command line's help and the writing prompt all state it from here.
+pub(crate) fn pdf_date_format() -> &'static str {
+    rules()["pdf_date_format"]
+        .as_str()
+        .expect("assets/docgen/rules.json must carry the pdf_date_format a metadata date accepts")
+}
+
+/// One description field a PDF's Info dictionary carries: the `metadata` request key, the
+/// sentence the schema describes it with, and whether the value is a PDF date. The schema, both
+/// refusals, the reading and the kit's writer read this one ordered list.
+#[derive(serde::Deserialize)]
+pub(crate) struct PdfMetadataField {
+    pub(crate) key: String,
+    pub(crate) description: String,
+    pub(crate) date: bool,
+}
+
+/// [`PdfMetadataField`]s out of [`rules`], in the order a reading prints them.
+pub(crate) fn pdf_metadata_fields() -> &'static [PdfMetadataField] {
+    static FIELDS: OnceLock<Vec<PdfMetadataField>> = OnceLock::new();
+    FIELDS.get_or_init(|| {
+        serde::Deserialize::deserialize(&rules()["pdf_metadata_fields"]).expect(
+            "assets/docgen/rules.json must carry the pdf_metadata_fields a description names",
+        )
+    })
+}
+
+/// The description fields spelled for a model-facing sentence, in the rules' order, each in
+/// backticks and joined as a list.
+pub(crate) fn pdf_metadata_fields_spelled() -> String {
+    let keys: Vec<String> = pdf_metadata_fields()
+        .iter()
+        .map(|field| format!("`{}`", field.key))
+        .collect();
+    crate::util::listed(&keys, "and")
+}
+
+/// The marks a Word reading prints that are labels rather than text: the pattern each is matched
+/// by and the spelling it prints as. The editing side names the same marks in its refusals.
+#[derive(serde::Deserialize)]
+pub(crate) struct DocxMark {
+    /// The pattern the mark is matched by — by the kit in JavaScript and by this crate's own
+    /// [`docx_marks`], which compiles each one.
+    pub(crate) pattern: String,
+    pub(crate) example: String,
+}
+
+/// [`DocxMark`]s out of [`rules`], as [`ppt_marks`] reads its own. Each pattern is compiled here:
+/// a pattern only one side accepts is a build fault, named at the first read.
+pub(crate) fn docx_marks() -> &'static [DocxMark] {
+    static MARKS: OnceLock<Vec<DocxMark>> = OnceLock::new();
+    MARKS.get_or_init(|| {
+        let marks: Vec<DocxMark> = serde::Deserialize::deserialize(&rules()["docx_marks"])
+            .expect("assets/docgen/rules.json must carry the docx_marks a reader prints");
+        for mark in &marks {
+            regex::Regex::new(&mark.pattern)
+                .expect("a docx mark's pattern must be a regex the kit and this crate both accept");
+        }
+        marks
+    })
+}
+
+/// One of the parts a docx edit does not change — a header, a footer, a note or a comment: the
+/// relationship type naming it and the conventional part a package naming none of that kind is
+/// read from. The kit reads the same entry, so the two sides cannot name one part two ways.
+#[derive(serde::Deserialize)]
+pub(crate) struct DocxPeripheralPart {
+    pub(crate) kind: String,
+    pub(crate) rel: String,
+    /// The conventional part name, absent for a kind a package reaches through a relationship
+    /// alone (a header, a footer).
+    #[serde(default)]
+    pub(crate) part: Option<String>,
+}
+
+/// The shared entry for one peripheral kind, by name. A kind the file lost is a build fault,
+/// caught where the entry is resolved.
+pub(crate) fn docx_peripheral_part(kind: &str) -> &'static DocxPeripheralPart {
+    static PARTS: OnceLock<Vec<DocxPeripheralPart>> = OnceLock::new();
+    PARTS
+        .get_or_init(|| {
+            serde::Deserialize::deserialize(&rules()["docx_peripheral_parts"]).expect(
+                "assets/docgen/rules.json must carry the docx_peripheral_parts an edit leaves alone",
+            )
+        })
+        .iter()
+        .find(|part| part.kind == kind)
+        .expect("assets/docgen/rules.json must name every peripheral part a docx edit leaves alone")
+}
+
+/// The materialized-kit directory name under the storage root. The per-content subdirectory keeps
+/// a new binary from reusing an older kit's files.
+const KIT_DIR_NAME: &str = "mahbot-document-kit";
+const KIT_SCRIPT_NAME: &str = "document-kit.js";
+const KIT_FONT_NAME: &str = "NotoSans-Regular.ttf";
+
+/// The kit's scratch directory, inside the version directory: a run's request and result files
+/// and the probe's tree. Emptied when the kit is prepared.
+const KIT_SCRATCH_NAME: &str = "scratch";
+
+const KIT_HASH_BYTES: usize = 8;
+
+const OUTPUT_TAIL_CHARS: usize = 2000;
+
+pub(crate) struct KitOutcome {
+    pub outputs: Vec<PathBuf>,
+    /// Placeholder names the request supplied no value for, left as they were in the produced file.
+    pub missing: Vec<String>,
+    /// The distinct `{name}` template tags the filler compiled or substituted, once per name — a
+    /// `fill_template` result only. `Some(0)` means the rewritten parts held none; `None` for every
+    /// other operation.
+    pub placeholders: Option<usize>,
+    /// The distinct characters the embedded PDF font could not draw, in the order the kit drew
+    /// them — the PDF-writing operations only.
+    pub unsupported: Vec<String>,
+    /// The caveats an operation discovered at run time — already bracketed, user-facing sentences
+    /// the reply appends verbatim: references naming old cells after a shift, text that lost runs'
+    /// formatting, a chart or pivot keeping cached values, a signature that no longer matches.
+    pub notes: Vec<String>,
+    /// Whether the kit raised at least one caveat meaning part of what the call asked for is NOT
+    /// in the produced file — as opposed to a note recording the scope of the edit.
+    pub lossy: bool,
+}
+
+/// Run one kit operation and report what it produced. `request` must be a JSON object naming
+/// `op`; the runner adds the result path and the materialized font path itself.
+pub(crate) async fn run(request: Value) -> Result<KitOutcome> {
+    let value = invoke(request).await?;
+    Ok(KitOutcome {
+        outputs: string_array(&value, "outputs")
+            .into_iter()
+            .map(PathBuf::from)
+            .collect(),
+        missing: string_array(&value, "missing"),
+        placeholders: value
+            .get("placeholders")
+            .and_then(Value::as_u64)
+            .and_then(|count| usize::try_from(count).ok()),
+        unsupported: string_array(&value, "unsupported"),
+        notes: string_array(&value, "notes"),
+        // The kit reports `losses` for the operations that can fall short — the three edits, and
+        // a create whose table of contents could not be worked out; any other operation leaves
+        // it out, which reads as no loss.
+        lossy: !string_array(&value, "losses").is_empty(),
+    })
+}
+
+/// Run the kit's own `probe` operation once per process, into a scratch directory removed
+/// afterwards, and cache SUCCESS only. A failure is retried on the next call because a kit broken
+/// now may become usable: the product keeps the managed runtime at its newest release on every
+/// start.
+pub(crate) async fn probe() -> Result<()> {
+    static PROBED: OnceLock<()> = OnceLock::new();
+    if PROBED.get().is_some() {
+        return Ok(());
+    }
+    // Refused before the kit is materialized: writing megabytes out only to report an
+    // unavailable runtime is work for nothing.
+    managed_runtime()?;
+    let dir = kit_directory().await?;
+    let scratch = dir
+        .join(KIT_SCRATCH_NAME)
+        .join(format!("probe-{:016x}", rand::random::<u64>()));
+    let result = invoke(json!({ "op": "probe", "scratch": scratch })).await;
+    // The scratch tree is the kit's own artifact, never something the tool reserved, so it is
+    // removed here whatever the probe reported.
+    let _ = tokio::fs::remove_dir_all(&scratch).await;
+    result?;
+    let _ = PROBED.set(());
+    Ok(())
+}
+
+/// One kit operation end to end: fill in the result path, write the request, run the kit, read
+/// and parse the result, then remove both files (best effort, the error path included). Shared by
+/// [`run`] and [`probe`], which interpret the parsed result differently.
+async fn invoke(mut request: Value) -> Result<Value> {
+    // Resolved before anything is materialized: the kit is megabytes, and writing it out only to
+    // refuse the call is work for nothing.
+    let runtime = managed_runtime()?;
+    let op = request
+        .get("op")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let dir = kit_directory().await?;
+    let nonce = format!("{:016x}", rand::random::<u64>());
+    let request_path = dir
+        .join(KIT_SCRATCH_NAME)
+        .join(format!("request-{nonce}.json"));
+    let result_path = dir
+        .join(KIT_SCRATCH_NAME)
+        .join(format!("result-{nonce}.json"));
+
+    // The runner owns both paths, so a caller can never point the kit at a file of its own
+    // choosing; the font is materialized beside the kit.
+    request["result"] = Value::String(result_path.to_string_lossy().into_owned());
+    request["font"] = Value::String(dir.join(KIT_FONT_NAME).to_string_lossy().into_owned());
+
+    let outcome = async {
+        let body = serde_json::to_vec(&request).map_err(|e| {
+            crate::tools::internal_fault(&format!("failed to encode the document kit request: {e}"))
+        })?;
+        tokio::fs::write(&request_path, body).await.map_err(|e| {
+            crate::tools::internal_fault(&format!(
+                "failed to write the document kit request for `{op}`: {e}"
+            ))
+        })?;
+        let output = run_kit(dir, &runtime, &request_path).await?;
+        read_result(&result_path, &output, &op).await
+    }
+    .await;
+    let _ = tokio::fs::remove_file(&request_path).await;
+    let _ = tokio::fs::remove_file(&result_path).await;
+    outcome
+}
+
+/// The managed script runtime, or the mahbot-side fault saying why the kit cannot run: nothing
+/// here is the request's fault, so it carries the `internal` token. The path is absent both when
+/// the runtime is not installed and while the product replaces it at startup.
+fn managed_runtime() -> Result<PathBuf> {
+    crate::tools::bun::bun_binary_path().ok_or_else(|| {
+        crate::tools::internal_fault(
+            "the document kit cannot run: the managed bun runtime is unavailable",
+        )
+    })
+}
+
+/// Run the kit on the managed runtime with the kit directory as cwd: the materialized script,
+/// then the request file as its argument.
+///
+/// A failure of the RUN itself — a timeout, a kill, one that would not start — is the product's
+/// own, reported with its own class token ("timeout:", "io:", "terminated:"), so the model reads
+/// one class and a subject.
+async fn run_kit(dir: &Path, runtime: &Path, request_path: &Path) -> Result<String> {
+    let args: Vec<String> = crate::tools::bun::SCRIPT_GUARDS
+        .iter()
+        .map(|flag| (*flag).to_string())
+        .chain([
+            dir.join(KIT_SCRIPT_NAME).to_string_lossy().into_owned(),
+            request_path.to_string_lossy().into_owned(),
+        ])
+        .collect();
+    // The kit is the product's own code and needs none of the owner's environment, which is what
+    // this entry point is for.
+    crate::tools::shell::run_internal_program_with_timeout(dir, runtime, &args, "the document kit")
+        .await
+}
+
+/// Read and parse the kit's result file.
+///
+/// A missing or unreadable result file, or an `ok: false` the kit did NOT blame on the request, is
+/// a mahbot-side fault ([`crate::tools::internal_fault`]): the kit's own code failed on data it
+/// handles. A failure the kit DID blame on the request (`"class": "usage"`) carries the `usage`
+/// token instead, because the model can fix that by changing the call.
+async fn read_result(path: &Path, output: &str, op: &str) -> Result<Value> {
+    let bytes = match tokio::fs::read(path).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            return Err(crate::tools::internal_fault(&format!(
+                "the document kit gave no result for `{op}` ({}){}",
+                e.kind(),
+                output_tail(output)
+            )));
+        }
+    };
+    let value: Value = match serde_json::from_slice(&bytes) {
+        Ok(value) => value,
+        Err(e) => {
+            return Err(crate::tools::internal_fault(&format!(
+                "the document kit returned an unreadable result for `{op}`: {e}{}",
+                output_tail(output)
+            )));
+        }
+    };
+    if value.get("ok").and_then(Value::as_bool) == Some(true) {
+        return Ok(value);
+    }
+    let message = value
+        .get("error")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let reason = if message.is_empty() {
+        format!("no reason given{}", output_tail(output))
+    } else {
+        message.to_string()
+    };
+    if value.get("class").and_then(Value::as_str) == Some("usage") {
+        anyhow::bail!("usage: {reason}");
+    }
+    Err(crate::tools::internal_fault(&format!(
+        "the document kit could not complete `{op}`: {reason}"
+    )))
+}
+
+/// The materialized-kit directory for THIS build's kit bytes, prepared on every call so a missing
+/// or truncated kit file is restored before the call runs. The path is cached; the length-checked
+/// writes are not, because the files may have gone with the directory (and the first write moves
+/// megabytes onto the disk, so it uses async I/O rather than a worker thread).
+async fn kit_directory() -> Result<&'static Path> {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    // Once per process, and before this call's own request is written: the sweep is what a
+    // killed run cannot do for itself, and `OnceCell` makes the ordering hold — every caller
+    // waits for it, so none can have a file inside the directory it clears.
+    static SWEPT: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
+    // The kit is materialized under the storage root rather than a temp root so that no
+    // tool-accessible root an agent may write reaches it — except the admin Assistant's own reach,
+    // the accepted limit the module docs name. Boot resolves the storage root before any agent
+    // runs, so its absence here is a boot-order bug.
+    let root = crate::config::CONFIG.try_storage_root().ok_or_else(|| {
+        crate::tools::internal_fault(
+            "the document kit cannot be prepared: the storage root is not resolved",
+        )
+    })?;
+    let dir = DIR.get_or_init(|| root.join(KIT_DIR_NAME).join(content_version()));
+    materialize(dir).await.map_err(|e| {
+        crate::tools::internal_fault(&format!(
+            "failed to prepare the document kit at {}: {e}",
+            dir.display()
+        ))
+    })?;
+    SWEPT
+        .get_or_init(|| async { sweep_kit_directory(dir).await })
+        .await;
+    Ok(dir)
+}
+
+/// The directory name for the embedded kit bytes: a new binary that changes the
+/// kit (or the font) gets a new directory, so a stale kit is never reused.
+fn content_version() -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(KIT_SCRIPT);
+    hasher.update(TEXT_FONT_DATA);
+    let hex = crate::util::hex_string(&hasher.finalize());
+    hex[..KIT_HASH_BYTES * 2].to_string()
+}
+
+async fn materialize(dir: &Path) -> std::io::Result<()> {
+    tokio::fs::create_dir_all(dir).await?;
+    write_if_missing(&dir.join(KIT_SCRIPT_NAME), KIT_SCRIPT).await?;
+    write_if_missing(&dir.join(KIT_FONT_NAME), TEXT_FONT_DATA).await
+}
+
+/// Drop what the kit directory should not keep: the scratch of a run that was
+/// killed, and the directories other content versions left behind (each is
+/// megabytes of bundle and font, and nothing else sweeps the storage root).
+///
+/// The instance flock makes this the only process under the storage root, so no
+/// sibling can be a version another process is running. Best effort — whatever
+/// will not go is left for the next process.
+async fn sweep_kit_directory(dir: &Path) {
+    let scratch = dir.join(KIT_SCRATCH_NAME);
+    let _ = tokio::fs::remove_dir_all(&scratch).await;
+    let _ = tokio::fs::create_dir_all(&scratch).await;
+    let Some(parent) = dir.parent() else {
+        return;
+    };
+    let Ok(mut entries) = tokio::fs::read_dir(parent).await else {
+        return;
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        if entry.path() != dir {
+            let _ = tokio::fs::remove_dir_all(entry.path()).await;
+        }
+    }
+}
+
+/// Write `bytes` to `path` unless a file of exactly that length is already
+/// there. A replacement goes through a unique sibling name + rename, so
+/// concurrent callers cannot race on a shared temporary and no reader ever sees
+/// a half-written file; a file of the wrong length is a leftover from a partial
+/// write (or a truncated copy) and is replaced.
+async fn write_if_missing(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if tokio::fs::metadata(path)
+        .await
+        .is_ok_and(|m| m.len() == bytes.len() as u64)
+    {
+        return Ok(());
+    }
+    let tmp = path.with_extension(format!("{:016x}.part", rand::random::<u64>()));
+    tokio::fs::write(&tmp, bytes).await?;
+    // A rename replaces an existing destination on every platform this builds
+    // for (Windows included), so it is not removed first: that would open a
+    // window in which a concurrently spawning sibling finds no kit at all.
+    match tokio::fs::rename(&tmp, path).await {
+        Ok(()) => Ok(()),
+        // Another caller can have won the race with byte-identical content; the
+        // length check is what says its copy is as good as ours.
+        Err(_)
+            if tokio::fs::metadata(path)
+                .await
+                .is_ok_and(|m| m.len() == bytes.len() as u64) =>
+        {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            Err(e)
+        }
+    }
+}
+
+/// The output tail carried into an error when the kit gave no message of its
+/// own; empty when the run said nothing.
+fn output_tail(output: &str) -> String {
+    let tail = output.trim();
+    if tail.is_empty() {
+        String::new()
+    } else {
+        format!("\n{}", crate::util::truncate(tail, OUTPUT_TAIL_CHARS))
+    }
+}
+
+/// The string members of a JSON array field, or an empty list when it is
+/// absent or not an array.
+fn string_array(value: &Value, key: &str) -> Vec<String> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The sources the committed bundle is built from, in the order
+    /// `assets/docgen/build.sh` hashes them.
+    const KIT_SOURCES: [&[u8]; 4] = [
+        include_bytes!("../assets/docgen/kit.js"),
+        RULES_JSON.as_bytes(),
+        include_bytes!("../assets/docgen/package.json"),
+        include_bytes!("../assets/docgen/bun.lock"),
+    ];
+
+    /// How much of the bundle's head carries its build provenance.
+    const HEADER_BYTES: usize = 512;
+
+    /// The class a kit failure carries is the whole contract with the model: a
+    /// failure the kit blamed on the request (`"class": "usage"`) is the caller's
+    /// to fix, and everything else is the product's — never the other way round.
+    #[tokio::test]
+    async fn a_kit_failure_carries_the_class_the_kit_reported() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let result = dir.path().join("result.json");
+
+        let usage =
+            br#"{"ok":false,"error":"no page 5: this document has 1 page(s)","class":"usage"}"#;
+        tokio::fs::write(&result, usage).await.expect("write");
+        let error = read_result(&result, "", "pdf_rotate")
+            .await
+            .expect_err("a failed result");
+        assert_eq!(
+            error.to_string(),
+            "usage: no page 5: this document has 1 page(s)"
+        );
+
+        // The same failure with no class of its own is the product's: no change
+        // to the call can recover it.
+        tokio::fs::write(&result, br#"{"ok":false,"error":"the kit broke"}"#)
+            .await
+            .expect("write");
+        let error = read_result(&result, "", "create")
+            .await
+            .expect_err("a failed result");
+        let message = error.to_string();
+        assert!(message.starts_with("internal: "), "{message}");
+        assert!(message.contains("the kit broke"), "{message}");
+
+        // So is a run that wrote no result at all.
+        tokio::fs::remove_file(&result).await.expect("remove");
+        let error = read_result(&result, "the run said nothing", "create")
+            .await
+            .expect_err("a failed result");
+        assert!(error.to_string().starts_with("internal: "), "{error}");
+    }
+
+    /// The kit file is written once per content version and then left alone: only a file of the
+    /// wrong LENGTH is a leftover to replace, and no temporary sibling survives either outcome.
+    #[tokio::test]
+    async fn write_if_missing_keeps_a_complete_copy_and_replaces_a_partial_one() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("kit.js");
+
+        write_if_missing(&path, b"first").await.expect("write");
+        write_if_missing(&path, b"other").await.expect("write");
+        assert_eq!(
+            tokio::fs::read(&path).await.expect("read"),
+            b"first",
+            "a file of the expected length is this build's own copy"
+        );
+
+        write_if_missing(&path, b"a much longer body")
+            .await
+            .expect("write");
+        assert_eq!(
+            tokio::fs::read(&path).await.expect("read"),
+            b"a much longer body"
+        );
+
+        let mut entries = tokio::fs::read_dir(dir.path()).await.expect("read dir");
+        let mut names = Vec::new();
+        while let Some(entry) = entries.next_entry().await.expect("entry") {
+            names.push(entry.file_name().to_string_lossy().into_owned());
+        }
+        assert_eq!(names, ["kit.js"], "no temporary sibling is left behind");
+    }
+
+    /// Only the version in use survives, and its scratch starts empty: an older version's
+    /// directory is megabytes nothing else sweeps away, and a killed run's request and result
+    /// files would otherwise stay in the storage root for good.
+    #[tokio::test]
+    async fn the_kit_directory_is_swept_once() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let parent = root.path().join(KIT_DIR_NAME);
+        let current = parent.join("current");
+        let stale = parent.join("stale");
+        let scratch = current.join(KIT_SCRATCH_NAME);
+        tokio::fs::create_dir_all(&stale).await.expect("create");
+        tokio::fs::write(stale.join("document-kit.js"), b"old")
+            .await
+            .expect("write");
+        tokio::fs::create_dir_all(scratch.join("probe-dead"))
+            .await
+            .expect("create");
+        tokio::fs::write(scratch.join("request-dead.json"), b"{}")
+            .await
+            .expect("write");
+
+        sweep_kit_directory(&current).await;
+
+        assert!(current.exists(), "the version in use must survive");
+        assert!(!stale.exists(), "an older version must be dropped");
+        let mut names = Vec::new();
+        let mut entries = tokio::fs::read_dir(&scratch).await.expect("read scratch");
+        while let Some(entry) = entries.next_entry().await.expect("entry") {
+            names.push(entry.file_name().to_string_lossy().into_owned());
+        }
+        assert!(
+            names.is_empty(),
+            "the scratch of a killed run must be dropped, found: {names:?}"
+        );
+    }
+
+    /// An edited `kit.js` without a rebuild changes nothing and would otherwise fail nothing,
+    /// leaving the embedded bytes and their source out of step.
+    #[test]
+    fn the_committed_bundle_is_the_build_of_the_committed_sources() {
+        let mut hasher = Sha256::new();
+        for source in KIT_SOURCES {
+            hasher.update(source);
+        }
+        let expected = crate::util::hex_string(&hasher.finalize());
+        let header = String::from_utf8_lossy(&KIT_SCRIPT[..HEADER_BYTES.min(KIT_SCRIPT.len())]);
+        assert!(
+            header.contains(&expected),
+            "assets/docgen/document-kit.js was not built from the committed kit.js/rules.json/\
+             package.json/bun.lock — run assets/docgen/build.sh and commit the bundle"
+        );
+    }
+}

@@ -1,0 +1,482 @@
+[package]
+name = "mahbot"
+version = "0.10.0"
+authors = ["edezhic <edezhic@gmail.com>"]
+description = "An autonomous agentic engineering system that manages software development through role separation, subagents, and deterministic diagnostics."
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/edezhic/mahbot"
+homepage = "https://github.com/edezhic/mahbot"
+readme = "README.md"
+keywords = ["ai", "agent"]
+categories = ["development-tools"]
+rust-version = "1.96"
+resolver = "2"
+# `scripts/` is a dev-only asset; never ship it to crates.io.
+exclude = [".DS_Store", "scripts"]
+
+[features]
+# Audio dev marker: logs every wake-word score the engine's decision produced.
+voice-debug = []
+
+[[bin]]
+name = "mahbot"
+path = "src/main.rs"
+
+[lib]
+name = "mahbot"
+path = "src/lib.rs"
+
+[dependencies]
+# Async
+async-trait = "0.1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+
+# Async runtime
+tokio = { version = "1.50", default-features = false, features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = { version = "0.7", default-features = false }
+
+# Native GUI dashboard
+iced = { version = "0.14", default-features = false, features = ["tokio", "wgpu", "markdown", "advanced", "image-without-codecs"] }
+iced_fonts = { version = "0.3", default-features = false, features = ["lucide", "advanced_text"] }
+# The composer's attach button opens the platform's own file chooser: the macOS
+# open panel, the Windows common dialog, and on Linux the desktop's own chooser
+# over the XDG portal — falling back to a `zenity` process when no portal is
+# running, so no GTK. The portal feature builds without system packages. No
+# default features: the portal's window-identification helper needs Wayland
+# protocol crates the product does not otherwise build.
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
+# The same markdown parser iced_widget uses (resolved to the lock's 0.12.2 —
+# no new crates). The Sessions transcript pre-scans it to find HTML regions
+# (angle-bracket tag blocks) and escape only those, so they render as literal
+# text instead of being dropped at parse time; `util::markdown` classifies the
+# regions that view draws as code, where a media marker is source text.
+pulldown-cmark = "0.12"
+iced_anim = "0.3"
+iced_term = "0.8.0"
+
+# The speech engines — recognition and spoken replies — and their models: the
+# inference crate from crates.io, pinned to one exact release so the build is a
+# published, checksummed artifact rather than a sibling checkout's working tree.
+# Exact on purpose: a range over a pre-release also admits later releases of the
+# same series. The family it depends on rides the same release, held by Cargo.lock.
+mahbot-inference = "=0.2.18-mahbot.2"
+# Microphone capture (`crate::audio::voice`): the platform's own host API —
+# CoreAudio, WASAPI, ALSA. The ALSA backend needs `libasound2-dev` (pkg-config
+# `alsa`) to build on Linux.
+cpal = "0.18"
+# The wake word's voice-activity detector (the recogniser's own lives in the inference
+# crate).
+earshot = "1.2"
+# Spoken-phrase playback and the wake-word recording cues: both play through one
+# shared output device on the same host API, and a WAV cue is decoded by `hound`.
+rodio = { version = "0.22", default-features = false, features = ["playback", "hound"] }
+# The recogniser's input decoders: OGG/Opus (a Telegram voice note arrives as one),
+# and MP3 (an audio attachment). WAV is read by the product itself.
+ogg = "0.9"
+opus-decoder = "0.1"
+# 0.6 vendors the minimp3 header that detects MSVC ARM64; 0.5's header predates
+# that fix and fails to compile the C decoder for `aarch64-pc-windows-msvc`.
+minimp3 = "0.6"
+
+# HTTP / WebSocket client
+# 0.13: `rustls-tls` feature is gone; the ring TLS provider is installed
+# explicitly via the direct `rustls` dep (rustls-no-provider path — no
+# aws-lc-rs/cmake C build). The `query` feature is required by the Telegram
+# integration's HTTP query call.
+reqwest = { version = "0.13", default-features = false, features = ["http2", "json", "stream", "multipart", "query", "rustls-no-provider"] }
+# Ring crypto provider for reqwest's rustls-no-provider path. Installed before
+# any HTTP client is created (see `util::http::install_ring_provider`). Root
+# certificates come from the OS trust store (macOS Keychain) via
+# rustls-platform-verifier; bundled roots are deliberately not used.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+
+# Embed files into the binary
+rust-embed = "8"
+
+# Serialization
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+
+# Config
+directories = "6.0"
+
+# System locale (surfaced into agent session context for locale-aware chat)
+sys-locale = "0.3"
+
+# Logging — `tracing-log` and the `tracing-subscriber` feature are requested by
+# name so the `log`→`tracing` bridge cannot vanish with a dependency-graph change
+# (see `logs::install_log_bridge`).
+tracing = { version = "0.1", default-features = false }
+tracing-log = "0.2"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "json", "tracing-log"] }
+
+# Error handling
+anyhow = "1.0"
+
+# Self-replace for cross-platform binary swap during self-update
+self-replace = "1.5"
+
+# Utils
+base64 = "0.22"
+# Local IPC for the mahbot debug read-only query endpoint (UDS on Unix,
+# named pipe on Windows). Enables the removal of multiprocess_wal.
+interprocess = { version = "2", default-features = false, features = ["tokio"] }
+jsonrepair-rs = "0.2"
+rand = "0.10"
+semver = "1"
+tempfile = "3"
+# Unicode name comparison: `unicode-normalization` (canonical decomposition) and
+# `unicase` (full case folding) give the caseless matching the account-name rule
+# compares by (src/users.rs). The former also serves the spoken text's NFKD fold
+# (src/speech/synth.rs), and the latter is already a `mime_guess` dependency —
+# neither is a new crate.
+# 2.10 is the floor on purpose: 2.9.0 emits three-character folds rotated
+# (`ﬃ` folded to `iff`), the very collision the account-name rule catches.
+unicode-normalization = "0.1"
+unicase = "2.10"
+
+# URL parsing + IP netmask matching for the shared URL validation (the SSRF
+# guard in src/util/http.rs).
+# `percent-encoding` is `url`'s own path-segment codec (already in the graph);
+# the rasterize page server decodes a request path with it directly.
+url = "2"
+percent-encoding = "2.3"
+ipnet = "2"
+
+# chrome-use release archive download/extract (tar.gz sidecar-verified)
+flate2 = "1"
+tar = "0.4"
+
+# Memory / persistence
+# The wrapper crate is pinned exactly to the newest release of the engine
+# family. The engine layer (turso_core and its siblings) follows the wrapper's
+# own requirement, and the committed Cargo.lock — not this pin — is what holds
+# a build to the versions it was written against.
+turso = { version = "=0.8.3", default-features = false, features = ["fts"] }
+# The connection layer the product creates its store connections with
+# (src/db/store.rs): the wrapper does not expose the per-statement limit the
+# product arms on them, so the layer is built on the SDK kit the wrapper itself
+# is built on. It is pinned to the wrapper's exact version on purpose — the layer
+# hands the wrapper's own IO backend and open flags into the kit's config, so two
+# engine versions could not be linked into one process against one store file in
+# the first place.
+turso_sdk_kit = "=0.8.3"
+
+# Lock-free read-only snapshot holder for running-agent live transcripts
+# (ArcSwap<TranscriptSnapshot> published by Session, read by the GUI).
+arc-swap = "1.9"
+
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+
+# Regex
+regex = "1.13"
+
+# Fast file/content search for the tools
+fff-search = "0.11"
+
+# Transparent grep interception engine (shell tool, read-only mode): the
+# ripgrep substrate (grep-regex/grep-searcher/grep-matcher) plus the ignore
+# crate for rg-default exclusion semantics on recursive walks. grep-searcher
+# pulls in encoding_rs/encoding_rs_io unconditionally — WHATWG-derived tables,
+# BSD-3-Clause-licensed, permissive (same family as ripgrep itself).
+grep-regex = "0.1"
+grep-searcher = "0.1"
+grep-matcher = "0.1"
+ignore = "0.4"
+
+# SHA256 for downloaded-artifact checksum verification, and the Windows debug
+# endpoint's location-derived pipe name (see src/db/ipc.rs)
+sha2 = "0.10"
+paste = "1.0"
+
+# Enum derive helpers
+strum = { version = "0.27", features = ["derive"] }
+
+# Image decode/re-encode for reference-image compression (already compiled via
+# iced's image-without-codecs feature; promoted to a direct dependency for the
+# loader). Codec support is deliberately trimmed to PNG/JPEG/WebP only — gif
+# and bmp are NOT supported anywhere in the product's own routing, MIME mapping
+# or decode (the rasterizer decodes what a drawing embeds, through its own
+# renderer's codecs, and produces none of them).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+
+# Tree-sitter for code navigation
+# The core and the bash grammar are exact-pinned: the read-only shell guard
+# walks the bash CST, so grammar/ABI drift must fail loudly at build time.
+tree-sitter = "=0.26.12"
+tree-sitter-rust = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-typescript = "0.23"
+tree-sitter-json = "0.24"
+tree-sitter-toml-ng = "0.7"
+tree-sitter-bash = "=0.25.1"
+tree-sitter-css = "0.25"
+tree-sitter-html = "0.23"
+tree-sitter-go = "0.25"
+tree-sitter-ruby = "0.23"
+tree-sitter-c = "0.24"
+tree-sitter-sequel = "0.3"
+tree-sitter-md = { version = "0.5.3", features = ["parser"] }
+
+# Managed bun runtime release archive extraction (zip, DEFLATE-compressed), and
+# the container format for `.docx` ingestion.
+zip = { version = "8", default-features = false, features = ["deflate"] }
+
+# Rasterizing an SVG or a PDF page: a pure-Rust in-process engine for the tool's
+# SVG and PDF inputs — an HTML input renders through the product's connected
+# browser instead and does not touch it — so the single self-contained binary
+# holds.
+#   text           — draw `<text>` instead of dropping it: the engine lays it out
+#                    with the faces the machine has (`system-fonts` finds them,
+#                    `memmap-fonts` maps rather than reads them) and the product's
+#                    own bundled font answers what they cannot (see the tool).
+#   raster-images  — decode the rasters a drawing refers to. It brings the `gif`,
+#                    `image-webp` and `zune-jpeg` decoders along, inside the
+#                    renderer only: the product's own decode path (`image`) still
+#                    accepts PNG/JPEG/WebP alone.
+# The engine's `svgz` feature is deliberately NOT enabled: the tool unwraps a
+# compressed input itself, bounded by the same limit as any other input, where
+# the engine's own path reads a whole stream into memory with no bound.
+# The engine carries its own rasterizer and font database, so the graph holds a
+# second copy of each next to the ones iced already links (`tiny-skia` 0.12 /
+# `tiny-skia-path` 0.12 alongside 0.11, `fontdb` 0.24 alongside 0.23): both
+# small, both self-contained, neither shared with the dashboard's own stack.
+resvg = { version = "0.48", default-features = false, features = ["text", "system-fonts", "memmap-fonts", "raster-images"] }
+
+# Document ingestion (inbound [FILE:...] markers and documents opened with the
+# read tool): pure-Rust text extraction and page rasterization for .pdf, plus a
+# small XML read for .docx. No native/OS PDF stack is linked (single
+# self-contained binary, identical on macOS/Linux).
+#   pdf-extract — PDF text layer only (MIT); panics on malformed input, so its
+#                 page-level API is driven one page at a time and each page's
+#                 panic is contained to that page.
+#   hayro       — PDF structure walk, filter chain and page rasterizer
+#                 (Apache-2.0 OR MIT); supplies the page list, reports an
+#                 encrypted document, decodes both rasterized pages and the
+#                 embedded images of text pages, and carries the annotation and
+#                 AcroForm dictionaries a document's marks are read from.
+#   quick-xml   — XML reader for every OOXML package part: the .docx body,
+#                 .xlsx sheets/shared strings and .pptx slides/notes (MIT).
+#   office_oxide — readers for the legacy binary Word/Excel/PowerPoint formats
+#                 (.doc/.xls/.ppt) this converter also accepts (MIT OR
+#                 Apache-2.0). Pinned exactly like turso and tree-sitter: its
+#                 parse result *is* the delivered text, so a new release's
+#                 behaviour change must be taken deliberately, not at the next
+#                 `cargo update`. Brings its own quick-xml 0.42 next to the
+#                 OOXML reader's 0.39 — the accepted price of reading the old
+#                 formats.
+pdf-extract = { version = "0.12", default-features = false }
+hayro = "0.7"
+quick-xml = { version = "0.39", default-features = false }
+office_oxide = { version = "=0.1.13" }
+
+[build-dependencies]
+# The product's icon inside the Windows executable (build.rs). Requested without
+# its default `toml` feature: the crate reads `[package.metadata.winresource]`
+# only when that feature is on, and this project sets the few properties it wants
+# from the build script itself. Every other target builds no resource at all.
+winresource = { version = "0.1", default-features = false }
+# The Computer tool's structured-exception shim (`build.rs`): Rust cannot catch a
+# structured exception, so the one `__try`/`__except` frame in the product is
+# `src/tools/computer/windows/seh.c`, compiled into Windows targets only. Kept out of
+# a `[target.'cfg(windows)'...]` table because build scripts are compiled for the
+# host: target-gating it would make the script itself `#[cfg]`-split for a dependency
+# it only reaches under a Windows target, which is why `winresource` above is
+# unconditional too.
+cc = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# Win32_Graphics_Gdi carries WNDCLASSEXW/RegisterClassExW and Win32_System_LibraryLoader
+# GetModuleHandleW — used only by the session-end listener (`shutdown::session_end`).
+# Win32_UI_Shell carries ShellExecuteExW and Win32_System_Registry the HKEY its
+# SHELLEXECUTEINFOW requires — used only by the link opener (`gui::shell_execute_address`);
+# Win32_System_Com is the CoInitializeEx apartment that call documents.
+# Win32_System_Environment carries CreateEnvironmentBlock/DestroyEnvironmentBlock —
+# used only by the owner-environment read (`shell_env::read_windows`).
+# Win32_Globalization carries GetOEMCP/MultiByteToWideChar — used only by the shell
+# tool's reading of a program's output (`tools::shell::windows_text`).
+# Wdk_System_SystemServices carries RtlGetVersion — the real Windows build, which
+# GetVersionExW misreports for an image with no compatibility manifest; used only by
+# the update path's host check (`self_update::windows_build`).
+windows-sys = { version = "0.52", features = ["Wdk_System_SystemServices", "Win32_Foundation", "Win32_Globalization", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_Com", "Win32_System_Console", "Win32_System_Environment", "Win32_System_JobObjects", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_System_Diagnostics_ToolHelp", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader"] }
+
+# Computer Use tool (GUI observe/act): UI Automation for observe/act, SendInput
+# for pointer and keyboard synthesis, and Windows.Graphics.Capture with a GDI
+# fallback for stills. The crate is already in the lock at 0.62 (pulled by the
+# cross-platform GUI/audio dependencies), so this adds no new version — only the
+# features below, and only for this target. `Win32_System_WinRT_Graphics_Capture`
+# carries the capture item's activation interop.
+windows = { version = "0.62", features = [
+    "Graphics_Capture",
+    "Graphics_DirectX",
+    "Graphics_DirectX_Direct3D11",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_System_StationsAndDesktops",
+    # GetTickCount — the clock `GetLastInputInfo` reports its last input against
+    # (`user_activity::os_idle`).
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_System_WinRT_Direct3D11",
+    "Win32_System_WinRT_Graphics_Capture",
+    "Win32_UI_Accessibility",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Computer Use tool (GUI observe/act): the live macOS backend's dependencies —
+# accessibility (AXUIElement), input synthesis (CGEvent) and capture
+# (ScreenCaptureKit). Version-aligned objc2 family — the same 0.6.x/0.3.x series
+# already resolved transitively via the GUI stack, so the lock gains no additional
+# objc2 base-version forks. The `exception` feature is Computer Use's per-call
+# Objective-C exception firewall (`objc2::exception::catch`): it adds the helper
+# that turns an exception thrown by framework code into an error value. It is
+# deliberately NOT `catch-all`, which would wrap every message send in the
+# product and turn an exception into a panic.
+objc2 = { version = "0.6", features = ["exception"] }
+# The AppleEvent features are not for Computer Use: the quit interception (src/shutdown.rs) reads
+# the reason the system names on a Quit AppleEvent — NSAppleEventManager/NSAppleEventDescriptor,
+# plus kAEQuitReason and its reason codes from CoreServices. NSProcessInfo, with the NSString its
+# reason argument takes, carries the one activity that takes the process out of App Nap and off
+# timer coalescing (src/power.rs).
+objc2-foundation = { version = "0.3", features = ["NSAppleEventDescriptor", "NSAppleEventManager", "NSProcessInfo", "NSString", "objc2-core-services"] }
+objc2-core-services = "0.3"
+objc2-core-foundation = "0.3"
+objc2-core-graphics = "0.3"
+# App enumeration (NSWorkspace/NSRunningApplication) for the `apps` action, and
+# the running application's own icon ([`crate::app_icon`]): NSImage built from the
+# embedded artwork's pixels, with NSBitmapImageRep as its representation.
+# `NSPasteboard` serves the chat composer's clipboard attachments
+# (`gui::pasteboard`): copied file URLs and image data, neither of which iced's
+# text-only clipboard exposes. `NSStatusItem`/`NSStatusBarButton` carry the tray icon's
+# status item and its image (`NSButton`/`NSControl`/`NSResponder`/`NSView` behind them),
+# `NSEvent` reads the plain click its button keeps from the view, and `NSWindow` brings
+# the dashboard window forward for that click.
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSBitmapImageRep", "NSButton", "NSControl", "NSEvent", "NSGraphics", "NSImage", "NSImageRep", "NSPasteboard", "NSResponder", "NSRunningApplication", "NSStatusBarButton", "NSStatusItem", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-application-services = "0.3"
+objc2-screen-capture-kit = "0.3"
+block2 = "0.6"
+dispatch2 = "0.3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Computer Use tool (GUI observe/act): AT-SPI2 accessibility tree over D-Bus,
+# XTEST input synthesis via enigo, X11 stills via x11rb and Wayland stills via
+# the Screenshot portal over zbus — all Rust-only, no system packages.
+atspi = { version = "0.30", default-features = false, features = ["proxies", "wrappers", "tokio"] }
+enigo = { version = "0.6", default-features = false, features = ["x11rb"] }
+# The `screensaver` feature adds the screen-saver extension's idle time — how long
+# since the X server last saw input, read by `user_activity::os_idle`.
+x11rb = { version = "0.13", features = ["screensaver"] }
+zbus = "5"
+# Boxes the async AT-SPI tree walk (already a transitive zbus dependency — same
+# version, no new fork); the accessibility tree is inherently recursive.
+async-recursion = "1.1"
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+# The tray icon (`crate::tray`): the platform's own status item / notification-area
+# icon with its native menu, and the clicks that come with it. It is gated to the two
+# platforms that have a tray, so a Linux build gains no GTK, appindicator or D-Bus
+# requirement from it — and its default `libappindicator` feature is off for the same
+# reason. Both platform backends (NSStatusItem, the shell's notification area) are
+# what the crate exists for; the Windows one re-registers after a taskbar restart.
+tray-icon = { version = "0.26", default-features = false }
+
+[dev-dependencies]
+http = "1.5"
+serial_test = "3"
+
+[profile.dev]
+incremental = true
+opt-level = 0
+debug = "line-tables-only"
+codegen-units = 256
+
+[profile.dev.package."*"]
+debug = false
+
+# The inference crate and the RLX graph under it are inference code: opt-level 3
+# keeps transcription fast enough for real-time voice in dev builds, where the
+# default opt-level 0 would make the ASR model noticeably slower. Deliberately
+# under `profile.dev`, not `profile.test`: `[profile.test]` inherits `dev`, so
+# test builds share the same optimized artifacts instead of fingerprinting a
+# second copy.
+#
+# The keys are the package names the inference crate's graph resolves to:
+#   cargo tree -p mahbot-inference --prefix none | awk '{print $1}' | grep '^mahbot-rlx' | sort -u
+# Anchored to the package-name column. A family package missing here runs
+# unoptimized in dev; a stale key costs a warning on every build.
+[profile.dev.package.mahbot-inference]
+opt-level = 3
+
+[profile.dev.package.mahbot-rlx-autodiff]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-compile]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-cpu]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-dduf]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-driver]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-flow]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-fusion]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-gguf]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-gpu-dispatch]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-gpu-host]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-ir]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-macros]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-mlx-io]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-nemo]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-opt]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-pkg]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-runtime]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-torch-ckpt]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-unfuse]
+opt-level = 3
+[profile.dev.package.mahbot-rlx-wgpu]
+opt-level = 3
+[profile.dev.package.mahbot-rlxsl]
+opt-level = 3
+
+[profile.dev.build-override]
+opt-level = 0
+debug = 0
+codegen-units = 256
+
+[profile.release]
+opt-level = 2
+lto = false
+codegen-units = 32
+incremental = true
+strip = false
+panic = "unwind"
+
+[profile.test]
+inherits = "dev"
+debug = "line-tables-only"
+codegen-units = 256

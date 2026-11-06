@@ -1,0 +1,9418 @@
+// Document kit — the one script the `document` tool runs on the managed bun
+// runtime. It is deliberately a closed set of operations over data the caller
+// passes: no expression is evaluated, no code is accepted, and every path in a
+// request was chosen by the caller (the Rust tool).
+import fs from "node:fs";
+import nodePath from "node:path";
+import zlib from "node:zlib";
+import PizZip from "pizzip";
+import Docxtemplater from "docxtemplater";
+import PptxGenJS from "pptxgenjs";
+import {
+  Document as DocxDocument, Packer, Paragraph, TextRun, HeadingLevel, ImageRun,
+  Table, TableRow, TableCell, WidthType, AlignmentType, NumberFormat,
+  Header, Footer, PageNumber, PageBreak, ExternalHyperlink, FootnoteReferenceRun,
+  TableOfContents,
+} from "docx";
+// The layout entry point lays a document out as Word does, which is what writes
+// a table of contents' page numbers — and the total a footer's page count states —
+// into the document as fixed text instead of leaving Word to ask for an update.
+import { estimatePageNumbers } from "docx/layout";
+import {
+  PDFDocument, rgb, degrees, PDFArray, PDFDict, PDFHexString, PDFName, PDFNumber, PDFString,
+  PDFTextField, PDFCheckBox, PDFRadioGroup, PDFDropdown, PDFOptionList,
+} from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
+// rules.json is the single statement of the input rules the `document` tool,
+// this kit and the presentation reader share — a set, a bound or a slide mark
+// is written there once and read from every side; bun inlines it into the
+// committed bundle.
+import RULES from "./rules.json";
+
+const A4 = [595.28, 841.89];
+const MARGIN = 56;
+const BODY_SIZE = 12;
+// A table's cells: ten-point text on a twelve-point leading, and a gap under
+// the row that makes a one-line row twenty points tall.
+const CELL_SIZE = 10;
+const CELL_LEADING = 12;
+const CELL_ROW_GAP = 8;
+// 96 px = 72 pt: the one factor a request's points are converted with, whichever
+// arm draws the picture — every writer measures an image in its own pixels.
+const PX_TO_POINTS = 72 / 96;
+// The same pixel in the units a part states a length in: 1in = 914400 EMU = 1440
+// twips, so a 96-dpi pixel is 9525 EMU and 15 twips. Stated once, since every arm
+// converts with them.
+const EMU_PER_INCH = 914400;
+const TWIPS_PER_INCH = 1440;
+const PX_TO_EMU = EMU_PER_INCH / 96;
+const TWIPS_PER_PIXEL = TWIPS_PER_INCH / 96;
+const DOCX_ORDERED = "document-kit-ordered";
+
+const readJson = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
+function writeOut(p, bytes) {
+  fs.mkdirSync(nodePath.dirname(p), { recursive: true });
+  fs.writeFileSync(p, bytes);
+}
+// A file the kit cannot read at all — gone, or locked by another process, in the
+// window between the tool's own check and this read — is the caller's own input
+// rather than a kit fault: the tool validates that an input exists, not that it
+// stays readable across spawning this runtime.
+const readInput = (p) => {
+  try {
+    return fs.readFileSync(p);
+  } catch {
+    throw new UsageError(`cannot read ${nodePath.basename(p)} — the file is not readable`);
+  }
+};
+
+// A rejection of the REQUEST's own data — a page the document does not have, a
+// field it does not declare, a colour that is not a hex one, a file that is not
+// readable. The caller can fix it, so the result carries `class: "usage"` and
+// the tool reports it as a usage error; any other failure is the kit's own and
+// is reported as a product fault.
+// The tool checks every one of those shapes at its own boundary and refuses
+// before the kit is spawned, so these are the last line rather than the only
+// one — and what the tool, this kit and the presentation reader share is stated
+// once, in rules.json.
+class UsageError extends Error {}
+
+// ── images ─────────────────────────────────────────────────────
+// Only the extensions the shared rules name are accepted: the writers that place
+// a raster picture embed PNG, JPEG and WebP, and one rule is what the tool's
+// prompt can state honestly. WebP is the format the product's own picture tool
+// writes, so a picture it produced is one it can place; a PDF's own two encodings
+// take no WebP and refuse one by name (see `embedImage`).
+function imageType(file) {
+  const lower = file.toLowerCase();
+  const extension = RULES.image_extensions.find((candidate) => lower.endsWith(`.${candidate}`));
+  if (!extension) throw new UsageError(`only PNG, JPEG or WebP images can be embedded, got: ${nodePath.basename(file)}`);
+  if (extension === "png") return { kind: "png", contentType: "image/png" };
+  if (extension === "webp") return { kind: "webp", contentType: "image/webp" };
+  return { kind: "jpg", contentType: "image/jpeg" };
+}
+// The shapes the tool's own boundary guarantees, as the kit's last line: a text
+// field is a string and a bullet or a cell is a scalar. A structure reaching a
+// writer is either thrown as a fault of the kit's own or, worse, silently
+// written as "[object Object]" — and either way the request is what is wrong.
+function textOf(value, what) {
+  if (typeof value !== "string") throw new UsageError(`${what} must be text`);
+  return value;
+}
+function scalarOf(value, what) {
+  if (RULES.scalar_kinds.includes(typeof value)) return value;
+  throw new UsageError(`${what} must be text, a number or a boolean`);
+}
+// `1, 2 or 3` — how these messages name the values a rule allows.
+function listed(values) {
+  if (values.length < 2) return String(values[0] ?? "");
+  return `${values.slice(0, -1).join(", ")} or ${values.at(-1)}`;
+}
+// One of the heading levels the writers have, refused rather than clamped: a
+// silent clamp delivers a document that differs from the request. A content
+// block reaches the kit as the model wrote it, so an absent level is spelled
+// `undefined` or `null` here; the tool never writes a `null` into an argument it
+// builds itself.
+function headingLevelNumber(level) {
+  const value = level === undefined || level === null ? 1 : level;
+  if (!RULES.heading_levels.includes(value)) throw new UsageError(`a heading's level must be ${listed(RULES.heading_levels)}, got: ${value}`);
+  return value;
+}
+function headingLevel(level) {
+  return [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3][headingLevelNumber(level) - 1];
+}
+
+// An image's bytes, checked against the kind its name claims: every writer
+// embeds them as that type and two of the three do not decode what they embed,
+// so a mislabelled or truncated file would become content no reader can open —
+// in a document the caller receives as a success. The check walks the format's
+// own structure and yields the image's own pixel size with it; a whole image of
+// a flavour pdf-lib's decoder rejects is still that arm's to refuse, one step
+// later. The media part the image becomes is named with the kind and declared
+// with the content type. The size is the frame's own, with no EXIF orientation
+// applied: a viewer that honours an orientation tag draws such a JPEG turned.
+function readImage(file) {
+  const { kind, contentType } = imageType(file);
+  const bytes = readInput(file);
+  const size = kind === "png" ? pngSize(bytes) : kind === "webp" ? webpSize(bytes) : jpegSize(bytes);
+  // A declared size of nothing means the bytes are not a whole image of the kind
+  // the name claims — truncated, or another format under that extension — not
+  // that the image is small: the proportions every other size is scaled from
+  // would not exist.
+  if (!size || size.width < 1 || size.height < 1) {
+    const label = { png: "PNG", jpg: "JPEG", webp: "WebP" }[kind];
+    throw new UsageError(`cannot embed ${nodePath.basename(file)} as a ${label} image: the file's bytes are not a whole ${label} image`);
+  }
+  return { kind, contentType, bytes, width: size.width, height: size.height };
+}
+// A PNG: the signature, then chunks of declared length whose first is a 13-byte
+// IHDR, at least one of which is image data, closed by an IEND. Bytes after the
+// IEND are allowed — the readers embed the primary image and ignore them. The
+// IHDR carries the pixel size, which is what a size the caller leaves out is
+// scaled from.
+function pngSize(bytes) {
+  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (bytes.length < 24 || !signature.every((byte, index) => bytes[index] === byte)) return null;
+  let offset = 8;
+  let pixels = false;
+  // Chunks are length(4) + type(4) + data(length) + crc(4).
+  while (offset + 12 <= bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const type = bytes.toString("latin1", offset + 4, offset + 8);
+    if (offset === 8 && (type !== "IHDR" || length !== 13)) return null;
+    if (type === "IDAT") pixels = true;
+    if (type === "IEND") {
+      if (!pixels) return null;
+      return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+    }
+    offset += 12 + length;
+  }
+  return null;
+}
+// The end-of-image marker: an FFD9 in the scan is what ends the image.
+const JPEG_EOI = Buffer.from([0xff, 0xd9]);
+// A JPEG: SOI, marker segments of declared length, a frame header, and an EOI
+// after the scan. Only the marker segments are walked — past the start-of-scan
+// marker the image data is entropy-coded and not length-prefixed, and an FFD9
+// inside it is the EOI, so the scan is where the walk stops looking. Trailing
+// bytes are allowed: a multi-picture (MPO) or padded camera file carries them,
+// and any number of FF fill bytes may precede a marker. The frame header carries
+// the pixel size.
+function jpegSize(bytes) {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  let offset = 2;
+  let size = null;
+  while (offset + 4 <= bytes.length) {
+    if (bytes[offset] !== 0xff) return null;
+    while (bytes[offset] === 0xff) offset += 1;
+    if (offset + 4 > bytes.length) return null;
+    const marker = bytes[offset];
+    if (marker === 0xda) return size && bytes.indexOf(JPEG_EOI, offset) >= 0 ? size : null;
+    if (marker === 0xd9) return null;
+    // A restart or a temporary marker carries no payload and no length.
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+      offset += 1;
+      continue;
+    }
+    const length = bytes.readUInt16BE(offset + 1);
+    if (length < 2) return null;
+    // The frame headers carry the image's dimensions, and are read only once
+    // their own bytes are there: a file cut right after the marker is a
+    // truncated image, not a fault of the kit's. The tables and the
+    // arithmetic-coding markers share the range but are not a frame.
+    if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+      if (offset + 8 > bytes.length) return null;
+      size = { width: bytes.readUInt16BE(offset + 6), height: bytes.readUInt16BE(offset + 4) };
+    }
+    offset += 1 + length;
+  }
+  return null;
+}
+// A WebP: a RIFF container whose form is WEBP, holding the image in one of three
+// chunks — `VP8 ` (lossy), `VP8L` (lossless) or `VP8X` (extended, a canvas with
+// the image's own chunks beside it). The first of them states the pixel size the
+// way the PNG's IHDR and the JPEG's frame header do, and a file that holds none,
+// or whose declared chunk runs past its bytes, is a truncated image or another
+// format under that name rather than a small one.
+function webpSize(bytes) {
+  if (bytes.length < 20 || bytes.toString("latin1", 0, 4) !== "RIFF" || bytes.toString("latin1", 8, 12) !== "WEBP") return null;
+  // The RIFF size counts everything after the eight bytes it follows; a file that
+  // claims more than it holds is cut short.
+  if (bytes.readUInt32LE(4) + 8 > bytes.length) return null;
+  // Chunks are fourcc(4) + length(4) + data, padded to an even length.
+  let offset = 12;
+  while (offset + 8 <= bytes.length) {
+    const fourcc = bytes.toString("latin1", offset, offset + 4);
+    const length = bytes.readUInt32LE(offset + 4);
+    const body = offset + 8;
+    if (body + length > bytes.length) return null;
+    if (fourcc === "VP8 ") {
+      // A three-byte frame tag, the 9d 01 2a start code, then the 14-bit width
+      // and height, each with two bits of scaling above it.
+      if (length < 10 || bytes[body + 3] !== 0x9d || bytes[body + 4] !== 0x01 || bytes[body + 5] !== 0x2a) return null;
+      return { width: bytes.readUInt16LE(body + 6) & 0x3fff, height: bytes.readUInt16LE(body + 8) & 0x3fff };
+    }
+    if (fourcc === "VP8L") {
+      // The 0x2f signature, then 14 bits of width and 14 of height, each one less
+      // than the side it states.
+      if (length < 5 || bytes[body] !== 0x2f) return null;
+      const bits = bytes.readUInt32LE(body + 1);
+      return { width: 1 + (bits & 0x3fff), height: 1 + ((bits >>> 14) & 0x3fff) };
+    }
+    if (fourcc === "VP8X") {
+      // A flags byte and three reserved ones, then the 24-bit canvas width and
+      // height, each one less than the side it states.
+      if (length < 10) return null;
+      const side = (at) => 1 + bytes[at] + (bytes[at + 1] << 8) + (bytes[at + 2] << 16);
+      return { width: side(body + 4), height: side(body + 7) };
+    }
+    offset = body + length + (length & 1);
+  }
+  return null;
+}
+// The size a content image is drawn at, in the pixels every writer measures an
+// image in. A request states its sides in points — the one unit a placed picture is
+// measured in (`RULES.dimension_points`) — and a request that gives one side only
+// scales the image's own proportions instead of stretching it, while one that gives
+// neither keeps the image's own size, fitted whole into `box`. `span` is the range
+// the shared rules allow a stated side (points), and `box` is the largest the
+// fallback may draw (pixels, both sides) — the arm's container, or a cap narrower
+// than it — or `null` for an arm with no container, where the image keeps its own
+// size. Neither side the fallback decides may exceed the box, so a picture taller
+// or wider than the page or slide it lands on is drawn whole and smaller rather
+// than cut off by an edge the call reported success past. `natural` and the answer
+// are pixels — the points-to-pixels conversion lives here alone, so no arm converts
+// a measure the others do not.
+const DEFAULT_IMAGE_WIDTH = 400;
+// Whether `value` is a finite number inside `span`, a range from rules.json
+// (`min_exclusive` marks a low end the value must exceed rather than reach).
+function inSpan(value, span) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return false;
+  if (span.min_exclusive ? value <= span.min : value < span.min) return false;
+  return value <= span.max;
+}
+// The phrase a refusal names `span` by. One helper for every arm, so a rule that
+// flips `min_exclusive` cannot leave one message saying "between" and another
+// "greater than" about the same range.
+function spanBounds(span) {
+  return span.min_exclusive
+    ? `greater than ${span.min} and at most ${span.max}`
+    : `between ${span.min} and ${span.max}`;
+}
+function imageSize(natural, width, height, span, box) {
+  // A side the block left out is no side at all: `null` counts as absent, since
+  // a content block reaches the kit as the model wrote it.
+  for (const side of [width, height]) {
+    if (side === undefined || side === null) continue;
+    if (!inSpan(side, span)) {
+      // The refusal names the unit it reads and the range it enforces: the shared
+      // span has an upper bound, and a low end a placed image's points must
+      // exceed rather than reach, so "positive" would understate both.
+      throw new UsageError(`an image's width and height must be ${spanBounds(span)} points, got: ${side}`);
+    }
+  }
+  // The one conversion: a stated side is points, an answer is pixels, and a side
+  // the request leaves out keeps the image's own proportions.
+  const px = (points) => points / PX_TO_POINTS;
+  if (width && height) return { width: px(width), height: px(height) };
+  if (width || height) {
+    const implied = width ? "height" : "width";
+    const size = width
+      ? { width: px(width), height: px(width) * natural.height / natural.width }
+      : { width: px(height) * natural.width / natural.height, height: px(height) };
+    // A side derived from the one the request names keeps inside the same bound: a
+    // tall height on a wide picture implies a width no page holds, so the request
+    // is refused rather than answered past the rule.
+    const points = size[implied] * PX_TO_POINTS;
+    if (!inSpan(points, span)) {
+      throw new UsageError(`an image's ${implied} implied by its ${width ? "width" : "height"} must be ${spanBounds(span)} points, got: ${Math.round(points)}`);
+    }
+    size[implied] = Math.max(1, size[implied]);
+    return size;
+  }
+  // The fallback below reads the image's own size, which is pixels already. It
+  // fits the picture whole into the arm's container — never enlarged past the
+  // image's own size — so a picture the page or slide has no room for is drawn
+  // smaller rather than to an edge the writer would cut it at. Both sides of the
+  // box are stated, and neither side decided here may exceed it; an arm with no
+  // container (`box` is `null`) draws the image at its own size.
+  const round = (side) => Math.max(1, Math.round(side));
+  if (box === null) return { width: round(natural.width), height: round(natural.height) };
+  const fit = Math.min(1, box.width / natural.width, box.height / natural.height);
+  return { width: round(natural.width * fit), height: round(natural.height * fit) };
+}
+// Embed `file` into a PDF document. A file the decoder rejects (truncated, or a
+// kind the magic bytes did not settle) is the request's own input. A PDF holds
+// its pictures in a PDF's own two encodings, and pdf-lib decodes neither WebP nor
+// a vector; the refusal names the conversion rather than failing later on bytes
+// it never read.
+async function embedImage(pdf, file) {
+  const image = readImage(file);
+  if (image.kind === "webp") throw new UsageError(`a PDF cannot embed ${nodePath.basename(file)}: a PDF holds a picture as PNG or JPEG — convert the WebP picture first`);
+  try {
+    return image.kind === "png" ? await pdf.embedPng(image.bytes) : await pdf.embedJpg(image.bytes);
+  } catch (error) {
+    throw new UsageError(`cannot read ${nodePath.basename(file)} as an image: ${(error && error.message) || error}`);
+  }
+}
+// What a page's or slide's own edge does not show of a box that reaches past it:
+// one sentence for the call, so a caller learns what was lost instead of the call
+// reporting a plain success. `where` is the thing it reached past — a document's
+// one page, or a slide.
+function pastEdgeNote(what, where) {
+  return `[the ${what}'s box reaches past ${where} — the part beyond ${where}'s edge is not shown on it]`;
+}
+// The same for a PDF placement, which names the pages whose visible area it
+// reached past instead.
+function pastAreaNote(what, pages) {
+  return `[the ${what}'s box reaches past the visible area of ${pagesPhrase(pages)} — the part beyond is not shown on it]`;
+}
+// The pages a request reached past, as one phrase to name them by: a run of three
+// or more collapses to `first-last` and at most the shared `note_page_ranges_max`
+// are named, so a request on a long document cannot turn one note into a
+// page-by-page listing — the reading's own notes are bounded by the same rule.
+function pagesPhrase(pages) {
+  const ordered = [...pages].sort((a, b) => a - b);
+  const ranges = [];
+  for (let i = 0; i < ordered.length; i += 1) {
+    const first = ordered[i];
+    let last = first;
+    while (i + 1 < ordered.length && ordered[i + 1] === last + 1) {
+      i += 1;
+      last = ordered[i];
+    }
+    if (ranges.length === RULES.note_page_ranges_max) {
+      ranges.push("…");
+      break;
+    }
+    ranges.push(first === last ? `${first}` : last === first + 1 ? `${first}, ${last}` : `${first}-${last}`);
+  }
+  return `${ordered.length === 1 ? "page" : "pages"} ${ranges.join(", ")}`;
+}
+
+// ── create: docx ───────────────────────────────────────────────
+// The page a created document is written on, in the record `docxPage` answers with
+// for one: the library's own A4 in twips, with the one-inch margins it gives it (see
+// `TWIPS_PER_INCH`). Stated here because a created Word document's own page is the
+// library's, not the file's, and a picture's own size is fitted into the column those
+// margins leave.
+const CREATED_PAGE = { width: 11906, height: 16838, left: TWIPS_PER_INCH, right: TWIPS_PER_INCH, top: TWIPS_PER_INCH, bottom: TWIPS_PER_INCH };
+// What a created picture's paragraph costs the page below the picture: the spacing
+// after the paragraph that holds it, and a line's descent under the inline picture —
+// pagination counts both, so a picture scaled to the column's exact height leaves the
+// page's last line too tall, and Word clips it at the page's edge or pushes it onto
+// the next one, a document that begins with an empty page. The descent is about 46
+// twips at the 11 pt body; four whole pixels, so the whole-pixel sides `imageSize`
+// derives can never reach the page's edge either. Only a created document's pictures
+// are sized here; an edit places into a column its own file's page states.
+const FIT_SLACK_TWIPS = 60;
+const IMAGE_PARAGRAPH_SPACING = 200;
+// The page number a header or a footer states where the caller wrote `{page}`,
+// and the document's page count where it wrote `{pages}`.
+const PAGE_TOKEN = /\{(page|pages)\}/g;
+// One line of a header or a footer: its text as the caller wrote it and its page
+// numbers as the field values a run places where they stand, in order — and whether
+// the line states the document's own page count, which is what asks for a layout
+// pass. Text travels as text and only a token as a field: the library reads a run's
+// children by their own spelling, so a caller whose line happens to say `CURRENT`
+// gets their words rather than a field.
+function pageNumberLine(text) {
+  const runs = [];
+  let counted = false;
+  let last = 0;
+  for (const match of text.matchAll(PAGE_TOKEN)) {
+    if (match.index > last) runs.push(new TextRun({ text: text.slice(last, match.index) }));
+    if (match[1] === "pages") counted = true;
+    runs.push(new TextRun({ children: [match[1] === "page" ? PageNumber.CURRENT : PageNumber.TOTAL_PAGES] }));
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) runs.push(new TextRun({ text: text.slice(last) }));
+  return { runs, counted };
+}
+// A header's or a footer's lines: one per line of the caller's own text, a line break
+// being either spelling and the one empty line a final newline adds dropped.
+const headerFooterLines = (text, what) => {
+  const lines = textOf(text, what).split(/\r?\n/);
+  if (lines.length > 1 && lines.at(-1) === "") lines.pop();
+  return lines.map(pageNumberLine);
+};
+const headerFooterParagraphs = (lines) => lines.map((line) => new Paragraph({ children: line.runs }));
+function docxImage(image, block) {
+  // A picture whose sides the block leaves out is fitted into the text column the
+  // created page leaves, short of the bottom by what its paragraph takes below it —
+  // the paragraph's spacing and a line's descent (see `FIT_SLACK_TWIPS` and
+  // `IMAGE_PARAGRAPH_SPACING`). The box is whole, and the sides derived from it are
+  // rounded to whole pixels (see `imageSize`), a rounding the slack above absorbs; the
+  // width is capped at the default width, already narrower than the column.
+  const room = pageColumn(CREATED_PAGE);
+  const box = {
+    width: DEFAULT_IMAGE_WIDTH,
+    height: Math.floor((room.height - IMAGE_PARAGRAPH_SPACING - FIT_SLACK_TWIPS) / TWIPS_PER_PIXEL),
+  };
+  const transformation = imageSize(image, block.width, block.height, RULES.dimension_points, box);
+  return {
+    run: new ImageRun({ type: image.kind, data: image.bytes, transformation }),
+    transformation,
+  };
+}
+function docxTableRow(cells, header) {
+  const what = header ? "a table heading" : "a table cell";
+  return new TableRow({
+    children: cells.map((cell) => new TableCell({
+      children: [new Paragraph({ children: [new TextRun({ text: String(scalarOf(cell, what)), bold: header })] })],
+    })),
+  });
+}
+// What createDocx says about a page break it leaves out, once per edge however many
+// breaks name it: a break at either edge of the document has nothing to break away
+// from, so it is left out and said.
+const edgeBreakNotes = {
+  before: "[a page break before the first block was left out — a document does not begin with an empty page]",
+  after: "[a page break after the last block was left out — it would leave the document with an empty last page]",
+};
+// Whether a block puts anything on the page: a page break does not, and neither does a
+// list with no bullets — nor a table with no row, a shape the tool's own boundary
+// refuses before it reaches this kit and this reads anyway, so a direct call is covered
+// too. The one rule both edges of the document are read by, so a break with nothing on
+// one side of it is an edge break however it is spelled.
+function draws(block) {
+  if (block.type === "list") return Boolean(block.items && block.items.length);
+  if (block.type === "table") return Boolean(block.headers && block.headers.length) || (block.rows ?? []).some((row) => row.length);
+  return block.type !== "page_break";
+}
+// The schemes a link may name: an office application follows a target only when it can
+// open one, and an allowlist is the whole rule — a scheme nobody here thought of cannot
+// be written either. The tool's own `url` field states it and its boundary refuses
+// first; this is the same rule at the writer's last line, so a direct call to this kit
+// cannot write a link nothing can follow.
+const FOLLOWABLE_SCHEMES = ["http:", "https:", "mailto:", "tel:"];
+// A link's address, checked where it is written. The address the parse produced is the
+// one written: parsing trims the space around it and drops an embedded tab or newline,
+// so the raw string can name an address that is not the one given — and one an
+// application would not follow.
+function linkAddress(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new UsageError(`a link's address must be an absolute URL, e.g. https://example.com, got: ${JSON.stringify(url)}`);
+  }
+  if (!FOLLOWABLE_SCHEMES.includes(parsed.protocol)) {
+    throw new UsageError(`a link's address must be an http, https, mailto or tel address, got: ${JSON.stringify(url)}`);
+  }
+  return parsed.href;
+}
+// What a Word document alone holds — a running header or footer, the three blocks only
+// its writer knows, a paragraph's footnote. The tool's boundary refuses every one of them
+// for another format first, and names the one the request carries; the same refusal is
+// stated here, beside the writers that would otherwise drop them from a file they report
+// written.
+function refuseWordOnly(req) {
+  const block = (req.content ?? []).find((block) => ["link", "page_break", "contents"].includes(block.type) || block.footnote != null);
+  const feature = req.header != null ? "a running header"
+    : req.footer != null ? "a running footer"
+    : block === undefined ? undefined
+    : block.type === "paragraph" ? "a paragraph's footnote"
+    : `a ${block.type} block`;
+  if (feature === undefined) return;
+  throw new UsageError(`${feature} is a Word document's own, and ${req.format} holds none`);
+}
+function createDocx(req) {
+  const children = [];
+  // The answer's own notes and losses: a picture the caller sized past the page, a
+  // page break left out at either end, an empty table of contents, one whose page
+  // numbers the layout could not work out, and a page count it could not work out.
+  // A loss is always a note too, and each is said once — the contract `editor.note`
+  // states for an edit.
+  const notes = [];
+  const losses = [];
+  const note = (message, loss = false) => {
+    if (!notes.includes(message)) notes.push(message);
+    if (loss && !losses.includes(message)) losses.push(message);
+  };
+  // Whether any block places a WebP: the library writes the part and declares no
+  // type for it, so the list is completed after packing (`declareWebpMedia`).
+  let webp = false;
+  let contents = false;
+  for (const [index, block] of req.content.entries()) {
+    if (block.type === "heading") {
+      children.push(new Paragraph({ text: textOf(block.text, "a heading's text"), heading: headingLevel(block.level) }));
+    } else if (block.type === "paragraph") {
+      const runs = [new TextRun(textOf(block.text, "a paragraph's text"))];
+      // A footnote is the note text the paragraph's own reference points at; an
+      // explicit null is no footnote, the way every optional field reads it.
+      if (block.footnote != null) {
+        runs.push(new FootnoteReferenceRun({ children: [new Paragraph(textOf(block.footnote, "a footnote's text"))] }));
+      }
+      children.push(new Paragraph({ children: runs }));
+    } else if (block.type === "list") {
+      for (const item of block.items) {
+        // A bullet is text as far as the writer is concerned: a number or a
+        // boolean left to the library becomes an empty paragraph.
+        const text = String(scalarOf(item, "a bullet"));
+        children.push(new Paragraph(block.ordered
+          ? { text, numbering: { reference: DOCX_ORDERED, level: 0 } }
+          : { text, bullet: { level: 0 } }));
+      }
+    } else if (block.type === "table") {
+      // A created table states no cell margins: the library's default table style is
+      // Word's own Normal Table — 108 twips at the sides, the margins a produced
+      // table always had — and a stated margin would only override the table style
+      // of a document `add_table` edits.
+      const rows = [];
+      // A row with no cells is a `<w:tr/>`, which Word refuses to open, so an
+      // empty header or an empty row is never written.
+      if (block.headers && block.headers.length) rows.push(docxTableRow(block.headers, true));
+      // `rows` is optional: a header alone is a table.
+      for (const row of block.rows || []) {
+        if (row.length) rows.push(docxTableRow(row, false));
+      }
+      children.push(new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE } }));
+    } else if (block.type === "image") {
+      const image = readImage(block.image);
+      if (image.kind === "webp") webp = true;
+      const { run, transformation } = docxImage(image, block);
+      // A size the caller named is placed exactly as named, so the answer says
+      // when the picture it makes reaches past the page, as an edit's does.
+      if ((block.width != null || block.height != null) && reachesPastPage(transformation, CREATED_PAGE)) {
+        note(pastEdgeNote("picture", "the page"));
+      }
+      children.push(new Paragraph({ children: [run], spacing: { after: IMAGE_PARAGRAPH_SPACING } }));
+    } else if (block.type === "page_break") {
+      // A break with nothing before it would leave the document's first page empty
+      // and one with nothing after it a last page that holds no content: either way
+      // there is nothing to break away from, so it is left out and said. Both edges
+      // are read by `draws` — the blocks on either side that put something on the
+      // page — so a run of breaks at an edge is left out as one, `note` saying it
+      // once however many breaks name it.
+      if (!req.content.slice(0, index).some(draws)) note(edgeBreakNotes.before);
+      else if (!req.content.slice(index + 1).some(draws)) note(edgeBreakNotes.after);
+      else children.push(new Paragraph({ children: [new PageBreak()] }));
+    } else if (block.type === "link") {
+      // The address is the package's external target; a `#fragment` in it is
+      // written as the hyperlink's own anchor, which Word appends to the target —
+      // the way Word writes one.
+      children.push(new Paragraph({
+        children: [new ExternalHyperlink({
+          link: linkAddress(textOf(block.url, "a link's address")),
+          children: [new TextRun({ text: textOf(block.text, "a link's text"), color: "0563C1", underline: {} })],
+        })],
+      }));
+    } else if (block.type === "contents") {
+      // One table per document: a second is a second field over the same headings,
+      // which no caller could tell apart — refused, as the tool's own boundary
+      // refuses it.
+      if (contents) throw new UsageError("a document holds one table of contents");
+      contents = true;
+      // The levels the product's own headings use, stated once in the shared
+      // rules, so a table of contents cannot list a level no heading has.
+      const range = `${RULES.heading_levels[0]}-${RULES.heading_levels.at(-1)}`;
+      // Untitled on purpose: the alias names the content control in Word's own
+      // panel and is never printed in the table, and Word's field-based table
+      // carries none.
+      children.push(new TableOfContents("", { hyperlink: true, headingStyleRange: range }));
+    } else {
+      // A kind this writer does not know is refused rather than dropped: the tool's
+      // own vocabulary says which kinds exist, and a block nothing wrote must never
+      // reach the file as nothing.
+      throw new UsageError(`a content block of unknown type ${JSON.stringify(block.type)} — a document takes a heading, a paragraph, a list, a table, an image, a link, a page break or a table of contents`);
+    }
+  }
+  // A header's and a footer's own runs, built once: the fields they hold — and the
+  // table of contents — are what decide whether the document is given an estimate of
+  // its own pages. Only such a document has its page numbers written in; one with
+  // neither is packed exactly as before, with no layout pass at all.
+  const header = req.header == null ? undefined : headerFooterLines(req.header, "a header");
+  const footer = req.footer == null ? undefined : headerFooterLines(req.footer, "a footer");
+  // The page count a caller's `{pages}` states is the layout's to work out, and the
+  // line that carries its field is what says the document needs that pass.
+  const counted = [header ?? [], footer ?? []].flat().some((line) => line.counted);
+  const numbered = contents || counted;
+  const section = { children };
+  if (header) {
+    section.headers = { default: new Header({ children: headerFooterParagraphs(header) }) };
+  }
+  if (footer) {
+    section.footers = { default: new Footer({ children: headerFooterParagraphs(footer) }) };
+  }
+  const numbering = {
+    config: [{
+      reference: DOCX_ORDERED,
+      levels: [{ level: 0, format: NumberFormat.DECIMAL, text: "%1.", alignment: AlignmentType.START }],
+    }],
+  };
+  // A document that states a table of contents or a `{pages}` is packed once with the
+  // library's page-number estimate. A layout it cannot work out at all is packed again
+  // without the estimate rather than failing the call: every number is then left as the
+  // writer wrote it — blank — and the checks below report each one, which is what a
+  // number the writer could not work out is owed, in a document the caller can open.
+  const pack = (estimate) => Packer.toBuffer(new DocxDocument({
+    numbering,
+    sections: [section],
+    ...(estimate ? { pageNumbers: estimatePageNumbers } : {}),
+  }));
+  const packing = numbered ? pack(true).catch(() => pack(false)) : pack(false);
+  return packing.then((buffer) => {
+    const packed = declareWebpMedia(buffer, webp);
+    if (!numbered) return { bytes: packed, notes, losses };
+    const zip = new PizZip(packed);
+    if (contents) {
+      if (!req.content.some((block) => block.type === "heading")) {
+        note("[the table of contents is empty — the document has no headings]");
+      }
+      // A number the layout could not work out is written clean and blank, so Word
+      // never fills it in either; the caller learns that rather than receiving an
+      // empty column the call called a success.
+      const gaps = blankFieldCount(zip.file(DOCX_DOCUMENT).asText(), /^PAGEREF\b/);
+      if (gaps) {
+        const sentence = gaps === 1
+          ? "[the table of contents has one entry with no page number — the writer could not work out the page it starts on]"
+          : `[the table of contents has ${gaps} entries with no page number — the writer could not work out the pages they start on]`;
+        note(sentence, true);
+      }
+    }
+    // The page count `{pages}` states is the same pass's own, and one it did not
+    // settle leaves blank rather than asking the reader to update a field: the same
+    // loss as a table-of-contents entry, said the same way.
+    if (counted && docxPageCountGaps(zip)) {
+      note("[the page count a header or a footer states could not be worked out — {pages} is left blank rather than filled with a number that may be wrong]", true);
+    }
+    return { bytes: packed, notes, losses };
+  });
+}
+
+// A field's own instruction as its elements spell it — `TOC \h \o "1-3"`, a
+// `PAGEREF _Toc1 \h`, or "" for a field stating none. A field with a begin/end pair
+// carries it in `w:instrText` elements, which are joined because a writer may split one
+// instruction across several; a simple field states it as `w:instr` on its own element,
+// which the shared field walk (see `fieldRegions`) finds just the same.
+const fieldInstruction = (field) => {
+  const spelled = [...field.matchAll(/<w:instrText[^>]*>([\s\S]*?)<\/w:instrText>/g)]
+    .map((part) => part[1]).join("").trim();
+  if (spelled) return spelled;
+  const simple = /^<w:fldSimple\b[^>]*\bw:instr="([^"]*)"/.exec(field);
+  return simple ? xmlUnescape(simple[1]).trim() : "";
+};
+// Whether a field carries no cached result — the text a reader shows without updating
+// anything. The writer caches it from the layout, and the cache has a different shape
+// per field: a begin/separate/end field holds it between its `separate` and its end, and
+// one written clean with nothing there, or with no `separate` at all, cached nothing.
+// A simple field's own content is its result — a shape the create path's writer never
+// emits, so that branch guards a direct kit call.
+function fieldResultBlank(field) {
+  if (field.startsWith("<w:fldSimple")) {
+    const open = field.indexOf(">");
+    return open < 0 || spelledText(field.slice(open + 1)) === "";
+  }
+  const separate = field.search(/<w:fldChar[^>]*w:fldCharType="separate"/);
+  return separate < 0 || spelledText(field.slice(separate)) === "";
+}
+// Every field of a part whose instruction starts with `instruction`, as the field's own
+// span — one walk, read by `blankFieldCount` below and by the table-of-contents checks.
+const fieldsStarting = (xml, instruction) => fieldRegions(xml)
+  .map(([start, end]) => xml.slice(start, end))
+  .filter((field) => instruction.test(fieldInstruction(field)));
+// How many fields of a part start with `instruction` and cached no result — the ones the
+// layout could not work out.
+const blankFieldCount = (xml, instruction) =>
+  fieldsStarting(xml, instruction).filter(fieldResultBlank).length;
+// The fields stating a document's table of contents, each as its own span. Two readers
+// of what such a field cached: `docxHasContents` asks whether there is one at all, and
+// `docxContentsHolds` reads the entries and the page numbers beside them.
+const contentsFields = (xml) => fieldsStarting(xml, /^TOC\b/);
+// Whether the part carries a table of contents at all.
+const docxHasContents = (xml) => contentsFields(xml).length > 0;
+// Whether a table of contents' own field holds `needle` — its entries' text and the page
+// numbers beside them, which the writer wrote as that field's result rather than as runs
+// of the body.
+const docxContentsHolds = (xml, needle) =>
+  contentsFields(xml).some((field) => spelledText(field).includes(needle));
+// The page counts a package's headers and footers state, counted over the NUMPAGES
+// fields whose cached result is blank — the ones the layout did not settle, so the
+// caller's `{pages}` would read as nothing. The parts are the ones the package names
+// for its headers and footers (`word/header1.xml`, `word/footer1.xml`).
+function docxPageCountGaps(zip) {
+  return Object.keys(zip.files)
+    .filter((name) => /^word\/(?:header|footer)\d*\.xml$/.test(name))
+    .reduce((gaps, name) => gaps + blankFieldCount(zip.file(name).asText(), /^NUMPAGES\b/), 0);
+}
+// Whether a paragraph style id states a heading level the table of contents covers:
+// the built-in `Heading1`..`HeadingN` ids, with or without the space, at the levels
+// the shared rule states.
+const headingStyleId = (id) => {
+  const level = /^heading\s*(\d+)$/i.exec(id ?? "")?.[1];
+  return level !== undefined && RULES.heading_levels.includes(Number(level));
+};
+// Whether a paragraph's own markup is one the table of contents lists: the writer
+// wraps each heading it writes an entry for in a `_Toc` bookmark, so a paragraph
+// holding one is a heading the table shows.
+const tocListed = (paragraph) => /w:bookmarkStart[^>]*w:name="_Toc\d+"/.test(paragraph);
+// The refusal a text op, a paragraph formatting op that names a style or a list, or
+// a paragraph removal gets when it addresses a paragraph the table lists: the entries
+// were written from those headings and an edit cannot rewrite them, so the heading's
+// text or the level stated for it would leave the table disagreeing with the
+// document. Raised where the paragraph is matched, so an edit of the body's own text
+// still goes through.
+function refuseListedHeading(find) {
+  throw new UsageError(`the text ${JSON.stringify(find)} is in a heading this document's table of contents lists — an edit cannot rewrite the table's own entries, so changing the heading would leave the table disagreeing with it; leave that heading as it is, and have a document this tool creates write the table from the headings you want`);
+}
+
+// A created document's content-type list, completed with the one media type the
+// `docx` library writes a part for and declares none of: its `ImageRun` takes a
+// WebP picture and names the part `.webp`, while the list it writes covers png,
+// jpeg, jpg, bmp, gif and svg only. Each written part is declared by an
+// `<Override>` — the declaration that decides for one part alone, the way the
+// edit path declares the picture it adds. `hasWebp` comes from the request's own
+// blocks, so a document holding none never opens its archive.
+function declareWebpMedia(buffer, hasWebp) {
+  if (!hasWebp) return buffer;
+  const zip = new PizZip(buffer);
+  const types = zip.file("[Content_Types].xml");
+  const parts = Object.keys(zip.files)
+    .filter((name) => name.startsWith(DOCX_MEDIA) && name.toLowerCase().endsWith(".webp"));
+  if (!types || !parts.length) return buffer;
+  zip.file("[Content_Types].xml", parts.reduce((xml, part) => withOverride(xml, part, "image/webp"), types.asText()));
+  return zip.generate({ type: "nodebuffer", compression: "DEFLATE" });
+}
+
+// ── create: xlsx ───────────────────────────────────────────────
+// Written by hand: the package is small, and owning the writer is what keeps a
+// text cell that starts with "=" a text cell and a formula cell a formula.
+//
+// The parts a workbook names its cell styles by, and the content type and
+// relationship type OPC declares one with. A workbook that never saved styles
+// carries no styles part at all; an edit that brings formatting to it writes the
+// same part `createXlsx` would have (see `stylesText`, and the entries and blocks
+// it shares with the style machinery under `STYLE_BLOCKS`). The name below is the
+// one every writer uses and the one a workbook this kit creates gets; an edit
+// writes the part the workbook's OWN relationships name, which is this one unless
+// the package saved its styles elsewhere (`stylesPart`).
+const XLSX_STYLES = "xl/styles.xml";
+const XLSX_WORKBOOK = "xl/workbook.xml";
+const XLSX_WORKBOOK_RELS = "xl/_rels/workbook.xml.rels";
+const STYLES_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml";
+const STYLES_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
+// A worksheet part, the content type and relationship type OPC declares one with,
+// and the parts an added picture lives in: its media, the drawing that anchors it,
+// and the type and relationship a drawing part is declared and named with.
+const WORKSHEET_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
+const WORKSHEET_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
+const DRAWING_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.drawing+xml";
+const DRAWING_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
+const XLSX_MEDIA = "xl/media/";
+const XLSX_DRAWINGS = "xl/drawings/";
+// Where a chart sheet's part lives: a `<sheet>` list holds both kinds, and this
+// tool edits worksheets only.
+const XLSX_CHARTSHEETS = "xl/chartsheets/";
+// A chart, as the format names its part: a chart's colour or style sidecar
+// (`xl/charts/colors1.xml`) is not one, and raises no caveat of its own.
+const CHART_PART = /^xl\/charts\/chart[^/]*\.xml$/;
+// The drawing root's namespaces: the one a `<xdr:wsDr>` anchor is written in, the
+// DrawingML one its picture body is written in, and the relationships one `r:embed`
+// is read through.
+const XDR_NS = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+const DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/main";
+const xmlEscape = (value) => String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" }[c]));
+const colName = (index) => {
+  let name = "";
+  let n = index + 1;
+  while (n > 0) { const rest = (n - 1) % 26; name = String.fromCharCode(65 + rest) + name; n = Math.floor((n - 1) / 26); }
+  return name;
+};
+// The three spellings a tag of `name` is written in — an open tag, a close tag and
+// one that closes itself — stated once, so every pattern that reads a part's tags is
+// built from one rule and no two readers can disagree about which shape a part is:
+// such a disagreement has read an element as absent and made a writer place a second
+// one beside it. `middle` is the attributes and whitespace between a name and its
+// tag's end, stopping at the first `>` so no read runs past the tag it is on; the
+// close tag and a self-closing tag take the whitespace XML allows before their `>` or
+// `/>`. A POSITION taken from a match built here comes from the match's own span or
+// from `elementEdges`, never from a close tag spelled out again to measure it.
+const TAG_MIDDLE = "(?:\\s[^>]*)?";
+const openTag = (name, middle = TAG_MIDDLE) => `<${name}${middle}>`;
+const selfClosingTag = (name, middle = TAG_MIDDLE) => `<${name}${middle}\\s*/>`;
+const closeTag = (name) => `</${name}\\s*>`;
+// The text a formula cell holds: the object names `formula` alone, and the text
+// — with its one optional leading `=` and the spacing removed — is a formula, so
+// a second `=` is refused rather than written into the `<f>` element as text.
+// The rule the tool's boundary states, as the kit's own last line; the tool's
+// paired refusal test drives both sides, keeping the two aligned.
+function formulaOf(reference, value) {
+  const formula = typeof value.formula === "string" ? value.formula.trim().replace(/^=/, "").trim() : "";
+  if (Object.keys(value).length === 1 && formula && !formula.startsWith("=")) return formula;
+  throw new UsageError(`cell ${reference}: an object value must be {"formula": "SUM(A1:A2)"}`);
+}
+function xlsxCell(reference, value) {
+  // A null is neither a scalar nor a formula cell: the docx/pptx/pdf arms
+  // refuse one through `scalarOf`, and writing the literal "null" into a cell
+  // would be wrong content rather than an empty cell.
+  if (value === null) throw new UsageError(`cell ${reference} must be text, a number or a boolean`);
+  // A request is JSON, so a number reaching here is finite by construction.
+  if (typeof value === "number") return `<c r="${reference}"><v>${value}</v></c>`;
+  if (typeof value === "boolean") return `<c r="${reference}" t="b"><v>${value ? 1 : 0}</v></c>`;
+  if (value && typeof value === "object") return `<c r="${reference}"><f>${xmlEscape(formulaOf(reference, value))}</f></c>`;
+  const text = String(value);
+  return text === "" ? "" : `<c r="${reference}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(text)}</t></is></c>`;
+}
+// A name written here reaches `xl/workbook.xml` verbatim, and a name ECMA-376
+// refuses makes the workbook one an office application offers to repair — while
+// the call reports success. The tool's boundary sends every name explicitly and
+// refuses first; this is the writer's own last line, over the names it will
+// actually write (a defaulted one included). Length is counted in code points,
+// the unit the rule states. `where` names the place the caller wrote the name —
+// a sheet's position, or the workbook a sheet is being added to or renamed in.
+function checkSheetName(name, where) {
+  if (typeof name !== "string") {
+    throw new UsageError(`${where}: a sheet name must be text, got: ${String(name)}`);
+  }
+  const length = [...name].length;
+  if (length < 1 || length > RULES.sheet_name_max) {
+    throw new UsageError(`${where}: a sheet name must be 1 to ${RULES.sheet_name_max} characters, got: ${name}`);
+  }
+  if ([...RULES.sheet_name_forbidden].some((character) => name.includes(character))) {
+    throw new UsageError(`${where}: a sheet name must not contain any of ${JSON.stringify(RULES.sheet_name_forbidden)}, got: ${name}`);
+  }
+  return name;
+}
+function checkSheetNames(sheets) {
+  const seen = new Set();
+  sheets.forEach((sheet, i) => {
+    const where = `sheet ${i + 1}`;
+    const name = checkSheetName(sheet.name, where);
+    const lower = name.toLowerCase();
+    if (seen.has(lower)) throw new UsageError(`${where}: a sheet name must be unique, ignoring case, got: ${name}`);
+    seen.add(lower);
+  });
+}
+function createXlsx(req) {
+  const zip = new PizZip();
+  // A name reaches the writer only when it is there: an absent one defaults to
+  // its position, while a name of any other kind — null or empty included — is
+  // left for `checkSheetNames` to refuse rather than silently defaulted over. A
+  // sheet that is not an object is refused here, before a property of it is read.
+  const sheets = req.sheets.map((sheet, i) => {
+    if (typeof sheet !== "object" || sheet === null) {
+      throw new UsageError(`sheet ${i + 1} must be an object, got: ${JSON.stringify(sheet)}`);
+    }
+    if (sheet.merges !== undefined && !Array.isArray(sheet.merges)) {
+      throw new UsageError(`sheet ${i + 1}: merges must be a list of A1:B2 ranges`);
+    }
+    return { name: sheet.name === undefined ? `Sheet${i + 1}` : sheet.name, rows: sheet.rows || [], merges: sheet.merges || [] };
+  });
+  checkSheetNames(sheets);
+  const merges = sheets.map(createdMerges);
+  const contentTypes = [
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+    '<Default Extension="xml" ContentType="application/xml"/>',
+    `<Override PartName="/${XLSX_WORKBOOK}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>`,
+    ...sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="${WORKSHEET_CONTENT_TYPE}"/>`),
+    `<Override PartName="/${XLSX_STYLES}" ContentType="${STYLES_CONTENT_TYPE}"/>`,
+  ];
+  zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">${contentTypes.join("")}</Types>`);
+  zip.file("_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="${XLSX_WORKBOOK}"/></Relationships>`);
+  zip.file(XLSX_WORKBOOK, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((sheet, i) => `<sheet name="${xmlEscape(sheet.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets></workbook>`);
+  const workbookRels = [
+    ...sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="${WORKSHEET_REL_TYPE}" Target="worksheets/sheet${i + 1}.xml"/>`),
+    `<Relationship Id="rId${sheets.length + 1}" Type="${STYLES_REL_TYPE}" Target="styles.xml"/>`,
+  ];
+  zip.file(XLSX_WORKBOOK_RELS, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${workbookRels.join("")}</Relationships>`);
+  zip.file(XLSX_STYLES, MINIMAL_STYLES);
+  sheets.forEach((sheet, i) => {
+    // A worksheet's cells nest inside their `<row>`; a sheet whose cells sit
+    // directly under `<sheetData>` is schema-invalid and opens empty in real
+    // readers (openpyxl among them), however readable it looks.
+    const rows = [];
+    sheet.rows.forEach((row, r) => {
+      const cells = [];
+      row.forEach((value, c) => {
+        const cell = xlsxCell(`${colName(c)}${r + 1}`, value);
+        if (cell) cells.push(cell);
+      });
+      if (cells.length) rows.push(`<row r="${r + 1}">${cells.join("")}</row>`);
+    });
+    // A merged block follows the sheet's own `<sheetData>`, the place
+    // `CT_Worksheet` gives it. A created sheet always states a `<sheetData>`, so
+    // the block is written directly after it.
+    zip.file(`xl/worksheets/sheet${i + 1}.xml`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rows.join("")}</sheetData>${merges[i]}</worksheet>`);
+  });
+  return zip.generate({ type: "nodebuffer", compression: "DEFLATE" });
+}
+
+// The `<mergeCells>` block a created sheet states for the ranges it names: each
+// range checked the way `merge_cells` checks one (two corners, at least two
+// cells, on the grid) under the sheet's own name, and two merges over one cell
+// refused — a workbook holding them is one a reader offers to repair, while the
+// call reports success. `""` for a sheet naming none.
+function createdMerges(sheet) {
+  const where = `sheet ${JSON.stringify(sheet.name)}: `;
+  const rects = sheet.merges.map((range) => mergeRect(range, where));
+  rects.forEach((rect, i) => {
+    const overlap = rects.find((other, j) => j < i && rectsOverlap(other, rect));
+    if (overlap) throw new UsageError(`${where}the merge ${rectLabel(overlap)} overlaps ${rectLabel(rect)}, and a workbook with two merges over one cell needs repairing`);
+  });
+  if (!rects.length) return "";
+  return `<mergeCells count="${rects.length}">${rects.map((rect) => `<mergeCell ref="${rectLabel(rect)}"/>`).join("")}</mergeCells>`;
+}
+
+// ── slide titles ───────────────────────────────────────────────
+// The block that opens a slide is the slide's TITLE, and a title is a real one: a
+// shape declaring the `title` placeholder, which is what a reading marks and what
+// an office package calls a slide title, rather than the plain text box the same
+// words would be. A declared title takes the master's title style wherever it says
+// nothing itself — it is centred and drawn in the theme's major font, where the
+// text box it was took the presentation's default text style — so the alignment and
+// the fonts are stated outright, and everything else stays what the block always
+// was: its frame, size, weight, colour and vertical centring. The two sides that
+// write a title — the create arm's opening block and the slide `add_slide` adds —
+// state the same ones, and the frame is stated in inches here and in the EMU those
+// inches are (see `titleFrameEmu`), so the two cannot drift.
+const TITLE_SHAPE = "Title";
+const TITLE_INCHES = { x: 0.4, y: 0.3, w: 9.2, h: 0.8 };
+const TITLE_POINTS = 28;
+// The text a table's cells carry, in points — the size the created deck's own
+// table and a table a slide edit adds both state.
+const TABLE_TEXT_POINTS = 14;
+// The colour both sides draw the title in; the library's own text colour is the
+// same one, so the create arm states it only through the declaration.
+const TITLE_COLOR = "000000";
+// The alignment a title states: the `algn` value a slide writes for the left
+// alignment (see `rules.json`'s own slide alignments). A declared title would be
+// centred otherwise, which is what the master's title style asks for.
+const TITLE_ALIGNMENT = "l";
+// The fonts a title states: the theme's minor ones, one per script, which is what
+// the presentation's own default text style gives the block it would otherwise
+// take them from.
+const TITLE_FONTS = `<a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/>`;
+// The title a caller gave, or `undefined` when it is blank — empty, or whitespace
+// alone. A blank title is no title a reading shows anything for, so neither side
+// that writes one declares it: the create arm leaves its blank heading the
+// undeclared text box it always drew, and the slide arm draws no title shape at
+// all. One rule, read by both writers.
+const titledText = (text) => (text !== undefined && text.trim() !== "" ? text : undefined);
+const TITLE_PLACEHOLDER = `<p:ph type="title"/>`;
+
+// ── slide geometry ─────────────────────────────────────────────
+// Every measurement the tool places by itself was drawn on the 16:9 deck
+// pptxgenjs's `LAYOUT_16x9` writes — the size this tool created before a size
+// could be named, stated in `rules.json` so the model-facing text and this
+// reference geometry cannot drift — and is scaled with the slide from there, so a
+// deck of another size places it by its own proportions rather than the default
+// deck's, and the default deck is laid out exactly as it always was.
+const PPTX_REFERENCE_INCHES = {
+  width: RULES.pptx_default_size.width_emu / EMU_PER_INCH,
+  height: RULES.pptx_default_size.height_emu / EMU_PER_INCH,
+};
+// The flow a created deck's blocks take, in inches on that deck: the left edge
+// and width every block spans — the title's own, so the flow and the title stay
+// aligned — where the flow starts below the title, and the floor it may not pass
+// before the next slide starts.
+const BODY_INCHES = { x: TITLE_INCHES.x, w: TITLE_INCHES.w, start: 1.3, bottom: 5.2 };
+
+// The inches a slide of this size lays the tool's own content out in: the title's
+// frame and the flow's own left edge, width, start and floor, each scaled from
+// the reference deck. `down` reads a vertical measure of that deck in this one's.
+function slideBox(width, height) {
+  const sx = width / PPTX_REFERENCE_INCHES.width;
+  const sy = height / PPTX_REFERENCE_INCHES.height;
+  return {
+    title: { x: TITLE_INCHES.x * sx, y: TITLE_INCHES.y * sy, w: TITLE_INCHES.w * sx, h: TITLE_INCHES.h * sy },
+    left: BODY_INCHES.x * sx,
+    width: BODY_INCHES.w * sx,
+    start: BODY_INCHES.start * sy,
+    bottom: BODY_INCHES.bottom * sy,
+    down: (inches) => inches * sy,
+  };
+}
+
+// The title's frame in EMU on a slide of this size: the inches above are what the
+// create arm states to the library, and this is how the slide arm converts them,
+// so the two cannot drift.
+function titleFrameEmu(slide) {
+  const frame = slideBox(slide.width / EMU_PER_INCH, slide.height / EMU_PER_INCH).title;
+  const emu = (inches) => Math.round(inches * EMU_PER_INCH);
+  return { x: emu(frame.x), y: emu(frame.y), w: emu(frame.w), h: emu(frame.h) };
+}
+
+// The size a created deck gets: the one the request names from `RULES.pptx_sizes`
+// — its EMU read as inches, under a layout the library is taught — or `undefined`
+// for the deck this tool has always written, `LAYOUT_16x9` left as the library
+// spells it. An unknown name is refused rather than fallen back from.
+function deckSize(size) {
+  if (size === undefined || size === null) return undefined;
+  const named = RULES.pptx_sizes.find((entry) => entry.name === size);
+  if (!named) {
+    throw new UsageError(`unknown slide size ${JSON.stringify(size)} — hint: use ${listed(RULES.pptx_sizes.map((entry) => entry.name))}`);
+  }
+  return {
+    layout: `mahbot-${named.name}`,
+    width: named.width_emu / EMU_PER_INCH,
+    height: named.height_emu / EMU_PER_INCH,
+  };
+}
+
+// ── create: pptx ───────────────────────────────────────────────
+function createPptx(req) {
+  const pptx = new PptxGenJS();
+  // The deck's own size in inches: the one the request names — a layout the
+  // library is taught — or the reference deck, whose layout it already knows.
+  const named = deckSize(req.size);
+  const deck = named ?? PPTX_REFERENCE_INCHES;
+  if (named) {
+    pptx.defineLayout({ name: named.layout, width: named.width, height: named.height });
+    pptx.layout = named.layout;
+  } else pptx.layout = "LAYOUT_16x9";
+  const box = slideBox(deck.width, deck.height);
+  // A picture the block states no sides for is fitted into the flow's own box, so
+  // even the tallest one stays inside the slide (see `imageSize`).
+  const imageMax = { width: DEFAULT_IMAGE_WIDTH, height: Math.round((box.bottom - box.start) * 96) };
+  let slide = null;
+  let y = box.start;
+  // Whether the current slide holds anything yet: a slide opened for a block that
+  // did not fit would be an empty leading slide, so a block always starts on the
+  // slide that is there and only later blocks open a new one.
+  let drawn = false;
+  const fresh = () => { slide = pptx.addSlide(); y = box.start; drawn = false; };
+  const room = (needed) => { if (drawn && y + needed > box.bottom) fresh(); };
+  for (const block of req.content) {
+    if (block.type === "heading") {
+      if (headingLevelNumber(block.level) === 1 || !slide) {
+        fresh();
+        const text = textOf(block.text, "a heading's text");
+        // A blank heading opens a slide without a title: the block is drawn as
+        // the text box it always was and left undeclared (see `declarePptxTitles`).
+        slide.addText(text, {
+          x: box.title.x, y: box.title.y, w: box.title.w, h: box.title.h, fontSize: TITLE_POINTS, bold: true,
+          objectName: titledText(text) === undefined ? undefined : TITLE_SHAPE,
+        });
+        drawn = true;
+      } else {
+        room(box.down(0.7));
+        slide.addText(textOf(block.text, "a heading's text"), { x: box.left, y, w: box.width, h: box.down(0.5), fontSize: 20, bold: true });
+        y += box.down(0.7);
+        drawn = true;
+      }
+    } else if (block.type === "paragraph") {
+      if (!slide) fresh();
+      room(box.down(1.1));
+      slide.addText(textOf(block.text, "a paragraph's text"), { x: box.left, y, w: box.width, h: box.down(1), fontSize: 16 });
+      y += box.down(1.1);
+      drawn = true;
+    } else if (block.type === "list") {
+      if (!slide) fresh();
+      const bullet = block.ordered ? { type: "number" } : true;
+      room(box.down(0.5 * block.items.length + 0.3));
+      // A bullet is text to the writer, so a number or a boolean is stringified
+      // here rather than handed to a library that draws nothing for one.
+      slide.addText(block.items.map((item) => ({ text: String(scalarOf(item, "a bullet")), options: { bullet, breakLine: true } })), { x: box.left, y, w: box.width, h: Math.max(box.down(0.5), box.down(0.5 * block.items.length)), fontSize: 16 });
+      y += box.down(0.5 * block.items.length + 0.3);
+      drawn = true;
+    } else if (block.type === "table") {
+      // A table row is an array of cells: a header row is one cell per heading,
+      // each carrying its own bold option (one cell holding all the headings is
+      // rejected by the writer).
+      const header = block.headers && block.headers.length ? [block.headers.map((h) => ({ text: String(scalarOf(h, "a table heading")), options: { bold: true } }))] : [];
+      const body = (block.rows || []).map((row) => row.map((cell) => ({ text: String(scalarOf(cell, "a table cell")) }))).filter((row) => row.length);
+      // A cell-less row is dropped above, so a table left with nothing to draw
+      // is one the tool refuses; this only keeps the writer from throwing on
+      // one.
+      if (!header.length && !body.length) continue;
+      if (!slide) fresh();
+      room(box.down(0.45 * (body.length + header.length) + 0.3));
+      slide.addTable([...header, ...body], { x: box.left, y, w: box.width, fontSize: TABLE_TEXT_POINTS });
+      y += box.down(0.45 * (body.length + header.length) + 0.3);
+      drawn = true;
+    } else if (block.type === "image") {
+      if (!slide) fresh();
+      const image = readImage(block.image);
+      const size = imageSize(image, block.width, block.height, RULES.dimension_points, imageMax);
+      // A presentation is laid out in inches and `imageSize` answers in pixels.
+      const w = size.width / 96;
+      const h = size.height / 96;
+      room(h + box.down(0.2));
+      slide.addImage({ data: `data:${image.contentType};base64,${image.bytes.toString("base64")}`, x: box.left, y, w, h });
+      y += h + box.down(0.2);
+      drawn = true;
+    } else if (block.type === "notes") {
+      if (!slide) fresh();
+      slide.addNotes(textOf(block.text, "speaker notes"));
+    }
+  }
+  if (!slide) pptx.addSlide();
+  return pptx.write({ outputType: "nodebuffer" }).then(completePptx);
+}
+
+// ── create: the package the library writes ─────────────────────
+// pptxgenjs draws the deck's content, and what it writes around that content is
+// not what an office package writes: the block that opens a slide is a plain text
+// box rather than the slide's title, content types are declared for parts it never
+// wrote (a slide master per slide, where a deck has one) and for media types no
+// part of the deck uses (jpeg, svg, gif, mp4, vml, an embedded workbook), a notes
+// page is written for every slide even when the deck holds no notes at all, the
+// note count in the file's own properties claims one per slide and the titles it
+// lists name each slide by its number, every folder in the archive is given an
+// entry of its own, and the presentation's children are ordered against the
+// sequence the format asks for. A deck this tool creates is handed through
+// `completePptx` once, which declares its titles and removes what nothing needs —
+// never leaving behind a declaration, a relationship or a reference that resolves
+// to nothing.
+
+// The parts a package holds, folder entries apart: a folder's own entry is not a
+// part, and neither the format nor a reader looks one up by name.
+const packageParts = (zip) => Object.keys(zip.files).filter((name) => !name.endsWith("/"));
+
+// The alignment a slide's title paragraph is given, written right after the
+// element's name: the alignment an `<a:pPr>` already states is its own and stays,
+// and one stating none is given the title alignment — so a second pass over the
+// same shape changes nothing.
+const withTitleAlignment = (tag) => (xmlAttribute(tag, "algn") === undefined ? tag.replace(/^<a:pPr/, `<a:pPr algn="${TITLE_ALIGNMENT}"`) : tag);
+
+// A title run's `<a:rPr>` body with the title fonts appended: the place the
+// format's sequence puts them, after the run's own fill. One already stating a
+// Latin font — a pass of this very rule included — keeps what it states.
+const withTitleFonts = (props) => (props.includes("<a:latin ") ? props : props.replace(/<\/a:rPr>$/, `${TITLE_FONTS}</a:rPr>`));
+
+// `xml` with the shape that opens a slide declared the slide's real title: the
+// placeholder (`TITLE_PLACEHOLDER`), the alignment and the fonts the declaration
+// would otherwise take from the master's title style, and nothing else — the
+// frame, size, weight, colour and vertical centring the block already carries stay
+// as they are. The shape is the one `createPptx` named for this (`TITLE_SHAPE`),
+// so a slide whose opening block is not a title — including one whose heading was
+// blank — holds no such shape and is handed back unchanged. Every part of the
+// declaration is stated only where the shape states none of it, so running this
+// over an already-declared shape leaves it as it is.
+function declarePptxTitles(xml) {
+  const shape = slideShapeSpans(xml).find((span) => shapeName(xml, span) === TITLE_SHAPE);
+  if (!shape) return xml;
+  const declared = xml.slice(shape.start, shape.end)
+    .replace(/<p:nvPr\s*\/>|<p:nvPr\s*>\s*<\/p:nvPr>/, `<p:nvPr>${TITLE_PLACEHOLDER}</p:nvPr>`)
+    .replace(/<a:pPr\b[^>]*>/g, withTitleAlignment)
+    .replace(/<a:rPr(?:[^>]*[^/])?>[\s\S]*?<\/a:rPr>/g, withTitleFonts);
+  return xml.slice(0, shape.start) + declared + xml.slice(shape.end);
+}
+
+// How many of the deck's slides really hold speaker notes: a slide's notes are the
+// text of the notes part its own relationship names (the text `paragraphLines` reads a
+// reading by), and the empty part the library writes for a slide is not notes. The
+// empty parts hold no text at all — the slide number a notes page draws is a
+// field, which no reader shows — so a deck with no notes at all counts none.
+function notedSlides(zip) {
+  return slideParts(zip).filter((part) => {
+    const notes = slideNotesPart(zip, part);
+    const file = notes === null ? null : zip.file(notes);
+    return file !== null && paragraphLines(file.asText()).trim() !== "";
+  }).length;
+}
+
+// `xml` without the relationship whose type is `type` — the notes-slide one a slide
+// declares, which is written once and self-closing, and which must not stay behind
+// when the part it names is gone.
+const withoutRelationship = (xml, type) => xml.replace(new RegExp(`<Relationship\\b[^>]*Type="${escapeRegExp(type)}"[^>]*/>`), "");
+
+// The deck's notes pages, dropped for every slide that holds no notes: the library
+// writes one per slide whatever the content, and a page holding no text is one a
+// reading shows nothing for, so a deck that holds some notes keeps none of the
+// empty pages — exactly as a deck holding none keeps no pages at all. A page
+// another slide still names is that slide's own and stays. The notes MASTER stays —
+// it is the part a notes page is drawn through, office writes one whether or not it
+// holds notes, and a deck without it can never be given notes at all.
+function dropPptxNotesPages(zip) {
+  const slides = slideParts(zip);
+  const pages = slides.map((slide) => slideNotesPart(zip, slide));
+  for (const [at, slide] of slides.entries()) {
+    const page = pages[at];
+    if (page === null || pages.some((other, index) => index !== at && other === page)) continue;
+    const file = zip.file(page);
+    if (file !== null && paragraphLines(file.asText()).trim() !== "") continue;
+    // The page's own relationships part goes with it; `zip.remove` takes a name
+    // the package does not hold as nothing at all.
+    zip.remove(page);
+    zip.remove(relsPartFor(page));
+    const rels = zip.file(relsPartFor(slide));
+    if (!rels) continue;
+    const without = withoutRelationship(rels.asText(), NOTES_REL);
+    if (without !== rels.asText()) zip.file(relsPartFor(slide), without);
+  }
+}
+
+// The deck's own application properties with the note count set to the slides that
+// really hold notes: the library writes the slide count there, one per slide
+// whether or not it wrote any notes, which is a file claiming notes it does not
+// hold.
+function setPptxNoteCount(zip, noted) {
+  const file = zip.file("docProps/app.xml");
+  if (!file) return;
+  const xml = file.asText();
+  const counted = xml.replace(/<Notes>\d+<\/Notes>/, `<Notes>${noted}</Notes>`);
+  if (counted !== xml) zip.file("docProps/app.xml", counted);
+}
+
+// The name the writer gives the group of slide titles in the application
+// properties, whose count and entries `withSlideTitles` keep together.
+const SLIDE_TITLES_GROUP = "Slide Titles";
+
+// The text a slide declares as its title, or null when it declares none: the
+// paragraphs of the shape whose `<p:ph>` names the title placeholder — the shape a
+// reading marks and the one both sides that write a title declare — joined the way
+// a part's own text is (see `paragraphLines`). A title blank once trimmed is one a
+// reading shows nothing for, so it is no title here either.
+function slideTitleText(zip, slidePart) {
+  const file = zip.file(slidePart);
+  if (file === null) return null;
+  const xml = file.asText();
+  const shape = slideShapeSpans(xml).find((span) => {
+    const placeholder = xml.slice(span.start, span.end).match(/<p:ph\b[^>]*>/) || [""];
+    return xmlAttribute(placeholder[0], "type") === "title";
+  });
+  const body = shape === undefined ? null : shapeTextBody(xml, shape);
+  if (body === null) return null;
+  const text = slideParagraphs(xml.slice(body.start, body.end))
+    .map((paragraph) => slideParagraphText(xml.slice(body.start + paragraph.start, body.start + paragraph.end)))
+    .join("\n")
+    .trim();
+  return text === "" ? null : text;
+}
+
+// The `(name, count)` pairs a `HeadingPairs` element states, in its own order: the
+// writer gives every group a `<vt:lpstr>` naming it and a `<vt:i4>` counting it, one
+// variant each and always in that order. A `null` when the element is not the shape
+// the writer gives it, so a part this does not understand is left alone.
+function headingPairs(block) {
+  const entries = [...block.matchAll(/<vt:(lpstr|i4)>([\s\S]*?)<\/vt:\1>/g)].map((match) => ({ kind: match[1], value: xmlUnescape(match[2]) }));
+  const pairs = [];
+  for (let at = 0; at + 1 < entries.length; at += 2) {
+    if (entries[at].kind !== "lpstr" || entries[at + 1].kind !== "i4") return null;
+    pairs.push({ name: entries[at].value, count: Number(entries[at + 1].value) });
+  }
+  return pairs;
+}
+
+// The entries a `TitlesOfParts` element lists, in its own order.
+const titledParts = (block) => [...block.matchAll(/<vt:lpstr>([\s\S]*?)<\/vt:lpstr>/g)].map((match) => xmlUnescape(match[1]));
+
+// A `HeadingPairs` element holding `pairs`, the vector's size the number of
+// variants that make them up.
+const headingPairsBlock = (pairs) => `<HeadingPairs><vt:vector size="${pairs.length * 2}" baseType="variant">` +
+  pairs.map((pair) => `<vt:variant><vt:lpstr>${xmlEscape(pair.name)}</vt:lpstr></vt:variant><vt:variant><vt:i4>${pair.count}</vt:i4></vt:variant>`).join("") +
+  `</vt:vector></HeadingPairs>`;
+
+// A `TitlesOfParts` element listing `entries`, the vector's size the number of
+// them.
+const titlesOfPartsBlock = (entries) => `<TitlesOfParts><vt:vector size="${entries.length}" baseType="lpstr">` +
+  entries.map((entry) => `<vt:lpstr>${xmlEscape(entry)}</vt:lpstr>`).join("") +
+  `</vt:vector></TitlesOfParts>`;
+
+// The deck's own application properties with the slide titles they list set to the
+// titles the slides really declare: the library writes one entry per slide, naming
+// each by its number, which is not a title any slide holds.
+function setPptxSlideTitles(zip) {
+  const file = zip.file("docProps/app.xml");
+  if (!file) return;
+  const xml = file.asText();
+  const titles = slideParts(zip).map((part) => slideTitleText(zip, part)).filter((title) => title !== null);
+  const rewritten = withSlideTitles(xml, titles);
+  if (rewritten !== xml) zip.file("docProps/app.xml", rewritten);
+}
+
+// `xml` — the deck's application properties — with the group of slide titles
+// listing `titles`: the group `SLIDE_TITLES_GROUP` names, whose entries are the
+// tail of the titles vector that follows the groups ahead of it (their counts are
+// what says where it begins). A deck declaring no title loses the group along with
+// its entries rather than keeping a count of zero, and the group's count, the
+// vectors' sizes and the entries are rewritten together, so the properties never
+// contradict each other. A part whose groups name more entries than its vector
+// holds is one this does not understand, and is handed back unchanged.
+function withSlideTitles(xml, titles) {
+  const heads = xml.match(/<HeadingPairs>[\s\S]*?<\/HeadingPairs>/);
+  const parts = xml.match(/<TitlesOfParts>[\s\S]*?<\/TitlesOfParts>/);
+  if (!heads || !parts) return xml;
+  const pairs = headingPairs(heads[0]);
+  const group = pairs === null ? -1 : pairs.findIndex((pair) => pair.name === SLIDE_TITLES_GROUP);
+  if (group < 0) return xml;
+  const before = pairs.slice(0, group).reduce((count, pair) => count + pair.count, 0);
+  const entries = titledParts(parts[0]);
+  if (entries.length < before) return xml;
+  const kept = entries.slice(0, before);
+  return titles.length === 0
+    ? xml
+        .replace(heads[0], () => headingPairsBlock(pairs.filter((_, at) => at !== group)))
+        .replace(parts[0], () => titlesOfPartsBlock(kept))
+    : xml
+        .replace(heads[0], () => headingPairsBlock(pairs.map((pair, at) => (at === group ? { name: pair.name, count: titles.length } : pair))))
+        .replace(parts[0], () => titlesOfPartsBlock([...kept, ...titles]));
+}
+
+// The deck's `[Content_Types].xml` with every declaration the package has no part
+// for removed: an `<Override>` whose part is not in the archive, and a `<Default>`
+// whose extension no part carries. `xml` and `rels` are the package's own and stay
+// — office writes both, and both extensions are in use here — and a part that IS
+// in the archive keeps its type, the ones this writes itself included.
+function prunePptxContentTypes(zip) {
+  const file = zip.file("[Content_Types].xml");
+  if (!file) return;
+  const xml = file.asText();
+  const parts = packageParts(zip);
+  const extensions = new Set(parts.map((part) => (part.split(".").pop() || "").toLowerCase()));
+  const pruned = xml.replace(/<(Default|Override)\b[^>]*\/>/g, (element) => {
+    if (element.startsWith("<Default")) {
+      return extensions.has((xmlAttribute(element, "Extension") || "").toLowerCase()) ? element : "";
+    }
+    return parts.includes((xmlAttribute(element, "PartName") || "").replace(/^\//, "")) ? element : "";
+  });
+  if (pruned !== xml) zip.file("[Content_Types].xml", pruned);
+}
+
+// The presentation part with its `<p:notesMasterIdLst>` moved where the format's
+// own sequence puts it: `p:presentation`'s children are a sequence, and the library
+// writes the notes master list after `<p:sldIdLst>`, where office writes it ahead
+// of it (the master lists, then the slide list, then the sizes). Nothing else about
+// the part changes, and one already in that order is left alone.
+function orderPptxPresentation(zip) {
+  const file = zip.file(PPT_PRESENTATION);
+  if (!file) return;
+  const xml = file.asText();
+  const notes = xml.match(/<p:notesMasterIdLst>[\s\S]*?<\/p:notesMasterIdLst>/);
+  const slides = xml.search(/<p:sldIdLst\b/);
+  if (!notes || slides < 0 || notes.index < slides) return;
+  const moved = xml.slice(0, notes.index) + xml.slice(notes.index + notes[0].length);
+  const masters = moved.match(/<p:sldMasterIdLst\b[^>]*>[\s\S]*?<\/p:sldMasterIdLst>/);
+  if (!masters) return;
+  const at = masters.index + masters[0].length;
+  zip.file(PPT_PRESENTATION, moved.slice(0, at) + notes[0] + moved.slice(at));
+}
+
+// The archive's folder entries, removed: a zip may state a directory of its own,
+// and this one states one for every folder the library made — the empty ones (the
+// charts, embeddings and media folders a deck with none of those holds) and the
+// folders the parts already imply. Office writes none and no reader looks one up,
+// and `zip.remove` is not what takes one: a folder name given to it takes the
+// folder's whole subtree with it, so the entry goes the way the library's own
+// removal removes one.
+function dropPptxFolderEntries(zip) {
+  for (const name of Object.keys(zip.files)) {
+    if (name.endsWith("/")) delete zip.files[name];
+  }
+}
+
+// The package a created deck is delivered as: the library's bytes with the titles
+// declared and the junk above gone.
+function completePptx(bytes) {
+  const zip = new PizZip(bytes);
+  for (const part of slideParts(zip)) {
+    const file = zip.file(part);
+    if (!file) continue;
+    const xml = file.asText();
+    const declared = declarePptxTitles(xml);
+    if (declared !== xml) zip.file(part, declared);
+  }
+  const noted = notedSlides(zip);
+  // Before the content types are pruned, so a page dropped here takes its own
+  // declaration with it.
+  dropPptxNotesPages(zip);
+  setPptxNoteCount(zip, noted);
+  setPptxSlideTitles(zip);
+  prunePptxContentTypes(zip);
+  orderPptxPresentation(zip);
+  dropPptxFolderEntries(zip);
+  return zip.generate({ type: "nodebuffer", compression: "DEFLATE" });
+}
+
+// ── create: pdf ────────────────────────────────────────────────
+// A streaming layout: blocks follow one another down the page and a new page
+// starts when the current one is full. Columns, floats and exact page
+// placement are deliberately not attempted.
+//
+// pdf-lib writes a character the embedded font has no glyph for as the notdef
+// glyph — a blank box — so a document that draws e.g. CJK with the bundled
+// NotoSans is delivered as a success that silently lost the text. Every string
+// drawn with that font is offered to `noteGlyphs`, and whatever it cannot draw
+// is reported in the result's `unsupported`.
+const missingGlyphs = new Set();
+// Code points pdf-lib's own text pipeline rewrites before the font is ever
+// consulted: `cleanText` turns U+0009, U+0085, U+2028 and U+2029 into four
+// spaces, and `lineSplit`/`mergeLines` turn U+000A, U+000C and U+000D into a
+// line break or a space. Reporting one would name a loss that did not happen, so
+// they are skipped rather than offered to the coverage check. A code point the
+// pipeline DROPS instead (backspace U+0008, vertical tab U+000B) really does
+// leave the file and stays reported — where the string reaches the font as it
+// was written (`pdf_text`, `pdf_form_fill`); `create pdf`'s own word splitter
+// turns a vertical tab into a space and reports nothing.
+const LAYOUT_CODE_POINTS = new Set([0x09, 0x0a, 0x0c, 0x0d, 0x85, 0x2028, 0x2029]);
+function noteGlyphs(glyphs, text) {
+  // By code point, not UTF-16 unit: an astral character is one glyph.
+  for (const character of text) {
+    const codePoint = character.codePointAt(0);
+    if (LAYOUT_CODE_POINTS.has(codePoint)) continue;
+    if (!glyphs.hasGlyphForCodePoint(codePoint)) missingGlyphs.add(character);
+  }
+}
+async function pdfWithFont(req) {
+  const pdf = await freshPdf(req.metadata);
+  pdf.registerFontkit(fontkit);
+  const bytes = fs.readFileSync(req.font);
+  const font = await pdf.embedFont(bytes, { subset: true });
+  // The same bytes, read by fontkit itself: what pdf-lib embeds is a subset, so
+  // the outline table of the input is what tells an unrenderable character.
+  const glyphs = fontkit.create(bytes);
+  return { pdf, font, glyphs };
+}
+
+function wrapText(font, text, size, indent, maxWidth) {
+  const lines = [];
+  for (const paragraph of String(text).split("\n")) {
+    let current = "";
+    for (const word of paragraph.split(/\s+/).filter(Boolean)) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (font.widthOfTextAtSize(candidate, size) + indent <= maxWidth) { current = candidate; continue; }
+      if (current) lines.push(current);
+      let rest = word;
+      while (font.widthOfTextAtSize(rest, size) + indent > maxWidth && rest.length > 1) {
+        let cut = rest.length - 1;
+        while (cut > 1 && font.widthOfTextAtSize(rest.slice(0, cut), size) + indent > maxWidth) cut -= 1;
+        lines.push(rest.slice(0, cut));
+        rest = rest.slice(cut);
+      }
+      current = rest;
+    }
+    lines.push(current);
+  }
+  return lines;
+}
+
+async function createPdf(req) {
+  const width = A4[0] - 2 * MARGIN;
+  // Pictures alone are one per page, fitted whole and centred: the streaming
+  // layout below would stack them down one column and let a page break cut a
+  // tall picture in two.
+  if (req.content.length && req.content.every((block) => block.type === "image")) {
+    const pdf = await freshPdf(req.metadata);
+    const height = A4[1] - 2 * MARGIN;
+    for (const block of req.content) {
+      const page = pdf.addPage(A4);
+      const image = await embedImage(pdf, block.image);
+      // The picture keeps its own proportions on its page. A block that names
+      // both sides names a box it is fitted inside whole — never a ratio to
+      // stretch to — one named side scales the other with it, and none keeps the
+      // picture's own size; the page's text area bounds whatever that is, so
+      // nothing is drawn past the page.
+      const size = imageSize(image, block.width, block.height, RULES.dimension_points, null);
+      const scale = Math.min(
+        size.width / image.width,
+        size.height / image.height,
+        width / PX_TO_POINTS / image.width,
+        height / PX_TO_POINTS / image.height,
+      );
+      const drawn = { width: image.width * scale * PX_TO_POINTS, height: image.height * scale * PX_TO_POINTS };
+      page.drawImage(image, { x: (A4[0] - drawn.width) / 2, y: (A4[1] - drawn.height) / 2, ...drawn });
+    }
+    return pdf.save();
+  }
+  const { pdf, font, glyphs } = await pdfWithFont(req);
+  let page = pdf.addPage(A4);
+  let y = A4[1] - MARGIN;
+  const fresh = () => { page = pdf.addPage(A4); y = A4[1] - MARGIN; };
+  const draw = (text, size, leading, indent) => {
+    if (y - leading < MARGIN) fresh();
+    noteGlyphs(glyphs, text);
+    page.drawText(text, { x: MARGIN + indent, y, size, font, color: rgb(0, 0, 0) });
+    y -= leading;
+  };
+  for (const block of req.content) {
+    if (block.type === "heading") {
+      const size = [22, 17, 14][headingLevelNumber(block.level) - 1];
+      y -= size * 0.4;
+      for (const line of wrapText(font, textOf(block.text, "a heading's text"), size, 0, width)) draw(line, size, size * 1.25, 0);
+      y -= size * 0.2;
+    } else if (block.type === "paragraph") {
+      for (const line of wrapText(font, textOf(block.text, "a paragraph's text"), BODY_SIZE, 0, width)) draw(line, BODY_SIZE, BODY_SIZE * 1.35, 0);
+      y -= BODY_SIZE * 0.4;
+    } else if (block.type === "list") {
+      block.items.forEach((item, index) => {
+        const marker = block.ordered ? `${index + 1}. ` : "• ";
+        for (const line of wrapText(font, marker + String(scalarOf(item, "a bullet")), BODY_SIZE, 12, width)) draw(line, BODY_SIZE, BODY_SIZE * 1.35, 12);
+      });
+      y -= BODY_SIZE * 0.4;
+    } else if (block.type === "table") {
+      // A cell-less row draws nothing but its rule, so it is dropped rather
+      // than left as a blank band.
+      const rows = [...(block.headers ? [block.headers] : []), ...(block.rows || [])].filter((row) => row.length);
+      const cols = Math.max(1, ...rows.map((row) => row.length));
+      const colWidth = width / cols;
+      for (const row of rows) {
+        // Every wrapped line of a cell is drawn, and the row is broken across
+        // pages line by line as a paragraph is: a row taller than the text
+        // column would otherwise draw past the page bottom, where a viewer clips
+        // it while the call still reported success.
+        const cells = [];
+        for (let c = 0; c < cols; c += 1) {
+          const cell = row[c] === undefined ? "" : String(scalarOf(row[c], "a table cell"));
+          cells.push(wrapText(font, cell, CELL_SIZE, 3, colWidth));
+        }
+        const lines = Math.max(...cells.map((cell) => cell.length));
+        if (y - 13 < MARGIN) fresh();
+        page.drawLine({ start: { x: MARGIN, y }, end: { x: MARGIN + width, y }, thickness: 0.5, color: rgb(0.6, 0.6, 0.6) });
+        for (let i = 0; i < lines; i += 1) {
+          if (y - 13 < MARGIN) fresh();
+          cells.forEach((cell, c) => {
+            const line = cell[i];
+            if (line === undefined) return;
+            noteGlyphs(glyphs, line);
+            page.drawText(line, { x: MARGIN + c * colWidth + 3, y: y - 13, size: CELL_SIZE, font });
+          });
+          y -= CELL_LEADING;
+        }
+        y -= CELL_ROW_GAP;
+      }
+      y -= BODY_SIZE;
+    } else if (block.type === "image") {
+      const image = await embedImage(pdf, block.image);
+      // The block's sides are points, as the page is laid out: `imageSize` reads
+      // them through the shared span and answers in pixels, which the page draws
+      // in points. A picture whose sides the block leaves out is fitted whole
+      // into the page's text column, so one no page holds is drawn smaller rather
+      // than past the page's edge.
+      const size = imageSize(image, block.width, block.height, RULES.dimension_points, {
+        width: DEFAULT_IMAGE_WIDTH,
+        height: Math.round((A4[1] - 2 * MARGIN) / PX_TO_POINTS),
+      });
+      let targetWidth = size.width * PX_TO_POINTS;
+      let targetHeight = size.height * PX_TO_POINTS;
+      // The streaming layout keeps what it draws inside the text column.
+      if (targetWidth > width) {
+        targetHeight *= width / targetWidth;
+        targetWidth = width;
+      }
+      if (y - targetHeight < MARGIN) fresh();
+      page.drawImage(image, { x: MARGIN, y: y - targetHeight, width: targetWidth, height: targetHeight });
+      y -= targetHeight + BODY_SIZE;
+    }
+  }
+  return pdf.save();
+}
+
+// ── fill_template ──────────────────────────────────────────────
+// Substitution runs over JOINED text runs, never over a run on its own: the
+// editor that wrote the sample may have split `{name}` across runs, and only the
+// joined text is the one placeholder the user sees.
+const PLACEHOLDER = /\{([^{}]+)\}/g;
+// The run element of a part, capturing its text. `prefix` is the run element's
+// name up to the tag itself: `a:` in a drawing part, empty in a workbook part.
+const runPattern = (prefix) => new RegExp(`${openTag(`${prefix}t`)}([\\s\\S]*?)${closeTag(`${prefix}t`)}`, "g");
+// The workbook's shared-string table, its `<si>` entries read as elements.
+const SHARED_STRINGS_PART = "xl/sharedStrings.xml";
+
+// Replace `text`'s placeholders with their values, recording every name the
+// sample declared (`seen`) and every one no value was given for (`missing`). The
+// lookup is own-property: a placeholder named after an Object.prototype member
+// (`{__proto__}`, `{toString}`) is one the caller gave no value for, not the
+// prototype's own member rendered into the document.
+function substituteText(text, values, seen, missing) {
+  return text.replace(PLACEHOLDER, (whole, name) => {
+    seen.add(name);
+    const value = Object.hasOwn(values, name) ? values[name] : undefined;
+    if (value === undefined) { missing.add(name); return whole; }
+    return String(value);
+  });
+}
+
+// XML text with its entity references resolved, so a placeholder is matched
+// against the text a reader sees rather than against the escaping the writer
+// chose — openpyxl writes every Cyrillic letter as a numeric reference, and
+// re-escaping one would turn it into the literal `&#1054;` a user then reads.
+// The digits are matched as digits and only as digits: a looser pattern reads
+// `&#123abc;` as the number 123 followed by junk and injects a brace.
+const xmlUnescape = (text) => text.replace(/&(#[0-9]+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/g, (whole, body) => {
+  if (body[0] !== "#") return { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" }[body] ?? whole;
+  const code = body[1] === "x" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+  return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+});
+
+// The joined text of `element`'s runs, unescaped, or `null` when it has none or
+// none of them holds a placeholder.
+function placeholderText(element, runs) {
+  const text = runText(element, runs);
+  // A literal of its own: `PLACEHOLDER` carries the `g` flag `replace` needs.
+  return /\{[^{}]+\}/.test(text) ? text : null;
+}
+
+// The joined, unescaped text of every run of `element` matching `runs`.
+function runText(element, runs) {
+  return xmlUnescape([...element.matchAll(runs)].map((match) => match[1]).join(""));
+}
+
+// The element holding one run's text, in the namespace `prefix` names. A
+// WordprocessingML `w:t` and a SpreadsheetML `<t>` declare `xml:space`, and both
+// get it so a significant space survives; DrawingML's `<a:t>` declares no
+// attributes at all, so it is written bare — the attribute is not part of that
+// format, and a presentation holding it offers to repair the file. Element text
+// reaches a reader whole either way, so no significant space is lost without it.
+const textElement = (prefix, text) => (prefix === "a:" ? `<a:t>${text}</a:t>` : `<${prefix}t xml:space="preserve">${text}</${prefix}t>`);
+
+// `element` with its first run holding `text` and every further run emptied;
+// the formatting around those runs (their run properties) is kept.
+function rewriteRuns(element, runs, prefix, text) {
+  let first = true;
+  return element.replace(runs, () => {
+    const content = first ? text : "";
+    first = false;
+    return textElement(prefix, xmlEscape(content));
+  });
+}
+
+// Substitute the placeholders of every `container` element of `xml`, one at a
+// time: the container's runs are joined, substituted once, and written back into
+// its first run. `container` is a complete-element pattern (see
+// `elementPattern`), so both shapes a file may write the element in are matched.
+function fillTextContainers(xml, container, prefix, values, seen, missing) {
+  const runs = runPattern(prefix);
+  return xml.replace(container, (element) => {
+    const text = placeholderText(element, runs);
+    if (text === null) return element;
+    return rewriteRuns(element, runs, prefix, substituteText(text, values, seen, missing));
+  });
+}
+
+// Open a sample package, blaming the REQUEST when it cannot be opened at all —
+// an encrypted or truncated file is a bad input the caller can do something
+// about, not a kit fault. The family is named as the extension it was read as,
+// so the sentence reads the same for every one of them.
+function openPackage(file, kind) {
+  try {
+    return new PizZip(fs.readFileSync(file));
+  } catch (error) {
+    throw new UsageError(`${nodePath.basename(file)} is not a readable .${kind} package: ${(error && error.message) || error}`);
+  }
+}
+
+// The library's own resolution of a tag (a plain lookup in the current scope),
+// with every tag it compiles recorded: what a sample declared is then a fact the
+// kit reports instead of one the caller re-derives from the output bytes.
+function recordingParser(tags) {
+  return (tag) => {
+    tags.add(tag);
+    return {
+      get(scope) {
+        if (tag === ".") return scope;
+        return scope && Object.hasOwn(scope, tag) ? scope[tag] : undefined;
+      },
+    };
+  };
+}
+
+// A substitute is text, a number or a boolean: a structure has no place in a
+// document, and writing one out would put `[object Object]` into it, so it is
+// refused once here — for the name-keyed maps both `fill_template` and
+// `pdf_form_fill` take.
+function checkValues(values) {
+  for (const [name, value] of Object.entries(values)) {
+    if (!RULES.scalar_kinds.includes(typeof value)) {
+      throw new UsageError(`the value for "${name}" must be text, a number or a boolean, not a structure`);
+    }
+  }
+}
+
+// The template library reports a compile or render failure as a `Multi error`
+// wrapping one sub-error per problem, each naming the offending tag, the part
+// and the surrounding text: the sub-errors are what tells the caller how to fix
+// their own sample, while the wrapper's own message says nothing. Such a failure
+// is the sample's, so it is a usage error.
+function templateError(error) {
+  const details = ((error && error.properties && error.properties.errors) || []).map((sub) => {
+    const where = (sub && sub.properties) || {};
+    return [where.explanation || sub.message, where.context && `…${where.context}…`, where.file].filter(Boolean).join(" ");
+  });
+  const reason = details.length ? details.join("; ") : String((error && error.message) || error);
+  return new UsageError(`the sample cannot be filled: ${reason}`);
+}
+
+// The family a package's own PARTS declare, whatever the name says: the three
+// OOXML families each own a part the other two do not have. `null` when the
+// archive declares none of them — a plain zip, or a package built on another
+// convention, which the reader that does know it can still accept.
+function packageFamily(zip) {
+  if (zip.file("word/document.xml")) return "docx";
+  if (zip.file(XLSX_WORKBOOK)) return "xlsx";
+  if (zip.file("ppt/presentation.xml")) return "pptx";
+  return null;
+}
+
+// A package whose parts are another family's cannot be used as this one: the
+// mismatch is named here rather than left to the library, whose message for it
+// talks about its own paid modules instead of the file. The caller passes its
+// own voice: `noun` names the file it handed over ("sample" for a fill, "input"
+// for an edit) and `hint` builds the advice that fits its own action from the
+// family the package really is, so the check itself stays one. The family is
+// named as the extension it is, the way the file is named.
+function ensurePackageFamily(zip, expected, noun, hint) {
+  const family = packageFamily(zip);
+  if (!family || family === expected) return;
+  throw new UsageError(`the ${noun} is really a .${family} package, not the .${expected} one its name says — hint: ${hint(family)}`);
+}
+
+function fillDocxOrPptx(req) {
+  const missing = new Set();
+  const tags = new Set();
+  // The request's `format` is the sample's family; without one it is a
+  // document, which the library reads on its own.
+  const expected = req.format === "pptx" ? "pptx" : "docx";
+  const zip = openPackage(req.template, expected);
+  ensurePackageFamily(zip, expected, "sample", () => "rename it to match its content");
+  let doc;
+  try {
+    doc = new Docxtemplater(zip, {
+      paragraphLoop: true,
+      linebreaks: true,
+      // The library logs a failure as JSON on stdout by default, which would
+      // bury the kit's own result channel in noise.
+      errorLogging: false,
+      parser: recordingParser(tags),
+      nullGetter: (part) => { missing.add(part.value); return `{${part.value}}`; },
+    });
+    doc.render(req.values);
+  } catch (error) {
+    // A sample the library cannot compile — an unbalanced `{`, a file that is
+    // not the package its name claims — is the caller's own input.
+    throw templateError(error);
+  }
+  const out = doc.getZip();
+  // Presenter notes are not a part docxtemplater renders, so their placeholders
+  // are substituted here instead of being left in the delivered file.
+  for (const name of Object.keys(out.files)) {
+    if (!/^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(name)) continue;
+    const xml = out.file(name).asText();
+    const filled = fillTextContainers(xml, elementPattern("a:p"), "a:", req.values, tags, missing);
+    if (filled !== xml) out.file(name, filled);
+  }
+  return { buffer: out.generate({ type: "nodebuffer", compression: "DEFLATE" }), missing: [...missing], placeholders: tags.size };
+}
+
+// A cell's `<v>` element, read with the shared spellings (`openTag`/`closeTag`), so a
+// `<v >` is the element a `<v>` is, like every other element this kit reads.
+const CELL_VALUE = new RegExp(`${openTag("v")}\\s*(\\d+)\\s*${closeTag("v")}`);
+
+// The shared string a `t="s"` cell indexes into, joined and unescaped, or `null`
+// when the cell is not a shared-string cell (or the table does not have that
+// index). A workbook written by Excel, Sheets or LibreOffice keeps EVERY string
+// here and writes only an index into the cell, so this is the text such a cell
+// displays.
+function sharedStringOf(cell, shared) {
+  if (!/\bt="s"/.test(cell)) return null;
+  const index = Number((cell.match(CELL_VALUE) || [])[1]);
+  return shared[index] ?? null;
+}
+
+// The joined, unescaped text of every `<si>` of the shared-string table, in
+// index order: what a `t="s"` cell's index refers to (`""` for an `<si/>` with
+// no runs, which still occupies its index).
+function sharedStringTexts(xml) {
+  return [...xml.matchAll(elementPattern("si"))].map((match) => runText(match[0], runPattern("")));
+}
+
+// The zero-based column a cell reference's letters name (`"B12"` -> 1).
+const columnOf = (reference) => [...reference.replace(/\d+/g, "")].reduce((index, letter) => index * 26 + letter.toUpperCase().charCodeAt(0) - 64, 0) - 1;
+
+// One cell with its placeholders substituted, or the cell unchanged.
+function fillCell(cell, reference, values, seen, missing, shared) {
+  const own = placeholderText(cell, runPattern(""));
+  const text = own ?? sharedStringOf(cell, shared);
+  if (text === null) return cell;
+  const style = (cell.match(/\bs="(\d+)"/) || [])[1];
+  const attribute = style ? ` s="${style}"` : "";
+  const inline = (content) => `<c r="${reference}"${attribute} t="inlineStr"><is><t xml:space="preserve">${xmlEscape(content)}</t></is></c>`;
+  const whole = text.match(/^\{([^{}]+)\}$/);
+  // A cell whose text lives in the shared table is only rewritten when the
+  // whole cell is one placeholder (below); a partial one stays a shared-string
+  // cell and is substituted in the table by its own pass.
+  if (!whole) return own === null ? cell : inline(substituteText(text, values, seen, missing));
+  seen.add(whole[1]);
+  const value = Object.hasOwn(values, whole[1]) ? values[whole[1]] : undefined;
+  if (value === undefined) { missing.add(whole[1]); return cell; }
+  // A number in a cell that is exactly one placeholder becomes a real number
+  // cell, whatever shape the sample kept its strings in.
+  if (typeof value === "number") return `<c r="${reference}"${attribute}><v>${value}</v></c>`;
+  return own === null ? cell : inline(String(value));
+}
+
+// A table sample is edited cell by cell: everything else in the package —
+// charts, comments, media, other sheets — is copied through untouched, and a
+// whole-cell placeholder becomes a number when the value is one. A cell is
+// addressed by its own `r` or, when a writer left it out, by its position in the
+// row — the rule the reader uses, so a sample whose cells the reader can show is
+// one this filler can fill.
+function fillXlsxSheet(xml, values, seen, missing, shared) {
+  let rowNumber = 0;
+  let column = 0;
+  return xml.replace(new RegExp(`${selfClosingTag("row")}|${openTag("row")}|${selfClosingTag("c")}|${openTag("c")}[\\s\\S]*?${closeTag("c")}`, "g"), (part) => {
+    if (part.startsWith("<row")) {
+      rowNumber = Number((part.match(/\br="(\d+)"/) || [])[1]) || rowNumber + 1;
+      column = 0;
+      return part;
+    }
+    const address = (part.match(/\br="([A-Z]+\d+)"/) || [])[1];
+    const reference = address || `${colName(column)}${rowNumber}`;
+    column = address ? columnOf(address) + 1 : column + 1;
+    return fillCell(part, reference, values, seen, missing, shared);
+  });
+}
+
+function fillXlsx(req) {
+  const missing = new Set();
+  const seen = new Set();
+  const zip = openPackage(req.template, "xlsx");
+  ensurePackageFamily(zip, "xlsx", "sample", () => "rename it to match its content");
+  const rewrite = (name, fill) => {
+    const part = zip.file(name);
+    if (!part) return;
+    const xml = part.asText();
+    const filled = fill(xml);
+    if (filled !== xml) zip.file(name, filled);
+  };
+  const sharedPart = zip.file(SHARED_STRINGS_PART);
+  const shared = sharedPart ? sharedStringTexts(sharedPart.asText()) : [];
+  for (const name of Object.keys(zip.files)) {
+    if (/^xl\/worksheets\/sheet\d+\.xml$/.test(name)) rewrite(name, (xml) => fillXlsxSheet(xml, req.values, seen, missing, shared));
+  }
+  // A real Excel file keeps its strings in the shared table and writes only an
+  // index into the cell, so a placeholder there is invisible to the cell pass.
+  rewrite(SHARED_STRINGS_PART, (xml) => fillTextContainers(xml, elementPattern("si"), "", req.values, seen, missing));
+  return { buffer: zip.generate({ type: "nodebuffer", compression: "DEFLATE" }), missing: [...missing], placeholders: seen.size };
+}
+
+// ── surgical package edits ─────────────────────────────────────
+// `docx_edit`, `xlsx_edit` and `pptx_edit` change an existing package part by
+// part instead of rewriting it through a writer library: every part an edit does
+// not name is carried into the output with the exact content it had, which keeps
+// a chart, a comment or a media file the caller never mentioned intact. The raw
+// archive bytes are not identical — a fresh DEFLATE stream re-compresses every
+// part — but the CONTENT of every part no edit touched is.
+//
+// Each edit walks the part it applies to — a `part` call charges the text it
+// opens, and an arm that folds a whole edit list over one part charges each edit's
+// own walk (the docx arm) — so a call costs the part text its edits walk, added
+// up. Past this much the run would reach its own time limit, which the caller
+// reads as a product fault: refusing here instead names a call the caller can fix
+// by splitting it. The unit is the part text's own length, which is its byte count
+// for the XML these parts hold.
+const EDIT_WORK_MAX = 4 * 1024 ** 3;
+
+// The refusal a call past that budget states, naming the size it walked and the
+// fix. One place, so the arms that charge work cannot word it differently.
+const editWorkRefusal = (work) => new UsageError(`the edits rewrite about ${Math.round(work / 1024 / 1024)} MB of the document's parts, more than one call applies (limit ${Math.round(EDIT_WORK_MAX / 1024 / 1024)} MB) — hint: split the edits into several calls`);
+
+function openEdit(req, family) {
+  const zip = openPackage(req.input, family);
+  ensurePackageFamily(zip, family, "input", (real) => `use ${real}_edit to edit it`);
+  // The family's own part is what an edit rewrites, so a package that declares
+  // no family at all — `ensurePackageFamily` refuses another family, not the
+  // absence of one — is refused here rather than left to a no-op. The sentence
+  // names what the file lacks, since a caller can act on that.
+  if (!packageFamily(zip)) throw new UsageError(`cannot edit ${nodePath.basename(req.input)}: it holds no document, workbook or presentation part, so it is not a .${family} package`);
+  // The parts the input held, for the signature check below — the set
+  // `packageParts` reads, a folder entry left out by the same rule.
+  const baseline = packageParts(zip);
+  // A package that carries a digital signature part cannot be edited into a file
+  // the signature still matches: the parts it signs change while the signature
+  // does not, so a changed package says so in one note rather than staying
+  // silent about it.
+  const signed = baseline.some((name) => name.startsWith("_xmlsignatures/"));
+  const notes = [];
+  // The notes that say part of what the call asked for is NOT in the produced
+  // file: what the edit could not carry over (a replacement that lost the asked
+  // formatting, an inserted paragraph that lost its section break), a reference
+  // it left naming the old cell, or something the call removed beyond what it
+  // named (a table that went with the range deleted inside it). A note about the
+  // INPUT's own properties is not one of them: a signed package whose signature
+  // no longer matches, and a chart or pivot cache nothing recomputes, are
+  // consequences of editing that input rather than work left undone — the caller
+  // reads them, and the Rust side does not turn them into a partial answer.
+  const losses = [];
+  let changed = false;
+  let touched = false;
+  let work = 0;
+  // Charge one walk over a part's text against the call's budget. The budget bounds
+  // the work a call does rather than the distinct bytes it touches, so a part taken
+  // into hand twice is charged twice: `part`, `sheet` and `read` charge the pass each
+  // makes, `rewrite` none, and the arms that walk a part of their own charge theirs
+  // with this (the docx arm, `formatCells`' index cache, `addRelationship`). The pptx
+  // arms that read a slide, a notes part or the presentation off the archive with
+  // `zip.file(…).asText()` walk their parts uncharged, so the bound is short of the
+  // work they do.
+  const charge = (length) => {
+    work += length;
+    if (work > EDIT_WORK_MAX) throw editWorkRefusal(work);
+  };
+  return {
+    zip,
+    // The path the input was opened from, for a refusal that has to name the file
+    // it could not edit (see `missingContentTypes`).
+    input: req.input,
+    // The diagram text a reading showed, keyed by slide part. Only a
+    // presentation has any, and the Rust reader owns what a diagram shows
+    // (`src/ooxml.rs::pptx_diagram_text`), so it is passed in the request rather
+    // than read here: a refusal names text the reading really showed (see
+    // `slideFindRefusal`). A slide whose diagrams the reader reported as
+    // unreadable is absent, so nothing is named for it.
+    diagramText: req.diagram_text ?? {},
+    charge,
+    // A user-facing note, already bracketed: the Rust side appends it verbatim.
+    // Kept once each, in the order the edits first raised it. `loss` marks a note
+    // that says part of what the call asked for is NOT in the produced file;
+    // every other note — the scope of what was touched, or a property of the
+    // input being edited — is informational (see `losses`).
+    note: (message, loss = false) => { if (!notes.includes(message)) notes.push(message); if (loss && !losses.includes(message)) losses.push(message); },
+    // Whether the call changed the sheet's CONTENT — a value written or an address
+    // moved — rather than only the markup around it: an insert past the used range
+    // adds a line without moving anything and a repeated write states what the cell
+    // already held, and the caveats about a workbook's charts and pivots are owed
+    // for a change of content, not for a rewrite. Recorded by the edits themselves
+    // (`markContent`), because only they know what their write meant.
+    content: () => touched,
+    // Record a change of content (see `content`).
+    markContent: () => { touched = true; },
+    // Rewrite a part only when the change really changed it; a part the family
+    // does not have is left alone.
+    part(name, change) {
+      const file = zip.file(name);
+      if (!file) return;
+      const xml = file.asText();
+      charge(xml.length);
+      const written = change(xml);
+      if (written !== xml) { zip.file(name, written); changed = true; }
+    },
+    // `part`'s own rule (only a real change is written), for the SHEET parts, plus
+    // the one refusal this family needs: the written part must not hold two elements
+    // at an address the part arrived as holding fewer of — a `<row>` number or a `<c>`
+    // address two of them share, which a reader offers to repair and the reply would
+    // pass off as a success. An edit places its content by the address it reads, so a
+    // row it removes or adds can move an element that states no `r` onto the address
+    // another one already holds. A repeat the part arrived with is passed over where
+    // it stands and a part whose rows cannot be read is not refused for the check's
+    // own sake (see `addedRepeat`); the two readings are charged like every other
+    // walk, and a change that changed nothing is not read a third time.
+    sheet(name, change) {
+      const file = zip.file(name);
+      if (!file) return;
+      const before = file.asText();
+      charge(before.length);
+      const after = change(before);
+      if (after === before) return;
+      charge(after.length);
+      const repeated = addedRepeat(before, after);
+      if (repeated) throw new UsageError(`${addressLabel(repeated)} would be stated twice in the sheet part — two elements claiming one address is a part a reader offers to repair, so this edit was refused rather than written`);
+      zip.file(name, after);
+      changed = true;
+    },
+    // Read a part's text and charge the walk over it, for an arm that reads a part
+    // outside one `part` call (see `charge`). `undefined` for a part the package
+    // does not hold, so a caller can tell "no part" from "an empty one".
+    read(name) {
+      const file = zip.file(name);
+      if (!file) return undefined;
+      const xml = file.asText();
+      charge(xml.length);
+      return xml;
+    },
+    // Write a part back as the text the caller read and charged, `from`, compared
+    // against it: `part`/`sheet` would read and charge the same text again, counting
+    // one call's work twice (`formatCells` and `setCell` grow the styles part across
+    // a whole walk and write it once, this way).
+    rewrite(name, from, to) {
+      if (from === to) return;
+      zip.file(name, to);
+      changed = true;
+    },
+    // Add a part the input did not have, or put one back with new content —
+    // `pptx_edit`'s slide add is the operation that means to. A name the package
+    // already holds with the same content is not a change.
+    add(name, content) {
+      const held = zip.file(name);
+      if (held && held.asText() === content) return;
+      zip.file(name, content);
+      changed = true;
+    },
+    remove(name) {
+      if (!zip.file(name)) return;
+      zip.remove(name);
+      changed = true;
+    },
+    // The result an edit hands back.
+    finish() {
+      if (changed && signed) notes.push("[the input carries a digital signature, which was carried through unchanged — the file changed, so the signature no longer matches it]");
+      return { buffer: zip.generate({ type: "nodebuffer", compression: "DEFLATE" }), notes, losses };
+    },
+  };
+}
+
+// The edits one call carries, bounded before any of them runs.
+function editList(req) {
+  if (!Array.isArray(req.edits)) throw new UsageError("edits must be a list");
+  if (req.edits.length > RULES.edits_max) throw new UsageError(`a call may carry at most ${RULES.edits_max} edits, got: ${req.edits.length}`);
+  return req.edits;
+}
+
+// A package with no `[Content_Types].xml` is not one this kit can edit: it could
+// not declare a part it adds. The sentence names the file the way the pptx media
+// path names it, so both families refuse it the same way.
+const missingContentTypes = (input) => new UsageError(`cannot edit ${nodePath.basename(input)}: it has no [Content_Types].xml part`);
+
+// One string an edit names — a find, a replacement, an inserted text — as the
+// kit's last line after the tool's own boundary: text, and inside the cap the
+// two sides share.
+function editText(value, what) {
+  if (typeof value !== "string") throw new UsageError(`${what} must be text`);
+  if ([...value].length > RULES.edit_text_max) throw new UsageError(`${what} must be at most ${RULES.edit_text_max} characters`);
+  return value;
+}
+
+// Every span `find` occurs at in `text`, left to right and non-overlapping. The
+// offsets are code points, the unit `locateSlot` counts in: a raw `indexOf`
+// offset is a UTF-16 code unit, so a supplementary character before a match
+// would shift it by one and make the edit rewrite the wrong slot. An empty
+// needle matches nothing: `indexOf` would report the same position forever, so
+// no caller's search may depend on one being refused beforehand.
+function occurrences(text, find) {
+  if (!find) return [];
+  const spans = [];
+  const width = [...find].length;
+  let from = 0;
+  // The code points of `text` before `from`, kept in step with the UTF-16 cursor
+  // `indexOf` advances.
+  let walked = 0;
+  while (true) {
+    const at = text.indexOf(find, from);
+    if (at < 0) break;
+    walked += [...text.slice(from, at)].length;
+    spans.push({ start: walked, end: walked + width });
+    from = at + find.length;
+    walked += width;
+  }
+  return spans;
+}
+
+// ── docx_edit ──────────────────────────────────────────────────
+// The three spellings a tag is written in (`selfClosingTag`/`openTag`/`closeTag`),
+// as the balanced walker `tagSpans` reads them. One definition of the rule, so a
+// family walked later cannot be handed a pattern missing a spelling.
+const tagPattern = (name) => new RegExp(`${selfClosingTag(name)}|${openTag(name)}|${closeTag(name)}`, "g");
+
+// A text edit addresses the joined, unescaped text of a `<w:p>` paragraph's
+// `<w:t>` runs. A field's cached result is not body text, and a run inside a
+// text box belongs to its own paragraph, so the runs of a field region, of a
+// `<w:fldSimple>`, and of a nested paragraph are excluded from the text an edit
+// addresses. The header, footer, footnote and endnote parts are not read at
+// all: the body is what an edit rewrites, and the only other parts a call ever
+// writes are the ones `add_image` needs to declare and reach its own media part.
+const DOCX_PARAGRAPH = tagPattern("w:p");
+const DOCX_RUN = tagPattern("w:r");
+const DOCX_FIELD = tagPattern("w:fldSimple");
+const DOCX_CELL = tagPattern("w:tc");
+const DOCX_TXBX = tagPattern("w:txbxContent");
+const DOCX_TABLE = tagPattern("w:tbl");
+// A run's text, the same pattern the filler substitutes through.
+const DOCX_TEXT = runPattern("w:");
+// The package directory a docx picture lives in: the one a created document's
+// images are written to, and the one `add_image` places a picture in.
+const DOCX_MEDIA = "word/media/";
+// The part a docx edit rewrites, and the parts a package that saved one of the
+// conventional files elsewhere names through its own relationships (see
+// `documentPart`): the styles part a `format_paragraph` style name resolves
+// against, the settings part that says whether revisions are recorded, and the
+// numbering part a list is read from and written to.
+const DOCX_DOCUMENT = "word/document.xml";
+const DOCX_SETTINGS = "word/settings.xml";
+const DOCX_STYLES = "word/styles.xml";
+const DOCX_NUMBERING = "word/numbering.xml";
+// The OPC content type and the relationship type head a numbering part is declared
+// with when a package holds none (see `listNumId`) — the way the xlsx arm declares
+// the styles part it has to write (`stylesText`). The head has a spelling per
+// dialect, and a part written for a document has to be declared with the one that
+// document's own reader resolves (see `dialectOf`).
+const NUMBERING_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml";
+const WORD_RELATIONSHIPS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const STRICT_RELATIONSHIPS = "http://purl.oclc.org/ooxml/officeDocument/relationships";
+// The marks the Word reader prints that are labels rather than text: one
+// statement of them lives in `assets/docgen/rules.json` (`docx_marks`), which
+// also carries the spelling the reader prints each one as. The kit reads the
+// list from the bundle it is built with, and `src/ooxml/docx.rs`'s tests check
+// the reader's own output against the same list, so neither side can move
+// without the other. A mark is looked for anywhere in a `find` — `[ins]` wraps
+// its content, a field marker and a merge annotation sit inside a line — and a
+// refusal names the longest mark a find carries (a find of the whole `[comment 1
+// starts]` names that rather than the shorter `[comment 1]` written inside it).
+// A link's mark runs to the line's last `)`, since the address it names may
+// itself hold one.
+// Built once and matched with `matchAll`, which clones a global pattern, so the
+// global flag carries no `lastIndex` from one `find` to the next.
+const DOCX_MARKS = RULES.docx_marks.map(({ pattern }) => new RegExp(pattern, "g"));
+
+// A `find` copied out of a reading carries the reader's indentation — a table
+// row sits two spaces under its `Table N:` head, a diagram's node lines under
+// theirs, a slide's notes under their label — so a find is compared with it
+// trimmed away by both families' refusals. The text a lookup is compared against
+// needs no such trimming: the reader's indent is its own printing, not the
+// package's.
+const withoutIndent = (text) => text.split("\n").map((line) => line.trimStart()).join("\n");
+
+// The longest mark `text` carries — the reader's label a miss names, or
+// undefined when it names none. `text` is the find with the reader's
+// indentation trimmed away (see `docxFindRefusal`): a table row is printed
+// two-space indented, and a mark is the reader's printing wherever it sits.
+function namedDocxMark(text) {
+  let longest;
+  for (const mark of DOCX_MARKS) {
+    for (const match of text.matchAll(mark)) {
+      if (longest === undefined || match[0].length > longest.length) longest = match[0];
+    }
+  }
+  return longest;
+}
+
+// The peripheral parts a docx edit does not change, from the shared statement of
+// them (`assets/docgen/rules.json`, read by the Word reader for the same parts):
+// the relationship-type suffix `word/document.xml` names each by, the phrase a
+// refusal calls it and the conventional part name a package that declares none is
+// read from — a header and a footer have none, since a package reaches those
+// through a relationship alone.
+const DOCX_PERIPHERAL_PARTS = RULES.docx_peripheral_parts;
+
+// The peripheral parts that hold `needle`, each as the phrase a refusal calls the
+// part and whether the part's addressed text holds it — `[]` when none does. A
+// part is read where the package really put it (see `documentParts`); a part a
+// document names several of (a header per section) is read for each, and each is
+// read with `read`, so the walk over it is charged. A part the package does not
+// hold costs only itself.
+//
+// A part whose addressed text does not hold the fragment may still hold it as
+// text a tracked revision of the part's own does — a deletion's `w:delText` runs,
+// which a reading prints as deleted rather than as live text — so that text is
+// read too, and such a part is reported with `revised: true`. A part whose
+// addressed text holds the fragment is never also reported as a revision's.
+function docxPeripheralHolds(editor, needle) {
+  const found = [];
+  for (const { rel, phrase, part } of DOCX_PERIPHERAL_PARTS) {
+    let revised = false;
+    const holds = documentParts(editor, rel, part).some((at) => {
+      const text = editor.read(at);
+      if (text === undefined) return false;
+      // The part's paragraphs joined the way the reader prints them, so a
+      // fragment copied across two lines of a header or a footnote reaches the
+      // part that holds both and that part is what the refusal names.
+      if (
+        docxParagraphTexts(text)
+          .map((paragraph) => paragraph.text)
+          .join("\n")
+          .includes(needle)
+      ) {
+        return true;
+      }
+      if (docxDeletedTexts(text).some((line) => line.includes(needle))) revised = true;
+      return false;
+    });
+    if (holds) found.push({ phrase, revised: false });
+    else if (revised) found.push({ phrase, revised: true });
+  }
+  return found;
+}
+
+// The refusal every docx op that searched and found nothing states. A miss has
+// several causes and the caller can act on each differently, so the reason is
+// named rather than passed over as "not in the body": a fragment that reaches
+// across a paragraph boundary, text a part a docx edit does not change holds
+// (whether the part's addressed text holds it or a tracked revision of the part's
+// own does), a fragment a table of contents' own field holds, text the body's own
+// tracked revision holds, one carrying leading whitespace the file does not hold,
+// one carrying the reader's own label, and one holding a tab or a line break. Each
+// check VERIFIES the reason it states — a
+// boundary against the paragraphs really joined, an indentation and a label
+// against the paragraph that really holds the trimmed fragment, a peripheral part
+// read for the text an edit addresses and for the text a revision of its own
+// holds, the body's own deletions read for their text — and they are asked
+// most-specific first, so a message never claims a reason that is not true: text a
+// footnote really holds is named as the footnote's rather than as a label that
+// happens to spell the same words, and a label the part's own text spells is not
+// called the reader's printing. The fallback stays honest about what was searched
+// and about what a body edit addresses. `block` says the op adds a block after an
+// anchor rather than editing text: its anchor is a paragraph of the document's own
+// (a table cell's counts, a text box's does not), where a text op reaches a text
+// box's own text too.
+function docxFindRefusal(editor, xml, find, block = false) {
+  const edited = block
+    ? "the body's own paragraphs, a table cell's included"
+    : "the body's own text, a text box's and a table cell's included";
+  const addressed = block
+    ? "a table cell's own text is addressed, a text box's or a field's cached result is not"
+    : "a text box's own text and a table cell's are addressed, a field's cached result is not";
+  const paragraphs = docxParagraphTexts(xml);
+  // A paragraph's address is the joined text of its runs and the reader prints
+  // one paragraph per line, so a fragment that reaches from one paragraph into
+  // the next is a concatenation of consecutive paragraphs joined by a newline —
+  // while no one paragraph holds it. Only a fragment holding a newline can be
+  // one: a newline sits between the paragraphs of the join, never inside one.
+  const trimmed = withoutIndent(find);
+  if (/\n/.test(trimmed) && paragraphs.map((paragraph) => paragraph.text).join("\n").includes(trimmed)) return `the text ${JSON.stringify(find)} is not in the document's body: the fragment reaches across a paragraph boundary, and an edit addresses one paragraph at a time`;
+  if (trimmed && trimmed !== find && paragraphs.some((paragraph) => paragraph.text.includes(trimmed))) return `the text ${JSON.stringify(find)} is not in the document's body: the fragment's leading whitespace is either the indentation the reader prints under a block or whitespace the file's text does not hold — search for ${JSON.stringify(trimmed)}`;
+  if (trimmed) {
+    const peripheral = docxPeripheralHolds(editor, trimmed);
+    const held = peripheral.filter(({ revised }) => !revised);
+    if (held.length) return `the text ${JSON.stringify(find)} is in ${conjoined(held.map(({ phrase }) => phrase))} of this document, which a docx edit does not change — it edits ${edited}, and not that part`;
+    // The parts left hold it as text a tracked revision of their own does, which
+    // a reading prints as deleted rather than as live text: the part is named
+    // with that, so the miss is not passed off as text the document lacks.
+    if (peripheral.length) return `the text ${JSON.stringify(find)} is not in the document's body: it is text a tracked revision holds in ${conjoined(peripheral.map(({ phrase }) => phrase))} of this document, which the reading prints as revised rather than as live text, and an edit addresses the text the body's runs hold today`;
+    // A table of contents' own entries — their text and the page numbers beside them —
+    // are that field's result, which no edit addresses: named as the table's rather than
+    // passed off as text the document lacks.
+    if (docxContentsHolds(xml, trimmed)) return `the text ${JSON.stringify(find)} is in this document's table of contents, which an edit does not change — its entries and their page numbers are the table's own field result, and an edit addresses ${edited}`;
+  }
+  // A tracked revision of the body holds text of its own: a deletion's runs are
+  // `w:delText`, which a reading prints as deleted rather than as live text, and an
+  // edit addresses the runs the body holds today. Said rather than passed off as
+  // text the body does not have — a revision inside a peripheral part is named by
+  // the part above, which no edit reaches either way.
+  if (trimmed && docxDeletedTexts(xml).some((text) => text.includes(trimmed))) {
+    return `the text ${JSON.stringify(find)} is not in the document's body: it is text a tracked revision holds, which the reading prints as revised rather than as live text, and an edit addresses the text the body's runs hold today`;
+  }
+  // The label is named only when the part's own text does not spell the mark
+  // itself: a paragraph whose own text carries `R1: `, or a field whose cached
+  // result does, is a document that really says so, and then the honest reason is
+  // the fallback's (a field's cached result is addressed by nothing), not a label
+  // the reading printed.
+  const mark = namedDocxMark(trimmed);
+  if (mark !== undefined && !spelledText(xml).includes(mark)) return `the text ${JSON.stringify(find)} is not in the document's body: ${JSON.stringify(mark)} is a label the reader prints, not text in the file`;
+  if (/[\t\n\r]/.test(find)) return `the text ${JSON.stringify(find)} is not in the document's body: ${holdsBreakReason("w:", "<w:p>")}`;
+  return `the text ${JSON.stringify(find)} is not in the document's body, its headers, its footers, its footnotes, its endnotes or its comments — ${addressed}`;
+}
+
+// The one balanced scan every "walk the elements of one tag family" caller here
+// is built on. It returns one entry per COMPLETE element of `pattern`'s family:
+// `start`/`end` are byte offsets, `closeAt` is where the element's own close tag
+// begins (the place a child added "at the end" goes), `depth` is the element's own
+// nesting level among its family (`1` for a top-level one) and `selfClosing` says
+// whether it was written `<name/>`. A self-closing element is complete where it
+// opens, a child-bearing one where its own close balances it, so the entries come
+// out in the order the scan finishes them — the order each walk this replaced
+// produced.
+function tagSpans(xml, pattern) {
+  const spans = [];
+  const stack = [];
+  for (const match of xml.matchAll(pattern)) {
+    const tag = match[0];
+    if (tag.endsWith("/>")) {
+      spans.push({ start: match.index, end: match.index + tag.length, depth: stack.length + 1, selfClosing: true });
+      continue;
+    }
+    if (tag.startsWith("</")) {
+      const open = stack.pop();
+      if (open) spans.push({ start: open.start, end: match.index + tag.length, closeAt: match.index, depth: open.depth, selfClosing: false });
+    } else {
+      stack.push({ start: match.index, depth: stack.length + 1 });
+    }
+  }
+  return spans;
+}
+
+// The `[start, end]` span of every complete `<w:p>` of a fragment, in the order
+// the scan reaches their closing tags (a nested one before the one that holds
+// it). A self-closing `<w:p/>` holds nothing an edit can address and is dropped.
+function docxParagraphs(xml) {
+  return tagSpans(xml, DOCX_PARAGRAPH)
+    .filter((span) => !span.selfClosing)
+    .map(({ start, end }) => ({ start, end }));
+}
+
+// The spans of the paragraphs nested in `fragment`, i.e. every complete `<w:p>`
+// that is not `fragment`'s own element (the only one at depth 1), each a
+// `[start, end]` pair.
+function nestedParagraphSpans(fragment) {
+  return tagSpans(fragment, DOCX_PARAGRAPH)
+    .filter((span) => !span.selfClosing && span.depth > 1)
+    .map(({ start, end }) => [start, end]);
+}
+
+// The nested paragraphs that are not themselves inside another nested one,
+// i.e. `fragment`'s direct child paragraphs — the ones a recursive edit walks.
+function childParagraphSpans(fragment) {
+  const nested = nestedParagraphSpans(fragment);
+  return nested.filter(([start, end]) => !nested.some(([outerStart, outerEnd]) => outerStart < start && outerEnd > end));
+}
+
+// The spans of the `<w:fldSimple>` elements of a fragment: everything inside one
+// is a field, which a text edit does not address.
+function fieldSimpleSpans(fragment) {
+  return tagSpans(fragment, DOCX_FIELD).map(({ start, end }) => [start, end]);
+}
+
+// The `[start, end]` spans of every field of a whole part: each `<w:fldSimple>`,
+// and the region from a `<w:fldChar begin>` to its `<w:fldChar end>`. Computed
+// over the part rather than per paragraph, because a field's begin and end may
+// sit in different paragraphs — a per-paragraph counter would leave the second
+// paragraph's cached result looking like body text and make the "fields are not
+// searched" promise false.
+function fieldRegions(xml) {
+  const regions = [];
+  const stack = [];
+  for (const match of xml.matchAll(tagPattern("w:fldChar"))) {
+    const type = (match[0].match(/\bw:fldCharType="([^"]*)"/) || [])[1];
+    if (type === "begin") stack.push(match.index);
+    else if (type === "end" && stack.length) regions.push([stack.pop(), match.index + match[0].length]);
+  }
+  return [...fieldSimpleSpans(xml), ...regions];
+}
+
+// The part of each excluded span that falls inside `[start, end]`, moved to that
+// slice's own origin — how a span found over a whole part reaches the fragment a
+// recursive edit works on.
+const clipSpans = (spans, start, end) => spans
+  .map(([from, to]) => [Math.max(from, start), Math.min(to, end)])
+  .filter(([from, to]) => from < to)
+  .map(([from, to]) => [from - start, to - start]);
+
+// The text a docx edit ADDRESSES in a fragment: the joined text of its own runs,
+// with the field regions that reach into it excluded. The fragments a text edit
+// matches, and the text a removal tests `find` against.
+function addressedText(fragment, excluded = []) {
+  return docxRuns(fragment, excluded).slots.map((slot) => xmlUnescape(slot.raw)).join("");
+}
+
+// The addressed text of every paragraph of a part, in document order — the
+// `docxParagraphs` spans sorted by start (the scan finishes a nested one before
+// its ancestor), each with the text a text edit addresses in it. `addParagraph`
+// anchors on these texts, and a miss's refusal reads them to tell a fragment
+// that reaches from one paragraph into the next from one no paragraph holds.
+function docxParagraphTexts(xml) {
+  const regions = fieldRegions(xml);
+  return docxParagraphs(xml)
+    .sort((left, right) => left.start - right.start)
+    .map((span) => ({
+      start: span.start,
+      end: span.end,
+      text: addressedText(xml.slice(span.start, span.end), clipSpans(regions, span.start, span.end)),
+    }));
+}
+
+// The deleted-text element of a Word part: a revision's own runs, which a reading
+// prints as deleted rather than as live text (`runPattern` spells the `<…:t>`
+// families).
+const DOCX_DELETED_TEXT = new RegExp(`${openTag("w:delText")}([\\s\\S]*?)${closeTag("w:delText")}`, "g");
+
+// The text a tracked deletion holds, one entry per paragraph — the `w:delText`
+// runs a reading prints as deleted. An edit addresses the runs a paragraph holds
+// today, so this text is what a miss states rather than passing it off as text
+// the body does not have.
+function docxDeletedTexts(xml) {
+  return docxParagraphs(xml).map((span) => runText(xml.slice(span.start, span.end), DOCX_DELETED_TEXT));
+}
+
+// Every run's text of a part, joined — what the part's own markup spells, whether
+// or not an edit addresses it (a field's cached result is one such run). Read to
+// tell a mark the READER printed from one the file itself holds.
+const spelledText = (xml) => runText(xml, DOCX_TEXT);
+
+// The text containers that must keep at least one block-level child — ECMA-376
+// requires one in `CT_Tc` and in `CT_TxbxContent` — with the name the refusal
+// gives them.
+const DOCX_BLOCK_CONTAINERS = [
+  { pattern: DOCX_CELL, name: "table cell" },
+  { pattern: DOCX_TXBX, name: "text box" },
+];
+
+// The paragraphs a container holds of its OWN — the ones that keep it valid. A
+// paragraph of a table nested in it is that table's cell's, not this container's,
+// and one drawn in a text box sits inside a paragraph (paragraph depth 2), which
+// `topParagraphs` already leaves out.
+function ownParagraphSpans(container) {
+  const tables = tagSpans(container, DOCX_TABLE).filter((span) => !span.selfClosing);
+  return topParagraphs(container).filter((paragraph) => !tables.some((span) => span.start < paragraph.start && paragraph.end <= span.end));
+}
+
+// Refuse a removal that would leave a container ECMA-376 requires a paragraph in
+// with none of its own. A container loses all of its own paragraphs exactly when
+// every one of them holds `find`, so the check runs once over the part before the
+// removal — the form that asked each removed paragraph for its enclosing
+// container re-walked the whole part once per paragraph, which made a
+// `remove_paragraph` matching many paragraphs quadratic in the part's size.
+function requireParagraphLeft(xml, find) {
+  const regions = fieldRegions(xml);
+  for (const { pattern, name } of DOCX_BLOCK_CONTAINERS) {
+    for (const span of tagSpans(xml, pattern)) {
+      if (span.selfClosing) continue;
+      const own = ownParagraphSpans(xml.slice(span.start, span.end));
+      if (!own.length) continue;
+      const everyOneGoes = own.every((paragraph) => {
+        const start = span.start + paragraph.start;
+        const end = span.start + paragraph.end;
+        return addressedText(xml.slice(start, end), clipSpans(regions, start, end)).includes(find);
+      });
+      if (everyOneGoes) throw new UsageError(`removing every paragraph holding ${JSON.stringify(find)} would leave a ${name} with no paragraph — a ${name} must keep one`);
+    }
+  }
+}
+
+// The `[start, end]` spans of a fragment's `<w:r>` elements, each with the depth
+// it sits at: a run that draws a text box holds the text box's runs.
+function runSpans(fragment) {
+  return tagSpans(fragment, DOCX_RUN).map(({ start, end, depth }) => ({ start, end, depth }));
+}
+
+// The `[start, end]` span of the `<name>…</name>` element — self-closing or
+// child-bearing — that starts exactly at `at`, or `undefined` when there is
+// none. Found by balancing, because the first `</name>` a lazy match reaches may
+// close a nested element of the same name (a `<w:rPrChange>` holds its own
+// `<w:rPr>`). Deliberately NOT a `tagSpans` call: the tag name is known only at
+// run time and the scan starts at `at`, while `tagSpans` walks a fixed family
+// over the whole part — this runs once per run, so re-scanning the whole part
+// each time would be quadratic.
+function elementSpan(xml, at, name) {
+  const open = new RegExp(`${selfClosingTag(name)}|${openTag(name)}`, "g");
+  open.lastIndex = at;
+  const first = open.exec(xml);
+  if (!first || first.index !== at) return undefined;
+  if (first[0].endsWith("/>")) return { start: at, end: at + first[0].length };
+  const token = tagPattern(name);
+  token.lastIndex = at + first[0].length;
+  let depth = 1;
+  let match;
+  while ((match = token.exec(xml)) !== null) {
+    if (match[0].startsWith("</")) { depth -= 1; if (depth === 0) return { start: at, end: match.index + match[0].length }; }
+    else if (!match[0].endsWith("/>")) depth += 1;
+  }
+  return undefined;
+}
+
+// The `<w:rPr>` a run holds as its OWN first child, or `undefined` when it has
+// none. A run's properties are the element directly inside `<w:r>`, never one a
+// nested `<w:rPrChange>` holds (a tracked formatting revision would otherwise
+// take the edit meant for the run).
+function runProperties(runXml) {
+  const open = runXml.match(new RegExp(openTag("w:r")));
+  if (!open) return undefined;
+  const rest = runXml.slice(open.index + open[0].length);
+  const lead = rest.length - rest.trimStart().length;
+  if (!new RegExp(`^(?:${openTag("w:rPr")}|${selfClosingTag("w:rPr")})`).test(rest.trimStart())) return undefined;
+  const span = elementSpan(runXml, open.index + open[0].length + lead, "w:rPr");
+  return span ? runXml.slice(span.start, span.end) : undefined;
+}
+
+// A paragraph's own runs and text slots. `slots` are the `<w:t>` elements whose
+// joined text an edit addresses, each with its span, its raw text, and whether
+// the raw text holds an entity — a slot whose text does is written back through
+// `xmlEscape`, one whose text does not keeps its own bytes. A run is skipped
+// when it carries the paragraph-mark property (a `<w:rPr>` with a `<w:sectPr>`,
+// where a Word section break sits), when it is not a depth-1 run, or when it
+// lies inside a nested paragraph or a field. `extra` are the field regions that
+// reach into the fragment, relative to it, for a field whose begin and end sit
+// in different paragraphs (see `fieldRegions`).
+function docxRuns(fragment, extra = []) {
+  const excluded = [...nestedParagraphSpans(fragment), ...fieldSimpleSpans(fragment), ...extra];
+  const inExcluded = (at) => excluded.some(([start, end]) => at >= start && at < end);
+  const runs = [];
+  const slots = [];
+  for (const span of runSpans(fragment)) {
+    if (span.depth !== 1 || inExcluded(span.start)) continue;
+    const runXml = fragment.slice(span.start, span.end);
+    if (new RegExp(`${openTag("w:rPr")}[\\s\\S]*?<w:sectPr\\b`).test(runXml)) continue;
+    const index = runs.length;
+    runs.push({ start: span.start, end: span.end, rpr: runProperties(runXml) });
+    for (const match of runXml.matchAll(DOCX_TEXT)) {
+      const at = span.start + match.index;
+      if (inExcluded(at)) continue;
+      slots.push({ start: at, end: at + match[0].length, raw: match[1], unescaped: /&(#\d+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/.test(match[1]), run: index });
+    }
+  }
+  return { runs, slots };
+}
+
+// The paragraph elements no other paragraph contains: the roots a recursive edit
+// starts from, so a nested paragraph is edited once and not a second time as
+// part of its ancestor. Read from the scan's own nesting depth rather than by
+// asking every paragraph whether another one holds it, which is quadratic in the
+// part's paragraph count.
+function topParagraphs(xml) {
+  return tagSpans(xml, DOCX_PARAGRAPH)
+    .filter((span) => !span.selfClosing && span.depth === 1)
+    .map(({ start, end }) => ({ start, end }));
+}
+
+// `element` with `change` applied to it and, first, to each of its nested
+// paragraphs. A nested edit rewrites its bytes, so both the paragraph's own runs
+// and its field regions are located only after the nested edits are in: the runs
+// are re-found in the rewritten text, and a region that lies entirely after a
+// nested edit moves by that edit's byte delta. (A region is never inside the
+// edited span: an edit addresses body text, and a field's text is not
+// addressable.) `excluded` are the field regions that reach into the element,
+// relative to it.
+function editParagraph(element, excluded, change) {
+  const children = childParagraphSpans(element);
+  let out = element;
+  let regions = excluded;
+  for (let i = children.length - 1; i >= 0; i -= 1) {
+    const [start, end] = children[i];
+    const before = out.slice(start, end);
+    const edited = editParagraph(before, clipSpans(regions, start, end), change);
+    out = out.slice(0, start) + edited + out.slice(end);
+    const delta = edited.length - before.length;
+    if (delta) regions = regions.map(([from, to]) => (from >= end ? [from + delta, to + delta] : [from, to]));
+  }
+  return change(out, regions) ?? out;
+}
+
+// `xml` with every top-level paragraph put through `change`, from the last to
+// the first so an earlier paragraph's byte positions stay valid. The field
+// regions are found over the whole part once, then clipped to each paragraph.
+// The result is assembled as the pieces of the part between and around the
+// rewritten paragraphs and joined once: rewriting `xml` in place on every
+// paragraph would copy the whole part once per paragraph.
+function mapParagraphs(xml, change) {
+  const regions = fieldRegions(xml);
+  const tops = topParagraphs(xml);
+  const pieces = [];
+  let end = xml.length;
+  for (let i = tops.length - 1; i >= 0; i -= 1) {
+    const top = tops[i];
+    const element = xml.slice(top.start, top.end);
+    const edited = editParagraph(element, clipSpans(regions, top.start, top.end), change);
+    pieces.push(xml.slice(top.end, end), edited);
+    end = top.start;
+  }
+  pieces.push(xml.slice(0, end));
+  return pieces.reverse().join("");
+}
+
+// The slot a character offset in the joined text falls in, with the offset from
+// that slot's start. An offset exactly at a slot's end belongs to the next slot
+// when it OPENS a fragment (a fragment that begins where one run's text ends
+// begins in the next run) and to the slot it ends when it CLOSES one (the run a
+// fragment ends in is the one whose text ends at that offset).
+function locateSlot(slots, offset, atEnd = false) {
+  let walked = 0;
+  for (let index = 0; index < slots.length; index += 1) {
+    const length = [...xmlUnescape(slots[index].raw)].length;
+    if (offset < walked + length || (atEnd && offset === walked + length) || index === slots.length - 1) return { index, offset: offset - walked };
+    walked += length;
+  }
+  return { index: 0, offset: 0 };
+}
+
+// A slot's own text, written back the way it was read: a slot whose text held
+// an entity is escaped again, one that held none keeps its own bytes — escaping
+// a raw `&` that was already an entity would double it.
+const slotText = (slot, text) => (slot.unescaped ? xmlEscape(text) : text);
+
+// One slot's `<t>`, rewritten from the sub-edits the occurrences in it produced.
+// Each edit is `[from, to, text]` over the slot's own code points, replacing
+// `[from, to)` with the already-escaped `text`; they are non-overlapping and
+// ascending, so they are applied from the last to the first, where an earlier
+// offset is still the one the slot's own text has. The characters no edit
+// touches keep their own bytes (re-escaped only when the slot's raw text held an
+// entity, see `slotText`), while every replacement is already `xmlEscape`d.
+function rewrittenSlot(slot, edits, prefix) {
+  const points = [...xmlUnescape(slot.raw)];
+  let at = points.length;
+  let text = "";
+  for (let i = edits.length - 1; i >= 0; i -= 1) {
+    const [from, to, replacement] = edits[i];
+    text = replacement + slotText(slot, points.slice(to, at).join("")) + text;
+    at = from;
+  }
+  return textElement(prefix, slotText(slot, points.slice(0, at).join("")) + text);
+}
+
+// `xml` with every one of `offsets` rewritten in a single pass. `offsets` is the
+// WHOLE list of code-point `{start, end}` spans for one paragraph's joined text,
+// taken together with the `runs`/`slots` of that same text, so no occurrence's
+// positions can go stale against another's. For each span, the replacement is
+// written into the slot it starts in — the fragment's first run is the one whose
+// text takes the replacement, and the one whose formatting it keeps — every slot
+// strictly between the first and the last is emptied, and the slot it ends in
+// keeps the characters after it. The replacement takes the formatting of the run
+// its span starts in, so a span covering any run with different formatting raises
+// a note saying so; a removal substitutes nothing, takes no formatting with it,
+// and raises nothing. The answer is the rewritten `xml` and the spans of the slots
+// it wrote into — the parts of the paragraph the edit touched — so a caller can say
+// which markup inside them the rewrite reached. `prefix` is the run/text namespace
+// (`w:` for the docx edit, `a:` for the pptx one).
+function replaceOccurrences(xml, runs, slots, offsets, replacement, note, prefix) {
+  const escaped = xmlEscape(replacement);
+  // Whether the span's slots cover a run whose own properties differ from the run
+  // the span starts in: the replacement is written into the first run, so every
+  // such run loses the formatting it had. Every covered slot is asked rather than
+  // the two ends alone, because a differently formatted run in the middle is lost
+  // exactly the same way.
+  const foldsFormatting = (first, last) => {
+    for (let index = first; index <= last; index += 1) {
+      if (runs[slots[index].run].rpr !== runs[slots[first].run].rpr) return true;
+    }
+    return false;
+  };
+  // The sub-edits each slot takes, keyed by its index, added in the order the
+  // occurrences are found, which keeps each slot's own list ascending.
+  const edits = new Map();
+  const add = (index, from, to, text) => {
+    const list = edits.get(index);
+    if (list) list.push([from, to, text]);
+    else edits.set(index, [[from, to, text]]);
+  };
+  for (const { start, end } of offsets) {
+    const first = locateSlot(slots, start);
+    const last = locateSlot(slots, end, true);
+    if (replacement && foldsFormatting(first.index, last.index)) {
+      note("[the replaced text spanned several differently formatted runs — it took the formatting of the first one]", true);
+    }
+    if (first.index === last.index) {
+      add(first.index, first.offset, last.offset, escaped);
+      continue;
+    }
+    add(first.index, first.offset, [...xmlUnescape(slots[first.index].raw)].length, escaped);
+    add(last.index, 0, last.offset, "");
+    for (let index = first.index + 1; index < last.index; index += 1) {
+      add(index, 0, [...xmlUnescape(slots[index].raw)].length, "");
+    }
+  }
+  // Each slot is written once, from the last to the first so an earlier slot's
+  // position in `xml` is the one it still has.
+  let out = xml;
+  for (const index of [...edits.keys()].sort((a, b) => b - a)) {
+    const slot = slots[index];
+    out = out.slice(0, slot.start) + rewrittenSlot(slot, edits.get(index), prefix) + out.slice(slot.end);
+  }
+  return { xml: out, spans: [...edits.keys()].map((index) => slots[index]) };
+}
+
+// The elements a family keeps as markup of its own between the text slots a
+// fragment's joined text is drawn from, with what a refusal calls each. A tab and
+// a line break are drawn, not written: the slot text around one joins across it,
+// so a fragment matching across it is not text the file really holds as such.
+const BRIDGED_MARKUP = {
+  "w:": [["w:tab", "tab"], ["w:br", "line break"], ["w:cr", "line break"]],
+  "a:": [["a:tab", "tab"], ["a:br", "line break"]],
+};
+
+// Refuse a text rewrite whose match reaches across one of `parts` — the elements
+// a family keeps as markup of its own between the text slots a fragment's joined
+// text is drawn from. A paragraph's address is the joined text of its slots, so a
+// tab or a line break between two of them is not in that text; a match reaching
+// across one would be written around it and leave the tab or the break with
+// nothing to belong to. `paragraph` is the paragraph element the slots belong to.
+// The slice checked is the paragraph from the first covered
+// slot's start to the last covered slot's end — an occurrence inside one slot
+// covers no element between slots, so it can never reach one. `parts` are
+// `[name, noun]` pairs (the element as the file spells it and the word the
+// refusal calls it), and their patterns are built per call through
+// `elementPattern` (both shapes a file may write an element in), so no global
+// `lastIndex` is carried from one check to the next.
+function requireNoBridgedMarkup(paragraph, slots, offsets, find, parts) {
+  for (const { start, end } of offsets) {
+    const first = locateSlot(slots, start);
+    const last = locateSlot(slots, end, true);
+    const covered = paragraph.slice(slots[first.index].start, slots[last.index].end);
+    const bridged = parts.find(([name]) => elementPattern(name).test(covered));
+    if (bridged) throw new UsageError(`the text ${JSON.stringify(find)} reaches across a ${bridged[1]} in the file: a ${bridged[1]} is markup of its own, not text an edit addresses, so writing across it would leave it with nothing to belong to — name a fragment on one side of it`);
+  }
+}
+
+// The pattern of an element of `name` in BOTH shapes a file may write it: a file
+// may spell it `<name/>` or `<name>…</name>`, and a pattern keeping only one
+// shape drops the other — the defect every hand-spelled copy of this rule has
+// invited (an `<Override>` that survived a removal, a `<dimension>` that stopped
+// being shifted, an old `<w:sz>` left beside the new one). `middle` is what the
+// open tag holds between the name and the tag's own close (`>` or `/>`); the
+// default states nothing but whatever attributes the tag carries. Built per call,
+// so no `lastIndex` of a global pattern is carried from one use to the next. The
+// two shapes are the shared spellings (`selfClosingTag`/`openTag`/`closeTag`), so
+// this reader, `tagPattern`'s walk and `elementEdges`' own read cannot disagree
+// about what a tag of `name` looks like.
+const elementForms = (name, middle = TAG_MIDDLE) => new RegExp(`${selfClosingTag(name, middle)}|${openTag(name, middle)}[\\s\\S]*?${closeTag(name)}`, "g");
+const elementPattern = (name) => elementForms(name);
+
+// The FIRST `<name>` element of `xml`, as a match object with its own `index`:
+// `elementPattern` is global, and `String.match` with a global pattern returns
+// the matched TEXTS rather than a match with an index, so anything that needs
+// the position of an element uses this. Only the first match is taken, so no
+// caller materializes the rest of the part.
+const firstElement = (xml, name) => xml.matchAll(elementPattern(name)).next().value;
+
+// The `<name>` element a caller is about to write BESIDE — `firstElement`'s own
+// answer, with a part that states the element's open tag and no close refused rather
+// than read as absent: `elementForms` reads the closed shapes alone, and a second
+// `<sheetData>`, `<cols>` or styles block written beside an unclosed one is a part a
+// reader offers to repair, the one outcome an edit must not report as a success.
+// `what` names the part the caller is writing into.
+const writableElement = (xml, name, what) => {
+  const found = firstElement(xml, name);
+  if (found) return found;
+  if (openedNotClosed(xml, name)) {
+    throw new UsageError(`${what} holds <${name}> opened and never closed, so a second <${name}> cannot be written beside it`);
+  }
+  return undefined;
+};
+
+// ECMA-376's `EG_RPrBase`: the order a run's own `<w:rPr>` children must come in.
+// Word drops a child written out of sequence, so a property appended at the end
+// of the body would be reported as applied while the run renders as it did.
+// `<w:rPrChange>` is not part of the sequence; the caller keeps it last. The body
+// is flat — that one child, which holds others, is split off before a body reaches
+// the writer — so `insertOrderedChild` writes each child as one complete element.
+const RUN_PROPERTY_ORDER = ["rStyle", "rFonts", "b", "bCs", "i", "iCs", "caps", "smallCaps", "strike", "dstrike", "outline", "shadow", "emboss", "imprint", "noProof", "snapToGrid", "vanish", "webHidden", "color", "spacing", "w", "kern", "position", "sz", "szCs", "highlight", "u", "effect", "bdr", "shd", "fitText", "vertAlign", "rtl", "cs", "em", "lang", "eastAsianLayout", "specVanish", "oMath"];
+
+// ECMA-376's `EG_PPrBase` followed by the two children a `<w:pPr>` adds after it:
+// the order a paragraph's own properties must come in. Word drops a child written
+// out of sequence, so a property appended at the end of the body would be reported
+// as applied while the paragraph renders as it did — the same hazard
+// `RUN_PROPERTY_ORDER` states for a run. `w:rPr` and `w:sectPr` close the sequence;
+// `w:pPrChange` is not part of it at all and the caller keeps it last.
+const PARAGRAPH_PROPERTY_ORDER = ["pStyle", "keepNext", "keepLines", "pageBreakBefore", "framePr", "widowControl", "numPr", "suppressLineNumbers", "pBdr", "shd", "tabs", "suppressAutoHyphens", "kinsoku", "wordWrap", "overflowPunct", "topLinePunct", "autoSpaceDE", "autoSpaceDN", "bidi", "adjustRightInd", "snapToGrid", "spacing", "ind", "contextualSpacing", "mirrorIndents", "suppressOverlap", "jc", "textDirection", "textAlignment", "textboxTightWrap", "outlineLvl", "divId", "cnfStyle", "rPr", "sectPr"];
+
+// The run-properties body with a bold/italic toggle set or switched off — in both
+// the plain and the complex-script spelling the property has (`w:b` with `w:bCs`,
+// `w:i` with `w:iCs`), the way `size` writes `w:sz` with `w:szCs`. Either way the
+// run states both itself: a `true` writes `<w:b/>` and `<w:bCs/>` (resp. `<w:i/>`
+// and `<w:iCs/>`) and a `false` the `ST_OnOff` off value of each, so neither what
+// the run's style states nor what `docDefaults` states reaches the text — a `false`
+// that wrote only the plain spelling would answer "not bold" with complex-script
+// text a `<w:bCs/>` still draws bold, and a `true` would leave such text to
+// whatever the style's own `<w:bCs>` states. Setting one writes it at its place in
+// the sequence, so a toggle added to a body that already holds a later property
+// (`<w:sz>`, `<w:u>`) is not written where Word would drop it, and the elements the
+// body spelled are replaced rather than joined by a second one that still states
+// the property as on.
+function runToggle(body, name, on) {
+  const csName = `${name}Cs`;
+  const spelling = (property) => (on ? `<w:${property}/>` : `<w:${property} w:val="false"/>`);
+  const without = body.replace(elementPattern(`w:${name}`), "").replace(elementPattern(`w:${csName}`), "");
+  const plain = insertOrderedChild(without, name, spelling(name), RUN_PROPERTY_ORDER);
+  return insertOrderedChild(plain, csName, spelling(csName), RUN_PROPERTY_ORDER);
+}
+
+// The `w:val` spellings `ST_OnOff` reads as false — a value stating the absence
+// where a toggle's own presence states it is on. The settings part's
+// tracked-revisions switch and the `w:default` a styles part states are read with it.
+const OFF_VALUES = new Set(["false", "0", "off"]);
+
+// The spellings a `<w:u>` reads as drawing no underline: `none`, the one
+// `ST_Underline` states in its own right, and the `ST_OnOff` spellings a run may
+// carry in its place. Reading `<w:u w:val="none"/>` as an underline already drawn
+// would let a `true` report success while the run kept the bytes it had, so the
+// property reads through its own set rather than `OFF_VALUES`.
+const NO_UNDERLINE = new Set(["none", "false", "0", "off"]);
+
+// Whether the body `body` states the property `name` as on: an element whose
+// `w:val` is absent, or states anything outside `off` — the spellings that count as
+// the property being absent. `OFF_VALUES` for a `<w:strike>`/`<w:dstrike>`, whose
+// vocabulary is `ST_OnOff`, and `NO_UNDERLINE` for a `<w:u>`, whose own set it is.
+const statesOn = (body, name, off) => [...body.matchAll(elementPattern(name))].some((match) => {
+  const value = xmlAttribute(match[0], "w:val");
+  return value === undefined || !off.has(value);
+});
+
+// The `<w:rPr>` the format request needs, from the run's own: a boolean states the
+// property itself (`<w:b>`, `<w:i>`, `<w:u>`, `<w:strike>`) — the on spelling for a
+// `true`, the off value for a `false`, which is how a request that switches a
+// property off does not fall back to the style's own — and bold and italic state
+// the complex-script spelling of the property beside the plain one (`<w:bCs>`
+// beside `<w:b>`, `<w:iCs>` beside `<w:i>`), the pairing `size` keeps for
+// `<w:sz>`/`<w:szCs>`: a style or `docDefaults` may state the complex-script
+// spelling alone, and one left stated would draw the text with the property the
+// request switched off. `size` replaces the run's own `<w:sz>`/`<w:szCs>` — in
+// either shape — with the half-point value, the unit `<w:sz>` counts in, and
+// `color` replaces the run's own `<w:color>` — in either shape — with the digits
+// the caller stated. Each property is written at its own
+// place in `EG_RPrBase` (see `insertOrderedChild`). A `null` property counts as
+// absent — the caller's own boundary treats a null-valued key that way — so only a
+// stated one is written, and a property whose statement the body already spells is
+// rewritten byte-identically, which `formatRuns` reads as a request that changed
+// nothing.
+//
+// An underline is not a plain toggle: a run's own `<w:u>` may state a richer one
+// (`double`, `dotted`, `wave`) and `<w:u w:val="single"/>` — the plain underline a
+// `true` asks for — would throw it away, so a body that already states an underline
+// keeps exactly what it states, and only a `false`, or a body whose every `<w:u>` is
+// off, is rewritten. A double strike is left the same way by a `true`, for the same
+// reason: a run already struck keeps the strike it draws, and a `true` never rewrites
+// a `<w:dstrike/>` into the plain `<w:strike/>` a run with neither is given. A `false`
+// writes the family's own off value instead — `<w:u w:val="none"/>`, whose vocabulary
+// it is, and the strike off value in BOTH of the property's spellings
+// (`<w:strike w:val="false"/>` beside `<w:dstrike w:val="false"/>`): a style or
+// `docDefaults` may state either spelling alone, and one left stated would still draw
+// the double strike the request switched off.
+//
+// A `<w:rPrChange>` holds the properties a tracked formatting revision recorded
+// — the state before that revision, not the run's own formatting — so only the
+// elements before it are read and rewritten: a revision keeps its own bytes (a
+// request is never answered by changing one), and the properties this writes go
+// in front of it, which is the one place `<w:rPr>` accepts it, `<w:rPrChange>`
+// being the child that must come last. A request that leaves no property at all
+// writes nothing: an empty `<w:rPr>` is a change that states nothing. A run whose
+// own body the request emptied but which records a revision keeps that revision:
+// it is content the request never named, and removing it would be the request
+// answering itself by deleting a recorded change.
+function formattedRunProperties(runXml, edit) {
+  const current = runProperties(runXml);
+  const inner = current ? current.replace(new RegExp(`^(?:${selfClosingTag("w:rPr")}|${openTag("w:rPr")})`), "").replace(new RegExp(closeTag("w:rPr") + "$"), "") : "";
+  const revisionAt = inner.search(new RegExp(`${selfClosingTag("w:rPrChange")}|${openTag("w:rPrChange")}`));
+  const revision = revisionAt < 0 ? undefined : elementSpan(inner, revisionAt, "w:rPrChange");
+  let body = revision ? inner.slice(0, revision.start) : inner;
+  if (edit.bold != null) body = runToggle(body, "b", edit.bold);
+  if (edit.italic != null) body = runToggle(body, "i", edit.italic);
+  if (edit.size != null) {
+    const without = body.replace(elementPattern("w:sz"), "").replace(elementPattern("w:szCs"), "");
+    body = insertOrderedChild(without, "szCs", `<w:szCs w:val="${edit.size}"/>`, RUN_PROPERTY_ORDER);
+    body = insertOrderedChild(body, "sz", `<w:sz w:val="${edit.size}"/>`, RUN_PROPERTY_ORDER);
+  }
+  if (edit.color != null) {
+    body = insertOrderedChild(body.replace(elementPattern("w:color"), ""), "color", `<w:color w:val="${edit.color}"/>`, RUN_PROPERTY_ORDER);
+  }
+  if (edit.underline != null) {
+    // A `<w:u>` whose `w:val` is absent, or states anything outside the spellings
+    // that draw no underline, IS an underline — so a `true` leaves such a body
+    // exactly as it stands, richer underline and all, while a body stating none is
+    // given the plain one. A `false` writes the off value in the element's place,
+    // so the run draws no underline whatever its style states.
+    const stated = statesOn(body, "w:u", NO_UNDERLINE);
+    if (!(edit.underline && stated)) {
+      const without = body.replace(elementPattern("w:u"), "");
+      body = insertOrderedChild(without, "u", edit.underline ? '<w:u w:val="single"/>' : '<w:u w:val="none"/>', RUN_PROPERTY_ORDER);
+    }
+  }
+  if (edit.strike != null) {
+    // A double strike is the same property spelled another way, so a `true` leaves
+    // the strike a run already draws — the rule the underline above keeps — rather
+    // than rewriting a `<w:dstrike/>` into a single one the caller did not name,
+    // while a `false` states the family's off value in both spellings, neither of
+    // which may be left out if an inherited double strike is to stop rendering.
+    const struck = statesOn(body, "w:strike", OFF_VALUES) || statesOn(body, "w:dstrike", OFF_VALUES);
+    if (!(edit.strike && struck)) {
+      const without = body.replace(elementPattern("w:strike"), "").replace(elementPattern("w:dstrike"), "");
+      body = insertOrderedChild(without, "strike", edit.strike ? "<w:strike/>" : '<w:strike w:val="false"/>', RUN_PROPERTY_ORDER);
+      // A `false` states the off value in both spellings of the one property: a
+      // spelling left out would let a style's or `docDefaults`' own `<w:dstrike/>`
+      // still draw the strike the request switched off.
+      if (!edit.strike) body = insertOrderedChild(body, "dstrike", '<w:dstrike w:val="false"/>', RUN_PROPERTY_ORDER);
+    }
+  }
+  if (!body && !revision) return "";
+  return `<w:rPr>${body}${revision ? inner.slice(revision.start) : ""}</w:rPr>`;
+}
+
+// The parts of a run an edit that rewrote its properties reached, in the paragraph's
+// own coordinates: the run with the markers the request keeps byte-identically taken
+// out of it (see `writtenParts`) — naming one as reached would say the call took a
+// change it left exactly as it found it. Everything else the run holds is reached,
+// and the caller owes a note about the unnamed markup there: the run is the unit a run
+// property is stated on, so a reference or a deletion marker beside the text took the
+// formatting too.
+const runReached = (run, runXml) => writtenParts(0, runXml.length, preservedMarkers(runXml))
+  .map((part) => ({ start: run.start + part.start, end: run.start + part.end }));
+
+// `xml` with `edit`'s formatting applied to the runs a matched fragment covers,
+// together with the parts of the paragraph the edit reached — the runs whose bytes
+// it rewrote, so the caller can say which markup inside them it touched (see
+// `runReached`). A run the request left as it was is no part of that: it is not a
+// span, or an edit that rewrote nothing would report reaching markup it never
+// touched. Run properties live on the run, not on a character, so a fragment
+// covering part of a run formats that whole run — splitting a run to format half
+// of it would rewrite bytes the preservation promise is about. Nothing outside
+// those runs changes.
+function formatRuns(xml, runs, runIndices, edit) {
+  const pieces = [];
+  for (const index of [...runIndices].sort((a, b) => a - b)) {
+    const run = runs[index];
+    const runXml = xml.slice(run.start, run.end);
+    const open = runXml.match(new RegExp(openTag("w:r")))[0];
+    const next = formattedRunProperties(runXml, edit);
+    // A run's properties sit immediately after its open tag, before its content,
+    // and are replaced by their own balanced span: a lazy regex would stop at the
+    // close of the `<w:rPr>` a nested `<w:rPrChange>` holds, writing the toggle
+    // into that nested element instead of the run's own.
+    const lead = runXml.slice(open.length).length - runXml.slice(open.length).trimStart().length;
+    const own = run.rpr ? elementSpan(runXml, open.length + lead, "w:rPr") : undefined;
+    // A run whose `<w:rPr>` is opened and never closed cannot be read, and a second
+    // one written beside it would leave the properties the call states inside the
+    // unclosed element, where no reader takes them — the refusal the paragraph path
+    // makes for a `<w:pPr>` (see `paragraphPropertiesSpan`).
+    if (!own && openedNotClosed(runXml, "w:rPr")) throw new UsageError("a run holds <w:rPr> opened and never closed, so its properties cannot be read");
+    const rewritten = own ? runXml.slice(0, own.start) + next + runXml.slice(own.end) : open + next + runXml.slice(open.length);
+    if (rewritten !== runXml) pieces.push({ start: run.start, end: run.end, xml: rewritten, reached: runReached(run, runXml) });
+  }
+  pieces.sort((a, b) => b.start - a.start);
+  let out = xml;
+  for (const piece of pieces) out = out.slice(0, piece.start) + piece.xml + out.slice(piece.end);
+  return { xml: out, spans: pieces.flatMap((piece) => piece.reached) };
+}
+
+// ── format_paragraph: a paragraph's own properties ─────────────
+// The alignment words a paragraph may name and the `<w:jc>` value each writes,
+// and the list kinds and the `w:numFmt` each writes — one statement of the pairs
+// in the shared rules, so the word a caller names and the value written for it
+// cannot drift.
+const PARAGRAPH_ALIGNMENTS = new Map(RULES.paragraph_alignments);
+const PARAGRAPH_LISTS = new Map(RULES.paragraph_lists);
+
+// The built-in paragraph style names Word resolves even when a document defines
+// none, each with Word's own language-independent `w:styleId`. The keys are
+// lowercased and trimmed the way the document index is (see `resolveParagraphStyle`),
+// so the English name, the Russian one and the run-together spelling all write the
+// same id. `Normal` is the default paragraph style; the three headings are the
+// built-ins a body edit names.
+const BUILTIN_STYLES = new Map([
+  ["normal", "Normal"], ["обычный", "Normal"], ["обычный текст", "Normal"],
+  ["heading 1", "Heading1"], ["heading1", "Heading1"], ["заголовок 1", "Heading1"], ["заголовок1", "Heading1"],
+  ["heading 2", "Heading2"], ["heading2", "Heading2"], ["заголовок 2", "Heading2"], ["заголовок2", "Heading2"],
+  ["heading 3", "Heading3"], ["heading3", "Heading3"], ["заголовок 3", "Heading3"], ["заголовок3", "Heading3"],
+]);
+
+// The parts a docx edit's own relationships name for the relationship type whose
+// tail is `suffix` (`/styles`, `/numbering`, `/settings`, `/header`), resolved
+// against `word/document.xml`'s directory the way `resolvePart` resolves every
+// target, with the conventional name as the fallback for a package that names
+// none — so `[]` for a kind that has no conventional name. The type is
+// matched by its TAIL, where the xlsx arm's `stylesPart` matches its whole string:
+// the transitional and the strict OOXML namespaces spell the head differently
+// (`schemas.openxmlformats.org/officeDocument/2006/relationships` against
+// `purl.oclc.org/ooxml/officeDocument/relationships`) while every kind keeps its own
+// local name, so a full-string match would leave a strict-namespace document's own
+// parts unresolved. Every named part is returned, since a document declares one
+// header per section and a refusal names each part an edit leaves alone.
+function documentParts(editor, suffix, conventional) {
+  const named = relationships(editor.read(relsPartFor(DOCX_DOCUMENT)) ?? "")
+    .filter((rel) => rel.type.endsWith(suffix))
+    .map((rel) => resolvePart(partDirectory(DOCX_DOCUMENT), rel.target));
+  return named.length ? named : conventional === undefined ? [] : [conventional];
+}
+
+// The one part of that kind a styles, numbering or settings lookup reads.
+const documentPart = (editor, suffix, conventional) => documentParts(editor, suffix, conventional)[0];
+
+// The `[start, end]` span of a paragraph's OWN `<w:pPr>` — its first child element
+// — or `undefined` when it has none or its first child is not one, found the way
+// `runProperties` finds a run's `<w:rPr>`. The span is taken by balancing, because
+// a `<w:pPrChange>` a `<w:pPr>` holds carries its own `<w:pPr>` and a lazy close
+// match would stop inside it.
+function paragraphPropertiesSpan(paragraphXml) {
+  const open = paragraphXml.match(new RegExp(openTag("w:p")));
+  if (!open) return undefined;
+  const rest = paragraphXml.slice(open.index + open[0].length);
+  const lead = rest.length - rest.trimStart().length;
+  if (!new RegExp(`^(?:${openTag("w:pPr")}|${selfClosingTag("w:pPr")})`).test(rest.trimStart())) return undefined;
+  const span = elementSpan(paragraphXml, open.index + open[0].length + lead, "w:pPr");
+  // A `<w:pPr>` that never closes swallows everything after it, so the properties a
+  // paragraph has cannot be read and a second one must not be written beside it —
+  // the part is already one a reader offers to repair.
+  if (!span) throw new UsageError("the paragraph holds <w:pPr> opened and never closed, so its properties cannot be read");
+  return span;
+}
+
+// A paragraph's own `<w:pPr>`, or `undefined` when it has none.
+function paragraphProperties(paragraphXml) {
+  const span = paragraphPropertiesSpan(paragraphXml);
+  return span ? paragraphXml.slice(span.start, span.end) : undefined;
+}
+
+// The excerpt of a fragment that states what it holds NOW: everything before the
+// `<w:pPrChange>` a tracked revision recorded. What that revision wrote is the state
+// the properties held when it was recorded, never the one they render with, so no
+// reading of the live properties may look past it — the style a paragraph names, the
+// numbering it draws, the region a formatting writes into. Cut at the recorded
+// change's own TAG rather than at its close: a lazy element match would end at the
+// `<w:pPr>` the change nests, which leaves the tag inside an excerpt whose live
+// properties are already complete.
+const liveProperties = (xml) => {
+  const changeAt = xml.search(new RegExp(`${selfClosingTag("w:pPrChange")}|${openTag("w:pPrChange")}`));
+  return changeAt < 0 ? xml : xml.slice(0, changeAt);
+};
+
+// The `<w:pStyle>` id a paragraph's own `<w:pPr>` names — what it states now (see
+// `liveProperties`) — or `undefined` when it names no style.
+function paragraphStyleId(paragraphXml) {
+  const own = paragraphProperties(paragraphXml);
+  if (!own) return undefined;
+  const found = firstElement(liveProperties(own), "w:pStyle");
+  return found ? xmlAttribute(found[0], "w:val") : undefined;
+}
+
+// A point value a paragraph's indents, spacing and line height state, in the
+// twips (1/20 point) those attributes count in, refused when it is outside the
+// shared bound — the same rule the tool checks, so a value neither side writes is
+// never rounded into the part.
+const pointsToTwips = (points, key, span) => {
+  if (!inSpan(points, span)) throw new UsageError(`${key} must be ${spanBounds(span)} points, got: ${JSON.stringify(points)}`);
+  return Math.round(points * 20);
+};
+
+// The paragraph properties a `format_paragraph` names, each in the unit its
+// attribute counts in, refused when a word or a shape the writer has not is named.
+// `list` is `undefined` when none was named, `false` when the list is to be taken
+// away, and `{ kind, level }` when a kind was.
+function paragraphFormat(edit) {
+  const props = {};
+  if (edit.align != null) {
+    const value = PARAGRAPH_ALIGNMENTS.get(edit.align);
+    if (value === undefined) throw new UsageError(`align must be ${listed([...PARAGRAPH_ALIGNMENTS.keys()])}, got: ${JSON.stringify(edit.align)}`);
+    props.align = value;
+  }
+  if (edit.style != null) props.style = editText(edit.style, "style");
+  if (edit.indent_left != null) props.indentLeft = pointsToTwips(edit.indent_left, "indent_left", RULES.paragraph_indent_points);
+  if (edit.indent_right != null) props.indentRight = pointsToTwips(edit.indent_right, "indent_right", RULES.paragraph_indent_points);
+  if (edit.indent_first_line != null) props.indentFirst = pointsToTwips(edit.indent_first_line, "indent_first_line", RULES.paragraph_indent_points);
+  if (edit.spacing_before != null) props.spacingBefore = pointsToTwips(edit.spacing_before, "spacing_before", RULES.paragraph_spacing_points);
+  if (edit.spacing_after != null) props.spacingAfter = pointsToTwips(edit.spacing_after, "spacing_after", RULES.paragraph_spacing_points);
+  if (edit.line_spacing != null) props.lineSpacing = pointsToTwips(edit.line_spacing, "line_spacing", RULES.paragraph_line_points);
+  props.list = paragraphList(edit);
+  if (Object.values(props).every((value) => value === undefined)) {
+    throw new UsageError("format_paragraph needs at least one of align, style, indent_left, indent_right, indent_first_line, spacing_before, spacing_after, line_spacing or list");
+  }
+  return props;
+}
+
+// The list a `format_paragraph` names: `undefined` when the field is absent, `false`
+// when it is `false` (the list is taken away), else the kind and level. A `level` is
+// a depth a list has to hold the paragraph at, so one beside no list — or beside
+// `list: false` — names a depth there is nothing to belong to.
+function paragraphList(edit) {
+  if (edit.list === undefined || edit.list === null || edit.list === false) {
+    if (edit.level != null) throw new UsageError(`level needs a list to belong to — name "list" as ${listed([...PARAGRAPH_LISTS.keys()])} beside it`);
+    return edit.list === false ? false : undefined;
+  }
+  if (!PARAGRAPH_LISTS.has(edit.list)) throw new UsageError(`list must be ${listed([...PARAGRAPH_LISTS.keys()])}, or false to take the paragraph's list away, got: ${JSON.stringify(edit.list)}`);
+  const level = edit.level == null ? 0 : edit.level;
+  if (!Number.isInteger(level) || level < 0 || level > RULES.paragraph_level_max) throw new UsageError(`level must be a whole number from 0 to ${RULES.paragraph_level_max}, got: ${JSON.stringify(level)}`);
+  return { kind: edit.list, level };
+}
+
+// What a properties excerpt states about numbering: `"numbered"` when its own
+// `<w:numPr>` names a `<w:numId>` other than the cancellation id, `"cancelled"` when
+// that is exactly what it states — OOXML's `<w:numId w:val="0"/>`, the way a
+// paragraph or a style says it draws no numbering (see `cancelledNumbering`) — and
+// `undefined` when it states nothing either way. Only what the excerpt states NOW
+// counts (see `liveProperties`): a recorded revision of the properties states what
+// they held when it was recorded, never the numbering in force. A style stating only
+// the cancellation numbers nothing, and reading it as numbered would have `list:
+// false` write a cancellation the paragraph does not need and report it as a change.
+const numberingState = (xml) => {
+  const numPr = firstElement(liveProperties(xml), "w:numPr");
+  const numId = numPr ? firstElement(numPr[0], "w:numId") : undefined;
+  if (!numId) return undefined;
+  const id = xmlAttribute(numId[0], "w:val");
+  return id === undefined || Number(id) !== 0 ? "numbered" : "cancelled";
+};
+
+// Every `<w:style>` of a styles part, in part order, as its `w:styleId`, its
+// `w:type` (paragraph when absent, the default a reader takes), its
+// `<w:name w:val>`, the style it is `<w:basedOn>` — what it inherits what it does not
+// state from — what it states about numbering of its own (see `numberingState`), and
+// whether the document states it as its default.
+function styleEntries(styles) {
+  const entries = [];
+  for (const match of styles.matchAll(elementPattern("w:style"))) {
+    const name = firstElement(match[0], "w:name");
+    const basedOn = firstElement(match[0], "w:basedOn");
+    const isDefault = xmlAttribute(match[0], "w:default");
+    entries.push({
+      id: xmlAttribute(match[0], "w:styleId"),
+      type: xmlAttribute(match[0], "w:type") || "paragraph",
+      name: name ? xmlAttribute(name[0], "w:val") : undefined,
+      basedOn: basedOn ? xmlAttribute(basedOn[0], "w:val") : undefined,
+      numbering: numberingState(match[0]),
+      isDefault: isDefault !== undefined && !OFF_VALUES.has(isDefault),
+    });
+  }
+  return entries;
+}
+
+// The `w:styleId` the paragraph style `name` resolves to: the document's own style
+// of that name, matched case-insensitively against its id and its name, or one of
+// the built-in names that always work. A style the document defines under another
+// type cannot format a paragraph, and a name the document does not define is refused
+// naming the paragraph styles it does — so a caller reads what to ask for, and the
+// built-in spellings are always a way out.
+function resolveParagraphStyle(editor, name) {
+  const styles = editor.read(documentPart(editor, "/styles", DOCX_STYLES));
+  const entries = styles === undefined ? [] : styleEntries(styles);
+  const index = new Map();
+  for (const entry of entries) {
+    if (entry.id !== undefined) index.set(entry.id.trim().toLowerCase(), entry);
+    if (entry.name !== undefined) index.set(entry.name.trim().toLowerCase(), entry);
+  }
+  const hit = index.get(name.trim().toLowerCase());
+  if (hit && hit.id !== undefined) {
+    if (hit.type !== "paragraph") throw new UsageError(`${JSON.stringify(name)} is the document's ${hit.type} style, and paragraph formatting needs a paragraph style`);
+    return hit.id;
+  }
+  const builtin = BUILTIN_STYLES.get(name.trim().toLowerCase());
+  if (builtin !== undefined) return builtin;
+  const names = entries.filter((entry) => entry.type === "paragraph" && entry.name !== undefined).map((entry) => entry.name);
+  if (!names.length) throw new UsageError(`the document defines no paragraph styles, so ${JSON.stringify(name)} cannot be resolved — hint: a built-in name such as Normal or Heading 1 always works`);
+  throw new UsageError(`the document defines no paragraph style named ${JSON.stringify(name)} — it defines ${names.slice(0, 20).join(", ")} — hint: a built-in name such as Normal or Heading 1 always works`);
+}
+
+// Whether a paragraph style numbers the paragraphs that take it, as a walk over the
+// chain a reader follows: what the style states now, else the style it takes what it
+// does not state from (its `<w:basedOn>`), else the document's own `<w:docDefaults>`,
+// in the order a reader walks them. The walk starts at the style a paragraph renders
+// with: the one it names, or — for a paragraph naming none, or one the document does
+// not define — the default ENTRY the document flags `w:default` (or the one carrying
+// the built-in `Normal` name), read as an entry rather than by id, since such a style
+// states its numbering whether or not it carries a `w:styleId`. A style stating the
+// cancellation stops the walk there, the numbering the defaults would give being the
+// one it took away, and so does one the chain has already read. A `basedOn` naming no
+// style the document defines is ignored rather than followed (ECMA-376 17.7.2.4):
+// such a style is its own root, so only the defaults apply to it, never the default
+// style's own statements. `defaults` says whether the document's own defaults number
+// every paragraph no style does. Built once per call, since a fragment matching many
+// paragraphs asks about a style again and again.
+function styleNumbers(entries, defaults) {
+  const byId = new Map(entries.filter((entry) => entry.id !== undefined).map((entry) => [entry.id, entry]));
+  const normal = BUILTIN_STYLES.get("normal");
+  const fallback = entries.find((entry) => entry.type === "paragraph" && entry.isDefault)
+    ?? entries.find((entry) => entry.type === "paragraph" && (entry.id === normal || entry.name === normal));
+  return (styleId) => {
+    let entry = styleId === undefined ? undefined : byId.get(styleId);
+    if (entry === undefined) entry = fallback;
+    const seen = new Set();
+    while (entry !== undefined && !seen.has(entry)) {
+      seen.add(entry);
+      if (entry.numbering === "numbered") return true;
+      if (entry.numbering === "cancelled") return false;
+      entry = entry.basedOn === undefined ? undefined : byId.get(entry.basedOn);
+    }
+    return defaults;
+  };
+}
+
+// Whether the document's own defaults number every paragraph:
+// `<w:docDefaults><w:pPrDefault><w:pPr>` stating a `<w:numPr>` numbers the paragraphs
+// no style and no paragraph of their own does, so `list: false` on one of them has to
+// cancel it like any other inherited numbering.
+function defaultsNumbering(styles) {
+  const defaults = firstElement(styles, "w:docDefaults");
+  const paragraph = defaults && firstElement(defaults[0], "w:pPrDefault");
+  const properties = paragraph && firstElement(paragraph[0], "w:pPr");
+  return properties !== undefined && numberingState(properties[0]) === "numbered";
+}
+
+// The nine `<w:lvl>` a list definition of `kind` carries, one per level the shared
+// cap allows: a fixed start of 1, the format the kind maps to, the marker a reader
+// draws (`%N.` at level N for a number, a bullet for a bullet) and a leading-edge
+// justification. ECMA-376 writes the children in this order or a reader drops them,
+// and both the level list and the justification are stated in the dialect the part is
+// written in (see `dialectOf`).
+const listLevels = (format, kind, dialect) => Array.from(
+  { length: RULES.paragraph_level_max + 1 },
+  (_, level) => `<w:lvl w:ilvl="${level}"><w:start w:val="1"/><w:numFmt w:val="${format}"/><w:lvlText w:val="${kind === "number" ? `%${level + 1}.` : "●"}"/><w:lvlJc w:val="${justification(dialect, "left")}"/></w:lvl>`,
+).join("");
+const abstractNumElement = (abstractNumId, format, kind, dialect) => `<w:abstractNum w:abstractNumId="${abstractNumId}">${listLevels(format, kind, dialect)}</w:abstractNum>`;
+const numElement = (numId, abstractNumId) => `<w:num w:numId="${numId}"><w:abstractNumId w:val="${abstractNumId}"/></w:num>`;
+
+// The two wordprocessingml namespaces a document's own root may bind its `w` prefix
+// to — the transitional one `create` writes and the strict one some producers do (see
+// `documentPart`) — and the relationship namespaces that go with them.
+const WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+const STRICT_WORD_NAMESPACE = "http://purl.oclc.org/ooxml/wordprocessingml/main";
+const WORD_NAMESPACES = { transitional: WORD_NAMESPACE, strict: STRICT_WORD_NAMESPACE };
+const RELATIONSHIP_NAMESPACES = { transitional: WORD_RELATIONSHIPS, strict: STRICT_RELATIONSHIPS };
+
+// The two readings of OOXML a part may be written in, and the dialect `part` — a
+// document being edited or a part it holds — is written in: `"strict"` when its root
+// binds `w` to the strict namespace, `"transitional"` otherwise. A reader resolves only
+// its own dialect's names and values, so every fact a call writes is the one the part
+// it writes into states (see `EDGE_INDENTS`, `JUSTIFICATIONS`), and a whole part is
+// created in the dialect of the document that has to read it.
+const dialectOf = (part) => (part.includes(`xmlns:w="${STRICT_WORD_NAMESPACE}"`) ? "strict" : "transitional");
+
+// The other dialect's own spelling of a fact a part may state twice (see
+// `EDGE_INDENTS`): writing it in one, the write clears the other, so exactly one of the
+// two states the value the call named.
+const otherDialect = (dialect) => (dialect === "strict" ? "transitional" : "strict");
+
+// The `<w:jc>` value each alignment names in a dialect (see `PARAGRAPH_ALIGNMENTS` for
+// the words): the strict schema spells a paragraph's leading and trailing edge
+// `start`/`end` where the transitional one spells them `left`/`right`, and a value a
+// part's own reader does not define leaves the paragraph where it was. Center and
+// both are spelled the same in either dialect, so only the edges are stated here.
+const JUSTIFICATIONS = {
+  transitional: { left: "left", right: "right" },
+  strict: { left: "start", right: "end" },
+};
+const justification = (dialect, value) => JUSTIFICATIONS[dialect][value] ?? value;
+
+// A whole numbering part holding one definition of `kind` — what a package that
+// holds none is given rather than refusing the list (see `listNumId`).
+const numberingPartXml = (abstractNumId, numId, format, kind, dialect) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering xmlns:w="${WORD_NAMESPACES[dialect]}">${abstractNumElement(abstractNumId, format, kind, dialect)}${numElement(numId, abstractNumId)}</w:numbering>`;
+
+// The root of a numbering part, in the one reading of an element's shape
+// (`elementEdges`), and `undefined` for a part whose root is missing or never
+// closed — a part the writer cannot splice into must not be reported as written.
+function numberingRoot(xml) {
+  const found = firstElement(xml, "w:numbering");
+  if (!found) return undefined;
+  const edges = elementEdges(found[0], "w:numbering");
+  return { selfClosing: edges.selfClosing, close: found.index + edges.close };
+}
+
+// `xml` with a new `<w:abstractNum>` and the `<w:num>` that points at it, in the
+// order ECMA-376 requires of a numbering part: every `w:abstractNum` before every
+// `w:num`, so the abstract goes before the first `<w:num>` (before the root's close
+// when the part holds none) and the `<w:num>` last. A self-closing root is opened
+// around the pair. `dialect` is the part's own (see `dialectOf`), which its levels are
+// stated in so this part's reader resolves them.
+function withNewList(xml, abstractNumId, numId, format, kind, dialect) {
+  const root = numberingRoot(xml);
+  if (!root) throw new UsageError("the document's numbering part cannot be written into: its <w:numbering> root is missing or never closed");
+  const abstract = abstractNumElement(abstractNumId, format, kind, dialect);
+  const num = numElement(numId, abstractNumId);
+  if (root.selfClosing) return xml.slice(0, root.close - 2) + `>${abstract}${num}</w:numbering>` + xml.slice(root.close);
+  const firstNum = firstElement(xml, "w:num");
+  const at = firstNum ? firstNum.index : root.close;
+  return xml.slice(0, at) + abstract + xml.slice(at, root.close) + num + xml.slice(root.close);
+}
+
+// Every `w:abstractNumId` or `w:numId` a numbering part holds, as numbers. An
+// element stating no id of its own is dropped, so it never raises the fresh id a
+// new definition takes.
+const idsOf = (xml, name, attribute) => [...xml.matchAll(elementPattern(name))]
+  .map((match) => Number(xmlAttribute(match[0], attribute)))
+  .filter(Number.isFinite);
+
+// The `w:numFmt` a `<w:num>`'s own `<w:lvlOverride>` states at `level`, or
+// `undefined` when it overrides nothing there: an override that only restates the
+// level's start leaves the abstract's format in force, while one carrying its own
+// `<w:lvl>` renders what that level states — reusing such a definition would give
+// the paragraph another kind of list than the one the call named.
+const overrideFormat = (num, level) => {
+  for (const match of num.matchAll(elementPattern("w:lvlOverride"))) {
+    if (Number(xmlAttribute(match[0], "w:ilvl")) !== level) continue;
+    const numFmt = firstElement(match[0], "w:numFmt");
+    if (numFmt) return xmlAttribute(numFmt[0], "w:val");
+  }
+  return undefined;
+};
+
+// The `w:numId` of the FIRST `<w:num>` that renders `format` at `level` — the
+// format its abstract states there, or the one its own `<w:lvlOverride>` puts in
+// that state's place — or `undefined` when the part holds none. A document that
+// already has a suitable list is never given a second one.
+function existingListNumId(xml, format, level) {
+  const abstracts = new Map();
+  for (const match of xml.matchAll(elementPattern("w:abstractNum"))) {
+    const byLevel = new Map();
+    for (const lvl of match[0].matchAll(elementPattern("w:lvl"))) {
+      const numFmt = firstElement(lvl[0], "w:numFmt");
+      if (numFmt) byLevel.set(Number(xmlAttribute(lvl[0], "w:ilvl")), xmlAttribute(numFmt[0], "w:val"));
+    }
+    abstracts.set(Number(xmlAttribute(match[0], "w:abstractNumId")), byLevel);
+  }
+  for (const match of xml.matchAll(elementPattern("w:num"))) {
+    const id = Number(xmlAttribute(match[0], "w:numId"));
+    // A `<w:num>` stating no id of its own, or the reserved 0 — the id the
+    // cancellation idiom writes — names no list a paragraph may be given: reading it
+    // as one would hand the paragraph a `<w:numId w:val="NaN"/>` no reader can
+    // resolve, or the cancellation itself where the call meant to apply a list, the
+    // way the sibling `idsOf` drops an element with no id of its own.
+    if (!Number.isFinite(id) || id <= 0) continue;
+    const abstract = firstElement(match[0], "w:abstractNumId");
+    const byLevel = abstract ? abstracts.get(Number(xmlAttribute(abstract[0], "w:val"))) : undefined;
+    if (byLevel && (overrideFormat(match[0], level) ?? byLevel.get(level)) === format) return id;
+  }
+  return undefined;
+}
+
+// `name` made a part `word/document.xml`'s own relationships name, unless one
+// already does — a part no relationship points at is one no reader reads, and the
+// relationship is stated in the dialect `dialect` names, so the reader this document
+// belongs to resolves the part it points at.
+function nameNumberingPart(editor, name, dialect) {
+  if (relationships(editor.read(relsPartFor(DOCX_DOCUMENT)) ?? "").some((rel) => rel.type.endsWith("/numbering"))) return;
+  addRelationship(editor, DOCX_DOCUMENT, `${RELATIONSHIP_NAMESPACES[dialect]}/numbering`, name);
+}
+
+// The `w:numId` a paragraph's `list` writes: the document's own definition of that
+// format at that level, or a fresh one written into the numbering part — the part
+// the document's own relationships name, created and declared whole when the
+// package holds none. Read fresh on every call, so two lists in one edit list find
+// and reuse the definition the first wrote. `dialect` is the document's own, read
+// once by the caller: a part created here has to be stated in it, while a definition
+// spliced into a part that already exists takes that part's own.
+function listNumId(editor, kind, level, dialect) {
+  const format = PARAGRAPH_LISTS.get(kind);
+  const name = documentPart(editor, "/numbering", DOCX_NUMBERING);
+  const xml = editor.read(name);
+  if (xml !== undefined) {
+    const existing = existingListNumId(xml, format, level);
+    if (existing !== undefined) return existing;
+    const abstractNumId = Math.max(0, ...idsOf(xml, "w:abstractNum", "w:abstractNumId")) + 1;
+    const numId = Math.max(0, ...idsOf(xml, "w:num", "w:numId")) + 1;
+    editor.rewrite(name, xml, withNewList(xml, abstractNumId, numId, format, kind, dialectOf(xml)));
+    return numId;
+  }
+  if (!editor.zip.file("[Content_Types].xml")) throw missingContentTypes(editor.input);
+  editor.add(name, numberingPartXml(1, 1, format, kind, dialect));
+  editor.part("[Content_Types].xml", (contentTypes) => withOverride(contentTypes, name, NUMBERING_CONTENT_TYPE));
+  nameNumberingPart(editor, name, dialect);
+  return 1;
+}
+
+// Where a paragraph's `<w:pPr>` body stops being properties a call may rewrite: the
+// paragraph mark's own `<w:rPr>` and the section break `<w:sectPr>` follow every
+// `EG_PPrBase` child. Everything from the first of them on travels through untouched
+// — the run properties are not the paragraph's, and the `<w:spacing>` an `<w:rPr>`
+// holds is the mark's own character spacing, which writing the paragraph's would
+// otherwise rewrite.
+function paragraphTailAt(body) {
+  const at = [firstElement(body, "w:rPr"), firstElement(body, "w:sectPr")].filter(Boolean).map((found) => found.index);
+  return at.length ? Math.min(...at) : -1;
+}
+
+// The `<w:ind>` attributes each edge indent is stated in: the strict dialect spells an
+// indent's leading and trailing edge `w:start`/`w:end` and the transitional one
+// `w:left`/`w:right` (see `dialectOf`), so a document takes the attribute its own
+// reader resolves — writing the other dialect's would state an indent that reader
+// ignores, and the value the call named would not be applied at all. Each edge also
+// has a character-scaled spelling (`w:leftChars`, `w:startChars`), the same indent
+// counted in characters rather than twips, which is cleared either way.
+const EDGE_INDENTS = {
+  strict: { left: "w:start", leftChars: "w:startChars", right: "w:end", rightChars: "w:endChars" },
+  transitional: { left: "w:left", leftChars: "w:leftChars", right: "w:right", rightChars: "w:rightChars" },
+};
+
+// A `<w:pPr>` body with each property `props` names written at its own seat in
+// `PARAGRAPH_PROPERTY_ORDER` (see `insertOrderedChild`), so a property is never
+// written where Word would drop it. Every element the call does not name keeps its
+// own bytes, and an existing `<w:ind>`/`<w:spacing>` keeps the attributes the call
+// does not name — a named value that a sibling attribute could override clears that
+// sibling, or the paragraph would render a spacing or an indent the reply said it
+// had written. An indent, an alignment and a list level are stated in the dialect's
+// own spelling (`dialect`). `list` is the request's list property as far as the call
+// has resolved it: the definition `numId` the kind it named takes, or, for a request
+// taking the list away, whether the paragraph `numbered` draws a list item marker at
+// all (see `formatParagraph` for both).
+function applyParagraphProperties(body, props, styleId, list, dialect) {
+  let out = body;
+  const place = (name, element) => {
+    out = insertOrderedChild(out.replace(elementPattern(`w:${name}`), ""), name, element, PARAGRAPH_PROPERTY_ORDER);
+  };
+  if (props.style !== undefined) place("pStyle", `<w:pStyle w:val="${xmlEscape(styleId)}"/>`);
+  if (props.align !== undefined) place("jc", `<w:jc w:val="${justification(dialect, props.align)}"/>`);
+  if (props.indentLeft !== undefined || props.indentRight !== undefined || props.indentFirst !== undefined) {
+    const found = firstElement(out, "w:ind");
+    let ind = found ? found[0] : "<w:ind/>";
+    const mine = EDGE_INDENTS[dialect];
+    const other = EDGE_INDENTS[otherDialect(dialect)];
+    if (props.indentLeft !== undefined) {
+      ind = setXmlAttribute(ind, mine.left, props.indentLeft);
+      ind = setXmlAttribute(ind, mine.leftChars, null);
+      ind = setXmlAttribute(ind, other.left, null);
+      ind = setXmlAttribute(ind, other.leftChars, null);
+    }
+    if (props.indentRight !== undefined) {
+      ind = setXmlAttribute(ind, mine.right, props.indentRight);
+      ind = setXmlAttribute(ind, mine.rightChars, null);
+      ind = setXmlAttribute(ind, other.right, null);
+      ind = setXmlAttribute(ind, other.rightChars, null);
+    }
+    if (props.indentFirst !== undefined) {
+      // A negative first-line indent IS the hanging indent: Word states the two as
+      // mutually exclusive attributes of one `<w:ind>`, so only one is ever written.
+      const hanging = props.indentFirst < 0;
+      ind = setXmlAttribute(ind, hanging ? "w:hanging" : "w:firstLine", Math.abs(props.indentFirst));
+      ind = setXmlAttribute(ind, hanging ? "w:firstLine" : "w:hanging", null);
+      ind = setXmlAttribute(ind, "w:firstLineChars", null);
+      ind = setXmlAttribute(ind, "w:hangingChars", null);
+    }
+    place("ind", ind);
+  }
+  if (props.spacingBefore !== undefined || props.spacingAfter !== undefined || props.lineSpacing !== undefined) {
+    const found = firstElement(out, "w:spacing");
+    let spacing = found ? found[0] : "<w:spacing/>";
+    if (props.spacingBefore !== undefined) {
+      spacing = setXmlAttribute(spacing, "w:before", props.spacingBefore);
+      spacing = setXmlAttribute(spacing, "w:beforeLines", null);
+      spacing = setXmlAttribute(spacing, "w:beforeAutospacing", null);
+    }
+    if (props.spacingAfter !== undefined) {
+      spacing = setXmlAttribute(spacing, "w:after", props.spacingAfter);
+      spacing = setXmlAttribute(spacing, "w:afterLines", null);
+      spacing = setXmlAttribute(spacing, "w:afterAutospacing", null);
+    }
+    if (props.lineSpacing !== undefined) {
+      spacing = setXmlAttribute(spacing, "w:line", props.lineSpacing);
+      spacing = setXmlAttribute(spacing, "w:lineRule", "exact");
+    }
+    place("spacing", spacing);
+  }
+  if (props.list !== undefined) {
+    if (props.list === false) {
+      // A paragraph holding its own `<w:numPr>` states the cancelled id in it, so the
+      // level and the bytes around it survive; one holding none is given the statement
+      // when the list it draws is not its own — `list.numbered` is the whole chain a
+      // reader walks (see `formatParagraph`) — since a paragraph taking its number from
+      // a style would otherwise keep rendering as a list item while the call reported
+      // the list taken away.
+      const own = firstElement(out, "w:numPr");
+      if (own) place("numPr", cancelledNumbering(own[0]));
+      else if (list.numbered) place("numPr", '<w:numPr><w:numId w:val="0"/></w:numPr>');
+    } else {
+      place("numPr", `<w:numPr><w:ilvl w:val="${props.list.level}"/><w:numId w:val="${list.numId}"/></w:numPr>`);
+    }
+  }
+  return out;
+}
+
+// A `<w:numPr>` stating that its paragraph draws no numbering — OOXML's
+// `<w:numId w:val="0"/>`. Dropping the element alone would not say it: a paragraph
+// taking a number from its own style would keep rendering as a list item. The id the
+// paragraph already points at is set to 0 in place, so its level and the bytes around
+// it survive; a `<w:numPr>` naming no `<w:numId>` at all is given one after its
+// `<w:ilvl>`, the seat `CT_NumPr` puts the two in.
+function cancelledNumbering(numPr) {
+  const found = firstElement(numPr, "w:numId");
+  if (found) return numPr.slice(0, found.index) + setXmlAttribute(found[0], "w:val", 0) + numPr.slice(found.index + found[0].length);
+  const edges = elementEdges(numPr, "w:numPr");
+  if (edges.selfClosing) return `${numPr.slice(0, edges.bodyStart - 2)}><w:numId w:val="0"/></w:numPr>`;
+  const level = firstElement(numPr, "w:ilvl");
+  const at = level ? level.index + level[0].length : edges.bodyStart;
+  return `${numPr.slice(0, at)}<w:numId w:val="0"/>${numPr.slice(at)}`;
+}
+
+// The paragraph XML with `props` written into its own `<w:pPr>`, and the parts of the
+// region the call rewrote in the ORIGINAL paragraph — so the caller can say which
+// markup inside it the rewrite reached. That region is the properties before the
+// pPr's tail, never the whole element: the tail (the paragraph mark's own `<w:rPr>`
+// and the `<w:sectPr>`) and the `<w:pPrChange>` a tracked revision recorded travel
+// through byte for byte, and the preserved markers inside the region are taken out of
+// it (see `writtenParts`) — naming any of them as reached would report markup the
+// call kept exactly as it found it. One of them really sits in the region: a
+// `<w:numPr>` states the `<w:ins>` its `CT_NumPr` carries, which cancelling the list
+// around it leaves exactly as it was — while a list kind replaces that `<w:numPr>`
+// whole, so the marker inside it goes with it and stays among the parts reached. A
+// paragraph with no pPr gets a fresh one immediately after its own open tag; an
+// existing one keeps its own tag spelling, and the recorded change stays LAST, exactly
+// as `formattedRunProperties` treats `<w:rPrChange>`. Nothing is written when the named
+// properties are already what the paragraph holds, and no part is reported then either:
+// an edit that rewrote no bytes reached no markup, so the caller owes no note about
+// what it "also reached".
+function formattedParagraph(paragraphXml, props, styleId, list, dialect) {
+  const own = paragraphPropertiesSpan(paragraphXml);
+  const element = own ? paragraphXml.slice(own.start, own.end) : "";
+  const open = own ? element.match(new RegExp(`^(?:${selfClosingTag("w:pPr")}|${openTag("w:pPr")})`))[0] : "";
+  const selfClosing = own ? open.endsWith("/>") : false;
+  const close = own && !selfClosing ? element.match(new RegExp(closeTag("w:pPr") + "$"))[0] : undefined;
+  const inner = own ? (selfClosing ? "" : element.slice(open.length, element.length - close.length)) : "";
+  const beforeRevision = liveProperties(inner);
+  const revisionTail = inner.slice(beforeRevision.length);
+  const tailAt = paragraphTailAt(beforeRevision);
+  const mutable = tailAt < 0 ? beforeRevision : beforeRevision.slice(0, tailAt);
+  const written = applyParagraphProperties(mutable, props, styleId, list, dialect);
+  // An unchanged body is the one case that writes nothing — and the one case a
+  // property cannot have emptied it: every property the request names adds an
+  // element, so a body that came back as it was is a body no property was placed in.
+  if (written === mutable) return { xml: paragraphXml, spans: [] };
+  const body = written + (tailAt < 0 ? "" : beforeRevision.slice(tailAt)) + revisionTail;
+  if (!own) {
+    const p = paragraphXml.match(new RegExp(openTag("w:p")));
+    const at = p.index + p[0].length;
+    return { xml: paragraphXml.slice(0, at) + `<w:pPr>${body}</w:pPr>` + paragraphXml.slice(at), spans: [] };
+  }
+  const head = selfClosing ? open.slice(0, -2) + ">" : open;
+  const closeText = selfClosing ? "</w:pPr>" : close;
+  const at = own.start + open.length;
+  // A `<w:numPr>` a list kind replaces is gone WHOLE — the numbering the paragraph had
+  // and everything `CT_NumPr` states in it, a tracked change of that numbering and an
+  // insertion marker included — so a marker inside it is not one the request kept:
+  // taking it out of the parts would report a change the call really made as markup it
+  // left as it found it (see `writtenParts`), where the answer owes the note.
+  const replaced = props.list === undefined || props.list === false ? undefined : firstElement(mutable, "w:numPr");
+  const kept = preservedMarkers(paragraphXml).filter((marker) => replaced === undefined
+    || marker.start < at + replaced.index || marker.start >= at + replaced.index + replaced[0].length);
+  return {
+    xml: paragraphXml.slice(0, own.start) + head + body + closeText + paragraphXml.slice(own.end),
+    spans: writtenParts(own.start, at + mutable.length, kept),
+  };
+}
+
+// `xml` with `find`'s paragraph properties applied to every paragraph whose own
+// addressed text holds it — the same paragraphs a text op addresses, a table cell's
+// and a text box's own included, the markup around them untouched. The style and
+// the list definition are resolved on the first match only, so a fragment that
+// matches nothing refuses before it can write a definition, and one definition
+// serves every paragraph the call reaches.
+function formatParagraph(xml, edit, find, editor, listed) {
+  const props = paragraphFormat(edit);
+  // The dialect every part and attribute this call writes has to state (see
+  // `dialectOf`), read from the body it edits.
+  const dialect = dialectOf(xml);
+  let styleId;
+  let numId;
+  let matched = 0;
+  // Whether the chain of styles a paragraph renders with numbers it (see
+  // `styleNumbers`). The styles part is read and parsed once per call and the walk is
+  // built with it: a fragment matching many paragraphs asks about a style again and
+  // again, and the part is charged on every read.
+  let styleNumbering;
+  const numberedByStyle = (id) => {
+    if (styleNumbering === undefined) {
+      const styles = editor.read(documentPart(editor, "/styles", DOCX_STYLES)) ?? "";
+      styleNumbering = styleNumbers(styleEntries(styles), defaultsNumbering(styles));
+    }
+    return styleNumbering(id);
+  };
+  const out = mapParagraphs(xml, (element, excluded) => {
+    if (!addressedText(element, excluded).includes(find)) return null;
+    if (props.style !== undefined && styleId === undefined) styleId = resolveParagraphStyle(editor, props.style);
+    if (Boolean(props.list) && numId === undefined) numId = listNumId(editor, props.list.kind, props.list.level, dialect);
+    // A heading the table lists cannot take another level or another numbering: the
+    // entry was written from it and an edit cannot rewrite the entry (see
+    // `refuseListedHeading`). A style naming the level the paragraph already states
+    // changes nothing, so it goes through. A paragraph given a heading level the table
+    // covers, and that the table does not list, becomes a heading the static table does
+    // not show — the mirror of a paragraph added after a heading, said the same way,
+    // and true whether the paragraph was body text or already a heading.
+    const styleChanged = props.style !== undefined && styleId !== paragraphStyleId(element);
+    const levelChanged = styleChanged || Boolean(props.list);
+    if (listed && levelChanged && tocListed(element)) refuseListedHeading(find);
+    if (listed && styleChanged && !tocListed(element) && headingStyleId(styleId)) {
+      editor.note("[the paragraph is a heading this document's table of contents does not list]");
+    }
+    matched += 1;
+    // Whether the paragraph draws a list item marker at all — what its own properties
+    // state (the state that decides on its own, a paragraph cancelling the numbering
+    // its style gives drawing none), else the chain of styles it renders with, in the
+    // order a reader walks them (see `styleNumbers`). It is what taking a list away has
+    // to answer for: the numbering its own body states is cancelled in place, and one
+    // it draws from anywhere else is cancelled with the id the cancellation is written
+    // as — while a paragraph that draws none keeps its bytes rather than taking a
+    // cancellation it does not need.
+    const list = { numId, numbered: false };
+    if (props.list === false) {
+      const own = numberingState(paragraphProperties(element) ?? "");
+      list.numbered = own === undefined ? numberedByStyle(styleId ?? paragraphStyleId(element)) : own === "numbered";
+    }
+    const written = formattedParagraph(element, props, styleId, list, dialect);
+    noteUnnamed(element, written.spans, editor.note);
+    return written.xml;
+  });
+  if (!matched) throw new UsageError(docxFindRefusal(editor, xml, find));
+  if (matched > 1) editor.note(`[the fragment matched ${matched} paragraphs — every one was formatted]`);
+  return out;
+}
+
+// The `<w:body>` part of `xml`: the end of its content and the span of its OWN
+// section properties — the last `<w:sectPr>` outside every paragraph, since a
+// section break sits inside the paragraph that ends the section. `undefined`
+// when the part holds no body at all.
+function bodyLayout(xml) {
+  const body = xml.match(new RegExp(`${openTag("w:body")}([\\s\\S]*)${closeTag("w:body")}`));
+  if (!body) return undefined;
+  // The content is the match's own middle, not a slice up to a close tag spelled
+  // out again: a body whose close carries whitespace (`</w:body >`) is read by the
+  // pattern above and by nothing else.
+  const content = body[1];
+  const open = body.index + body[0].indexOf(">") + 1;
+  const paragraphs = docxParagraphs(content);
+  const insideParagraph = (at) => paragraphs.some((span) => at >= span.start && at < span.end);
+  const section = tagSpans(content, tagPattern("w:sectPr")).filter((span) => !insideParagraph(span.start)).at(-1);
+  return {
+    end: open + content.length,
+    section: section === undefined ? undefined : { start: open + section.start, end: open + section.end },
+  };
+}
+
+// The `<w:body>` position a paragraph added "at the end" goes to: before the
+// body's own `<w:sectPr>` when it has them, since those must stay the body's
+// last element, else at the very end of the body.
+function bodyEnd(xml) {
+  const body = bodyLayout(xml);
+  if (!body) throw new UsageError("the document has no body to add a paragraph to");
+  return body.section ? body.section.start : body.end;
+}
+
+// `xml` with a paragraph holding `text` added: after the FIRST paragraph whose
+// text holds `after`, or at the end of the body. The first match in part order
+// is the anchor on purpose — the same rule the presentation's `add_paragraph`
+// uses (see `addSlideParagraph`) — so a fragment that matches several paragraphs
+// always lands the new one in the same place.
+//
+// A paragraph added after an anchor takes what the anchor holds: the style, the
+// paragraph formatting and the list membership of its own `<w:pPr>` (minus the
+// markers that must not be fabricated in new content — see `inheritedParagraph`)
+// and the run formatting of its first run, so a line added to a list stays a list
+// item and one added after a heading is a heading. With no `after`, a bare
+// paragraph goes at the end of the body, exactly as before. `listed` is the
+// table-of-contents reading the caller already paid for (see `applyDocxEdit`).
+function addParagraph(xml, edit, editor, listed) {
+  const note = editor.note;
+  const text = editText(edit.text, "text");
+  if (edit.after === undefined) {
+    const at = bodyEnd(xml);
+    return xml.slice(0, at) + addedParagraph(undefined, undefined, text) + xml.slice(at);
+  }
+  const { span } = docxAnchor(xml, edit, editor);
+  const anchor = xml.slice(span.start, span.end);
+  // A paragraph added after a heading takes the heading's style, so it becomes one
+  // of its own — which a table of contents written with this document does not
+  // list, since its entries cannot be rewritten. Said rather than left silent.
+  if (listed && tocListed(anchor)) {
+    note("[the paragraph added after a heading is a heading of its own, and this document's table of contents does not list it]");
+  }
+  return xml.slice(0, span.end) + inheritedParagraph(anchor, text, note) + xml.slice(span.end);
+}
+
+// A `<w:p>` holding one run and `text`: the shape every `add_paragraph` writes,
+// with the anchor's own `<w:pPr>` and first run's `<w:rPr>` when it is inserted
+// after one. Both are `undefined` for a paragraph added at the end of the body.
+const addedParagraph = (pPr, rPr, text) => `<w:p>${pPr ?? ""}<w:r>${rPr ?? ""}<w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p>`;
+
+// A copied property body with the markers that must not be fabricated in new
+// content taken out: the recorded revisions the anchor's properties and its numbering
+// carry (`w:pPrChange`/`w:rPrChange`/`w:numberingChange`, the anchor's history rather
+// than the new paragraph's) and a tracked insertion, deletion or move, which would
+// annotate content this call never inserted as belonging to a revision that never
+// mentioned it — the one list `preservedMarkers` reads, so the two readings of a
+// marker cannot drift apart.
+const withoutTrackedMarkers = (xml) => TRACKED_MARKERS
+  .reduce((kept, name) => kept.replace(elementPattern(name), ""), xml);
+
+// The paragraph `add_paragraph` inserts after `anchor`: the anchor's own `<w:pPr>`
+// copied verbatim minus the markers that must not be fabricated in new content —
+// a section break belongs to the paragraph that ENDS the section, and copying it
+// would duplicate the break, while everything `withoutTrackedMarkers` takes is the
+// anchor's history, not the new paragraph's — and the anchor's first own run's
+// `<w:rPr>`, stripped the same way. The run is the one the arm's own `docxRuns`
+// sees at depth 1, so a text box's run is not taken.
+function inheritedParagraph(anchor, text, note) {
+  const pPr = paragraphProperties(anchor);
+  let inherited;
+  if (pPr) {
+    if (firstElement(pPr, "w:sectPr")) note("[the paragraph the new one follows ends a section, so the new one does not carry its section break]", true);
+    const kept = withoutTrackedMarkers(pPr.replace(elementPattern("w:sectPr"), ""));
+    // What the stripping left may be nothing at all — a paragraph whose only
+    // property was the section break — and an empty `<w:pPr>` is a change that
+    // states nothing (the rule a run's own properties are written under).
+    inherited = elementParts(kept, "w:pPr").body.trim() ? kept : undefined;
+  }
+  const { runs } = docxRuns(anchor);
+  const stripped = runs.length && runs[0].rpr ? withoutTrackedMarkers(runs[0].rpr) : undefined;
+  // The rule the paragraph's own properties are kept under, for the run's: what the
+  // stripping left may be nothing at all — a run whose only property was the recorded
+  // revision — and an empty `<w:rPr>` is a change that states nothing.
+  const rPr = stripped && elementParts(stripped, "w:rPr").body.trim() ? stripped : undefined;
+  return addedParagraph(inherited, rPr, text);
+}
+
+// ── add_image / add_table ──────────────────────────────────────
+// Both ops add a BLOCK to the body and both are placed the same way as
+// `add_paragraph`: after the first of the document's own paragraphs
+// (`topParagraphs`, so a table cell's anchor counts and a text box's does not)
+// whose text holds `after`. A paragraph inside a table cell addresses the whole
+// table the cell belongs to rather than a place inside it — a block added inside
+// a cell is not the placement a caller means, and a cell must never end with a
+// table — and a fragment the body does not hold is refused, never appended at
+// the end.
+
+// The paragraph a block added after `after` anchors on, with the body position it
+// goes to: the end of the outermost table holding the paragraph — a nested table's
+// end is still inside its cell — else the paragraph's own end. `inTable` says
+// which of the two it was, the fact a table added there needs on its previous
+// side.
+function docxAnchor(xml, edit, editor) {
+  const after = editText(edit.after, "after");
+  if (!after) throw new UsageError("after must not be empty");
+  if (bodyLayout(xml) === undefined) throw new UsageError(`the document has no body, so there is nothing to place an ${edit.op} after`);
+  const paragraphs = docxParagraphTexts(xml);
+  const own = new Set(topParagraphs(xml).map((span) => span.start));
+  const span = paragraphs.find((paragraph) => own.has(paragraph.start) && paragraph.text.includes(after));
+  if (!span) {
+    // The fragment may still be text this document holds and the text ops can
+    // edit — a text box's own paragraph — so the refusal says where it is
+    // instead of the body's "not searched" wording, which reads as "not in the
+    // file".
+    const buried = paragraphs.find((paragraph) => paragraph.text.includes(after));
+    if (buried) throw new UsageError(`the text ${JSON.stringify(after)} is inside a text box: an ${edit.op} after anchors in the document's own paragraphs (a table cell's counts), and a text box's paragraph is a nested one`);
+    throw new UsageError(docxFindRefusal(editor, xml, after, true));
+  }
+  const table = tagSpans(xml, DOCX_TABLE).find((candidate) => !candidate.selfClosing
+    && candidate.depth === 1 && candidate.start < span.start && span.end <= candidate.end);
+  return { span, at: table ? table.end : span.end, inTable: table !== undefined };
+}
+
+// The page a docx block lands on, in twips: the size and the margins the body's
+// own section states. The section in force where a block lands may be another one;
+// this is the measure a picture's own size, a table's columns and the note about a
+// picture past the page are read against, not a fact the file records. A document
+// stating no page of its own is read at the page `create` lays down (see
+// `CREATED_PAGE`), so the default is stated once.
+function docxPage(xml) {
+  const section = bodyLayout(xml)?.section;
+  const page = section === undefined ? "" : xml.slice(section.start, section.end);
+  const measure = (name, attribute, fallback) => {
+    const tag = page.match(tagPattern(name))?.[0];
+    const value = tag === undefined ? Number.NaN : Number(xmlAttribute(tag, attribute));
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+  };
+  return {
+    width: measure("w:pgSz", "w:w", CREATED_PAGE.width),
+    height: measure("w:pgSz", "w:h", CREATED_PAGE.height),
+    left: measure("w:pgMar", "w:left", CREATED_PAGE.left),
+    right: measure("w:pgMar", "w:right", CREATED_PAGE.right),
+    top: measure("w:pgMar", "w:top", CREATED_PAGE.top),
+    bottom: measure("w:pgMar", "w:bottom", CREATED_PAGE.bottom),
+  };
+}
+
+// A page's own text column, in twips: that page less the margins on each side.
+const pageColumn = (page) => ({
+  width: Math.max(1, page.width - page.left - page.right),
+  height: Math.max(1, page.height - page.top - page.bottom),
+});
+
+// The body's own text column, in twips.
+const docxTextColumn = (xml) => pageColumn(docxPage(xml));
+
+// Whether a picture's box reaches past the page it is placed on: an inline picture
+// starts at the page's left margin, so the room it has before the page's edge is
+// the page less that one margin on each axis. The one statement of the rule, for
+// the picture a create lays down and the one an edit adds.
+const reachesPastPage = (size, page) => size.width * TWIPS_PER_PIXEL > page.width - page.left
+  || size.height * TWIPS_PER_PIXEL > page.height - page.top;
+
+// The DrawingML namespaces a picture is written in, per dialect: a document
+// resolves the spellings its own dialect states, and the picture declares them
+// on its own element so it does not rely on what the part's root happens to
+// carry.
+const DRAWING_NAMESPACES = {
+  transitional: {
+    wp: "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
+    a: "http://schemas.openxmlformats.org/drawingml/2006/main",
+    pic: "http://schemas.openxmlformats.org/drawingml/2006/picture",
+  },
+  strict: {
+    wp: "http://purl.oclc.org/ooxml/drawingml/wordprocessingDrawing",
+    a: "http://purl.oclc.org/ooxml/drawingml/main",
+    pic: "http://purl.oclc.org/ooxml/drawingml/picture",
+  },
+};
+
+// `xml` with the picture `edit` names added after the anchor it names: the bytes
+// become a media part, `[Content_Types].xml` declares it, the document gains its
+// relationship, and a `<w:p>` holding the drawing goes at the anchor. A package
+// with no content-type list cannot declare the part it gains and is refused the
+// way a presentation without one is. The size is the one every placement shares:
+// a stated side is points, one side alone keeps the picture's own proportions,
+// and neither keeps its natural size, fitted whole into the page's text column.
+function addImage(xml, edit, editor) {
+  const { at } = docxAnchor(xml, edit, editor);
+  const image = readImage(edit.image);
+  if (!editor.zip.file("[Content_Types].xml")) throw missingContentTypes(editor.input);
+  const dialect = dialectOf(xml);
+  const media = nextMediaPart(editor.zip, DOCX_MEDIA, image.kind);
+  editor.add(media, image.bytes);
+  editor.part("[Content_Types].xml", (types) => withOverride(types, media, image.contentType));
+  const relationship = addRelationship(editor, DOCX_DOCUMENT, `${RELATIONSHIP_NAMESPACES[dialect]}/image`, media);
+  const column = docxTextColumn(xml);
+  const page = docxPage(xml);
+  const container = {
+    width: Math.round(column.width / TWIPS_PER_PIXEL),
+    height: Math.round(column.height / TWIPS_PER_PIXEL),
+  };
+  const size = imageSize(image, edit.width, edit.height, RULES.dimension_points, container);
+  // A picture wider than the text column still shows, into the margin, so a size
+  // that does not fit there is said to reach past the page — as the slide and PDF
+  // arms say it — rather than reported as a plain success.
+  if (reachesPastPage(size, page)) {
+    editor.note(pastEdgeNote("picture", "the page"));
+  }
+  const cx = Math.max(1, Math.round(size.width * PX_TO_EMU));
+  const cy = Math.max(1, Math.round(size.height * PX_TO_EMU));
+  // A document's drawing ids are unique: the next free one, so a picture this
+  // call adds never renames the ones it already holds. Any prefix a package
+  // bound the wordprocessingDrawing namespace to is counted.
+  const id = Math.max(0, ...[...xml.matchAll(/<[A-Za-z0-9_]+:docPr\b[^>]*\bid="(\d+)"/g)].map((match) => Number(match[1]))) + 1;
+  const namespaces = DRAWING_NAMESPACES[dialect];
+  const drawing = `<w:drawing><wp:inline xmlns:wp="${namespaces.wp}" xmlns:a="${namespaces.a}" xmlns:pic="${namespaces.pic}" xmlns:r="${RELATIONSHIP_NAMESPACES[dialect]}" distT="0" distB="0" distL="0" distR="0">`
+    + `<wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent t="0" r="0" b="0" l="0"/>`
+    + `<wp:docPr id="${id}" name="Picture ${id}"/>`
+    + `<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>`
+    + `<a:graphic><a:graphicData uri="${namespaces.pic}"><pic:pic>`
+    + `<pic:nvPicPr><pic:cNvPr id="${id}" name="Picture ${id}"/><pic:cNvPicPr><a:picLocks noChangeAspect="1"/></pic:cNvPicPr></pic:nvPicPr>`
+    + `<pic:blipFill><a:blip r:embed="${relationship}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>`
+    + `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>`
+    + `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>`;
+  return xml.slice(0, at) + `<w:p><w:r>${drawing}</w:r></w:p>` + xml.slice(at);
+}
+
+// One `<w:tc>`: a cell must hold at least one block element, so every cell
+// carries its own paragraph — the shape `create` writes, a heading's run bold
+// and a body cell's plain. A structure reaching here is refused by the one
+// scalar rule `create`'s cells are written under.
+function docxTableCell(value, header) {
+  const bold = header ? "<w:rPr><w:b/><w:bCs/></w:rPr>" : "";
+  const text = String(scalarOf(value, header ? "a table heading" : "a table cell"));
+  return `<w:tc><w:p><w:r>${bold}<w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p></w:tc>`;
+}
+
+// The `<w:tbl>` a `create` table block would have written: the same 100 % width,
+// six single borders, and a grid of equal columns over the body's own text width.
+// `CT_Tbl` requires both the `<w:tblPr>` and the `<w:tblGrid>`, and the grid is
+// stated rather than left to a reader's autofit — its count the widest row's, the
+// count the reading prints and Word draws.
+function docxTable(headers, rows, usable) {
+  const columns = rows.reduce((widest, row) => Math.max(widest, row.length), headers.length);
+  if (columns > RULES.table_columns_max) throw new UsageError(`a table may hold at most ${RULES.table_columns_max} columns, got: ${columns}`);
+  const width = Math.max(1, Math.round(usable / columns));
+  const row = (cells, header) => `<w:tr>${cells.map((cell) => docxTableCell(cell, header)).join("")}</w:tr>`;
+  const borders = ["top", "left", "bottom", "right", "insideH", "insideV"]
+    .map((side) => `<w:${side} w:val="single" w:color="auto" w:sz="4"/>`).join("");
+  return `<w:tbl><w:tblPr><w:tblW w:type="pct" w:w="5000"/><w:tblBorders>${borders}</w:tblBorders></w:tblPr>`
+    + `<w:tblGrid>${`<w:gridCol w:w="${width}"/>`.repeat(columns)}</w:tblGrid>`
+    + `${headers.length ? row(headers, true) : ""}${rows.map((cells) => row(cells, false)).join("")}</w:tbl>`;
+}
+
+// The kind of the body's own block that begins at or after `at` — `"w:tbl"`,
+// `"w:p"`, or `undefined` when only the body's section properties and range
+// markers follow, i.e. when a table added at `at` would be the body's last block.
+// A body block is a table no other table holds and a paragraph neither a table nor
+// another paragraph holds — an empty `<w:p/>` is one, as `Word` writes them; a
+// range marker draws nothing, so it is stepped over by not being one, whatever
+// spelling it is written in.
+function nextBlockKind(xml, at) {
+  const tables = tagSpans(xml, DOCX_TABLE).filter((span) => !span.selfClosing && span.depth === 1);
+  const held = (span) => tables.some((table) => table.start < span.start && span.end <= table.end);
+  const paragraphs = tagSpans(xml, DOCX_PARAGRAPH).filter((span) => span.depth === 1 && !held(span));
+  return [
+    ...tables.map((span) => ({ at: span.start, kind: "w:tbl" })),
+    ...paragraphs.map((span) => ({ at: span.start, kind: "w:p" })),
+  ].sort((a, b) => a.at - b.at).find((block) => block.at >= at)?.kind;
+}
+
+// `xml` with the table `edit` names added after the anchor it names. A table
+// that would be the body's last block, or that lands directly beside another
+// table, is followed by an empty paragraph: a document must not end on a table,
+// and two tables with no paragraph between them draw as one.
+function addTable(xml, edit, editor) {
+  const { at, inTable } = docxAnchor(xml, edit, editor);
+  const headers = Array.isArray(edit.headers) ? edit.headers : [];
+  // A cell-less row is dropped the way `create`'s writer drops it, so both take
+  // one table shape; a row that is not a list is still refused.
+  const rows = (Array.isArray(edit.rows) ? edit.rows : []).filter((row) => {
+    if (!Array.isArray(row)) throw new UsageError("every table row must be a list of cells");
+    return row.length > 0;
+  });
+  // A header alone is a table, exactly as it is for `create`.
+  if (!headers.length && !rows.length) throw new UsageError("a table needs at least one row or one heading");
+  // A separator paragraph goes on either side that needs one: after the anchor's
+  // own table when the anchor resolved to one (see `docxAnchor`), and before a
+  // table or the body's end on the next side (see `nextBlockKind`), since two
+  // tables with no paragraph between them draw as one and ECMA-376 forbids a body
+  // ending with a table.
+  const trailing = nextBlockKind(xml, at) !== "w:p";
+  return xml.slice(0, at) + (inTable ? "<w:p/>" : "") + docxTable(headers, rows, docxTextColumn(xml).width) + (trailing ? "<w:p/>" : "") + xml.slice(at);
+}
+
+// `element` with every paragraph — itself or a nested one — whose joined text
+// holds `find` removed, `null` when the whole element goes. A nested paragraph
+// is removed on its own: it is only the paragraph the text is in that goes, not
+// the one that draws the text box around it. `excluded` are the field regions
+// that reach into the element, relative to it. A nested edit rewrites bytes, so
+// the field regions and the element's own runs are located only after it —
+// exactly as `editParagraph` does.
+function removeParagraph(element, excluded, find, found, note, listed) {
+  const children = childParagraphSpans(element);
+  let out = element;
+  let regions = excluded;
+  for (let i = children.length - 1; i >= 0; i -= 1) {
+    const [start, end] = children[i];
+    const before = out.slice(start, end);
+    const removed = removeParagraph(before, clipSpans(regions, start, end), find, found, note, listed);
+    if (removed === null) out = out.slice(0, start) + out.slice(end);
+    else if (removed !== before) out = out.slice(0, start) + removed + out.slice(end);
+    const delta = (removed === null ? 0 : removed.length) - before.length;
+    if (delta) regions = regions.map(([from, to]) => (from >= end ? [from + delta, to + delta] : [from, to]));
+  }
+  if (!addressedText(out, regions).includes(find)) return out;
+  // A heading a table of contents lists is not removed: the entry it was written
+  // with would stay behind, naming a heading the document no longer has.
+  if (listed && tocListed(out)) refuseListedHeading(find);
+  // A paragraph that ends a section or holds a page break carries a break the
+  // removal would take with it, and no note would bring the break back: the call
+  // is refused with the way that removes the text and keeps the break. Checked
+  // here, where the paragraph is really dropped, so a nested paragraph is checked
+  // too, and named with the fragment the call used.
+  const own = paragraphProperties(out);
+  if (own && firstElement(own, "w:sectPr")) throw new UsageError(`the paragraph holding ${JSON.stringify(find)} ends a section, and removing it would delete the section break — remove its text instead, with remove_text`);
+  if (elementWithAttribute("w:br", "w:type", "page").test(out)) throw new UsageError(`the paragraph holding ${JSON.stringify(find)} holds a page break, and removing it would delete the page break — remove its text instead, with remove_text`);
+  found.value = true;
+  // The whole element goes, so everything drawn inside it goes too — and the note
+  // is raised here, where the paragraph really removed is known: a nested paragraph
+  // removed on its own reports its own fragment, not the one that draws its box.
+  noteUnnamed(element, [{ start: 0, end: element.length }], note);
+  return null;
+}
+
+// `xml` with the top-level paragraphs put through `removeParagraph`, from the
+// last to the first so an earlier one's byte positions stay valid. The result is
+// assembled as the pieces of the part around the removed paragraphs and joined
+// once, the way `mapParagraphs` does.
+function removeParagraphs(xml, find, found, note, listed) {
+  // A container a paragraph is removed from must keep a paragraph — ECMA-376
+  // requires one in a `<w:tc>` and in a `<w:txbxContent>` — and the removal is
+  // refused rather than written out as a part no reader may hold. The check runs
+  // over the whole part once, before anything goes.
+  requireParagraphLeft(xml, find);
+  const regions = fieldRegions(xml);
+  const tops = topParagraphs(xml);
+  const pieces = [];
+  let end = xml.length;
+  for (let i = tops.length - 1; i >= 0; i -= 1) {
+    const top = tops[i];
+    const element = xml.slice(top.start, top.end);
+    const removed = removeParagraph(element, clipSpans(regions, top.start, top.end), find, found, note, listed);
+    pieces.push(xml.slice(top.end, end));
+    if (removed !== null) pieces.push(removed);
+    end = top.start;
+  }
+  pieces.push(xml.slice(0, end));
+  return pieces.reverse().join("");
+}
+
+// ── the markup an edit reached without naming it ───────────────
+// A body edit addresses text, and a paragraph's markup travels with the text it
+// holds: a section break, a bookmark, a hyperlink, a comment anchor or a recorded
+// revision can sit inside the fragment the edit matched and be rewritten with it.
+// A caller named a fragment and the formatting for it, never that markup, so the
+// reply owes it a note saying what else went along.
+//
+// The kinds, in the order the note lists them, each with the phrase the note calls
+// it and the patterns the fragment is read for — through the file's own tag
+// spellings (`tagPattern`), so a `<w:br >` and a `<w:br/>` are read here as they are
+// everywhere else. A page break is a `<w:br>` carrying `w:type="page"` — a bare
+// `<w:br/>` is a line break, and `<w:lastRenderedPageBreak/>` is an artifact a reader
+// writes rather than a break the document holds — and an unaccepted tracked change
+// is the four elements the revision arms use plus any element whose local name ends
+// in `Change`, the family a formatting or paragraph-property revision is recorded in
+// — a name the tag spellings already close, so a local name merely containing
+// `Change` is not read as one, whatever prefix it carries. Built per call rather than
+// kept beside the other docx patterns: `elementWithAttribute` belongs to the reader
+// half of this file below, and a pattern built per call carries no global `lastIndex`
+// from one fragment to the next — the rule `elementPattern` states for itself.
+const unnamedKinds = () => [
+  { phrase: "a section break", patterns: [tagPattern("w:sectPr")] },
+  { phrase: "a page break", patterns: [elementWithAttribute("w:br", "w:type", "page")] },
+  { phrase: "a bookmark", patterns: [tagPattern("w:bookmarkStart"), tagPattern("w:bookmarkEnd")] },
+  { phrase: "a hyperlink", patterns: [tagPattern("w:hyperlink")] },
+  { phrase: "a footnote reference", patterns: [tagPattern("w:footnoteReference")] },
+  { phrase: "an endnote reference", patterns: [tagPattern("w:endnoteReference")] },
+  { phrase: "a comment", patterns: [tagPattern("w:commentReference"), tagPattern("w:commentRangeStart"), tagPattern("w:commentRangeEnd")] },
+  { phrase: "an unaccepted tracked change", patterns: [tagPattern("w:ins"), tagPattern("w:del"), tagPattern("w:moveFrom"), tagPattern("w:moveTo"), tagPattern("(?:\\w+:)?\\w*Change")] },
+];
+
+// The revision markers a docx element may carry: a recorded change of the properties
+// (`w:rPrChange`/`w:pPrChange`), a recorded change of the numbering a `<w:numPr>`
+// states (`w:numberingChange`, the child `CT_NumPr` puts after the id it changed), and
+// a tracked insertion, deletion or move. A formatting request keeps them
+// byte-identically wherever it leaves them (see `preservedMarkers`), and content added
+// to the document must not inherit them from the paragraph it is inserted after (see
+// `withoutTrackedMarkers`) — one list for both readings, so a marker added or renamed
+// cannot leave one of them behind. The one marker a request may really delete is the
+// one inside a `<w:numPr>` a list kind replaces, which it reports (see
+// `formattedParagraph`).
+const TRACKED_MARKERS = ["w:rPrChange", "w:pPrChange", "w:numberingChange", "w:ins", "w:del", "w:moveFrom", "w:moveTo"];
+
+// Every preserved marker of `fragment`, in the fragment's own order, as its balanced
+// span. An element opened and never closed yields none — the reading `tagSpans` gives
+// everywhere, and a marker the writer cannot read is not one this reports as kept.
+const preservedMarkers = (fragment) => TRACKED_MARKERS
+  .flatMap((name) => tagSpans(fragment, tagPattern(name)))
+  .sort((a, b) => a.start - b.start);
+
+// The parts of `[start, end)` a formatting request rewrote: the region with every
+// preserved marker lying WHOLLY inside it taken out. A marker WRAPPING the region —
+// an `<w:ins>` around the run the request formatted — is not inside it and stays, so
+// the run it wraps is still markup the call reached; a marker nested in one already
+// passed over is passed over too, so the parts never overlap. `markers` is sorted by
+// the caller (`preservedMarkers` sorts).
+const writtenParts = (start, end, markers) => {
+  const parts = [];
+  let at = start;
+  for (const marker of markers) {
+    if (marker.start >= end) break;
+    if (marker.start < at || marker.end > end) continue;
+    parts.push({ start: at, end: marker.start });
+    at = marker.end;
+  }
+  parts.push({ start: at, end });
+  return parts.filter((part) => part.start < part.end);
+};
+
+// The phrases as one English list ("a bookmark, a comment and a page break").
+// `listed` joins with "or", which is a set of alternatives to pick from; these are
+// several things an edit did at once.
+const conjoined = (phrases) => (phrases.length < 2 ? String(phrases[0] ?? "") : `${phrases.slice(0, -1).join(", ")} and ${phrases.at(-1)}`);
+
+// The sentence a miss states for a fragment holding a tab or a line break the
+// reading shows: the elements are written from the same pairs a rewrite is refused
+// across (`BRIDGED_MARKUP`), so the markup the check names and the markup the
+// message prints cannot drift apart, and only the paragraph element is named per
+// family (`<w:p>` against `<a:p>`).
+const holdsBreakReason = (prefix, paragraph) => {
+  const markup = BRIDGED_MARKUP[prefix].map(([name]) => `<${name}/>`).join(", ");
+  return `the fragment holds a tab or a line break, and the file keeps it as markup of its own (${markup}) or as a paragraph of its own (${paragraph}), not as text — name a fragment on one side of it`;
+};
+
+// The one note an edit owes about the markup it reached beyond what the caller
+// named. `fragment` is the paragraph XML the edit worked on and `spans` are the
+// parts of it the edit rewrote, so a kind that merely sits elsewhere in the
+// paragraph is not reported — the edit did not reach it — while every kind
+// overlapping one of the spans is.
+function noteUnnamed(fragment, spans, note) {
+  if (!spans.length) return;
+  const overlaps = (element) => spans.some((span) => element.start < span.end && span.start < element.end);
+  const reached = unnamedKinds()
+    .filter((kind) => kind.patterns.some((pattern) => tagSpans(fragment, pattern).some(overlaps)))
+    .map((kind) => kind.phrase);
+  if (reached.length) note(`[the edit also reached ${conjoined(reached)}, which the call did not name]`);
+}
+
+// One docx edit applied to `xml`: the edit addresses the joined text of a
+// paragraph's runs, and every occurrence of `find` is rewritten — while the ops
+// that ADD a block (`add_paragraph`, `add_image`, `add_table`) are placed by the
+// anchor they name instead. `editor` is what an op that reads or writes another
+// part of the package resolves it through — the numbering part a list needs, the
+// media part and its declaration a picture adds — and withholds its notes.
+function applyDocxEdit(xml, edit, editor) {
+  const op = edit && edit.op;
+  if (op === "add_image") return addImage(xml, edit, editor);
+  if (op === "add_table") return addTable(xml, edit, editor);
+  // The table of contents, read once for the ops that refuse or report against it — a
+  // paragraph added after a heading (see `addParagraph`), a removal, a paragraph
+  // formatting, and the ops that rewrite a fragment below. `format_text` changes no
+  // text and no level, so it never pays for the scan.
+  const listed = op !== "format_text" && docxHasContents(xml);
+  if (op === "add_paragraph") return addParagraph(xml, edit, editor, listed);
+  const find = editText(edit && edit.find, "find");
+  if (!find) throw new UsageError("find must not be empty");
+  if (op === "remove_paragraph") {
+    const found = { value: false };
+    const out = removeParagraphs(xml, find, found, editor.note, listed);
+    if (!found.value) throw new UsageError(docxFindRefusal(editor, xml, find));
+    return out;
+  }
+  if (op === "format_paragraph") return formatParagraph(xml, edit, find, editor, listed);
+  if (!["replace_text", "insert_text", "remove_text", "format_text"].includes(op)) throw new UsageError(`unknown docx edit: ${JSON.stringify(op)}`);
+  const format = { bold: edit.bold, italic: edit.italic, underline: edit.underline, strike: edit.strike };
+  if (op === "format_text") {
+    if (edit.bold == null && edit.italic == null && edit.underline == null && edit.strike == null && edit.size == null && edit.color == null) throw new UsageError("format_text needs at least one of bold, italic, underline, strike, size or color");
+    if (edit.size != null) {
+      if (!inSpan(edit.size, RULES.text_size_points)) throw new UsageError(`size must be ${spanBounds(RULES.text_size_points)} points, got: ${JSON.stringify(edit.size)}`);
+      // `<w:sz>` counts half-points, and the shared bound's ends are the one and
+      // the 1638 half-points a `<w:sz>` can hold, so rounding a size the rule
+      // allows never reaches the zero a reader cannot draw.
+      format.size = String(Math.round(edit.size * 2));
+    }
+    if (edit.color != null) format.color = hexDigits(edit.color).toUpperCase();
+  }
+  let replacement = "";
+  if (op === "replace_text") replacement = editText(edit.replace, "replace");
+  else if (op === "insert_text") {
+    const insert = editText(edit.insert, "insert");
+    if (!insert) throw new UsageError("insert must not be empty");
+    const position = edit.position === undefined ? "after" : edit.position;
+    if (position !== "after" && position !== "before") throw new UsageError(`position must be "after" or "before", got: ${JSON.stringify(position)}`);
+    replacement = position === "before" ? insert + find : find + insert;
+  }
+  // The three ops that rewrite a fragment's text are the ones that would leave the table
+  // of contents disagreeing with a heading it lists. The refusal is raised where such a
+  // paragraph is matched (see `refuseListedHeading`), while `listed` was read above.
+  let inserted = false;
+  let matched = 0;
+  let spilled = false;
+  const out = mapParagraphs(xml, (element, excluded) => {
+    const { runs, slots } = docxRuns(element, excluded);
+    const text = slots.map((slot) => xmlUnescape(slot.raw)).join("");
+    const offsets = occurrences(text, find);
+    if (!offsets.length) return null;
+    if (listed && tocListed(element)) refuseListedHeading(find);
+    inserted = true;
+    matched += offsets.length;
+    if (op === "format_text") {
+      // Each run's own extent in the joined text, from the slots it holds: a run's
+      // slots are consecutive there, so the first one opens it and the last closes
+      // it.
+      const extents = new Map();
+      let walked = 0;
+      for (const slot of slots) {
+        const length = [...xmlUnescape(slot.raw)].length;
+        const extent = extents.get(slot.run);
+        if (extent) extent.end = walked + length;
+        else extents.set(slot.run, { start: walked, end: walked + length });
+        walked += length;
+      }
+      // The runs the matched fragments cover, found once and formatted together:
+      // a later edit could not move an earlier one's run. A fragment whose first
+      // run opens before it, or whose last run closes after it, covers only part of
+      // a run — and a run is the smallest unit a run property is stated on, so the
+      // rest of it took the formatting too.
+      const runIndices = new Set();
+      for (const span of offsets) {
+        const first = locateSlot(slots, span.start);
+        const last = locateSlot(slots, span.end, true);
+        for (let i = first.index; i <= last.index; i += 1) runIndices.add(slots[i].run);
+        if (extents.get(slots[first.index].run).start < span.start || extents.get(slots[last.index].run).end > span.end) spilled = true;
+      }
+      const formatted = formatRuns(element, runs, runIndices, format);
+      noteUnnamed(element, formatted.spans, editor.note);
+      return formatted.xml;
+    }
+    // Every occurrence is written in one pass over the same runs and slots, so
+    // no occurrence's offsets can go stale against another's. A rewrite must not
+    // bridge a tab or a line break the joined text skips over (see
+    // `requireNoBridgedMarkup`).
+    requireNoBridgedMarkup(element, slots, offsets, find, BRIDGED_MARKUP["w:"]);
+    const written = replaceOccurrences(element, runs, slots, offsets, replacement, editor.note, "w:");
+    noteUnnamed(element, written.spans, editor.note);
+    return written.xml;
+  });
+  if (!inserted) throw new UsageError(docxFindRefusal(editor, xml, find));
+  if (op === "format_text" && matched > 1) editor.note(`[the fragment matched ${matched} times — every one was formatted]`);
+  if (spilled) editor.note("[the fragment covers only part of a run, and a run is the smallest unit formatting is stated on — the rest of that run's text took the formatting too]");
+  return out;
+}
+
+// Whether the document's settings part turns recorded revisions on. The part is
+// resolved through `word/document.xml`'s own relationships rather than assumed to
+// sit at the conventional `DOCX_SETTINGS` (see `documentPart`) — a package that
+// saved its settings elsewhere has a reader consult the part the relationship
+// names, and the conventional name is the fallback for a package naming none. Read
+// through `read`, so the walk is charged like every other one, and by the caller
+// only once something changed. `<w:trackRevisions>` with no `w:val`, or one outside
+// the off spellings, is the mode a reader draws on — the element the schema states
+// and the one Word, LibreOffice and the docx library this kit writes with all
+// write; a package with no settings part at all records no revision, which is the
+// same answer a part stating `<w:trackRevisions w:val="false"/>` gives.
+function trackedChangesOn(editor) {
+  const settings = editor.read(documentPart(editor, "/settings", DOCX_SETTINGS));
+  return settings !== undefined && statesOn(settings, "w:trackRevisions", OFF_VALUES);
+}
+
+function docxEdit(req) {
+  const editor = openEdit(req, "docx");
+  const edits = editList(req);
+  editor.part(DOCX_DOCUMENT, (xml) => {
+    const before = xml;
+    for (const edit of edits) {
+      // Each edit walks the whole body text, and what it walks is a part it does
+      // not open through `part` — so it charges its own walk, and the budget
+      // covers a long edit list over a large body rather than one document
+      // length.
+      editor.charge(xml.length);
+      xml = applyDocxEdit(xml, edit, editor);
+    }
+    // `part` writes the part only when its text differs, which is the same test the
+    // note is owed under: a call whose edits all rewrote their own bytes back is a
+    // call that changed nothing to record a revision of.
+    if (xml !== before && trackedChangesOn(editor)) editor.note("[the document has tracked changes turned on, and what this call changed is written as plain content, not as a recorded revision]");
+    return xml;
+  });
+  return editor.finish();
+}
+
+// ── xlsx_edit ──────────────────────────────────────────────────
+// A cell's address is its own `r` or, when a writer left it out, its position in
+// the row — the rule the reader and the filler already use.
+const ROW_ELEMENT = elementPattern("row");
+const CELL_ELEMENT = elementPattern("c");
+const styleOf = (cell) => (cell.match(/\bs="(\d+)"/) || [])[1];
+
+// Whether a part opens a `<name>` element and never closes it. `elementPattern` reads
+// the closed shapes alone, so such an element is invisible to every reader here, and a
+// writer places its content relative to what it cannot see — a second `<row>` beside
+// the one it missed, a `<c>` nested inside it. A sheet's rows, and a row's cells, hold
+// no elements of their own kind, so the tag spellings are counted rather than parsed —
+// the shared ones (`tagPattern`), so this test and the walk agree about every shape.
+const openedNotClosed = (xml, name) => {
+  let opens = 0;
+  let closes = 0;
+  for (const tag of xml.matchAll(tagPattern(name))) {
+    if (tag[0].startsWith("</")) closes += 1;
+    else if (!tag[0].endsWith("/>")) opens += 1;
+  }
+  return opens > closes;
+};
+
+// `items` in ascending order of the number `at` reads off one: a list already
+// ascending is returned as it stands — so a caller can keep the text between the
+// items of a part it does not reorder — while one no writer produces is put in
+// address order, the way a reader expects them rather than the way they arrived. An
+// item that states no address of its own IS the position it sits in, so such a list
+// is refused (`where` names it) rather than silently relocated.
+const ascending = (items, at, where) => {
+  if (items.every((item, index) => index === 0 || at(item) > at(items[index - 1]))) return items;
+  if (items.some((item) => !item.stated)) throw new UsageError(`${where} are not in address order and one of them states no address of its own, so reordering them would move what it holds`);
+  return [...items].sort((a, b) => at(a) - at(b));
+};
+
+// The `<row>` elements of a sheet, each with the number it holds, its span and whether
+// it states that number itself: a row that left `r` out stands for the one after its
+// predecessor.
+function sheetRows(xml) {
+  if (openedNotClosed(xml, "row")) throw new UsageError("the sheet part holds a <row> opened and never closed, so its rows cannot be read");
+  const rows = [];
+  let number = 0;
+  for (const match of xml.matchAll(ROW_ELEMENT)) {
+    const attribute = (match[0].match(/\br="(\d+)"/) || [])[1];
+    number = attribute ? Number(attribute) : number + 1;
+    rows.push({ start: match.index, end: match.index + match[0].length, number, stated: attribute !== undefined, xml: match[0] });
+  }
+  return rows;
+}
+
+// The `<c>` elements of one row, each with the zero-based column it addresses and
+// whether it states that address itself: a cell that left `r` out stands for the
+// position it sits in.
+function rowCells(rowXml) {
+  if (openedNotClosed(rowXml, "c")) throw new UsageError("the sheet part holds a <c> opened and never closed, so its cells cannot be read");
+  const cells = [];
+  let column = 0;
+  for (const match of rowXml.matchAll(CELL_ELEMENT)) {
+    const attribute = (match[0].match(/\br="([A-Za-z]+\d+)"/) || [])[1];
+    const index = attribute ? columnOf(attribute) : column;
+    column = index + 1;
+    cells.push({ start: match.index, end: match.index + match[0].length, column: index, address: attribute, stated: attribute !== undefined, xml: match[0] });
+  }
+  return cells;
+}
+
+// The largest row number and column the sheet's cells use, for the reach of a
+// row or column operation.
+function usedRange(xml) {
+  let rowMax = 0;
+  let columnMax = 0;
+  for (const row of sheetRows(xml)) {
+    rowMax = Math.max(rowMax, row.number);
+    for (const cell of rowCells(row.xml)) columnMax = Math.max(columnMax, cell.column + 1);
+  }
+  return { rowMax, columnMax };
+}
+
+// How many elements a sheet part holds at each address, or `undefined` for a part
+// whose rows or cells a reader refuses (see `openedNotClosed`) — a reading with
+// nothing to compare against is skipped rather than turned into a refusal an edit
+// that never needed the rows (a column width) does not owe. An address is keyed by
+// itself — a row as `#3`, a cell by its reference folded to upper case, so two
+// spellings of one address are one key — and an element that states no `r` of its own
+// counts at the position `sheetRows`/`rowCells` resolve for it, the format making `r`
+// optional and inferred. A count above one is two elements claiming one address.
+const rowKey = (number) => `#${number}`;
+function addressCounts(xml) {
+  const counts = new Map();
+  const bump = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
+  try {
+    for (const row of sheetRows(xml)) {
+      bump(rowKey(row.number));
+      for (const cell of rowCells(row.xml)) bump((cell.address ?? `${colName(cell.column)}${row.number}`).toUpperCase());
+    }
+  } catch (error) {
+    if (error instanceof UsageError) return undefined;
+    throw error;
+  }
+  return counts;
+}
+
+// The words an answer names one of those addresses by.
+const addressLabel = (key) => (key.startsWith("#") ? `the row ${key.slice(1)}` : `the cell ${key}`);
+
+// The first address `after` holds more elements at than `before` did, or `undefined`
+// when there is none to tell. A repeat counts only where the part the edit was built
+// from held fewer there, so a repeat that part arrived with is passed over where it
+// stands and refused only once an edit carries it onto an address the part held one
+// element at; a part whose rows cannot be read is not refused for the check's own
+// sake.
+function addedRepeat(before, after) {
+  const was = addressCounts(before);
+  if (!was) return undefined;
+  for (const [address, count] of addressCounts(after) ?? []) {
+    if (count > 1 && count > (was.get(address) ?? 0)) return address;
+  }
+  return undefined;
+}
+
+// A sheet's `<col>` entries in the file's own order: the text each is spelled with,
+// its 1-based `min`/`max` span (`NaN` for one a reader cannot place, which therefore
+// covers no column) and the `style` it states. ONE reading of the block for the three
+// callers that each had their own copy of it — the style a cell inherits
+// (`columnStyleEntries`), the entry a `format_cells` covers (`formatColumn`) and the
+// entry it splits (`splitColumn`) — and every entry's own text is kept, so a block
+// rewritten from these keeps the entries it does not name byte for byte. `[]` for a
+// sheet with no `<cols>` block at all.
+const colEntries = (sheet) => {
+  const cols = firstElement(sheet, "cols");
+  if (!cols) return [];
+  return [...cols[0].matchAll(elementPattern("col"))].map((match) => ({
+    text: match[0],
+    min: Number((match[0].match(/\bmin="(\d+)"/) || [])[1]),
+    max: Number((match[0].match(/\bmax="(\d+)"/) || [])[1]),
+    style: (match[0].match(/\bstyle="(\d+)"/) || [])[1],
+  }));
+};
+
+// The workbook's sheets in its own order: each `<sheet>` element's name, the
+// `state` it declares (absent for a visible sheet), its `sheetId` and `r:id`, the
+// part it addresses and the element's own span in the workbook text. The part is
+// the target of the relationship its `r:id` names, resolved by the one OPC resolver
+// `resolvePart` — an absolute `/xl/worksheets/sheet1.xml`, a relative
+// `worksheets/sheet1.xml` and a target spelled with `..` all name the part the
+// resolver folds them to — and, for a relationship the workbook does not declare,
+// the conventional part name for that position, the same fallback the reader makes.
+// `named` says which of the two it was. Both parts are read through the editor
+// (`read`), so the workbook and its relationships are charged like every other part
+// an edit takes into hand: reading them is work a check can spend the call's budget
+// on, and a read that skipped the charge would be a hole in the bound the caller is
+// refused by. The span is what an edit that removes or moves the element splices
+// on, so it is measured off the very text these entries were read from — the whole
+// element in either shape a file may write it (`elementPattern`), since a splice
+// over an open tag alone would leave the close behind it. That text comes back with
+// the entries, so an edit that also rewrites the workbook writes it against the text
+// it read (`rewrite`) instead of reading and charging it a second time.
+function workbookSheetList(editor) {
+  const workbook = editor.read(XLSX_WORKBOOK);
+  if (workbook === undefined) return { workbook, sheets: [] };
+  const relations = relationships(editor.read(XLSX_WORKBOOK_RELS) ?? "");
+  const sheets = [...workbook.matchAll(elementPattern("sheet"))].map((match, index) => {
+    const id = xmlAttribute(match[0], "r:id");
+    const relation = id === undefined ? undefined : relations.find((entry) => entry.id === id);
+    const target = relation?.target;
+    const sheetId = xmlAttribute(match[0], "sheetId");
+    return {
+      name: xmlUnescape(xmlAttribute(match[0], "name") ?? ""),
+      state: xmlAttribute(match[0], "state"),
+      sheetId: sheetId === undefined ? undefined : Number(sheetId),
+      id,
+      type: relation?.type,
+      part: target ? resolvePart("xl/", target) : `xl/worksheets/sheet${index + 1}.xml`,
+      named: target !== undefined,
+      text: match[0],
+      start: match.index,
+      end: match.index + match[0].length,
+    };
+  });
+  return { workbook, sheets };
+}
+
+// The part a sheet NAME addresses, through `xl/workbook.xml` and its
+// relationships. The name is matched the way Excel matches one — ignoring case,
+// in the workbook's own order — while a refusal keeps the file's spelling. The
+// part's own presence is checked on the archive (`zip.file`), which decompresses
+// nothing; the sheet's text is the caller's own read, charged once there. The
+// entries the name was found among come back with it (`index` into `sheets`) and the
+// workbook text they were read from (`workbook`), so an edit that also renames, moves
+// or removes the element writes the workbook back against that text (`rewrite`)
+// rather than reading and charging it again.
+function sheetPart(editor, name) {
+  const { workbook, sheets } = workbookSheetList(editor);
+  const wanted = typeof name === "string" ? name.toLowerCase() : null;
+  const index = wanted === null ? -1 : sheets.findIndex((sheet) => sheet.name.toLowerCase() === wanted);
+  if (index < 0) throw new UsageError(`there is no sheet named ${JSON.stringify(name)}: this workbook has ${listed(sheets.map((sheet) => sheet.name)) || "no sheets"}`);
+  const { part, named, type } = sheets[index];
+  const sheetName = sheets[index].name;
+  // A chart sheet is a `<sheet>` in the same list and not a worksheet: naming one
+  // is refused with that reason rather than rewritten as a worksheet it is not.
+  const chart = part.startsWith(XLSX_CHARTSHEETS) || (type !== undefined && type.endsWith("/chartsheet"));
+  if (chart || (type !== undefined && !type.endsWith("/worksheet"))) {
+    throw new UsageError(`the sheet ${JSON.stringify(sheetName)} is ${chart ? "a chart sheet" : "not a worksheet"}, and this tool edits worksheets only`);
+  }
+  if (!editor.zip.file(part)) {
+    throw new UsageError(named
+      ? `the sheet ${JSON.stringify(sheetName)} names the part ${part}, which the package does not have`
+      : `the sheet ${JSON.stringify(sheetName)} has no worksheet part: the workbook's relationships do not name one and the package has no ${part}`);
+  }
+  return { part, name: sheetName, index, sheets, workbook };
+}
+
+// The row and zero-based column an A1 address names, refusing a reference to a
+// cell no workbook's grid holds.
+function cellAddress(value, what = "cell") {
+  const match = typeof value === "string" ? value.match(/^([A-Za-z]+)(\d+)$/) : null;
+  if (!match) throw new UsageError(`${what} must be an A1 address like B7, got: ${JSON.stringify(value)}`);
+  const row = Number(match[2]);
+  if (row < 1 || row > RULES.sheet_row_max) throw new UsageError(`${what} ${value}: the row must be between 1 and ${RULES.sheet_row_max}`);
+  const column = columnOf(match[1]);
+  if (column + 1 > RULES.sheet_column_max) throw new UsageError(`${what} ${value}: the column must be between A and ${colName(RULES.sheet_column_max - 1)}`);
+  return { row, column };
+}
+
+function rowNumber(value) {
+  if (!Number.isInteger(value) || value < 1 || value > RULES.sheet_row_max) throw new UsageError(`row must be a whole number between 1 and ${RULES.sheet_row_max}, got: ${JSON.stringify(value)}`);
+  return value;
+}
+
+// The 1-based column a caller's own `column` field names: one to three UPPERCASE
+// letters, exactly the shape the Rust boundary's `column_number` accepts, so the
+// kit cannot take a spelling the boundary would already have refused. The
+// cell-address reader (`cellAddress`) stays tolerant of either case because it
+// also reads the refs a file states of its own — a `<mergeCell ref>`, an
+// `<autoFilter ref>` — where a lowercase letter is a writer's spelling rather
+// than a request this kit gets to judge.
+function columnNumber(value) {
+  if (typeof value !== "string" || !/^[A-Z]{1,3}$/.test(value) || columnOf(value) + 1 > RULES.sheet_column_max) {
+    throw new UsageError(`column must be column letters between A and ${colName(RULES.sheet_column_max - 1)}, got: ${JSON.stringify(value)}`);
+  }
+  return columnOf(value) + 1;
+}
+
+// The `<c>` a value makes at `reference`, with the style a `number_format` chose
+// or the cell's own. Every attribute but the style is dropped: a `cm`/`vm`
+// metadata reference names a value the cell no longer holds and the reader
+// rebuilds it, so keeping it would point at nothing.
+function valueCell(reference, value, style) {
+  const attribute = style === null || style === undefined ? "" : ` s="${style}"`;
+  if (value && typeof value === "object") return `<c r="${reference}"${attribute}><f>${xmlEscape(formulaOf(reference, value))}</f></c>`;
+  // The scalar rule the tool's boundary states, as the kit's own last line.
+  const scalar = scalarOf(value, `cell ${reference}`);
+  if (typeof scalar === "number") return `<c r="${reference}"${attribute}><v>${scalar}</v></c>`;
+  if (typeof scalar === "boolean") return `<c r="${reference}"${attribute} t="b"><v>${scalar ? 1 : 0}</v></c>`;
+  return `<c r="${reference}"${attribute} t="inlineStr"><is><t xml:space="preserve">${xmlEscape(scalar)}</t></is></c>`;
+}
+
+// The blocks of a `<styleSheet>` an edit reads or grows, and the element name one
+// entry of each takes: they are read and grown by one rule rather than one per
+// block. Each entry is matched in either shape — an `<xf>`, say, may hold an
+// `<alignment>` or a `<protection>` (both legal `CT_Xf`), and a matcher that kept
+// only the self-closing ones would drop the entry and shift every cell's `s=`
+// index. `<cellStyleXfs>` is where an id a cell xf omits resolves from and
+// `<cellStyles>` where a workbook's named styles live: both are read wherever the
+// part states them, and written with the default entry only when it states none —
+// a cell xf names a style in `<cellStyleXfs>` and a workbook states its default
+// style in `<cellStyles>`, so a part grown without them would point at blocks it
+// does not hold (see `STYLE_REFERENCES`).
+const STYLE_BLOCKS = { numFmts: "numFmt", fonts: "font", fills: "fill", borders: "border", cellXfs: "xf", cellStyleXfs: "xf", cellStyles: "cellStyle" };
+
+// `CT_Stylesheet`'s child order. A block the part lacks is created at its own
+// place in it: a `<fonts>` written after `<cellXfs>`, say, is a styles part a
+// reader may drop.
+const STYLESHEET_ORDER = ["numFmts", "fonts", "fills", "borders", "cellStyleXfs", "cellXfs", "cellStyles", "dxfs", "tableStyles", "colors", "extLst"];
+const stylesheetRank = (name) => {
+  const rank = STYLESHEET_ORDER.indexOf(name);
+  return rank < 0 ? STYLESHEET_ORDER.length : rank;
+};
+
+// The neutral `<xf>` the two xf blocks' index-0 entries are built from: it names
+// every format as 0 — no number format, font, fill or border of its own — so it
+// restyles nothing. The cell xf adds the `xfId="0"` that points it at cell style
+// 0; the cell-style xf states none, since it is the style an id resolves from.
+const NEUTRAL_XF = '<xf numFmtId="0" fontId="0" fillId="0" borderId="0"';
+
+// The entry each `<styleSheet>` block states when it holds one, and the block a
+// part states with it: ONE statement of the defaults, read by `MINIMAL_STYLES`
+// (the part a workbook this kit creates gets) and by the entries a part that never
+// stated a block is grown with (`putStyleEntry`), so a created workbook and a grown
+// part state the same font 0, fill 0 and `<xf>` 0.
+const STYLE_PART_ENTRIES = {
+  fonts: '<font><sz val="11"/><name val="Calibri"/></font>',
+  fills: '<fill><patternFill patternType="none"/></fill>',
+  borders: "<border/>",
+  cellStyleXfs: `${NEUTRAL_XF}/>`,
+  cellXfs: `${NEUTRAL_XF} xfId="0"/>`,
+  cellStyles: '<cellStyle name="Normal" xfId="0" builtinId="0"/>',
+};
+// The block a styles part states with one entry in it.
+const styleBlock = (block) => `<${block} count="1">${STYLE_PART_ENTRIES[block]}</${block}>`;
+
+// The styles part a workbook this kit creates is written with, in `CT_Stylesheet`'s own
+// order: one font, the "none" fill, no border and the `<cellStyleXfs>`/`<cellXfs>` pair
+// every `<styleSheet>` states — the blocks and entries `STYLE_PART_ENTRIES` states once,
+// so a created workbook and a part an edit grows state the same font 0, fill 0 and `<xf>`
+// 0. The default style `<cellStyles>` holds is not among them: creating a workbook has
+// never written one (this op leaves creation as it was), and a part grown for a style
+// entry is given the blocks that entry's ids resolve into (`STYLE_REFERENCES`),
+// `<cellStyles>` included.
+const MINIMAL_STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${Object.keys(STYLE_PART_ENTRIES).filter((block) => block !== "cellStyles").sort((a, b) => stylesheetRank(a) - stylesheetRank(b)).map(styleBlock).join("")}</styleSheet>`;
+
+// The `<styleSheet>` root of a styles part, in the one reading of an element's shape
+// (`elementEdges`), and `undefined` for a part whose root is missing or never closed —
+// `firstElement` reads closed elements alone — so an opening check and a writer reading
+// through this cannot disagree about what "writable" means: a part spelled
+// `</styleSheet >` is sound, and a writer matching the close tag literally would write
+// past it and report a success over a part that never took the child.
+function stylesRoot(styles) {
+  const found = firstElement(styles, "styleSheet");
+  if (!found) return undefined;
+  const edges = elementEdges(found[0], "styleSheet");
+  return { open: edges.open, selfClosing: edges.selfClosing, close: found.index + edges.close };
+}
+
+// `xml` with a whole `<name>` block inserted where `CT_Stylesheet` puts it: after every
+// block the schema orders before it and before the first it orders after. The scan is
+// over the schema's own block names, since an element scan would stop on an entry
+// nested in a block — a `<numFmt>` inside `<numFmts>` — instead of on the block itself.
+// A block written here is one its caller read through `writableElement` and found
+// absent, so a part that states its open tag without its close is already refused; a
+// self-closing root is opened around the element and a closed one takes it before its
+// own close.
+function insertStylesChild(xml, name, element) {
+  const root = stylesRoot(xml);
+  // An internal invariant rather than a caller's fault: `requireStylesRoot` refuses
+  // a part without a root before any edit runs.
+  if (!root) throw new Error(`there is no <styleSheet> root to write a <${name}> block into`);
+  if (root.selfClosing) return xml.slice(0, root.close - 2) + `>${element}</styleSheet>` + xml.slice(root.close);
+  const rank = stylesheetRank(name);
+  for (const later of STYLESHEET_ORDER.slice(rank + 1)) {
+    const found = firstElement(xml, later);
+    if (found) return xml.slice(0, found.index) + element + xml.slice(found.index);
+  }
+  return xml.slice(0, root.close) + element + xml.slice(root.close);
+}
+
+// The entries of a styles part's block — `<fonts>`, `<fills>`, `<borders>`,
+// `<cellXfs>`, `<cellStyleXfs>`, `<cellStyles>` — in the file's own order; `[]`
+// when the part has no such block at all. `putStyleEntry` is what adds one.
+function styleBlockEntries(styles, block) {
+  // A block the table states no entry element for is a rule this kit forgot, not
+  // a part with no entries: `elementPattern(undefined)` matches nothing, so the
+  // caller reads "this block states no entry" and writes its default over every
+  // byte the block really held. That is how a part whose `<cellStyles>` stated
+  // three named styles was replaced by the one default style.
+  if (!STYLE_BLOCKS[block]) throw new Error(`STYLE_BLOCKS states no entry element for the ${block} block`);
+  const found = firstElement(styles, block);
+  return found ? [...found[0].matchAll(elementPattern(STYLE_BLOCKS[block]))].map((match) => match[0]) : [];
+}
+
+// The blocks a style entry's ids resolve into, and the block a workbook states
+// its default style in. The entries this kit writes carry ids of their own: the
+// index-0 entry `STYLE_PART_ENTRIES` states names font 0, fill 0, border 0 and
+// style 0, and an `<xf>` omits what it does not state, which means id 0 too — so
+// a part that states none of those blocks would hold entries naming an id nothing
+// resolves, the dangling reference a reader refuses the whole styles part over.
+const STYLE_REFERENCES = { cellStyleXfs: ["fonts", "fills", "borders"], cellXfs: ["fonts", "fills", "borders", "cellStyleXfs", "cellStyles"] };
+
+// `styles` with `name` holding at least one entry, so the ids an entry names
+// resolve. A block the part does not state at all is written at its own
+// `CT_Stylesheet` place (`insertStylesChild`); a block the part states holding no
+// entry — a `<fills count="0"/>`, the shape a stripped workbook leaves — is
+// written over the block element itself, since there is no body to append an entry
+// to. A block that already states one keeps its own bytes.
+function ensureStyleBlock(styles, name) {
+  const found = writableElement(styles, name, "the styles part");
+  if (found && styleBlockEntries(styles, name).length) return styles;
+  return found ? styles.replace(found[0], () => styleBlock(name)) : insertStylesChild(styles, name, styleBlock(name));
+}
+
+// `styles` with every block `STYLE_REFERENCES` says `block`'s entries resolve into
+// grown, and each of those grown in turn: a `cellXfs` brings its `cellStyleXfs`,
+// whose own entry needs fonts, fills and borders. A no-op for a block that resolves
+// nothing — `fonts`, `fills`, `borders`, `numFmts` — so it runs unconditionally.
+function ensureStyleBlocks(styles, block) {
+  return (STYLE_REFERENCES[block] ?? []).reduce(
+    (out, name) => ensureStyleBlocks(ensureStyleBlock(out, name), name),
+    styles,
+  );
+}
+
+// The index `entry` takes in `block`'s list: an identical entry already there is reused
+// rather than added twice, else `entry` is appended and the block's `count` recomputed.
+// Entries keep their raw spelling, so adding one never rewrites the others. A block with
+// no entries takes the index-0 entry `STYLE_PART_ENTRIES` states first and `entry` at
+// index 1, so the entry never lands on the slot that restyles every cell naming no style
+// — and the blocks its ids resolve into are ensured first (`ensureStyleBlocks`).
+function putStyleEntry(styles, block, entry) {
+  const found = writableElement(styles, block, "the styles part");
+  const entries = found ? styleBlockEntries(styles, block) : [];
+  const existing = entries.indexOf(entry);
+  if (existing >= 0) return { styles, index: existing };
+  const written = entries.length ? [...entries, entry] : [STYLE_PART_ENTRIES[block], entry];
+  const body = written.join("");
+  const index = written.length - 1;
+  // The referenced blocks go into the text this call inserts into, so the block
+  // lands after them; the string match below still finds the element itself.
+  const base = ensureStyleBlocks(styles, block);
+  if (!found) return { styles: insertStylesChild(base, block, `<${block} count="${written.length}">${body}</${block}>`), index };
+  // The block's own open tag is kept — a `<cellXfs>`'s attributes, whatever it
+  // spells — and read through `elementParts`, so a close tag spelled with the
+  // whitespace XML allows does not make a closed block read as self-closing.
+  const { open } = elementParts(found[0], block);
+  return { styles: base.replace(found[0], () => `${setXmlAttribute(open, "count", String(written.length))}${body}</${block}>`), index };
+}
+
+// The open-tag/body/close shape of an element a part states: its own tag byte for byte
+// — a handler that rewrites a child keeps a `<border diagonalUp="1">` or a `<font>`'s
+// own attributes, which a rebuild from the tag name alone would drop — where its body
+// starts, whether it is self-closing and where its close tag starts. ONE reading of
+// the shape, shared by the element handlers (`elementParts`), the styles root
+// (`stylesRoot`) and a sheet's body (`sheetBody`). The close tag is read with the
+// whitespace XML allows before its `>` (`</name >`), the tolerance `elementForms`
+// states: a literal `</name>` test reads a sound element as self-closing and splices
+// its own open tag's close into the middle of it. This assumes `element` starts at the
+// element, which every caller's own match does. `close` is `undefined` for an element
+// a part opens and never closes.
+function elementEdges(element, name) {
+  // The open-tag pattern reads a self-closing tag too, whether or not the tag states
+  // an attribute before its `/` (`<border/>`): such a tag is the self-closing form and
+  // has no body.
+  const open = element.match(new RegExp(`^(?:${selfClosingTag(name)}|${openTag(name)})`))[0];
+  const bodyStart = open.length;
+  if (open.endsWith("/>")) return { open, bodyStart, selfClosing: true, close: bodyStart };
+  const close = element.slice(bodyStart).match(new RegExp(closeTag(name)));
+  return { open, bodyStart, selfClosing: false, close: close ? bodyStart + close.index : undefined };
+}
+
+// An element's open tag — the self-closing form opened, so a caller can write children
+// into it — and the text of its body, `""` for a self-closing element.
+function elementParts(element, name) {
+  const edges = elementEdges(element, name);
+  return edges.selfClosing
+    ? { open: `${edges.open.slice(0, -2)}>`, body: "" }
+    : { open: edges.open, body: element.slice(edges.bodyStart, edges.close) };
+}
+
+// `element` with `name="value"` set on its OWN open tag — the text up to and
+// including the first `>` — or, when it states no such attribute, ` name="value"`
+// inserted just before that tag's close, so a self-closing tag stays
+// self-closing; `null` removes the attribute instead. Only the open tag is
+// touched, so an attribute of the same name on a child element is the child's own
+// and the text around the tag is byte-identical. A function replacement
+// throughout, so a `$` in `value` is never read as a substitution pattern.
+function setXmlAttribute(element, name, value) {
+  const close = element.indexOf(">");
+  const open = element.slice(0, close + 1);
+  const pattern = new RegExp(`\\s${name}="[^"]*"`);
+  let written;
+  if (value === null) written = open.replace(pattern, "");
+  else if (pattern.test(open)) written = open.replace(pattern, () => ` ${name}="${value}"`);
+  else written = open.replace(/(\s*\/?>)$/, (end) => ` ${name}="${value}"${end}`);
+  return written + element.slice(close + 1);
+}
+
+// ECMA-376's `EG_Font` order: a `<font>`'s children must come in it, or a reader
+// may drop one written out of sequence, and a property appended at the end would
+// be reported as applied while the font renders as it did.
+const FONT_PROPERTY_ORDER = ["b", "i", "strike", "condense", "extend", "outline", "shadow", "u", "vertAlign", "sz", "color", "name", "family", "charset", "scheme"];
+
+// An element whose name the pattern itself captures: the self-closing shape
+// first, then the open/close shape whose close carries the name back. The readers
+// that walk children whose names are not known ahead build on this, so such a
+// child is read with the same tag spellings every other reader here uses.
+const ANY_ELEMENT = new RegExp(
+  `${selfClosingTag("([A-Za-z][A-Za-z0-9:]*)")}|${openTag("([A-Za-z][A-Za-z0-9:]*)")}[\\s\\S]*?${closeTag("\\2")}`,
+  "g",
+);
+
+// `body` with `element` written where `order` puts it: after every child the
+// sequence puts before it and before the first it puts after it. A body is flat —
+// the children of a `<font>` and the sides of a `<border>` hold no elements of
+// their own, and the docx arm's `<w:rPr>` one that does is split off before the
+// body arrives — so each child is one complete element. The docx arm's order is
+// `EG_RPrBase` (`RUN_PROPERTY_ORDER`); a child is ranked by its own local name,
+// since such a body spells its children with a namespace prefix (`<w:sz>`).
+function insertOrderedChild(body, name, element, order) {
+  const rank = (found) => {
+    const at = order.indexOf(found.slice(found.indexOf(":") + 1));
+    return at < 0 ? order.length : at;
+  };
+  const placed = rank(name);
+  for (const match of body.matchAll(ANY_ELEMENT)) {
+    if (rank(match[1] ?? match[2]) > placed) return body.slice(0, match.index) + element + body.slice(match.index);
+  }
+  return body + element;
+}
+
+// The workbook's own `<numFmts>` id for `formatCode`: an existing `<numFmt>` with
+// the same code is reused, else the id after the highest in use — at least the
+// first custom id, 164 — is allocated and its `<numFmts>` block written back. The
+// lookup is the block's own entries, not every `<numFmt>` in the part: a
+// `<numFmt>` a `<dxf>` holds is not a member of the workbook's table, and reading
+// one would reuse its id for a cell format the block never states. A built-in id
+// the file does not spell out resolves to whatever code the reader's locale gives
+// it, so it is not guessed at, and a format code is compared as text.
+function numberFormatId(styles, formatCode) {
+  const length = [...formatCode].length;
+  if (length > RULES.number_format_max) throw new UsageError(`a number format must be at most ${RULES.number_format_max} characters, got: ${length}`);
+  const entries = styleBlockEntries(styles, "numFmts");
+  const formats = new Map();
+  for (const entry of entries) {
+    const id = Number((entry.match(/\bnumFmtId="(\d+)"/) || [])[1]);
+    const code = (entry.match(/\bformatCode="([^"]*)"/) || [])[1];
+    if (Number.isFinite(id) && code !== undefined) formats.set(id, xmlUnescape(code));
+  }
+  let edited = styles;
+  let id = [...formats.entries()].find(([, code]) => code === formatCode)?.[0];
+  if (id === undefined) {
+    id = Math.max(163, ...formats.keys()) + 1;
+    // The entries keep their raw spelling, so a format the file already had is
+    // not rewritten by this one being added. `insertStylesChild` writes the block
+    // at its own `CT_Stylesheet` place — `<numFmts>` directly after
+    // `<styleSheet>`, before `<fonts>` — and opens a self-closing root so the
+    // block lands inside it rather than beside a second top-level element.
+    // Everything rewritten in is the file's own text or the caller's code, so a
+    // function replacement is used: a `$` in either would otherwise be a
+    // substitution pattern (`$&`, `$$`, `` $` ``, `$'`) and corrupt the part.
+    const block = `<numFmts count="${entries.length + 1}">${entries.join("")}<numFmt numFmtId="${id}" formatCode="${xmlEscape(formatCode)}"/></numFmts>`;
+    const numFmts = writableElement(styles, "numFmts", "the styles part");
+    edited = numFmts
+      ? edited.replace(numFmts[0], () => block)
+      : insertStylesChild(edited, "numFmts", block);
+  }
+  return { styles: edited, id };
+}
+
+// The `<font>` a request needs, from the cell's own: a toggle writes or drops
+// `<b/>`, `<i/>`, `<u/>` and `<strike/>` — a `<font>` entry is a complete
+// description of the look, so dropping one IS switching the property off, and the
+// cell renders no such property whatever its row or column states — `size` replaces
+// `<sz>`, `color` replaces `<color rgb="FF……"/>` (the digits uppercased under a full
+// alpha, the spelling Excel writes) and `font` replaces `<name>` — and takes the
+// font out of the theme's scheme with it: a `<scheme val="minor"/>` beside a
+// `<name>` says the face is the one the workbook's THEME states, so a requested face
+// kept beside it would still render as the theme's and be rewritten by a theme
+// change (the scheme element is what tells a reader the font IS the theme's —
+// ISO/IEC 29500 §18.8.35). `<family>`, `<charset>` and anything the request did not
+// name keep their own bytes, `<scheme>` among them when the face is not named; a
+// child written back goes at its place in `EG_Font` (`insertOrderedChild`), so it is
+// not written where a reader would drop it.
+function formatFont(font, edit) {
+  const { open, body } = elementParts(font, "font");
+  let out = body;
+  for (const [name, toggle] of [["b", "bold"], ["i", "italic"], ["u", "underline"], ["strike", "strike"]]) {
+    if (edit[toggle] === undefined) continue;
+    const without = out.replace(elementPattern(name), "");
+    out = edit[toggle] ? insertOrderedChild(without, name, `<${name}/>`, FONT_PROPERTY_ORDER) : without;
+  }
+  if (edit.size !== undefined) out = replaceFontChild(out, "sz", `<sz val="${edit.size}"/>`);
+  if (edit.color !== undefined) out = replaceFontChild(out, "color", `<color rgb="FF${edit.color}"/>`);
+  if (edit.font !== undefined) {
+    out = replaceFontChild(out.replace(elementPattern("scheme"), ""), "name", `<name val="${xmlEscape(edit.font)}"/>`);
+  }
+  return `${open}${out}</font>`;
+}
+
+// `body` with the `<name>` child it states replaced by `element`, or `element`
+// written at that child's place in `EG_Font` when it states none.
+function replaceFontChild(body, name, element) {
+  const held = firstElement(body, name);
+  if (held) return body.slice(0, held.index) + element + body.slice(held.index + held[0].length);
+  return insertOrderedChild(body, name, element, FONT_PROPERTY_ORDER);
+}
+
+// `CT_Border`'s own child order: `start`/`end` are the table-border sides a
+// reader would drop a child written before, and a request names only the sides a
+// cell draws.
+const BORDER_SIDES = ["start", "end", "left", "right", "top", "bottom", "diagonal", "vertical", "horizontal"];
+// The sides a `border` request may name, from the shared rules (rules.json).
+const CELL_BORDER_SIDES = RULES.cell_border_sides;
+
+// The `<border>` a request needs, from the cell's own: a named side `true` is a
+// thin default-coloured border (the spelling Excel itself uses) and `false` an
+// empty side that draws nothing. A side the request did not name — `<diagonal>`
+// included — keeps its own bytes, and a side written back goes at its place in
+// `CT_Border`.
+function formatBorder(border, edit) {
+  const { open, body } = elementParts(border, "border");
+  let out = body;
+  for (const side of CELL_BORDER_SIDES) {
+    if (edit.border[side] === undefined) continue;
+    const element = edit.border[side] ? `<${side} style="thin"><color indexed="64"/></${side}>` : `<${side}/>`;
+    const held = firstElement(out, side);
+    out = held ? out.slice(0, held.index) + element + out.slice(held.index + held[0].length) : insertOrderedChild(out, side, element, BORDER_SIDES);
+  }
+  return `${open}${out}</border>`;
+}
+
+// `CT_Xf`'s children after the entry's own attributes, in the order the schema
+// writes them: a child a request adds goes at its place, never before one that
+// must come first.
+const XF_CHILD_ORDER = ["alignment", "protection"];
+
+// The `<cellStyleXfs>` entry a cell xf's own `xfId` names — the named style it
+// takes anything it omits from — or `undefined` when the id names no entry.
+const namedStyleXf = (styles, xf) => styleBlockEntries(styles, "cellStyleXfs")[Number((xf.match(/\bxfId="(\d+)"/) || [])[1])];
+
+// The `<xf>` with its `<alignment>` changed by the named `align`/`vertical`/`wrap`
+// properties: each writes or replaces one attribute and every attribute the
+// element states keeps its value, so a cell with its own `vertical` that is asked
+// only for `align` keeps it. The base element is the xf's own `<alignment>` when it
+// states one or claims to apply its own alignment (`applyAlignment="1"`), else the
+// one the named style the xf's `xfId` references carries — the rule
+// `xfAttributeId` applies to a font, fill or border id, so naming only `align`
+// does not drop the `vertical`/`wrapText` the cell renders through its named
+// style; an inherited element is materialized onto the cell at the xf's own child
+// place, as a newly added one is. An `<alignment>` left stating nothing at all is
+// removed rather than written empty.
+function withAlignment(styles, xf, edit) {
+  const { open, body } = elementParts(xf, "xf");
+  const held = firstElement(body, "alignment");
+  const inherited = held || /\bapplyAlignment="1"/.test(xf) ? null : firstElement(namedStyleXf(styles, xf) ?? "", "alignment");
+  let element = held ? held[0] : inherited ? inherited[0] : "<alignment/>";
+  if (edit.align !== undefined) element = setXmlAttribute(element, "horizontal", edit.align);
+  if (edit.vertical !== undefined) element = setXmlAttribute(element, "vertical", edit.vertical);
+  if (edit.wrap !== undefined) element = edit.wrap ? setXmlAttribute(element, "wrapText", "1") : setXmlAttribute(element, "wrapText", null);
+  const bare = !/<alignment\b[^>]*[A-Za-z]+=/.test(element);
+  let out;
+  if (held) out = body.slice(0, held.index) + (bare ? "" : element) + body.slice(held.index + held[0].length);
+  else out = bare ? body : insertOrderedChild(body, "alignment", element, XF_CHILD_ORDER);
+  return `${open}${out}</xf>`;
+}
+
+// The id an `<xf>` states for `attribute`, or the one the named style it
+// references carries: a cell xf that omits an id takes it from the
+// `<cellStyleXfs>` entry its own `xfId` names (see `namedStyleXf`), so resolving
+// such an id to 0 would base the new entry on a look the cell never had. An entry
+// that claims to apply its own formatting (`applied`) yet states no id is the
+// schema default 0 instead — it inherits nothing.
+function xfAttributeId(styles, xf, attribute, applied) {
+  const pattern = new RegExp(`\\b${attribute}="(\\d+)"`);
+  const own = (xf.match(pattern) || [])[1];
+  if (own !== undefined) return Number(own);
+  if (new RegExp(`\\b${applied}="1"`).test(xf)) return 0;
+  const inherited = (namedStyleXf(styles, xf)?.match(pattern) || [])[1];
+  return inherited === undefined ? 0 : Number(inherited);
+}
+
+// The `<cellXfs>` entry the named properties need, from `xf` — the cell's own, or
+// the minimal default for a cell that names no style — with ONLY those properties
+// changed: everything unnamed (the number format, the fill, the borders, the
+// wrap, the vertical alignment, the protection) is the entry's own bytes. The
+// font, fill and border a named property needs are added to `styles` and
+// referenced by the entry's own ids, and the `apply…` flag is stated for every
+// property the request NAMED — the entry is cloned for what the caller asked for,
+// and an id written without its flag would leave the format inert.
+function styledXf(styles, xf, edit) {
+  let current = styles;
+  let out = xf;
+  if (["font", "size", "bold", "italic", "underline", "strike", "color"].some((name) => edit[name] !== undefined)) {
+    const fontId = xfAttributeId(current, out, "fontId", "applyFont");
+    const put = putStyleEntry(current, "fonts", formatFont(styleBlockEntries(current, "fonts")[fontId] ?? STYLE_PART_ENTRIES.fonts, edit));
+    current = put.styles;
+    out = setXmlAttribute(setXmlAttribute(out, "fontId", String(put.index)), "applyFont", "1");
+  }
+  if (edit.fill !== undefined) {
+    const fill = edit.fill === false
+      ? '<fill><patternFill patternType="none"/></fill>'
+      : `<fill><patternFill patternType="solid"><fgColor rgb="FF${edit.fill}"/><bgColor indexed="64"/></patternFill></fill>`;
+    const put = putStyleEntry(current, "fills", fill);
+    current = put.styles;
+    out = setXmlAttribute(setXmlAttribute(out, "fillId", String(put.index)), "applyFill", "1");
+  }
+  if (edit.border !== undefined) {
+    const borderId = xfAttributeId(current, out, "borderId", "applyBorder");
+    const put = putStyleEntry(current, "borders", formatBorder(styleBlockEntries(current, "borders")[borderId] ?? STYLE_PART_ENTRIES.borders, edit));
+    current = put.styles;
+    out = setXmlAttribute(setXmlAttribute(out, "borderId", String(put.index)), "applyBorder", "1");
+  }
+  if (edit.align !== undefined || edit.vertical !== undefined || edit.wrap !== undefined) {
+    // The flag is stated even when `withAlignment` left no `<alignment>` child —
+    // turning every named property off means the cell renders no alignment of its
+    // own, and without the flag a reader would fall back to the one the named style
+    // the xf's `xfId` references carries.
+    out = setXmlAttribute(withAlignment(current, out, edit), "applyAlignment", "1");
+  }
+  if (edit.number_format !== undefined) {
+    const format = numberFormatId(current, edit.number_format);
+    current = format.styles;
+    out = setXmlAttribute(setXmlAttribute(out, "numFmtId", String(format.id)), "applyNumberFormat", "1");
+  }
+  return { styles: current, xf: out };
+}
+
+// The `<cellXfs>` index a cell takes for the properties `edit` names: the base
+// style changed by exactly those properties — the cell's own `<cellXfs>` entry,
+// or the list's first for a cell that names no style of its own. An identical
+// entry already in the list is reused rather than appended twice, and the index
+// returned is the entry's real position in the list.
+function cellStyleIndex(styles, edit, cellStyle) {
+  const xfs = styleBlockEntries(styles, "cellXfs");
+  const index = Number(cellStyle);
+  // The cell's own entry, or — for a cell that names no `s=` — the list's first,
+  // which is the base style such a cell renders as: a hard-coded default instead
+  // would take away a font, fill or alignment the entry states.
+  const own = Number.isInteger(index) && xfs[index] !== undefined ? xfs[index] : xfs[0];
+  const styled = styledXf(styles, own ?? STYLE_PART_ENTRIES.cellXfs, edit);
+  return putStyleEntry(styled.styles, "cellXfs", styled.xf);
+}
+
+// Whether a line moves for an insert (a line at or after the point) or a delete
+// (only the lines after it — the deleted line itself is gone).
+const moves = (line, at, delta) => (delta > 0 ? line >= at : line > at);
+
+// A moved line number, kept inside the sheet's grid: a line at the sheet's own
+// last row or column stays there instead of naming one past the edge, which no
+// reader of the sheet has. The two caps are the shared rules the tool's own
+// boundary validates a caller's row and column against.
+const shiftNumber = (value, at, delta, max) => (moves(value, at, delta) ? Math.min(value + delta, max) : value);
+const shiftColumn = (column, at, delta) => shiftNumber(column + 1, at, delta, RULES.sheet_column_max) - 1;
+
+// One token of a range — `$A$1`, `B:D`, `3:7`, a single cell — moved; a token in
+// another shape (a defined name, `Sheet1!A1`) is left exactly as it is.
+function shiftToken(token, kind, at, delta) {
+  const cellToken = token.match(/^(\$?)([A-Za-z]{1,3})(\$?)(\d+)$/);
+  if (cellToken) {
+    const column = kind === "column" ? shiftColumn(columnOf(cellToken[2]), at, delta) : columnOf(cellToken[2]);
+    const row = kind === "row" ? shiftNumber(Number(cellToken[4]), at, delta, RULES.sheet_row_max) : Number(cellToken[4]);
+    return `${cellToken[1]}${colName(column)}${cellToken[3]}${row}`;
+  }
+  const columnToken = token.match(/^(\$?)([A-Za-z]{1,3})$/);
+  if (columnToken) {
+    if (kind !== "column") return token;
+    return `${columnToken[1]}${colName(shiftColumn(columnOf(columnToken[2]), at, delta))}`;
+  }
+  const rowToken = token.match(/^(\$?)(\d+)$/);
+  if (rowToken) return kind === "row" ? `${rowToken[1]}${shiftNumber(Number(rowToken[2]), at, delta, RULES.sheet_row_max)}` : token;
+  return token;
+}
+
+// A range or an address (`A1:C5`, `$A$1:$B$2`, `B:D`, `3:7`), both ends moved;
+// a value in another shape is returned byte-identical.
+function shiftRef(reference, kind, at, delta) {
+  const parts = reference.split(":");
+  const shifted = parts.map((part) => shiftToken(part, kind, at, delta));
+  return shifted.every((part, index) => part === parts[index]) ? reference : shifted.join(":");
+}
+
+// A `[low, high]` line range with the line `at` deleted: the deleted line is
+// gone from the range when it was inside it, so the range shrinks by one, and a
+// range that was that line alone vanishes. A range entirely after the point
+// moves down. `null` when nothing is left.
+function deleteRange(low, high, at) {
+  const nextLow = low > at ? low - 1 : low;
+  const nextHigh = high >= at ? high - 1 : high;
+  return nextHigh < nextLow ? null : { low: nextLow, high: nextHigh };
+}
+
+// A token naming whole lines (`B:D` on a column shift, `3:7` on a row shift, with
+// the `$` markers either end may carry): its line range with one line deleted —
+// the deleted line leaves the range, a range entirely after the point moves down,
+// a range the delete covered whole is `null` (nothing of it is left), and one the
+// delete does not reach comes back byte-identical. `undefined` for any other
+// token, so the caller keeps its own handling of cells and of names.
+function deleteLineRef(reference, kind, at) {
+  const pattern = kind === "column" ? /^(\$?)([A-Za-z]{1,3})$/ : /^(\$?)(\d+)$/;
+  const parts = reference.split(":");
+  const lines = parts.map((part) => part.match(pattern));
+  if (parts.length > 2 || lines.some((line) => line === null)) return undefined;
+  const numbers = lines.map((line) => (kind === "column" ? columnOf(line[2]) + 1 : Number(line[2])));
+  const low = Math.min(...numbers);
+  const high = Math.max(...numbers);
+  const span = deleteRange(low, high, at);
+  if (span === null) return null;
+  if (span.low === low && span.high === high) return reference;
+  const highest = numbers.indexOf(high);
+  return lines
+    .map((line, index) => {
+      const number = index === highest ? span.high : span.low;
+      return `${line[1]}${kind === "column" ? colName(number - 1) : number}`;
+    })
+    .join(":");
+}
+
+// A range with one line deleted on the shift's axis. A merge shrinks the way a
+// spreadsheet's merged cells do: a range the delete narrowed to one cell is no
+// longer a merge and is dropped, but one that was ALREADY a single cell and the
+// delete merely moved keeps its own spelling — dropping it would lose content
+// the edit did not name. A region (a `<dimension>`, an `sqref` token, an
+// autofilter) keeps the narrowed cell spelled once instead. A range the delete
+// does not move is returned byte-identical, each end's `$` markers and the
+// higher end kept; an insert shifts both ends the ordinary way. `null` when
+// nothing of the range is left, or, for a merge, when it no longer merges.
+function deleteRangeRef(reference, kind, at, delta, merge) {
+  if (delta > 0) return shiftRef(reference, kind, at, delta);
+  // A whole-line token is a range of the axis' own lines, not of cells, so it is
+  // moved by the line rules rather than the cell ones below. A merge is always a
+  // cell range.
+  if (!merge) {
+    const line = deleteLineRef(reference, kind, at);
+    if (line !== undefined) return line;
+  }
+  const parts = reference.split(":");
+  const cells = parts.map((part) => part.match(/^(\$?)([A-Za-z]{1,3})(\$?)(\d+)$/));
+  if (cells.some((cell) => cell === null) || (merge ? parts.length !== 2 : parts.length > 2)) {
+    return merge ? shiftRef(reference, kind, at, delta) : reference;
+  }
+  const columns = cells.map((cell) => columnOf(cell[2]) + 1);
+  const rows = cells.map((cell) => Number(cell[4]));
+  const lowColumn = Math.min(...columns);
+  const highColumnValue = Math.max(...columns);
+  const lowRow = Math.min(...rows);
+  const highRowValue = Math.max(...rows);
+  const columnSpan = kind === "column" ? deleteRange(lowColumn, highColumnValue, at) : { low: lowColumn, high: highColumnValue };
+  const rowSpan = kind === "row" ? deleteRange(lowRow, highRowValue, at) : { low: lowRow, high: highRowValue };
+  if (columnSpan === null || rowSpan === null) return null;
+  if (columnSpan.low === lowColumn && columnSpan.high === highColumnValue && rowSpan.low === lowRow && rowSpan.high === highRowValue) return reference;
+  const highColumn = columns.indexOf(highColumnValue);
+  const highRow = rows.indexOf(highRowValue);
+  const rebuilt = cells.map((cell, index) => {
+    const column = index === highColumn ? columnSpan.high : columnSpan.low;
+    const row = index === highRow ? rowSpan.high : rowSpan.low;
+    return `${cell[1]}${colName(column - 1)}${cell[3]}${row}`;
+  });
+  if (columnSpan.high === columnSpan.low && rowSpan.high === rowSpan.low) {
+    if (!merge) return rebuilt[0];
+    // A merge that no longer merges is dropped; one that was already a single
+    // cell and is merely moved keeps its own two-end spelling.
+    return lowColumn === highColumnValue && lowRow === highRowValue ? rebuilt.join(":") : null;
+  }
+  return rebuilt.join(":");
+}
+
+// A single-cell reference with one line deleted: the delete removes the element
+// when it names the very cell that goes (a hyperlink addresses one cell, so a
+// delete of that cell's row or column drops the link rather than leaving it to
+// re-attach to whatever cell shifts into its address), and shifts it otherwise.
+// An insert only shifts.
+function deleteCellRef(reference, kind, at, delta) {
+  if (delta > 0) return shiftRef(reference, kind, at, delta);
+  const cell = reference.match(/^(\$?)([A-Za-z]{1,3})(\$?)(\d+)$/);
+  if (cell === null) return shiftRef(reference, kind, at, delta);
+  if ((kind === "row" && Number(cell[4]) === at) || (kind === "column" && columnOf(cell[2]) + 1 === at)) return null;
+  return shiftRef(reference, kind, at, delta);
+}
+
+// The children the counted containers below are walked with: one element of the
+// container's own name, self-closing or child-bearing.
+const MERGE_CELL = elementPattern("mergeCell");
+const HYPERLINK = elementPattern("hyperlink");
+const COL_ENTRY = elementPattern("col");
+const DATA_VALIDATION = elementPattern("dataValidation");
+const PROTECTED_RANGE = elementPattern("protectedRange");
+const IGNORED_ERROR = elementPattern("ignoredError");
+
+// A container of counted children (`<mergeCells>`, `<hyperlinks>`, `<cols>`,
+// `<dataValidations>`, `<protectedRanges>`, `<ignoredErrors>`): each child's own
+// text is passed through `change`, which returns the child's new text or `null`
+// to drop it. An emptied container is dropped whole, because every one of these
+// elements requires a child, and a `count` the file stated follows the survivors.
+// A count is never INVENTED: `CT_Cols`, `CT_Hyperlinks`, `CT_ProtectedRanges` and
+// `CT_IgnoredErrors` declare no attributes at all, so one written for them would
+// make the part invalid, and an element the file wrote without a count keeps its
+// open tag exactly as it was written.
+//
+// The children are rewritten where they stand and nothing else in the block is
+// touched: a member this pass does not name — the `extLst` the schema's own
+// `CT_IgnoredErrors` allows, say — and the text between children are content the
+// edit never named, so they stay exactly as they were written. A block that held
+// none of its own children is returned untouched rather than dropped: it held
+// nothing already, so removing it is not this pass's to do. A block whose own
+// children ALL went with the edit is dropped whole, and a member it happened to
+// hold goes with it: the schema requires a child, so an emptied container cannot
+// stay at all, and this is the one case where an unnamed member cannot.
+function countedContainer(block, child, change) {
+  let held = 0;
+  let kept = 0;
+  const body = block.replace(child, (entry) => {
+    held += 1;
+    const next = change(entry);
+    if (next === null) return "";
+    kept += 1;
+    return next;
+  });
+  if (!held) return block;
+  if (!kept) return "";
+  const open = block.slice(0, block.indexOf(">") + 1);
+  return `${open.replace(/\bcount="\d*"/, `count="${kept}"`)}${body.slice(open.length)}`;
+}
+
+// What an element carrying an `sqref` is, in the words a reader of the answer
+// knows it by: the note says a conditional format, a data validation, a protected
+// range or a selection is gone, not the XML element's own name.
+function describeRange(name) {
+  if (name === "conditionalFormatting") return "conditional format's range";
+  if (name === "dataValidation") return "data validation's range";
+  if (name === "protectedRange") return "protected range";
+  if (name === "ignoredError") return "ignored error";
+  if (name === "selection") return "selection";
+  // A carrier outside these is named by its range alone: a raw element name is
+  // markup, not something a reader of the answer knows the sheet by.
+  return "range";
+}
+
+// The whitespace-separated range tokens of a value — what an `sqref` attribute and
+// an extended `<xm:sqref>` child both hold — each one moved by the shift the way
+// `deleteRangeRef` moves a region: a token the delete covered whole is dropped, so
+// an empty result means nothing of the range is left. `null` says the same to the
+// caller, which drops the element, and the note such a drop owes is written here,
+// once, for every element that carries a range — `what` naming it in the words a
+// reader of the answer knows it by. A value holding no token at all named no range,
+// so there was nothing to move and nothing the edit covered: `[]` says that, and
+// the element stays as it is — one the edit never named is not the edit's to drop.
+const movedRange = (range, what, kind, at, delta, note) => {
+  const tokens = range.split(/\s+/).filter(Boolean);
+  if (!tokens.length) return [];
+  const kept = tokens.map((token) => deleteRangeRef(token, kind, at, delta, false)).filter((token) => token !== null);
+  if (kept.length) return kept;
+  note(`[the deleted ${kind} covered the whole ${what}, ${JSON.stringify(range)}, which is gone with it]`, true);
+  return null;
+};
+
+// One element carrying an `sqref` attribute, its range moved: the element with
+// its range rewritten, or `null` to drop it — the note a full-cover delete owes
+// is written once, in `movedRange`. A value holding no token named no range, so
+// there was nothing to move and the element stays exactly as it is — one the
+// edit never named is not the edit's to drop.
+function shiftedSqref(whole, name, value, kind, at, delta, note) {
+  const kept = movedRange(value, describeRange(name), kind, at, delta, note);
+  if (kept === null) return null;
+  if (!kept.length) return whole;
+  return whole.replace(/\bsqref="[^"]*"/, () => `sqref="${kept.join(" ")}"`);
+}
+
+// The counted containers whose children carry an `sqref` themselves, with the
+// name each child is known by. Their children are moved inside the container's
+// own pass, NEVER by the bare-element pass above: that is what lets a container
+// the delete emptied go with its last child, exactly the way the merge, column
+// and hyperlink containers are handled — an emptied one is schema-invalid
+// (ECMA-376 requires a child) and an answer that kept it as an empty group with
+// a stale count would be reporting a corrupt file as a success.
+const SQUREF_CONTAINERS = [
+  ["dataValidations", DATA_VALIDATION, "dataValidation"],
+  ["protectedRanges", PROTECTED_RANGE, "protectedRange"],
+  ["ignoredErrors", IGNORED_ERROR, "ignoredError"],
+];
+
+// A whole element that carries an `sqref` of addresses, with one line deleted:
+// each token shrinks the way a merge range does (`deleteRangeRef` in region mode —
+// a rectangle narrows on the deleted axis, a token the delete covered whole is
+// gone) and the rewritten element keeps every surviving token. When no token is
+// left the element goes with them, and `note` says what was dropped, because an
+// edit that removes a conditional-format range, a data validation, a protected
+// range or a pane selection must not do it silently. Anchored on the open tag
+// (`[^<>]*` never crosses a `<` or `>`), so a cell whose own TEXT reads
+// `sqref="…"` is content and stays as it is.
+function shiftSqrefs(xml, kind, at, delta, note) {
+  const name = "([A-Za-z0-9_]+(?::[A-Za-z0-9_]+)?)";
+  const middle = "\\b[^<>]*\\bsqref=\"([^\"]*)\"[^<>]*";
+  const element = new RegExp(`${selfClosingTag(name, middle)}|${openTag(name, middle)}[\\s\\S]*?${closeTag("\\3")}`, "g");
+  const inContainer = new Set(SQUREF_CONTAINERS.map(([, , name]) => name));
+  let moved = xml.replace(element, (whole, selfName, selfValue, name, value) => {
+    const elementName = selfName ?? name;
+    // A counted container's child is moved by that container's own pass below.
+    if (inContainer.has(elementName)) return whole;
+    const next = shiftedSqref(whole, elementName, selfValue ?? value, kind, at, delta, note);
+    return next === null ? "" : next;
+  });
+  for (const [container, child, name] of SQUREF_CONTAINERS) {
+    moved = moved.replace(elementPattern(container), (block) => countedContainer(block, child, (entry) => {
+      const value = (entry.match(/\bsqref="([^"]*)"/) || [])[1];
+      return value === undefined ? entry : shiftedSqref(entry, name, value, kind, at, delta, note);
+    }));
+  }
+  return moved;
+}
+
+// One `<col>` entry with a column operation applied: an insert shifts `min`/`max`
+// the way a column address moves — a range covering the sheet's whole grid keeps
+// its last column — a delete shrinks the range and drops the entry when its own
+// column is the deleted one, leaving it would give two entries the same range.
+function columnEntry(tag, at, delta) {
+  const min = Number((tag.match(/\bmin="(\d+)"/) || [])[1]);
+  const max = Number((tag.match(/\bmax="(\d+)"/) || [])[1]);
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return tag;
+  if (delta > 0) {
+    const moved = (value) => shiftNumber(value, at, delta, RULES.sheet_column_max);
+    return tag.replace(/\b(min|max)="(\d+)"/g, (whole, name, value) => `${name}="${moved(Number(value))}"`);
+  }
+  const next = deleteRange(min, max, at);
+  if (next === null) return null;
+  return tag.replace(/\bmin="\d+"/, () => `min="${next.low}"`).replace(/\bmax="\d+"/, () => `max="${next.high}"`);
+}
+
+// The `<brk id>` page breaks of a `<rowBreaks>`/`<colBreaks>` block. A break's id
+// is a BOUNDARY — the number of lines above it — not a line, so a break at or below
+// the line that went moves up with it instead of keeping a number the data below
+// moved out of, and one at the sheet's top cannot go past it. `max` is the axis'
+// own last line, so an insert pushing a break down keeps it inside the grid. The
+// rewrite is anchored on the `<brk>` element's own tag, so an unrelated `id=` the
+// block happens to hold is left as it is.
+const shiftBreaks = (block, at, delta, max) => block.replace(/<brk\b[^<>]*>/g, (tag) => tag.replace(/(\bid=")(\d+)(")/g, (whole, before, value, after) => {
+  const id = Number(value);
+  if (id < at) return whole;
+  const next = delta > 0 ? Math.min(id + delta, max) : Math.max(id + delta, 1);
+  return `${before}${next}${after}`;
+}));
+
+// A cell range (`A1`, `A1:B2`) or a whole-line range (`B:D`, `3:7`), each end with
+// or without its `$` markers.
+const A1_OR_LINE = "(?:\\$?[A-Za-z]{1,3}\\$?\\d+(?::\\$?[A-Za-z]{1,3}\\$?\\d+)?|\\$?[A-Za-z]{1,3}:\\$?[A-Za-z]{1,3}|\\$?\\d+:\\$?\\d+)";
+
+// One end of a sheet qualifier, as two capture groups: a quoted name and a bare one.
+// The quoted spelling is the literal `'` a formula is written with, never the
+// `&apos;` XML escapes it to: a quote is the one character a greedy name body cannot
+// tell from content, so an escaped one in the pattern would let the body run past its
+// own closing quote and swallow every qualifier after it. The scans that read markup
+// unescape the text first instead (`cellFormulas`, `chartFormulas`, `ruleFormulas`,
+// `hyperlinkLocations`, `definedNameTexts`); the shift that WRITES a formula back
+// works on the part's own text and leaves an escaped qualifier as it stands.
+const SHEET_NAME = "(?:'((?:[^']|'')*)'|([\\p{L}_][\\p{L}\\p{N}_.]*))";
+
+// An A1 reference or whole-line range inside a conditional-format or
+// data-validation formula, with the sheet qualifier such a reference may carry.
+// Moved the way the range the rule names is moved: a reference to a line the
+// delete took is gone, so a range shrinks to the end that survives and a
+// reference to the cell itself becomes Excel's own `#REF!` instead of naming
+// whatever cell shifts into its place, while an insert moves both ends the
+// ordinary way. Anything that is not a reference is left as it is: a quoted
+// string is a list of values, a defined name is not an address, and a reference
+// qualified with ANOTHER sheet's name (`Sheet2!A1`) names a range this shift does
+// not move — only a reference to the sheet being shifted, bare or under its own
+// name, moves. A sheet name needs no quoting when it carries no space or
+// punctuation, so the bare qualifier takes letters of ANY script: a workbook's
+// `Данные!$B$2:$B$4` is as ordinary a reference as `Sheet1!A1`, and an
+// ASCII-only class would leave the whole range invisible to the shift. The
+// qualifier is part of the match, so a qualified range cannot be
+// half-rewritten by its tail matching alone, and a `:` in front of a match still
+// blocks it: a 3-D range (`Sheet1:Sheet3!A1`, and `'Week 1:Week 5'!A1` when a name
+// needs quoting) reads as ONE reference with both ends (`refMatch`), which a row or
+// column shift then leaves as it stands, rather than as a reference to its last
+// sheet. A whole-line range takes the same guard on its own tail (`!`): a 3-D
+// reference spelled with sheet names that carry no digits
+// (`Jan:Mar!A1`) reads as one, and the `!` is what tells it apart.
+const A1_REFERENCE = new RegExp([
+  '"(?:[^"]|"")*"',
+  `(?<![\\w.!$[:])${SHEET_NAME}(?::${SHEET_NAME})?!(${A1_OR_LINE})(?![\\w(!])`,
+  `(?<![\\w.!$[:])(${A1_OR_LINE})(?![\\w(!])`,
+].join("|"), "gu");
+
+// One match of `A1_REFERENCE` split into what it names: the reference itself, the
+// sheet its qualifier names — `undefined` for a bare reference, which belongs to the
+// sheet the formula sits on — and, for a 3-D range, the qualifier's other end. A name
+// read out of markup is unescaped the way the workbook's own name is before the two
+// are compared, and a quoted name's doubled quotes are folded. A 3-D range whose end
+// needs quoting wraps BOTH ends in the one quoted qualifier (`'Week 1:Week 5'!D5`),
+// the spelling Excel writes; a colon cannot occur in a sheet name, so a quoted body
+// holding exactly one is that range's two ends.
+const refMatch = (whole, quoted, bare, lastQuoted, lastBare, qualified, local) => {
+  const name = (quotedName, bareName) => (quotedName === undefined && bareName === undefined
+    ? undefined
+    : xmlUnescape(quotedName ?? bareName).replace(/''/g, "'"));
+  const ends = (quoted ?? "").split(":");
+  const range = ends.length === 2;
+  return {
+    reference: qualified ?? local,
+    sheet: range ? name(ends[0]) : name(quoted, bare),
+    lastSheet: range ? name(ends[1]) : name(lastQuoted, lastBare),
+  };
+};
+
+// `text` with every reference to the sheet named `sheet` moved by the shift.
+// `sheet` is the name the workbook spells for the sheet being edited, so a
+// reference the file qualified with its own name (`Sheet1!$A$1:$A$5`, which is
+// how Excel writes a validation list on the sheet itself) moves with it, while a
+// reference to any other sheet keeps its text.
+function shiftFormula(text, kind, at, delta, sheet) {
+  const wanted = typeof sheet === "string" ? sheet.toLowerCase() : null;
+  return text.replace(A1_REFERENCE, (whole, ...groups) => {
+    const { reference, sheet: qualifier, lastSheet } = refMatch(whole, ...groups);
+    // A quoted string is a list of values rather than a reference: it matches with
+    // the whole text and nothing else.
+    if (reference === undefined) return whole;
+    // A 3-D range names the same cells on every sheet between its ends, and this
+    // shift moves the cells of ONE sheet, so its text stays as it is.
+    if (lastSheet !== undefined) return whole;
+    if (qualifier !== undefined && qualifier.toLowerCase() !== wanted) return whole;
+    const next = deleteRangeRef(reference, kind, at, delta, false);
+    if (next === null) return "#REF!";
+    return whole.slice(0, whole.length - reference.length) + next;
+  });
+}
+
+// The references `text` spells under a qualifier naming the sheet `sheet` — what a
+// formula held by ANOTHER part writes about this one, where a bare reference
+// belongs to the sheet the formula itself sits on. Either end of a 3-D range names
+// the sheet, since the range covers every sheet between them.
+function qualifiedRefs(text, sheet) {
+  const wanted = sheet.toLowerCase();
+  const out = [];
+  for (const match of text.matchAll(A1_REFERENCE)) {
+    const { reference, sheet: qualifier, lastSheet } = refMatch(...match);
+    if ([qualifier, lastSheet].some((name) => name !== undefined && name.toLowerCase() === wanted)) out.push(reference);
+  }
+  return out;
+}
+
+// The extended twins Excel writes beside a base conditional format or data
+// validation in an `<extLst>`: the same rule in the `x14:`/`xm:` spelling, whose
+// range sits in an `<xm:sqref>` CHILD element where the base form has an `sqref`
+// attribute and whose formula sits in an `<xm:f>` child (inside an
+// `<x14:formulaN>` wrapper). They mirror the base rules the attribute pass moved,
+// so they move with them — and a rule whose range the delete took goes with it
+// rather than staying as one that applies to nothing.
+const XM_SQREF = elementPattern("xm:sqref");
+const X14_CONDITIONAL_FORMATTING = elementPattern("x14:conditionalFormatting");
+const X14_DATA_VALIDATION = elementPattern("x14:dataValidation");
+// Only `<xm:f>` holds formula text: an `<x14:formula1>` merely WRAPS one, so
+// matching the wrapper too would hand the reference rewriter its child markup and
+// let it read a tag name as a range. The element's name is the pattern's own
+// capture and both its tags are the shared spellings, so the close tag's
+// whitespace is read here as everywhere else.
+const EXTENDED_FORMULA = new RegExp(`${openTag("(xm:f)")}([\\s\\S]*?)${closeTag("\\1")}`, "g");
+
+// One extended rule, or `null` to drop it when the delete took its whole range.
+// `what` is the rule in the words a reader of the answer knows it by.
+function extendedRule(entry, what, kind, at, delta, sheet, note) {
+  const sqref = entry.match(XM_SQREF);
+  if (sqref) {
+    // The element's own body is the range list, as the shared element reading gives
+    // it: `""` for a self-closing element.
+    const range = elementParts(sqref[0], "xm:sqref").body;
+    const kept = movedRange(range, what, kind, at, delta, note);
+    if (kept === null) return null;
+    if (kept.length) entry = entry.replace(XM_SQREF, () => `<xm:sqref>${kept.join(" ")}</xm:sqref>`);
+  }
+  return entry.replace(EXTENDED_FORMULA, (whole, name, text) => {
+    const moved = shiftFormula(text, kind, at, delta, sheet);
+    return moved === text ? whole : `<${name}>${moved}</${name}>`;
+  });
+}
+
+// The names of the two containers an extended rule lives in: what says a wrapper
+// held a rule this pass moved, and so may have been emptied by it.
+const X14_RULE_CONTAINER = /<x14:(?:conditionalFormattings|dataValidations)\b/;
+
+// `xml` with the extended rules above moved. An extended conditional format
+// keeps its range beside its own `<x14:cfRule>` children, an extended data
+// validation holds its own: each goes whole when the range is gone, and a
+// container the delete emptied goes with it — both containers require a child, so
+// an emptied `<x14:conditionalFormattings>`/`<x14:dataValidations>` is not left
+// behind, and neither is the `null` a dropped rule would otherwise be written as.
+//
+// The containers are shifted inside the wrapper that holds them, so only a
+// wrapper that really held one of the two can have been emptied, and only such a
+// wrapper goes with its container: a payload of another kind — a plain-text
+// extension, one this pass never named — is left exactly as it stands.
+//
+// The wrappers are moved inside the `<extLst>` that holds them, so the list can
+// tell whether the pass emptied it: an `<extLst>` that held an `<ext>` and now
+// holds none goes with its last wrapper (the schema requires a child), while one
+// that held none to begin with — a self-closing `<extLst/>` or a paired empty
+// one — is not this pass's to remove. The open-tag alternation states a
+// self-closing list first, so it never pairs with a later `</extLst>`.
+// `elementPattern("ext")` cannot match `<extLst` (the name must be followed by a
+// space or `>`), and the ordered alternation keeps a self-closing `<ext .../>`
+// from being read as the open tag of a pair.
+function extendedRules(xml, kind, at, delta, sheet, note) {
+  const rule = (what) => (entry) => extendedRule(entry, what, kind, at, delta, sheet, note);
+  const shift = (block) => block
+    .replace(elementPattern("x14:conditionalFormattings"), (container) =>
+      countedContainer(container, X14_CONDITIONAL_FORMATTING, rule("extended conditional format's range")))
+    .replace(elementPattern("x14:dataValidations"), (container) =>
+      countedContainer(container, X14_DATA_VALIDATION, rule("extended data validation's range")));
+  const wrapper = (block) => {
+    const shifted = shift(block);
+    if (!X14_RULE_CONTAINER.test(block)) return shifted;
+    // The wrapper's own open tag is not payload: a wrapper whose shift left no
+    // element inside it held one of the two containers and nothing else, so it
+    // goes with them. The close tag reads `</…` to the test, never `<…`.
+    return /<[A-Za-z]/.test(shifted.slice(shifted.indexOf(">") + 1)) ? shifted : "";
+  };
+  return xml.replace(elementForms("extLst", "\\b[^<>]*"), (block) => {
+    if (!/<ext\b/.test(block)) return block;
+    const shifted = block.replace(elementPattern("ext"), wrapper);
+    return /<ext\b/.test(shifted) ? shifted : "";
+  });
+}
+
+// A whole element that names a range in its own `ref` — the sheet's own
+// `<dimension>` extent, its `<autoFilter>` range — with the ref narrowed on the
+// deleted axis the way the merges are; a ref the delete covered whole takes the
+// element with it rather than keeping the removed line or leaving an empty `ref`.
+// Neither element is required by the format, so a dropped one is owed no note.
+const refElement = (kind, at, delta) => (element) => {
+  const ref = (element.match(/\bref="([^"]*)"/) || [])[1];
+  if (ref === undefined) return element;
+  const next = deleteRangeRef(ref, kind, at, delta, false);
+  return next === null ? "" : element.replace(/\bref="[^"]*"/, () => `ref="${next}"`);
+};
+
+// Move every address one row or column insert/delete moved, across a sheet part.
+// Formulas, defined names, charts and pivot caches keep their text on purpose:
+// rewriting a formula's references is a spreadsheet engine's job, and a wrong
+// rewrite is worse than a stale one — the notes this raises say so. The notes are
+// raised here rather than at each call site, so no row or column op can forget
+// them, and only when the shift really moved a row or cell address: an insert
+// past the used range moves nothing, and the formulas, comments, shapes and
+// drawing anchors the part holds still name the cells they did. `stale` is what
+// `staleRefs` collected for this part, and `sheet` the name the workbook spells
+// for the sheet being shifted, which is what tells a formula's reference to this
+// sheet from one to another.
+//
+// A shift that moved nothing returns the part it was handed: making the addresses
+// a writer left implicit explicit is the only thing it would have written, and a
+// part rewritten for nothing is a change the caller would see and a chart caveat
+// nobody is owed. `removed` is the caller's own delete having taken cells out
+// before this call: a delete of the sheet's last line moves no address, yet it
+// changed the sheet's content and leaves the same parts naming old cells.
+// `addressed` is for a caller whose own delete had to materialize the addresses
+// first: it hands the part over already addressed, so the walk is not made twice.
+function shiftSheet(editor, xml, kind, at, delta, { stale, sheet, removed, addressed }) {
+  const note = editor.note;
+  const materialized = addressed ? xml : materializeAddresses(xml);
+  const data = shiftSheetData(materialized, kind, at, delta);
+  const shifted = data
+    .replace(elementPattern("dimension"), refElement(kind, at, delta))
+    .replace(elementPattern("mergeCells"), (block) =>
+      countedContainer(block, MERGE_CELL, (cell) => {
+        const ref = (cell.match(/\bref="([^"]*)"/) || [])[1];
+        if (ref === undefined) return cell;
+        const next = deleteRangeRef(ref, kind, at, delta, true);
+        return next === null ? null : cell.replace(/\bref="[^"]*"/, () => `ref="${next}"`);
+      }))
+    // An `<autoFilter ref>` names the range the filter covers, so it narrows or
+    // goes with a delete exactly as the merges above do (see `refElement`).
+    .replace(elementPattern("autoFilter"), refElement(kind, at, delta))
+    // A pane's `topLeftCell` and a selection's `activeCell` name a cursor
+    // POSITION in the grid rather than a range of content: a position after the
+    // deleted line moves up, the deleted line's own number stays and now points at
+    // the line that shifted into it, and an insert pushes a position at or after
+    // the point down — what a spreadsheet does with a selected cell. The `sqref`
+    // sibling is a range the rule named, so it shrinks or goes with the delete
+    // (see `shiftSqrefs`), and the element goes with it when nothing of the range
+    // is left: that is why a `selection` can vanish while the pane beside it keeps
+    // its cursor. The match is anchored on the tag itself, so a cell whose own text
+    // reads `activeCell="B2"` is content.
+    .replace(/<(?:pane|selection)\b[^<>]*>/g, (tag) => tag
+      .replace(/(\btopLeftCell=")([^"]*)(")/, (whole, before, value, after) => before + shiftRef(value, kind, at, delta) + after)
+      .replace(/(\bactiveCell=")([^"]*)(")/, (whole, before, value, after) => before + shiftRef(value, kind, at, delta) + after))
+    .replace(elementPattern("hyperlinks"), (block) =>
+      countedContainer(block, HYPERLINK, (link) => {
+        const ref = (link.match(/\bref="([^"]*)"/) || [])[1];
+        if (ref === undefined) return link;
+        const next = deleteCellRef(ref, kind, at, delta);
+        return next === null ? null : link.replace(/\bref="[^"]*"/, () => `ref="${next}"`);
+      }));
+  // `conditionalFormatting`, `dataValidation` and `pane/selection` all carry a
+  // `sqref` of addresses; each token shrinks or drops the way the merges above
+  // do, and an element left with no token goes with them (see `shiftSqrefs`).
+  const sqrefs = shiftSqrefs(shifted, kind, at, delta, note)
+    .replace(elementPattern("cols"), (block) =>
+      kind === "column" ? countedContainer(block, COL_ENTRY, (entry) => columnEntry(entry, at, delta)) : block)
+    .replace(elementPattern("rowBreaks"), (block) => kind === "row" ? shiftBreaks(block, at, delta, RULES.sheet_row_max) : block)
+    .replace(elementPattern("colBreaks"), (block) => kind === "column" ? shiftBreaks(block, at, delta, RULES.sheet_column_max) : block)
+    // The ranges conditional formatting and data validation name are moved above
+    // with their `sqref`; the references their own formulas carry move with them —
+    // including the ranges of whole columns or rows and a reference the file
+    // qualified with this sheet's own name — so a rule keeps testing the cells it
+    // was written for. A cell's `<f>` is not touched — see `formulaNote`.
+    .replace(elementPattern("conditionalFormatting"), (block) =>
+      block.replace(new RegExp(`(${openTag("formula")})([\\s\\S]*?)(${closeTag("formula")})`, "g"), (whole, open, text, close) => open + shiftFormula(text, kind, at, delta, sheet) + close))
+    .replace(DATA_VALIDATION, (entry) =>
+      entry.replace(new RegExp(`(${openTag("formula1")}|${openTag("formula2")})([\\s\\S]*?)(${closeTag("formula1")}|${closeTag("formula2")})`, "g"), (whole, open, text, close) => open + shiftFormula(text, kind, at, delta, sheet) + close));
+  // The extended forms of the same two rules live in an `<extLst>` beside them
+  // and move the same way.
+  const moved = extendedRules(sqrefs, kind, at, delta, sheet, note);
+  // What owes a content change and a note is the sheet having changed: a shift that
+  // moved a surviving address, or a delete that took cells without moving one (the
+  // last line of a sheet). An insert past the used range did neither — it has
+  // nothing to warn about and writes nothing.
+  const shiftedPart = moved !== materialized;
+  if (!shiftedPart && !removed) return xml;
+  editor.markContent();
+  formulaNote(editor, moved, kind, at, delta, sheet);
+  if (stale.size) note(`[the shift left ${[...stale].join(" and ")} pointing at the old cells — they were not rewritten]`, true);
+  return shiftedPart ? moved : xml;
+}
+
+// Whether an element's own open tag states an `r` at all: an address this kit's
+// reader can place (`A1`) and one it cannot (`$A$1`) are both addresses the element
+// names, and writing a second `r` beside either would state the attribute twice.
+const statesAddress = (element) => /\sr\s*=/.test(element.slice(0, element.indexOf(">") + 1));
+
+// The sheet part with the addresses its writer left implicit made explicit: each
+// `<row>` gets the computed `r` it stands for, each addressless `<c>` its
+// computed `r`. The product's own reader already numbers them that way — an
+// addressless cell is its position in the row, an addressless row is the one
+// after its predecessor — so a shift that moved only written addresses would
+// move the wrong cells, or none. This rewrites the part the shift already
+// rewrites and no other, and an element that already states an address of its own
+// keeps its bytes (see `statesAddress`).
+function materializeAddresses(xml) {
+  let number = 0;
+  return xml.replace(ROW_ELEMENT, (rowXml) => {
+    const attribute = (rowXml.match(/\br="(\d+)"/) || [])[1];
+    number = attribute ? Number(attribute) : number + 1;
+    const row = statesAddress(rowXml) ? rowXml : rowXml.replace(/^<row\b/, (open) => `${open} r="${number}"`);
+    const cells = rowCells(row);
+    let out = row;
+    for (let i = cells.length - 1; i >= 0; i -= 1) {
+      const cell = cells[i];
+      if (statesAddress(cell.xml)) continue;
+      const addressed = cell.xml.replace(/^<c\b/, (open) => `${open} r="${colName(cell.column)}${number}"`);
+      out = out.slice(0, cell.start) + addressed + out.slice(cell.end);
+    }
+    return out;
+  });
+}
+
+// The sheet's own rows and cells, with every address the shift moved. The caller
+// materializes the addresses first (see `materializeAddresses`), so a cell or row
+// with no `r` moves by the position that addresses it rather than staying put —
+// and so a shift can tell whether it really moved one.
+function shiftSheetData(xml, kind, at, delta) {
+  return xml.replace(ROW_ELEMENT, (rowXml) => {
+    const cells = rowXml.replace(CELL_ELEMENT, (cellXml) => cellXml.replace(/\br="([A-Za-z]+\d+)"/, (whole, reference) => `r="${shiftToken(reference, kind, at, delta)}"`));
+    if (kind !== "row") return cells;
+    return cells.replace(/(<row\b[^>]*\br=")(\d+)(")/, (whole, before, value, after) => `${before}${shiftNumber(Number(value), at, delta, RULES.sheet_row_max)}${after}`);
+  });
+}
+
+// Insert a new cell into its row at the address-ordered position.
+function insertCell(rowXml, cells, column, element) {
+  const after = cells.find((cell) => cell.column > column);
+  if (after) return rowXml.slice(0, after.start) + element + rowXml.slice(after.start);
+  // A self-closing `<row r="1"/>` is opened to hold the new cell; one already open
+  // takes it before its close, which `elementParts` reads in either spelling.
+  const { open, body } = elementParts(rowXml, "row");
+  return `${open}${body}${element}</row>`;
+}
+
+// `CT_Worksheet`'s children from `<sheetData>` on, in the sequence ISO/IEC 29500
+// states: a sheet part that states no `<sheetData>` gets one written before the
+// first child the sequence puts after it, so the part stays one a reader accepts.
+// The tail is the schema's own, `drawingHF` included — a sheet's header/footer
+// images are declared there — which some published copies of the type leave out.
+const WORKSHEET_ORDER = ["sheetData", "sheetCalcPr", "sheetProtection", "protectedRanges", "scenarios", "autoFilter", "sortState", "dataConsolidate", "customSheetViews", "mergeCells", "phoneticPr", "conditionalFormatting", "dataValidations", "hyperlinks", "printOptions", "pageMargins", "pageSetup", "headerFooter", "rowBreaks", "colBreaks", "customProperties", "cellWatches", "ignoredErrors", "smartTags", "drawing", "legacyDrawing", "legacyDrawingHF", "drawingHF", "picture", "oleObjects", "controls", "webPublishItems", "tableParts", "extLst"];
+
+// The worksheet root's two tags, in the shared spellings (`openTag`/`closeTag`), for
+// the two places that need a position in the root rather than the elements it holds.
+const WORKSHEET_OPEN = new RegExp(openTag("worksheet"));
+const WORKSHEET_CLOSE = new RegExp(closeTag("worksheet"));
+
+// `xml` with a `<sheetData/>` written at its `CT_Worksheet` place when the sheet
+// part states none: an edit that brings a value or formatting to such a sheet
+// writes the element it needs rather than refusing a legal part. A part that leaves
+// it open rather than stating it is refused (`writableElement`).
+const ensureSheetData = (xml) => (writableElement(xml, "sheetData", "the sheet part") ? xml : insertWorksheetChild(xml, "sheetData", "<sheetData/>"));
+
+// `xml` with `element` written at `name`'s own `CT_Worksheet` place: before the
+// first child the sequence puts after it, else before the worksheet's close. A
+// sheet's `<sheetData>`, its `<mergeCells>` and its `<drawing>` are all placed by
+// it, so none lands where a reader may drop it. A name the sequence does not list
+// has no place it could state — an `indexOf` of −1 would make it the root's first
+// child, before `sheetPr` — so it is refused.
+function insertWorksheetChild(xml, name, element) {
+  const at = WORKSHEET_ORDER.indexOf(name);
+  if (at < 0) throw new UsageError(`<${name}> has no place in this kit's worksheet order, so nothing was written`);
+  for (const later of WORKSHEET_ORDER.slice(at + 1)) {
+    const found = firstElement(xml, later);
+    if (found) return xml.slice(0, found.index) + element + xml.slice(found.index);
+  }
+  const close = xml.match(WORKSHEET_CLOSE);
+  if (!close) throw new UsageError(`the sheet part has no </worksheet> to write a <${name}> into`);
+  return xml.slice(0, close.index) + element + xml.slice(close.index);
+}
+
+// The `<sheetData>` a row- or cell-writing edit works in: the index its open tag starts
+// at, the tag it is spelled with, where its body ends and whether it is self-closing —
+// ONE reading of the element (`writableElement`, which refuses a part that leaves it
+// open), and `undefined` for a part that states none (`ensureSheetData` writes one). A
+// worksheet holds its rows in ONE `<sheetData>` (`CT_Worksheet` states exactly one), so
+// a part that states a second, or a `<row>` outside this one, is a shape no writer
+// produces and one no edit can write into without guessing which body is the sheet's:
+// refused by the callers that write into the body — a row created in it, the body
+// rebuilt — since a success over a part a reader offers to repair is the one outcome
+// an edit must not report. A caller that places a block BESIDE the body (a column
+// width's `<cols>`) needs the element's own index and reads no rows. An edit that
+// rewrites a cell inside a row it found changes nothing structural and leaves the
+// part as healthy as it arrived.
+function sheetBody(xml) {
+  const found = writableElement(xml, "sheetData", "the sheet part");
+  if (!found) return undefined;
+  const edges = elementEdges(found[0], "sheetData");
+  const bodyStart = found.index + edges.bodyStart;
+  const bodyEnd = found.index + edges.close;
+  const outside = sheetRows(xml).some((row) => row.start < bodyStart || row.end > bodyEnd);
+  if (outside || xml.slice(bodyEnd).includes("<sheetData")) {
+    throw new UsageError("the sheet part states a <row> outside its <sheetData>, or a second <sheetData>: a worksheet holds its rows in one body, which this tool does not edit around");
+  }
+  return { index: found.index, open: edges.open, selfClosing: edges.selfClosing, bodyStart, bodyEnd };
+}
+
+// Insert a `<row>` into the sheet's own `<sheetData>` in row order.
+function insertSheetRow(xml, rows, number, element) {
+  const source = ensureSheetData(xml);
+  // A part whose rows stand outside its `<sheetData>` is refused here, and a part
+  // that states none has no rows for `after` to name — so the positions `rows`
+  // carries are positions in `source` whenever `after` is found.
+  const body = sheetBody(source);
+  const after = rows.find((row) => row.number > number);
+  if (after) return source.slice(0, after.start) + element + source.slice(after.start);
+  // No row to order after: the element is the sheet's first, so the body holding
+  // the rows is opened when the one it states is self-closing.
+  if (!body.selfClosing) return source.slice(0, body.bodyEnd) + element + source.slice(body.bodyEnd);
+  return source.slice(0, body.index) + `${body.open.slice(0, -2)}>${element}</sheetData>` + source.slice(body.bodyStart);
+}
+
+// The cells a deleted column held, removed from their rows — the row itself
+// stays, so the sheet keeps a body to address. The caller materializes the
+// addresses first, so every cell here carries the `r` it sits at.
+function removeColumn(xml, column) {
+  return xml.replace(ROW_ELEMENT, (rowXml) => {
+    const cells = rowCells(rowXml).filter((cell) => cell.column + 1 === column);
+    let out = rowXml;
+    for (let i = cells.length - 1; i >= 0; i -= 1) out = out.slice(0, cells[i].start) + out.slice(cells[i].end);
+    return out;
+  });
+}
+
+// The `<f>` elements a part holds: a cell's formula, with the `ref` a shared
+// formula states and the formula's own text, unescaped so a name it spells through
+// markup (`&apos;My Data&apos;!B2`, the spelling this kit's own writer gives a quote)
+// reads as the name it means. A formula is the only place a reference lives, so this
+// is what a scan for one reads — a cell's own text is content, and one that merely
+// reads like a reference names nothing.
+const cellFormulas = (text) => [...text.matchAll(new RegExp(`${selfClosingTag("f", "\\b([^<>]*)")}|${openTag("f", "\\b([^<>]*)")}([\\s\\S]*?)${closeTag("f")}`, "g"))]
+  .map((match) => ({ range: ((match[1] ?? match[2]).match(/\bref="([^"]*)"/) || [])[1], text: xmlUnescape(match[3] ?? "") }));
+
+// The formulas a SHEET part holds outside its cells: a conditional format's
+// `<formula>` and a data validation's `<formula1>`/`<formula2>` — the elements a row
+// or column shift rewrites like a cell's `<f>` (see `shiftSheet`) — plus the
+// `<xm:f>` body an extended rule writes its copy of one in. Each is unescaped for the
+// same reason `cellFormulas` is.
+const ruleFormulas = (xml) => [
+  ...["formula", "formula1", "formula2"].flatMap((name) => [...xml.matchAll(elementPattern(name))].map((match) => elementParts(match[0], name).body)),
+  ...[...xml.matchAll(EXTENDED_FORMULA)].map((match) => match[2]),
+].map(xmlUnescape);
+
+// One note when a sheet a row or column shift touched holds cell formulas naming a
+// cell the shift moved: their own text is not rewritten — rewriting references is a
+// spreadsheet engine's job — so a reference may now mean a different cell. A
+// formula naming nothing the shift moved is left out rather than named: its text
+// means exactly what it did, and a note that stated a loss which did not happen
+// would be as wrong as a silent one. A cell's `<f>` is what counts — a
+// conditional-format or data-validation formula is not left behind (the shift
+// moves its references with the range it belongs to) — and a shared formula's own
+// covered range counts too, since the shift does not rewrite it either. `xml` is
+// the part as it stands AFTER the shift, so a formula the shift removed is not
+// counted as one left in place.
+function formulaNote(editor, xml, kind, at, delta, sheet) {
+  const movesReference = (text) => shiftFormula(text, kind, at, delta, sheet) !== text;
+  let count = 0;
+  for (const formula of cellFormulas(xml)) {
+    if (movesReference(formula.text) || (formula.range !== undefined && movesReference(formula.range))) count += 1;
+  }
+  if (!count) return;
+  const one = count === 1;
+  editor.note(`[the sheet's ${count} formula${one ? " was" : "s were"} left as ${one ? "it is" : "they are"} while ${one ? "a cell it names" : "cells they name"} moved — check the references]`, true);
+}
+
+// The addresses a cell- or range-anchored part names in its own text, which is
+// what a shift has to move for the part to be left behind: the `ref` of a comment,
+// of a table and of its autofilter, the range a `<definedName>` states, and the row
+// and column a floating drawing anchors its object at (0-based in the markup, so
+// one is added).
+const partRefs = (text) => [...text.matchAll(/\bref="([^"]*)"/g)].map((match) => match[1]);
+const definedNameTexts = (text) => [...text.matchAll(new RegExp(`${openTag("definedName")}([\\s\\S]*?)${closeTag("definedName")}`, "g"))].map((match) => xmlUnescape(match[1]));
+const anchoredCells = (text) => [...text.matchAll(new RegExp(`${openTag("xdr:(?:from|to)", "\\b[\\s\\S]*?")}${closeTag("xdr:(?:from|to)")}`, "g"))].flatMap((anchor) => {
+  const column = (anchor[0].match(new RegExp(`${openTag("xdr:col")}(\\d+)${closeTag("xdr:col")}`)) || [])[1];
+  const row = (anchor[0].match(new RegExp(`${openTag("xdr:row")}(\\d+)${closeTag("xdr:row")}`)) || [])[1];
+  return column === undefined || row === undefined ? [] : [`${colName(Number(column))}${Number(row) + 1}`];
+});
+
+// The parts a row/column shift leaves naming the cells it moved, because their
+// own text is not rewritten: the workbook's defined names, the shifted sheet's
+// own table ranges (a table is declared either by the sheet's `<tableParts>` or
+// by a `<.../table>` relationship of its `.rels`) and the sheet's cell-anchored
+// parts — a comment's own `ref`, the VML shape a comment is drawn with, and a
+// floating drawing's cell anchor all name the cell they were written for while
+// the data under them moves. A part is collected only when the shift really moves
+// one of the addresses it names: one whose own cells the shift moved with is as
+// valid as it was, and naming it would state a loss that did not happen. A part
+// the sheet declares that the package cannot read keeps its caveat — one that
+// cannot be inspected is not one known to be fine. The formulas held by OTHER
+// sheets of the workbook belong here too: a reference such a formula qualifies
+// with this sheet's own name names cells this shift moved and its part is not the
+// one being edited. What is collected, the reply names, the way it names formulas,
+// charts and pivots.
+function staleRefs(editor, part, xml, stale, kind, at, delta, sheet) {
+  const base = part.slice(0, part.lastIndexOf("/") + 1);
+  // Every part this check reads goes through the editor (`read`), so the walks it
+  // makes are charged like the ones the edits themselves make: a check that read
+  // whole parts around the budget would be the very hole the bound exists to close.
+  const relations = relationships(editor.read(relsPartFor(part)) ?? "");
+  // Whether the shift changes what an address names. The test is the shift's own
+  // reference rule, so a part anchored on a line the delete took is stale like one
+  // below it.
+  const movesAddress = (address) => shiftFormula(address, kind, at, delta, sheet) !== address;
+  const anyMoves = (addresses) => addresses.some(movesAddress);
+  const declares = (what) => relations.some((rel) => rel.type.endsWith(`/${what}`));
+  // Whether a part of this type the sheet declares names an address the shift moves.
+  const movedPart = (what, addresses) => relations
+    .filter((rel) => rel.type.endsWith(`/${what}`))
+    .some((rel) => {
+      const text = editor.read(resolvePart(base, rel.target));
+      return text === undefined || anyMoves(addresses(text));
+    });
+  const { workbook, sheets } = workbookSheetList(editor);
+  if (workbook !== undefined && anyMoves(definedNameTexts(workbook))) stale.add("the workbook's defined names");
+  // A table declared by the sheet's `<tableParts>` but named by no relationship of
+  // its own can be neither read nor ruled out.
+  if (movedPart("table", partRefs) || (/<tableParts\b/.test(xml) && !declares("table"))) stale.add("the sheet's table ranges");
+  if (movedPart("comments", partRefs)) {
+    stale.add("the sheet's comments");
+    // The shape a comment is drawn with follows the comment's own cell.
+    if (declares("vmlDrawing")) stale.add("the sheet's comment shapes");
+  }
+  if (movedPart("drawing", anchoredCells)) stale.add("the sheet's drawing anchors");
+  // A formula held by ANOTHER sheet is not this shift's to rewrite — that part is
+  // not the one being edited — so a reference it qualifies with this sheet's name
+  // keeps naming cells that moved. A bare reference belongs to the sheet the
+  // formula sits on, which is what the qualifier tells apart. The scan reads the
+  // formulas the part holds — a cell's `<f>` and the part's own rule formulas — rather
+  // than its whole text: a cell's own text can read like a reference and is content,
+  // not a formula, and naming it would state a loss that did not happen.
+  const others = sheets.map((entry) => entry.part).filter((name) => name !== part);
+  const staleElsewhere = others.some((name) => {
+    const text = editor.read(name);
+    if (text === undefined) return false;
+    const formulas = [...cellFormulas(text).map((formula) => formula.text), ...ruleFormulas(text)];
+    return formulas.some((formula) => qualifiedRefs(formula, sheet).some(movesAddress));
+  });
+  if (staleElsewhere) stale.add("the other sheets' formulas naming this sheet");
+}
+
+// `xml` with a `<dimension>` added for a workbook that states none, at
+// `CT_Worksheet`'s own place for it: directly after `<sheetPr>` when the sheet
+// has one, else as the worksheet's first child. A created workbook's sheet holds
+// only `<sheetData>`, so this is the sheet an edit widens for the first time.
+function insertDimension(xml, ref) {
+  const element = `<dimension ref="${ref}"/>`;
+  const sheetPr = firstElement(xml, "sheetPr");
+  const at = sheetPr ? sheetPr.index + sheetPr[0].length : (() => {
+    const open = xml.match(WORKSHEET_OPEN);
+    return open ? open.index + open[0].length : -1;
+  })();
+  if (at < 0) return xml;
+  return xml.slice(0, at) + element + xml.slice(at);
+}
+
+// The `<dimension ref>` a sheet that states none gets, so a write into it can
+// extend a declared reach it did not have: the smallest rectangle covering every
+// cell the part holds AND the address a write names, because a ref naming the
+// written cell alone would describe a part holding more than the ref says. The
+// cells' own addresses (`sheetRows`/`rowCells`) already resolve what a writer left
+// implicit, so the computed numbers are the ones a reader uses.
+function dimensionRef(xml, row, column) {
+  let firstRow = row;
+  let lastRow = row;
+  let firstColumn = column;
+  let lastColumn = column;
+  for (const entry of sheetRows(xml)) {
+    for (const cell of rowCells(entry.xml)) {
+      firstRow = Math.min(firstRow, entry.number);
+      lastRow = Math.max(lastRow, entry.number);
+      firstColumn = Math.min(firstColumn, cell.column);
+      lastColumn = Math.max(lastColumn, cell.column);
+    }
+  }
+  const low = `${colName(firstColumn)}${firstRow}`;
+  const high = `${colName(lastColumn)}${lastRow}`;
+  return low === high ? low : `${low}:${high}`;
+}
+
+// A worksheet's `<dimension ref>` widened so it covers a cell a `set_cell` wrote:
+// the cell may lie outside the sheet's declared reach, and a ref that does not
+// name it describes a part holding more than the ref says. The ref's own bounds
+// are the extent a write extends; a sheet that states no `<dimension>` at all
+// gets one covering its cells and the written address, since a part with no
+// declared reach is what an edit first brings formatting to, and one that states
+// a `<dimension>` with no `ref` (a part no writer would produce) takes the ref on
+// that element rather than a second element beside it. One the reader cannot
+// parse is left alone, as a row or column shift updates the ref the ordinary way.
+function widenDimension(xml, row, column) {
+  // The `<dimension>` element the ref goes on, or none: one the part leaves open is
+  // refused (`writableElement`).
+  const dimension = writableElement(xml, "dimension", "the sheet part");
+  if (!dimension) return insertDimension(xml, dimensionRef(xml, row, column));
+  if (!/\bref="/.test(dimension[0])) {
+    // `setXmlAttribute` keeps a self-closing tag self-closing, so `<dimension/>`
+    // becomes `<dimension ref="A1:B2"/>` rather than gaining a second element.
+    const covering = setXmlAttribute(dimension[0], "ref", dimensionRef(xml, row, column));
+    return xml.slice(0, dimension.index) + covering + xml.slice(dimension.index + dimension[0].length);
+  }
+  return xml.replace(/(<dimension\b[^>]*\bref=")([^"]*)(")/, (whole, before, value, after) => {
+    const cells = value.split(":").map((part) => part.match(/^([A-Za-z]+)(\d+)$/));
+    if (cells.length > 2 || cells.some((cell) => cell === null)) return whole;
+    const columns = [column + 1, ...cells.map((cell) => columnOf(cell[1]) + 1)];
+    const rows = [row, ...cells.map((cell) => Number(cell[2]))];
+    const low = `${colName(Math.min(...columns) - 1)}${Math.min(...rows)}`;
+    const high = `${colName(Math.max(...columns) - 1)}${Math.max(...rows)}`;
+    return before + (low === high ? low : `${low}:${high}`) + after;
+  });
+}
+
+function setCell(editor, edit, input, stylesName) {
+  const { part } = sheetPart(editor, edit.sheet);
+  const address = cellAddress(edit.cell);
+  const reference = colName(address.column) + address.row;
+  // A `set_cell` writes a value; changing a cell's formatting without writing one
+  // is the `format_cells` op's job, so there is one spelling of "format only".
+  // Writing through the value path with no value would answer such a request by
+  // emptying the cell it was given.
+  if (edit.value === undefined) throw new UsageError("set_cell needs a value — hint: use the format_cells op to change only a cell's formatting");
+  const format = edit.number_format === undefined ? null : editText(edit.number_format, "number_format");
+  // A workbook that never saved styles gets the part written rather than a
+  // refusal: setting a number format is exactly the edit that needs one.
+  const styles = format !== null ? stylesText(editor, input, stylesName) : null;
+  // The sheet is read and written by the one `sheet` call (its own duplicate check
+  // included), and the styles part by `stylesText` — each read charged — with the
+  // grown styles written back through `rewrite` rather than read again for the write
+  // (see `charge`'s doc).
+  editor.sheet(part, (sheet) => {
+    let style = null;
+    if (format !== null) {
+      const rows = sheetRows(sheet);
+      const row = rows.find((candidate) => candidate.number === address.row);
+      const cell = row ? rowCells(row.xml).find((candidate) => candidate.column === address.column) : undefined;
+      // The entry the number format clones is the style the cell already renders
+      // as — its own `s=` when it states one, else the one it inherits from its row
+      // or column — so setting a number format does not drop the cell's font, fill,
+      // border or alignment.
+      const base = (cell ? styleOf(cell.xml) : undefined) ?? inheritedStyle(rowStyleOf(row?.xml), columnStyleEntries(sheet), address.column);
+      const applied = cellStyleIndex(styles, { number_format: format }, base);
+      style = String(applied.index);
+      editor.rewrite(stylesName, styles, applied.styles);
+    }
+    const written = writeCell(sheet, edit, address, reference, style);
+    // A write that landed on the value the cell already held changed no content,
+    // so the caveats keyed on content are not owed for it.
+    if (written !== sheet) editor.markContent();
+    return written;
+  });
+}
+
+// `xml` with `edit`'s cell written: the row is added when the sheet has none, the
+// cell replaced or inserted inside its row, and the sheet's extent widened to
+// cover the address.
+function writeCell(xml, edit, address, reference, style) {
+  const rows = sheetRows(xml);
+  const row = rows.find((candidate) => candidate.number === address.row);
+  if (!row) {
+    const written = insertSheetRow(xml, rows, address.row, `<row r="${address.row}">${valueCell(reference, edit.value, style)}</row>`);
+    return widenDimension(written, address.row, address.column);
+  }
+  const cells = rowCells(row.xml);
+  const existing = cells.find((candidate) => candidate.column === address.column);
+  const cellStyle = style !== null ? style : existing ? styleOf(existing.xml) : null;
+  const element = valueCell(reference, edit.value, cellStyle);
+  const cellXml = existing ? row.xml.slice(0, existing.start) + element + row.xml.slice(existing.end) : insertCell(row.xml, cells, address.column, element);
+  return widenDimension(xml.slice(0, row.start) + cellXml + xml.slice(row.end), address.row, address.column);
+}
+
+function clearCell(editor, edit) {
+  const { part, name } = sheetPart(editor, edit.sheet);
+  const address = cellAddress(edit.cell);
+  editor.sheet(part, (xml) => {
+    // The cell is found by the address it stands for, read the way the rest of the
+    // kit reads one: `sheetRows`/`rowCells` resolve an addressless `<c>` to the
+    // position it sits in, so the target is found without rewriting the part's
+    // addresses. The emptied cell keeps its own address and style, and every other
+    // cell and row keeps its exact bytes.
+    const rows = sheetRows(xml);
+    const row = rows.find((candidate) => candidate.number === address.row);
+    const existing = row ? rowCells(row.xml).find((candidate) => candidate.column === address.column) : null;
+    if (!existing) throw new UsageError(`the cell ${edit.cell} is not in sheet ${JSON.stringify(name)}`);
+    editor.markContent();
+    // The cell is emptied, not unstyled: clearing takes what the cell holds, and
+    // the look it was given — the `s=` a `format_cells` wrote, an `apply…` entry's
+    // own style — stays its own. The `t`/`cm`/`vm` attributes go with the value, by
+    // the rule `valueCell` states, and so do the children; the address the emptied
+    // element states is its own, so the emptied cell stays where it was.
+    const emptied = emptiedCell(existing.xml);
+    return xml.slice(0, row.start) + row.xml.slice(0, existing.start) + emptied + row.xml.slice(existing.end) + xml.slice(row.end);
+  });
+}
+
+// The `<c>` element an emptied cell leaves: its address and its style index, in
+// the file's own spelling — the two attributes a cell keeps when its content is
+// taken out. Every other attribute described the value being removed.
+function emptiedCell(cell) {
+  const open = cell.slice(0, cell.indexOf(">") + 1);
+  const kept = ["r", "s"].map((name) => open.match(new RegExp(`\\s${name}="[^"]*"`))).filter(Boolean);
+  return `<c${kept.map((held) => held[0]).join("")}/>`;
+}
+
+function insertRow(editor, edit, stale) {
+  const { part, name } = sheetPart(editor, edit.sheet);
+  const row = rowNumber(edit.row);
+  editor.sheet(part, (xml) => {
+    const { rowMax } = usedRange(xml);
+    if (rowMax === 0) throw new UsageError(`sheet ${JSON.stringify(name)} has no rows to insert into`);
+    if (row > rowMax + 1) throw new UsageError(`row ${row} is past the sheet's used range (1-${rowMax})`);
+    // An insert moves every line from `row` down by one, so a sheet already
+    // reaching the grid's last row cannot take one: the row pushed past the edge
+    // would have to keep the last row's own address. Refusing names a call the
+    // caller can fix rather than writing two lines the same address.
+    if (rowMax >= RULES.sheet_row_max) throw new UsageError(`sheet ${JSON.stringify(name)} reaches the last row (${RULES.sheet_row_max}), so an insert would push a row past the sheet's grid`);
+    staleRefs(editor, part, xml, stale, "row", row, 1, name);
+    const shifted = shiftSheet(editor, xml, "row", row, 1, { stale, sheet: name });
+    return insertSheetRow(shifted, sheetRows(shifted), row, `<row r="${row}"/>`);
+  });
+}
+
+function deleteRow(editor, edit, stale) {
+  const { part, name } = sheetPart(editor, edit.sheet);
+  const row = rowNumber(edit.row);
+  editor.sheet(part, (xml) => {
+    const { rowMax } = usedRange(xml);
+    if (rowMax === 0) throw new UsageError(`sheet ${JSON.stringify(name)} has no rows`);
+    if (row > rowMax) throw new UsageError(`row ${row} is past the sheet's used range (1-${rowMax})`);
+    staleRefs(editor, part, xml, stale, "row", row, -1, name);
+    // A line inside the used range the writer left no `<row>` element for is
+    // still a line the delete takes: everything below it moves up by one, the
+    // same rule the column arm follows. Only a line past the used range is
+    // refused. The addresses a writer left implicit are materialized BEFORE the
+    // line goes, the column arm's own rule: an addressless `<row>` counts as "one
+    // after its predecessor", so a line taken out from above it would otherwise be
+    // renumbered by that count instead of moved by the shift, and the surviving
+    // row would come out stating a number its cells no longer sit at.
+    const materialized = materializeAddresses(xml);
+    const target = sheetRows(materialized).find((candidate) => candidate.number === row);
+    const without = target ? materialized.slice(0, target.start) + materialized.slice(target.end) : materialized;
+    // The delete takes the content the line held, whether or not it moves a
+    // surviving address: deleting the last used line leaves nothing to shift, and
+    // the caveats about a workbook's charts and pivots are owed for a change of
+    // content — a line the writer left holding no cell changed none. The shift
+    // raises the notes that change owes (see `shiftSheet`).
+    const tookCells = Boolean(target && rowCells(target.xml).length);
+    return shiftSheet(editor, without, "row", row, -1, { stale, sheet: name, removed: tookCells, addressed: true });
+  });
+}
+
+function insertColumn(editor, edit, stale) {
+  const { part, name } = sheetPart(editor, edit.sheet);
+  const column = columnNumber(edit.column);
+  editor.sheet(part, (xml) => {
+    const { columnMax } = usedRange(xml);
+    if (columnMax === 0) throw new UsageError(`sheet ${JSON.stringify(name)} has no columns to insert into`);
+    if (column > columnMax + 1) throw new UsageError(`column ${edit.column} is past the sheet's used range (A-${colName(columnMax - 1)})`);
+    // The column arm of the row guard above: a column pushed past the last one
+    // would have to keep the last column's own address.
+    if (columnMax >= RULES.sheet_column_max) throw new UsageError(`sheet ${JSON.stringify(name)} reaches the last column (${colName(RULES.sheet_column_max - 1)}), so an insert would push a column past the sheet's grid`);
+    staleRefs(editor, part, xml, stale, "column", column, 1, name);
+    return shiftSheet(editor, xml, "column", column, 1, { stale, sheet: name });
+  });
+}
+
+function deleteColumn(editor, edit, stale) {
+  const { part, name } = sheetPart(editor, edit.sheet);
+  const column = columnNumber(edit.column);
+  editor.sheet(part, (xml) => {
+    const { columnMax } = usedRange(xml);
+    if (columnMax === 0) throw new UsageError(`sheet ${JSON.stringify(name)} has no columns`);
+    if (column > columnMax) throw new UsageError(`column ${edit.column} is past the sheet's used range (A-${colName(columnMax - 1)})`);
+    staleRefs(editor, part, xml, stale, "column", column, -1, name);
+    // The addresses a writer left implicit are materialized before the column is
+    // removed, so the cell that sits in the deleted column by position is found
+    // rather than left behind.
+    const materialized = materializeAddresses(xml);
+    const stripped = removeColumn(materialized, column);
+    // The row arm's rule: the delete takes the cells the column held, whether or
+    // not it moves a surviving address.
+    return shiftSheet(editor, stripped, "column", column, -1, { stale, sheet: name, removed: stripped !== materialized, addressed: true });
+  });
+}
+
+// ── xlsx_edit: format_cells ────────────────────────────────────
+// `format_cells` writes only the properties a request names; everything else on
+// the cell is its own `<cellXfs>` entry's bytes (see `styledXf`). The closed sets
+// are the shared rules', so an alignment with no reader value — or an inherited
+// name such as "constructor" — is refused rather than written as one no reader
+// knows, and a border side outside the rule's list is refused the same way.
+const CELL_ALIGNMENTS = new Set(RULES.cell_alignments);
+const CELL_VERTICALS = new Set(RULES.cell_verticals);
+
+// The refusal a styles part whose root cannot be written into states: a
+// self-closing `<styleSheet/>` is opened by `insertStylesChild` around whatever
+// goes into it while a closed one takes children before its close, so either is
+// writable; a part with no root element, or one whose root never closes, has
+// nothing to write into, and a change that would splice into it must not be
+// reported as written. Read through the same reader the writer uses
+// (`stylesRoot`), so this opening check and the write cannot disagree about the
+// root's spelling.
+function requireStylesRoot(styles) {
+  if (!stylesRoot(styles)) throw new UsageError("the workbook's styles part cannot be written into: its <styleSheet> root is missing or never closed");
+}
+
+// The part the workbook's own relationships name for its styles, resolved like a
+// sheet's part is (`resolvePart` of the relationship's target) rather than assumed to
+// sit at the conventional `XLSX_STYLES`: a workbook whose styles were saved elsewhere
+// is one whose formatting has to go where the relationship points, or it lands in a
+// part no reader consults while the cells' own `s=` keep pointing at the part the
+// relationship names. The relationship list is read whether or not it can be written
+// into — the same reading `workbookSheetList` makes, so sheets and styles resolve
+// by one rule — and the conventional name is the fallback for a package that names no
+// styles part at all: the name a relationship has to be added for, by
+// `nameStylesPart`.
+function stylesPart(editor) {
+  const named = relationships(editor.read(XLSX_WORKBOOK_RELS) ?? "").find((rel) => rel.type === STYLES_REL_TYPE);
+  return named ? resolvePart(partDirectory(XLSX_WORKBOOK), named.target) : XLSX_STYLES;
+}
+
+// `name` — the styles part `stylesPart` resolved — made one the workbook's own
+// relationships name: a part no relationship points at is one no reader reads, so the
+// formatting would sit in a part nobody consults. Says whether the part ends up named.
+// `false` is a package whose relationship list cannot be written into — absent, or
+// holding no close of its own — which this kit does not refuse: a reader falls back to
+// the conventional part names for such a package and so does this kit (see
+// `workbookSheetList`), and an edit that writes no style has nothing to gain from
+// the naming. An edit that DOES write styles cannot accept it — see `stylesText`.
+function nameStylesPart(editor, name) {
+  const rels = editor.read(XLSX_WORKBOOK_RELS);
+  if (!relsWritable(rels)) return false;
+  if (relationships(rels).some((rel) => rel.type === STYLES_REL_TYPE)) return true;
+  addRelationship(editor, XLSX_WORKBOOK, STYLES_REL_TYPE, name);
+  return true;
+}
+
+// The text of `name`, the styles part `stylesPart` resolved, added and declared when the
+// workbook has none: an edit that brings formatting to a workbook that never saved styles
+// writes the part `createXlsx` would have rather than refusing, and the part a reader
+// reads is the one the workbook's own relationships name — a package whose relationships
+// cannot name it is refused (`nameStylesPart`) rather than answered with formatting
+// nobody consults. The text is the caller's own read, charged like every other walk over
+// a part, and the root was checked once before any edit ran (`xlsxEdit`).
+function stylesText(editor, input, name) {
+  if (!editor.zip.file("[Content_Types].xml")) throw missingContentTypes(input);
+  if (!editor.zip.file(name)) editor.add(name, MINIMAL_STYLES);
+  editor.part("[Content_Types].xml", (xml) => withOverride(xml, name, STYLES_CONTENT_TYPE));
+  if (!nameStylesPart(editor, name)) throw new UsageError(`cannot edit ${nodePath.basename(input)}: the workbook's relationships cannot name a styles part, so the formatting would sit in a part no reader reads`);
+  return editor.read(name);
+}
+
+// The rectangle an A1 cell or `A1:B2` range covers, its endpoints normalized so
+// `first` is the top-left: `cellAddress` reads each end (refusing a bad address or
+// one past the grid) and the ends are swapped. Every cell inside is on the grid by
+// construction.
+function gridRect(range) {
+  const parts = typeof range === "string" ? range.split(":") : [];
+  if (parts.length === 0 || parts.length > 2) throw new UsageError(`range must be an A1 address or an A1:B2 range, got: ${JSON.stringify(range)}`);
+  const ends = parts.map((part) => cellAddress(part, "range"));
+  const [a, b] = ends.length === 1 ? [ends[0], ends[0]] : ends;
+  return {
+    firstRow: Math.min(a.row, b.row),
+    lastRow: Math.max(a.row, b.row),
+    firstColumn: Math.min(a.column, b.column),
+    lastColumn: Math.max(a.column, b.column),
+  };
+}
+
+// The caller's own range: `gridRect` plus the one bound on how many cells a format
+// may name.
+function rangeRect(range) {
+  const rect = gridRect(range);
+  requireRangeCap(rect, range);
+  return rect;
+}
+
+// The one bound that keeps a format from walking a rectangle no call could
+// finish. A rect is checked when it is read and again when a merge widens it: a
+// `<mergeCell>` covering more cells than the rule allows would otherwise slip
+// past the check the caller's own range passed.
+const requireRangeCap = (rect, label) => {
+  const cells = (rect.lastRow - rect.firstRow + 1) * (rect.lastColumn - rect.firstColumn + 1);
+  if (cells > RULES.format_cells_max) throw new UsageError(`the range ${label} covers ${cells} cells, more than the ${RULES.format_cells_max} one format may name`);
+};
+
+// The `A1:C1` (or single `A1`) spelling a rectangle is named by.
+const rectLabel = (rect) => {
+  const first = `${colName(rect.firstColumn)}${rect.firstRow}`;
+  const last = `${colName(rect.lastColumn)}${rect.lastRow}`;
+  return first === last ? first : `${first}:${last}`;
+};
+
+// Whether two rectangles share a cell.
+const rectsOverlap = (a, b) => a.firstRow <= b.lastRow && b.firstRow <= a.lastRow && a.firstColumn <= b.lastColumn && b.firstColumn <= a.lastColumn;
+
+// Whether two rectangles name the same cells.
+const sameRect = (a, b) => a.firstRow === b.firstRow && a.lastRow === b.lastRow && a.firstColumn === b.firstColumn && a.lastColumn === b.lastColumn;
+
+// The rectangle a merge's range names, refused when it covers a single cell: a
+// merge joins at least two. `where` names the sheet a created one was written on
+// (`""` for an edit, whose own sentence already does).
+const mergeRect = (range, where = "") => {
+  let rect;
+  try { rect = gridRect(range); } catch (error) { throw new UsageError(`${where}${error.message}`); }
+  if (rect.firstRow === rect.lastRow && rect.firstColumn === rect.lastColumn) {
+    throw new UsageError(`${where}the range ${rectLabel(rect)} covers one cell, and a merge needs at least two — hint: name a range like A1:B2`);
+  }
+  return rect;
+};
+
+// A sheet's own merges, the ONE reading of them: its `<mergeCells>` block, each
+// `<mergeCell>`'s ref as written, the rectangle it names and the element's own text,
+// and how many refs no reader can place (`rect` is `null` for one this kit cannot
+// parse or the grid cannot hold — the caller's own range is grid-checked, a merge's
+// is not). The unreadable ones are never dropped in silence: the ops that map onto
+// the block refuse over them (`mergeCells`), while the widening one skips them rather
+// than widening to an address no sheet has (`mergedRect`).
+function sheetMerges(xml) {
+  const block = firstElement(xml, "mergeCells");
+  // One opened and never closed is invisible to `firstElement`, and a second
+  // block written beside it is a part a reader offers to repair.
+  if (!block && openedNotClosed(xml, "mergeCells")) {
+    throw new UsageError("the sheet part holds <mergeCells> opened and never closed, so its merges cannot be read");
+  }
+  // A child opened and never closed is invisible to `MERGE_CELL` the same way, and a
+  // merge written at the end of the block's body would land inside it — lost, while
+  // the answer claimed otherwise. Unreadable, like a ref no reader can place.
+  if (block && openedNotClosed(block[0], "mergeCell")) {
+    throw new UsageError("the sheet part holds a <mergeCell> opened and never closed, so its merges cannot be read");
+  }
+  const merges = block
+    ? [...block[0].matchAll(MERGE_CELL)].map((match) => {
+      const ref = (match[0].match(/\bref="([^"]*)"/) || [])[1];
+      let rect = null;
+      if (ref !== undefined) { try { rect = gridRect(ref); } catch { rect = null; } }
+      return { ref, rect, text: match[0] };
+    })
+    : [];
+  return { block, merges, unreadable: merges.filter((merge) => merge.rect === null).length };
+}
+
+// A rectangle widened to cover every `<mergeCell>` it touches: Excel formats a
+// merged cell as one, so a format aimed at part of one must land on the whole.
+// Returns the widened rectangle, the label a reply names it by, whether it
+// changed, and how many merges the widened rectangle covers — an L of merges
+// closes over more than one, and the note a reply carries must not call them one.
+// The merges are `sheetMerges`' own reading, whose unreadable ones are skipped
+// here. Widening can bring a merge the rectangle did not touch into reach — an L of
+// merges whose far arm only the first widening reaches — so the passes repeat until
+// the rectangle stops growing, each pass taking in at least one merge. A merge that
+// widens the rectangle past the cap is NOT skipped: `requireRangeCap` runs on the
+// WIDENED rect at the call site, so a merge that covers more cells than the rule
+// allows still refuses the call.
+function mergedRect(xml, rect) {
+  const merges = sheetMerges(xml).merges.map((merge) => merge.rect).filter((rect) => rect !== null);
+  let out = { ...rect };
+  let growing = true;
+  while (growing) {
+    growing = false;
+    for (const merge of merges) {
+      if (!rectsOverlap(merge, out)) continue;
+      const grown = {
+        firstRow: Math.min(out.firstRow, merge.firstRow),
+        lastRow: Math.max(out.lastRow, merge.lastRow),
+        firstColumn: Math.min(out.firstColumn, merge.firstColumn),
+        lastColumn: Math.max(out.lastColumn, merge.lastColumn),
+      };
+      if (grown.firstRow !== out.firstRow || grown.lastRow !== out.lastRow || grown.firstColumn !== out.firstColumn || grown.lastColumn !== out.lastColumn) growing = true;
+      out = grown;
+    }
+  }
+  const widened = out.firstRow !== rect.firstRow || out.lastRow !== rect.lastRow || out.firstColumn !== rect.firstColumn || out.lastColumn !== rect.lastColumn;
+  // How many merges the widened rectangle covers, so the note can say whether the
+  // format landed on one merged cell or on several: widening closes over every
+  // merge a merge reaches, so a rectangle grown by an L of them covers more than
+  // one and a note that called them one would be wrong.
+  const covered = merges.filter((merge) => rectsOverlap(merge, out)).length;
+  return { rect: out, label: rectLabel(out), widened, covered };
+}
+
+// A `border` request: an object whose keys are the sides a cell draws and whose
+// values are booleans, at least one side named. An unknown key, a non-boolean
+// value or an empty object is refused rather than silently dropped, since the
+// caller would otherwise be told a border was applied that no reader shows.
+function rangeBorder(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new UsageError(`border must be an object naming sides (${listed(CELL_BORDER_SIDES)}), got: ${JSON.stringify(value)}`);
+  const keys = Object.keys(value);
+  if (!keys.length) throw new UsageError(`border must name at least one side (${listed(CELL_BORDER_SIDES)})`);
+  const border = {};
+  for (const key of keys) {
+    if (!CELL_BORDER_SIDES.includes(key)) throw new UsageError(`border has no side ${JSON.stringify(key)} — hint: use ${listed(CELL_BORDER_SIDES)}`);
+    if (typeof value[key] !== "boolean") throw new UsageError(`border.${key} must be true or false`);
+    border[key] = value[key];
+  }
+  return border;
+}
+
+// The properties a `range` target names, normalized for `styledXf`: each one
+// bounded, colours reduced to their digits and booleans checked, so a value the
+// Rust boundary refused first is refused here too rather than written. A target
+// that names none is refused — the op would otherwise rewrite the sheet and
+// change nothing.
+function rangeFormat(edit) {
+  const format = {};
+  let named = false;
+  if (edit.font !== undefined) {
+    const font = editText(edit.font, "font");
+    if (!font) throw new UsageError("font must not be empty");
+    if ([...font].length > RULES.font_name_max) throw new UsageError(`font must be at most ${RULES.font_name_max} characters, got: ${[...font].length}`);
+    format.font = font;
+    named = true;
+  }
+  if (edit.size !== undefined) {
+    if (!inSpan(edit.size, RULES.cell_font_points)) throw new UsageError(`size must be ${spanBounds(RULES.cell_font_points)} points, got: ${JSON.stringify(edit.size)}`);
+    format.size = edit.size;
+    named = true;
+  }
+  for (const toggle of ["bold", "italic", "underline", "strike"]) {
+    if (edit[toggle] === undefined) continue;
+    if (typeof edit[toggle] !== "boolean") throw new UsageError(`${toggle} must be true or false`);
+    format[toggle] = edit[toggle];
+    named = true;
+  }
+  if (edit.color !== undefined) {
+    format.color = hexDigits(edit.color).toUpperCase();
+    named = true;
+  }
+  if (edit.fill !== undefined) {
+    format.fill = edit.fill === false ? false : hexDigits(edit.fill).toUpperCase();
+    named = true;
+  }
+  if (edit.border !== undefined) {
+    format.border = rangeBorder(edit.border);
+    named = true;
+  }
+  if (edit.align !== undefined) {
+    if (!CELL_ALIGNMENTS.has(edit.align)) throw new UsageError(`align must be ${listed([...CELL_ALIGNMENTS])}, got: ${JSON.stringify(edit.align)}`);
+    format.align = edit.align;
+    named = true;
+  }
+  if (edit.vertical !== undefined) {
+    if (!CELL_VERTICALS.has(edit.vertical)) throw new UsageError(`vertical must be ${listed([...CELL_VERTICALS])}, got: ${JSON.stringify(edit.vertical)}`);
+    format.vertical = edit.vertical;
+    named = true;
+  }
+  if (edit.wrap !== undefined) {
+    if (typeof edit.wrap !== "boolean") throw new UsageError("wrap must be true or false");
+    format.wrap = edit.wrap;
+    named = true;
+  }
+  if (edit.number_format !== undefined) {
+    const code = editText(edit.number_format, "number_format");
+    if (!code) throw new UsageError("number_format must not be empty");
+    if ([...code].length > RULES.number_format_max) throw new UsageError(`a number format must be at most ${RULES.number_format_max} characters, got: ${[...code].length}`);
+    format.number_format = code;
+    named = true;
+  }
+  if (!named) throw new UsageError("a format_cells range target names no property — hint: name at least one of font, size, bold, italic, underline, strike, color, fill, border, align, vertical, wrap or number_format");
+  return format;
+}
+
+// The style a `<row>` itself carries, which the cells that name none inherit: it
+// is stated with `customFormat="1"` — a bare `s=` a writer left on a row is not a
+// style a reader applies — and a `customFormat` row with no readable `s=` takes
+// the schema default, entry 0, so the row still wins over a covering `<col>`. A
+// row that is not there at all has no style, so a failed lookup's `undefined`
+// passes through.
+const rowStyleOf = (rowXml) => {
+  if (rowXml === undefined) return undefined;
+  const open = elementParts(rowXml, "row").open;
+  return /customFormat="1"/.test(open) ? (styleOf(open) ?? "0") : undefined;
+};
+
+// The `<col>` entries of a sheet that state a `style`, each with the span it covers:
+// a cell that names no style of its own takes the last entry covering its column.
+const columnStyleEntries = (sheet) => colEntries(sheet)
+  .filter((entry) => entry.style !== undefined && Number.isFinite(entry.min) && Number.isFinite(entry.max));
+
+// The style a cell that names no `s=` of its own renders by: the row's when it
+// has one — the row wins, as a reader applies them — else the last `<col>` entry
+// covering the column, else `undefined`, which is entry 0.
+const inheritedStyle = (rowStyle, columns, column) => {
+  if (rowStyle !== undefined) return rowStyle;
+  let found;
+  for (const entry of columns) if (column + 1 >= entry.min && column + 1 <= entry.max) found = entry.style;
+  return found;
+};
+
+// The `format_cells` op on a cell range: the sheet rebuilt in ONE pass, so the
+// rect's cells are rewritten and its missing rows and cells created while rows
+// outside the rect stay byte-identical (a body whose rows are not in address order
+// is written back in it — see the rows below). Every read is charged — the styles
+// part by `stylesText`, the sheet by the caller, each new style entry's parse here —
+// so a rect the rule allows but no machine could finish is refused the way any other
+// call over its budget is. The rebuilt text is RETURNED rather than written, so the
+// `sheet` call that read the part writes it once against the text it arrived as.
+function formatCells(editor, sheet, rect, edit, input, stylesName) {
+  const openedStyles = stylesText(editor, input, stylesName);
+  let styles = openedStyles;
+  const indices = new Map();
+  // The index a cell's base style takes — its own `s=`, or the style it inherits
+  // from its row or column when it names none — computed once per distinct base
+  // against the styles part as it grows: a rect may hold `RULES.format_cells_max`
+  // cells, and re-parsing the styles part for every cell of one base would be
+  // quadratic in the worst case the rule allows. The parse each new base costs is
+  // charged, so a rect of all-distinct bases is refused with a split hint rather
+  // than run into the kit's own time limit.
+  const indexFor = (base) => {
+    const key = base ?? "";
+    let index = indices.get(key);
+    if (index === undefined) {
+      editor.charge(styles.length);
+      const applied = cellStyleIndex(styles, edit, base);
+      styles = applied.styles;
+      index = String(applied.index);
+      indices.set(key, index);
+    }
+    return index;
+  };
+  const colStyles = columnStyleEntries(sheet);
+  const present = new Set(sheetRows(sheet).map((row) => row.number));
+  // The rows of the rect the sheet states no element for: the numbers come from
+  // the sheet's own set rather than from a cursor over document order, so a
+  // document that is not ascending cannot make one be created twice. An addressless
+  // `<row>` counts as "one after its predecessor", so a row element inserted among
+  // such rows renumbers every successor (see `materializeAddresses`). The addresses
+  // are made explicit before any row is inserted, but only when one of these has to
+  // be written.
+  const missing = [];
+  for (let row = rect.firstRow; row <= rect.lastRow; row += 1) {
+    if (!present.has(row)) missing.push(row);
+  }
+  const source = ensureSheetData(missing.length ? materializeAddresses(sheet) : sheet);
+  const body = sheetBody(source);
+  let created = false;
+  const newCell = (column, number, rowStyle) => {
+    created = true;
+    return `<c r="${colName(column)}${number}" s="${indexFor(inheritedStyle(rowStyle, colStyles, column))}"/>`;
+  };
+  // A whole row the sheet has none of: one created cell per column of the rect.
+  const rowElement = (number) => {
+    const cells = [];
+    for (let column = rect.firstColumn; column <= rect.lastColumn; column += 1) cells.push(newCell(column, number, undefined));
+    return `<row r="${number}">${cells.join("")}</row>`;
+  };
+  const rowBody = (row) => {
+    const stated = rowCells(row.xml);
+    // The row's own cells in address order: the row is rebuilt here either way, so its
+    // cells go back the way a reader reads them rather than the way they arrived, each
+    // address stated once (a row whose cells state none is refused — `ascending`).
+    const cells = ascending(stated, (cell) => cell.column, "the cells of a sheet row");
+    const rowStyle = rowStyleOf(row.xml);
+    const inRect = (column) => column >= rect.firstColumn && column <= rect.lastColumn;
+    // The rect's columns the row holds no cell for, in address order: emitted before
+    // the first stated cell they precede, so the row is rebuilt in ONE pass rather
+    // than rescanned per created cell (a rect may hold `RULES.format_cells_max` cells
+    // in one row). The cursor is the next column of the rect not yet written, so a
+    // cell LEFT of the rect leaves it where it is — stepping it back would create a
+    // neighbouring column the caller never named.
+    let column = rect.firstColumn;
+    const pending = (before) => {
+      let out = "";
+      while (column <= rect.lastColumn && column < before) {
+        out += newCell(column, row.number, rowStyle);
+        column += 1;
+      }
+      return out;
+    };
+    if (!cells.length) {
+      const filled = pending(Number.POSITIVE_INFINITY);
+      // A self-closing `<row r="1"/>` is opened to hold them; one already open
+      // takes them before its close (`elementParts` reads either spelling).
+      const { open, body } = elementParts(row.xml, "row");
+      return `${open}${body}${filled}</row>`;
+    }
+    // The row's own text around its cells — its open tag and whatever follows the
+    // last one — is kept as it stands: the text BETWEEN cells is a writer's own
+    // layout, and the row is written from the cells it holds.
+    let out = "";
+    for (const cell of cells) {
+      out += pending(cell.column);
+      // An existing in-rect cell has only its `s=` set — to the style it already
+      // renders as, its own or the one it inherits; one outside the rect is
+      // byte-identical, and the created columns go at their own place.
+      out += inRect(cell.column)
+        ? setXmlAttribute(cell.xml, "s", indexFor(styleOf(cell.xml) ?? inheritedStyle(rowStyle, colStyles, cell.column)))
+        : cell.xml;
+      column = Math.max(column, cell.column + 1);
+    }
+    out += pending(Number.POSITIVE_INFINITY);
+    return row.xml.slice(0, stated[0].start) + out + row.xml.slice(stated[stated.length - 1].end);
+  };
+  // The rows of the body in the order they go back: one the sheet states in address
+  // order is written where it stands, with the text between its rows kept byte for
+  // byte, while a body whose rows are not in order — a shape no writer produces — is
+  // rebuilt in address order, since the body is rewritten here anyway and each of the
+  // rect's rows is then stated once (a row stating no number of its own cannot be
+  // reordered and is refused — `ascending`).
+  const stated = sheetRows(source);
+  const rows = ascending(stated, (row) => row.number, "the sheet's rows");
+  const kept = rows === stated;
+  let text = source.slice(0, body.index) + (body.selfClosing ? `${body.open.slice(0, -2)}>` : body.open);
+  let cursor = body.bodyStart;
+  let next = 0;
+  const absent = (before) => {
+    let out = "";
+    while (next < missing.length && (before === null || missing[next] < before)) {
+      out += rowElement(missing[next]);
+      next += 1;
+    }
+    return out;
+  };
+  for (const row of rows) {
+    if (kept) text += source.slice(cursor, row.start);
+    text += absent(row.number);
+    if (row.number >= rect.firstRow && row.number <= rect.lastRow) {
+      text += rowBody(row);
+    } else {
+      text += source.slice(row.start, row.end);
+    }
+    cursor = row.end;
+  }
+  text += absent(null);
+  if (kept) text += source.slice(cursor, body.bodyEnd);
+  text += body.selfClosing ? `</sheetData>${source.slice(body.bodyEnd)}` : source.slice(body.bodyEnd);
+  // The sheet's declared reach covers the addressed rectangle only when a cell
+  // was really created: rewriting an existing cell's style moves no address, and
+  // a ref widened for it would be a change the caller did not ask for.
+  if (created) {
+    text = widenDimension(text, rect.firstRow, rect.firstColumn);
+    text = widenDimension(text, rect.lastRow, rect.lastColumn);
+  }
+  editor.rewrite(stylesName, openedStyles, styles);
+  return text;
+}
+
+// `entry` — a `colEntries` entry, so its own text and span are already read — split
+// so exactly `column` names `width` while the spans on either side keep the entry's
+// own attributes: each side is the same `<col>` with its `min`/`max` narrowed, and
+// the named column's copy has the new width and `customWidth` stated. A span the
+// named column does not touch produces no side piece.
+function splitColumn(entry, column, width) {
+  const span = (lo, hi) => setXmlAttribute(setXmlAttribute(entry.text, "min", String(lo)), "max", String(hi));
+  const parts = [];
+  if (column > entry.min) parts.push(span(entry.min, column - 1));
+  parts.push(setXmlAttribute(setXmlAttribute(span(column, column), "width", String(width)), "customWidth", "1"));
+  if (column < entry.max) parts.push(span(column + 1, entry.max));
+  return parts;
+}
+
+// The `format_cells` op on a column: the width goes into a `<col min max width
+// customWidth="1"/>` entry covering exactly that column. An entry covering a
+// WIDER span is SPLIT so the columns on either side keep exactly the entry they
+// had (same width, style, hidden, outlineLevel, collapsed, bestFit bytes) and
+// only the named column changes; a sheet with no `<cols>` block gets one created
+// directly before `<sheetData>`, the place `CT_Worksheet` requires of it.
+function formatColumn(editor, part, edit) {
+  const column = columnNumber(edit.column);
+  const width = edit.width_chars;
+  editor.sheet(part, (xml) => {
+    const source = ensureSheetData(xml);
+    // The block the entry goes into, or `undefined` for a sheet that states none; one
+    // the part leaves open is refused (`writableElement`).
+    const cols = writableElement(source, "cols", "the sheet part");
+    const entries = colEntries(source);
+    const covering = entries.findIndex((entry) => Number.isFinite(entry.min) && column >= entry.min && column <= entry.max);
+    const written = entries.map((entry) => entry.text);
+    if (covering >= 0) {
+      written[covering] = splitColumn(entries[covering], column, width).join("");
+    } else {
+      const placed = entries.findIndex((entry) => entry.min > column);
+      // The new entry is written at its `min`'s place, so the block stays ordered
+      // whether or not the sheet had a `<col>` for the column already.
+      written.splice(placed < 0 ? written.length : placed, 0, `<col min="${column}" max="${column}" width="${width}" customWidth="1"/>`);
+    }
+    const block = `<cols>${written.join("")}</cols>`;
+    if (cols) return source.slice(0, cols.index) + block + source.slice(cols.index + cols[0].length);
+    // No `<cols>` to write into: the block goes at its own `CT_Worksheet` place,
+    // directly before the body the sheet's rows live in. Only that element's place is
+    // read (`writableElement`; `ensureSheetData` above guarantees it exists), and no
+    // row is: a column width never writes into the body, so a part whose rows cannot
+    // be read is no reason to refuse it.
+    const body = writableElement(source, "sheetData", "the sheet part");
+    return source.slice(0, body.index) + block + source.slice(body.index);
+  });
+}
+
+// The `format_cells` op on a row: `ht` and `customHeight` are set on the row
+// element, everything else on it (its `spans`, its `s`, its cells) kept. A sheet
+// with no such row gets `<row r="N" ht="…" customHeight="1"/>` inserted in row
+// order; the addresses are made explicit before the element goes in, since an
+// addressless row counts as "one after its predecessor" and an inserted element
+// would renumber the rows after it.
+function formatRow(editor, part, edit) {
+  const row = rowNumber(edit.row);
+  const height = edit.height_points;
+  editor.sheet(part, (xml) => {
+    const existing = sheetRows(xml).find((candidate) => candidate.number === row);
+    if (existing) {
+      const element = setXmlAttribute(setXmlAttribute(existing.xml, "ht", String(height)), "customHeight", "1");
+      return xml.slice(0, existing.start) + element + xml.slice(existing.end);
+    }
+    const source = materializeAddresses(xml);
+    return insertSheetRow(source, sheetRows(source), row, `<row r="${row}" ht="${height}" customHeight="1"/>`);
+  });
+}
+
+// The `format_cells` op: a cell range, a column or a row, exactly one target
+// named and exactly the properties that target takes. Only the keys a target
+// knows are read — a key outside its set is the Rust boundary's refusal — and
+// every bound is stated here as the kit's own last line. A range target's sheet
+// part is read and charged once here (`sheet`), then handed to `mergedRect` and
+// `formatCells`, which returns the text the same call writes.
+function xlsxFormatCells(editor, edit, input, stylesName) {
+  const { part } = sheetPart(editor, edit.sheet);
+  const targets = ["range", "column", "row"].filter((key) => edit[key] !== undefined);
+  if (!targets.length) throw new UsageError("a format_cells edit needs one of range, column or row");
+  if (targets.length > 1) throw new UsageError(`a format_cells edit names more than one target (${listed(targets)}), but takes exactly one`);
+  if (targets[0] === "range") {
+    const rect = rangeRect(edit.range);
+    const format = rangeFormat(edit);
+    editor.sheet(part, (sheet) => {
+      const merged = mergedRect(sheet, rect);
+      if (merged.widened) {
+        requireRangeCap(merged.rect, `${merged.label} (${rectLabel(rect)} widened by a merged cell)`);
+        const merge = merged.covered === 1 ? "those cells are one merged cell" : `those cells are covered by ${merged.covered} merged cells`;
+        editor.note(`[the range ${rectLabel(rect)} was widened to ${merged.label}: ${merge}]`);
+      }
+      return formatCells(editor, sheet, merged.rect, format, input, stylesName);
+    });
+    return;
+  }
+  if (targets[0] === "column") {
+    if (edit.width_chars === undefined) throw new UsageError("a format_cells column target names no width_chars — hint: name width_chars");
+    if (!inSpan(edit.width_chars, RULES.column_width_chars)) throw new UsageError(`width_chars must be ${spanBounds(RULES.column_width_chars)} characters, got: ${JSON.stringify(edit.width_chars)}`);
+    formatColumn(editor, part, edit);
+    return;
+  }
+  if (edit.height_points === undefined) throw new UsageError("a format_cells row target names no height_points — hint: name height_points");
+  if (!inSpan(edit.height_points, RULES.row_height_points)) throw new UsageError(`height_points must be ${spanBounds(RULES.row_height_points)} points, got: ${JSON.stringify(edit.height_points)}`);
+  formatRow(editor, part, edit);
+}
+
+// ── xlsx_edit: merges, sheets and pictures ─────────────────────
+// `xlsx_edit`'s `merge_cells`: the range is normalized to its top-left corner and
+// written as one `<mergeCell>` at the end of the sheet's own block — merges need no
+// order — or as a block of its own at the element's `CT_Worksheet` place. The cells
+// the range covers are never touched: a merge changes what the sheet says about
+// them, not what they hold.
+function mergeCells(editor, edit) {
+  const { part, name } = sheetPart(editor, edit.sheet);
+  const rect = mergeRect(edit.range);
+  const label = rectLabel(rect);
+  editor.sheet(part, (xml) => {
+    const { block, merges, unreadable } = sheetMerges(xml);
+    const overlap = merges.find((merge) => merge.rect !== null && rectsOverlap(merge.rect, rect));
+    if (overlap) {
+      throw new UsageError(sameRect(overlap.rect, rect)
+        ? `sheet ${JSON.stringify(name)} already has ${label} merged — hint: unmerge ${overlap.ref} first, or name a range that is not merged`
+        : `the range ${label} overlaps ${overlap.ref}, which sheet ${JSON.stringify(name)} already has merged — hint: unmerge ${overlap.ref} first`);
+    }
+    if (unreadable) {
+      throw new UsageError(`sheet ${JSON.stringify(name)} holds a merge this kit cannot read, so a merge into it was refused rather than written over it`);
+    }
+    if (!block) return insertWorksheetChild(xml, "mergeCells", `<mergeCells count="1"><mergeCell ref="${label}"/></mergeCells>`);
+    const { open, body } = elementParts(block[0], "mergeCells");
+    const count = (open.match(/\bcount="(\d+)"/) || [])[1];
+    const nextOpen = count === undefined ? open : open.replace(/\bcount="\d*"/, () => `count="${Number(count) + 1}"`);
+    return xml.slice(0, block.index) + `${nextOpen}${body}<mergeCell ref="${label}"/></mergeCells>` + xml.slice(block.index + block[0].length);
+  });
+}
+
+// `xlsx_edit`'s `unmerge_cells`: the `<mergeCell>` naming the range, after the same
+// normalization the merge was written with — reversed corners included. A ref this
+// kit cannot parse can never be the match and is left exactly as it stands, keeping
+// the block alive; a block the removal empties goes with it, since the element
+// requires a child.
+function unmergeCells(editor, edit) {
+  const { part, name } = sheetPart(editor, edit.sheet);
+  const rect = gridRect(edit.range);
+  const label = rectLabel(rect);
+  editor.sheet(part, (xml) => {
+    const { block, merges } = sheetMerges(xml);
+    const target = merges.find((merge) => merge.rect !== null && sameRect(merge.rect, rect));
+    if (!target) {
+      const refs = merges.map((merge) => merge.ref).filter((ref) => ref !== undefined);
+      throw new UsageError(`the range ${label} is not a merge in sheet ${JSON.stringify(name)}: it has ${refs.length ? refs.join(", ") : "none"}`);
+    }
+    let gone = false;
+    const rewritten = countedContainer(block[0], MERGE_CELL, (entry) => {
+      if (!gone && entry === target.text) { gone = true; return null; }
+      return entry;
+    });
+    return xml.slice(0, block.index) + rewritten + xml.slice(block.index + block[0].length);
+  });
+}
+
+// `xlsx_edit`'s `add_sheet`: a fresh worksheet part, declared in the content types,
+// named by a workbook relationship and written last in the workbook's own sheet
+// list. The part number is one past the highest the package uses, so an existing
+// sheet and the references to it are never renamed.
+function addSheet(editor, edit) {
+  const name = checkSheetName(edit.name, "the new sheet");
+  const { workbook, sheets: entries } = workbookSheetList(editor);
+  if (entries.some((entry) => entry.name.toLowerCase() === name.toLowerCase())) {
+    throw new UsageError(`a sheet named ${JSON.stringify(name)} already exists — hint: pick a name no sheet uses, ignoring case`);
+  }
+  const list = workbook === undefined ? undefined : firstElement(workbook, "sheets");
+  if (list === undefined) throw new UsageError("the workbook has no sheet list to add a sheet to");
+  if (!editor.zip.file("[Content_Types].xml")) throw missingContentTypes(editor.input);
+  const number = Math.max(0, ...numberedParts(editor.zip, "xl/worksheets/sheet").map((entry) => entry.number)) + 1;
+  const part = `xl/worksheets/sheet${number}.xml`;
+  editor.add(part, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>`);
+  editor.part("[Content_Types].xml", (xml) => withOverride(xml, part, WORKSHEET_CONTENT_TYPE));
+  const id = addRelationship(editor, XLSX_WORKBOOK, WORKSHEET_REL_TYPE, part);
+  const sheetId = Math.max(0, ...entries.map((entry) => (Number.isFinite(entry.sheetId) ? entry.sheetId : 0))) + 1;
+  // The list holds `<sheet>` children alone, and a self-closing `<sheets/>` is
+  // opened to take the new one. The part is written back from the text already read
+  // rather than read and checked a second time.
+  const { open, body } = elementParts(list[0], "sheets");
+  const element = `<sheet name="${xmlEscape(name)}" sheetId="${sheetId}" r:id="${id}"/>`;
+  editor.rewrite(XLSX_WORKBOOK, workbook, workbook.slice(0, list.index) + `${open}${body}${element}</sheets>` + workbook.slice(list.index + list[0].length));
+}
+
+// `xlsx_edit`'s `rename_sheet`: the `<sheet>` element's own `name` attribute, and
+// every other part left byte-identical. Formulas, defined names, chart series and
+// links that still spell the old name are reported rather than rewritten — a wrong
+// rewrite of a reference is worse than a stale one, and rewriting references is a
+// spreadsheet engine's job.
+function renameSheet(editor, edit) {
+  const { workbook, name, index, sheets } = sheetPart(editor, edit.sheet);
+  const next = checkSheetName(edit.name, "the new sheet");
+  const target = sheets[index];
+  const clash = sheets.find((entry) => entry !== target && entry.name.toLowerCase() === next.toLowerCase());
+  if (clash) throw new UsageError(`a sheet named ${JSON.stringify(next)} already exists — hint: pick a name no sheet uses, ignoring case`);
+  if (next === name) return;
+  const renamed = workbook.slice(0, target.start) + setXmlAttribute(target.text, "name", xmlEscape(next)) + workbook.slice(target.end);
+  editor.rewrite(XLSX_WORKBOOK, workbook, renamed);
+  // A rename that only changes the spelling's case orphans nothing: a formula's
+  // qualifier is matched ignoring case, so `Data!A1` still names the sheet.
+  const kinds = name.toLowerCase() === next.toLowerCase() ? [] : sheetReferenceKinds(editor, name, sheets, renamed);
+  if (kinds.length) {
+    editor.note(`[the sheet ${JSON.stringify(name)} is now ${JSON.stringify(next)}, but ${joinedKinds(kinds)} still name ${JSON.stringify(name)} — those references were not rewritten]`, true);
+  }
+}
+
+// A `<sheet>` is hidden when its `state` says so: `hidden` and `veryHidden` are the
+// two ECMA-376 spells, and a visible sheet states nothing or `visible`. Hidden
+// sheets are ordinary sheets for every other purpose.
+const sheetHidden = (entry) => entry.state === "hidden" || entry.state === "veryHidden";
+
+// A `<definedName>`, in both shapes a part may write it in.
+const DEFINED_NAME = elementPattern("definedName");
+
+// The workbook's own indices into its sheet list, moved: a `<workbookView>`'s
+// `activeTab` and `firstSheet` through `sheetIndex`, and each `<definedName
+// localSheetId>` through `nameIndex`, where `null` drops the name with the sheet it
+// was scoped to. An attribute that is absent or no number is left as it stands, and
+// a `<definedNames>` block left with no child goes with it, since the element
+// requires one.
+function remapWorkbookIndices(xml, sheetIndex, nameIndex) {
+  let dropped = false;
+  const attribute = (tag, name, remap) => tag.replace(new RegExp(`(\\b${name}=")([^"]*)(")`), (whole, before, value, after) => {
+    if (!/^\d+$/.test(value)) return whole;
+    const moved = remap(Number(value));
+    return moved === null ? whole : `${before}${moved}${after}`;
+  });
+  const remapped = xml
+    .replace(/<workbookView\b[^>]*>/g, (tag) => attribute(attribute(tag, "activeTab", sheetIndex), "firstSheet", sheetIndex))
+    .replace(elementPattern("definedNames"), (block) => countedContainer(block, DEFINED_NAME, (element) => {
+      const value = xmlAttribute(element, "localSheetId");
+      if (value === undefined || !/^\d+$/.test(value)) return element;
+      const moved = nameIndex(Number(value));
+      if (moved === null) { dropped = true; return null; }
+      return setXmlAttribute(element, "localSheetId", String(moved));
+    }));
+  return { xml: remapped, dropped };
+}
+
+// `xlsx_edit`'s `delete_sheet`: the `<sheet>` element, the workbook relationship and
+// the worksheet part that belong to it alone, and the workbook's own indices kept
+// pointing at the sheets they named. A drawing, media or chart part it referenced is
+// left as it stands — a part nothing points at is a valid OPC part, and removing one
+// another part still names is not this edit's to do.
+function deleteSheet(editor, edit) {
+  const { workbook, part, name, index: at, sheets: entries } = sheetPart(editor, edit.sheet);
+  if (entries.length <= 1) throw new UsageError(`sheet ${JSON.stringify(name)} is the workbook's only sheet, and a workbook keeps at least one`);
+  const rest = entries.filter((entry, index) => index !== at);
+  if (!sheetHidden(entries[at]) && rest.every(sheetHidden)) {
+    throw new UsageError(`sheet ${JSON.stringify(name)} is the workbook's only visible sheet, and a workbook keeps at least one`);
+  }
+  // The first visible sheet an index landing on a hidden one moves to; a workbook
+  // whose remaining sheets are all hidden keeps index 0.
+  const visible = Math.max(0, rest.findIndex((entry) => !sheetHidden(entry)));
+  const sheetIndex = (index) => {
+    if (index >= entries.length) return index;
+    const moved = Math.min(Math.max(index > at ? index - 1 : index, 0), rest.length - 1);
+    return sheetHidden(rest[moved]) ? visible : moved;
+  };
+  const nameIndex = (index) => (index === at ? null : index > at ? index - 1 : index);
+  const without = workbook.slice(0, entries[at].start) + workbook.slice(entries[at].end);
+  const remapped = remapWorkbookIndices(without, sheetIndex, nameIndex);
+  editor.rewrite(XLSX_WORKBOOK, workbook, remapped.xml);
+  if (remapped.dropped) editor.note(`[the workbook's sheet-scoped names for ${JSON.stringify(name)} went with the sheet]`);
+  if (entries[at].id !== undefined && !rest.some((entry) => entry.id === entries[at].id)) {
+    editor.part(XLSX_WORKBOOK_RELS, (xml) => xml.replace(elementWithAttribute("Relationship", "Id", entries[at].id), ""));
+  }
+  if (!rest.some((entry) => entry.part === part)) {
+    editor.remove(part);
+    editor.remove(relsPartFor(part));
+    removeOverride(editor, part);
+  }
+  // Values left the workbook, so a chart or a pivot reading them keeps what it had.
+  editor.markContent();
+  const kinds = sheetReferenceKinds(editor, name, entries, remapped.xml);
+  if (kinds.length) {
+    editor.note(`[the sheet ${JSON.stringify(name)} is gone, but ${joinedKinds(kinds)} still name it — those references were not rewritten]`, true);
+  }
+}
+
+// `xlsx_edit`'s `move_sheet`: the `<sheet>` element is taken out of the workbook's
+// sheet list and put back at the position the caller names in the RESULTING order,
+// so the order is the only thing that changes. The workbook's own indices are
+// remapped through the same move, so the active sheet stays the active sheet.
+function moveSheet(editor, edit) {
+  const { workbook, name, index: from, sheets: entries } = sheetPart(editor, edit.sheet);
+  const to = edit.to;
+  if (!Number.isInteger(to) || to < 1 || to > entries.length) {
+    throw new UsageError(`no position ${to}: this workbook has ${entries.length} sheet${entries.length === 1 ? "" : "s"}`);
+  }
+  if (to === from + 1) throw new UsageError(`sheet ${JSON.stringify(name)} is already at position ${to} — moving it there would change nothing`);
+  const remap = (index) => {
+    if (index >= entries.length) return index;
+    if (index === from) return to - 1;
+    const rest = index < from ? index : index - 1;
+    return rest < to - 1 ? rest : rest + 1;
+  };
+  const moved = entries[from];
+  const rest = entries.filter((entry, index) => index !== from);
+  const without = workbook.slice(0, moved.start) + workbook.slice(moved.end);
+  // A span after the removed element moved up by the element's own length.
+  const at = (position) => (position > moved.start ? position - moved.text.length : position);
+  const next = rest[to - 1];
+  const close = without.match(new RegExp(closeTag("sheets")));
+  if (!next && !close) throw new UsageError("the workbook's sheet list has no close to place the moved sheet before");
+  const position = next ? at(next.start) : close.index;
+  const inserted = without.slice(0, position) + moved.text + without.slice(position);
+  editor.rewrite(XLSX_WORKBOOK, workbook, remapWorkbookIndices(inserted, remap, remap).xml);
+}
+
+// The formulas a chart part's series carry: the body of each `<c:f>`, unescaped like
+// a cell's own formula.
+const chartFormulas = (xml) => [...xml.matchAll(elementPattern("c:f"))].map((match) => xmlUnescape(elementParts(match[0], "c:f").body));
+// The target each `<hyperlink>` element names through its `location` attribute,
+// unescaped: the attribute is markup, and a target is a formula's own text.
+const hyperlinkLocations = (xml) => [...xml.matchAll(elementPattern("hyperlink"))].map((match) => xmlUnescape(xmlAttribute(match[0], "location") ?? ""));
+
+// The kinds of reference that still name the sheet `name`, in the words the answer
+// uses: the workbook's cell formulas, the sheet parts' own rule formulas, its defined
+// names, every chart's series and the sheets' hyperlink targets. `sheets` and
+// `workbook` are the reading the caller already made (`sheetPart`), so the sheet list
+// and the defined names come from text already in hand; the sheet parts and the
+// charts are read here, through the editor, so the scan is charged like every other
+// walk — a check that read whole parts around the budget would be the very hole the
+// bound exists to close.
+function sheetReferenceKinds(editor, name, sheets, workbook) {
+  const names = (text) => qualifiedRefs(text, name).length > 0;
+  const parts = sheets.map((entry) => editor.read(entry.part)).filter((xml) => xml !== undefined);
+  const kinds = [];
+  if (parts.some((xml) => cellFormulas(xml).some((formula) => names(formula.text)))) kinds.push("the workbook's formulas");
+  if (parts.some((xml) => ruleFormulas(xml).some(names))) kinds.push("the sheets' conditional-format and data-validation formulas");
+  if (workbook !== undefined && definedNameTexts(workbook).some(names)) kinds.push("the workbook's defined names");
+  const charts = Object.keys(editor.zip.files).filter((part) => CHART_PART.test(part));
+  if (charts.some((part) => chartFormulas(editor.read(part) ?? "").some(names))) kinds.push("the charts' series");
+  if (parts.some((xml) => hyperlinkLocations(xml).some(names))) kinds.push("the sheets' links");
+  return kinds;
+}
+
+// Those kinds as one phrase: "a and b", or "a, b and c".
+const joinedKinds = (kinds) => (kinds.length < 2 ? kinds[0] ?? "" : `${kinds.slice(0, -1).join(", ")} and ${kinds.at(-1)}`);
+
+// `xlsx_edit`'s `add_image`: the picture becomes a media part, declared in the
+// content types, and is anchored at the cell the caller names by the SHEET'S OWN
+// drawing — the one the sheet already declares, or a new part the sheet gains a
+// relationship and a `<drawing>` element for. A single-cell anchor is what keeps
+// the picture where the caller put it: a later row or column shift moves the cells
+// under it and leaves the anchor naming the cell it was written for (see
+// `staleRefs`, which reports that). The size is the one every placement shares: a
+// stated side is points, one side alone keeps the picture's own proportions, and
+// neither keeps the picture's own size, since a sheet has no page to fit it into.
+// The sheet part is read once: a `<drawing>` adds no row or cell, so the text is
+// written back with `rewrite` and needs none of `sheet`'s duplicate-address check.
+function addSheetImage(editor, edit) {
+  const { part, name } = sheetPart(editor, edit.sheet);
+  const address = cellAddress(edit.cell);
+  const image = readImage(edit.image);
+  const size = imageSize(image, edit.width, edit.height, RULES.dimension_points, null);
+  const cx = Math.max(1, Math.round(size.width * PX_TO_EMU));
+  const cy = Math.max(1, Math.round(size.height * PX_TO_EMU));
+  if (!editor.zip.file("[Content_Types].xml")) throw missingContentTypes(editor.input);
+  const media = nextMediaPart(editor.zip, XLSX_MEDIA, image.kind);
+  editor.add(media, image.bytes);
+  editor.part("[Content_Types].xml", (xml) => withOverride(xml, media, image.contentType));
+  const sheetXml = editor.read(part);
+  const declared = writableElement(sheetXml, "drawing", "the sheet part");
+  let drawingPart;
+  if (declared) {
+    const declaredId = relationshipId(declared[0]);
+    const target = declaredId === undefined ? undefined : relationshipMap(editor.read(relsPartFor(part)) ?? "").get(declaredId);
+    drawingPart = target === undefined ? undefined : resolvePart(partDirectory(part), target);
+    if (drawingPart === undefined || !editor.zip.file(drawingPart)) {
+      throw new UsageError(`sheet ${JSON.stringify(name)} names a drawing part this kit cannot find, so the picture was not added`);
+    }
+  } else {
+    const number = Math.max(0, ...numberedParts(editor.zip, `${XLSX_DRAWINGS}drawing`).map((entry) => entry.number)) + 1;
+    drawingPart = `${XLSX_DRAWINGS}drawing${number}.xml`;
+    editor.part("[Content_Types].xml", (xml) => withOverride(xml, drawingPart, DRAWING_CONTENT_TYPE));
+    const drawingId = addRelationship(editor, part, DRAWING_REL_TYPE, drawingPart);
+    editor.rewrite(part, sheetXml, insertWorksheetChild(withRelationshipNamespace(sheetXml, "worksheet"), "drawing", `<drawing r:id="${drawingId}"/>`));
+  }
+  const relationship = addRelationship(editor, drawingPart, IMAGE_REL, media);
+  const existing = editor.read(drawingPart);
+  // One past the highest picture id the drawing already numbers, so the picture
+  // never renames one the part holds.
+  const pictureId = Math.max(2, Math.max(0, ...[...(existing ?? "").matchAll(/<xdr:cNvPr\b[^>]*\bid="(\d+)"/g)].map((match) => Number(match[1]))) + 1);
+  const anchor = `<xdr:oneCellAnchor><xdr:from><xdr:col>${address.column}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${address.row - 1}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>`
+    + `<xdr:ext cx="${cx}" cy="${cy}"/>`
+    + `<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="${pictureId}" name="Picture ${pictureId}"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>`
+    + `<xdr:blipFill><a:blip r:embed="${relationship}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>`
+    + `<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>`
+    + `</xdr:pic><xdr:clientData/></xdr:oneCellAnchor>`;
+  if (existing === undefined) {
+    editor.add(drawingPart, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><xdr:wsDr xmlns:xdr="${XDR_NS}" xmlns:a="${DRAWING_NS}" xmlns:r="${REL_NS}">${anchor}</xdr:wsDr>`);
+    return;
+  }
+  const namespaced = withNamespace(withRelationshipNamespace(existing, "xdr:wsDr"), "xdr:wsDr", "a", DRAWING_NS);
+  const close = namespaced.match(new RegExp(closeTag("xdr:wsDr")));
+  if (!close) throw new UsageError(`the drawing part ${drawingPart} has no </xdr:wsDr> to place a picture in`);
+  editor.rewrite(drawingPart, existing, namespaced.slice(0, close.index) + anchor + namespaced.slice(close.index));
+}
+
+function xlsxEdit(req) {
+  const editor = openEdit(req, "xlsx");
+  const edits = editList(req);
+  const names = Object.keys(editor.zip.files);
+  // A chart or a pivot that reads the edited cells keeps the values it was
+  // written with: the parts are copied through and nothing recomputes them. The
+  // test is on the part names the format gives those objects (`CHART_PART`).
+  const charts = names.some((name) => CHART_PART.test(name));
+  const pivots = names.some((name) => /^xl\/pivotTables\/pivotTable[^/]*\.xml$/.test(name) || /^xl\/pivotCache\/pivotCache(?:Definition|Records)[^/]*\.xml$/.test(name));
+  // The styles part is taken into hand before any edit runs, whatever the edit is: the
+  // part the workbook's own relationships name (`stylesPart`), a root not one a child
+  // can be written into (`requireStylesRoot`) and a part the workbook does not name
+  // (`nameStylesPart` — best effort here, while a styles-writing edit refuses a
+  // workbook whose relationships cannot name it, see `stylesText`). The read is charged
+  // (`read`), as is the one the edit that grows the part makes itself, so the work
+  // budget counts the part twice on a styles-writing call — the bound is on the work a
+  // call does, not on the distinct bytes it touches. What the part holds between its
+  // entries is not vetted, since an input already damaged there is no worse for this
+  // edit. A workbook with no styles part has nothing to check and keeps working.
+  const stylesName = stylesPart(editor);
+  const styles = editor.read(stylesName);
+  if (styles !== undefined) {
+    requireStylesRoot(styles);
+    nameStylesPart(editor, stylesName);
+  }
+  // The stale references a shift cannot rewrite, collected while the edits run
+  // so the reply names them once.
+  const stale = new Set();
+  for (const edit of edits) {
+    const op = edit && edit.op;
+    if (op === "set_cell") setCell(editor, edit, req.input, stylesName);
+    else if (op === "clear_cell") clearCell(editor, edit);
+    else if (op === "insert_row") insertRow(editor, edit, stale);
+    else if (op === "delete_row") deleteRow(editor, edit, stale);
+    else if (op === "insert_column") insertColumn(editor, edit, stale);
+    else if (op === "delete_column") deleteColumn(editor, edit, stale);
+    else if (op === "format_cells") xlsxFormatCells(editor, edit, req.input, stylesName);
+    else if (op === "merge_cells") mergeCells(editor, edit);
+    else if (op === "unmerge_cells") unmergeCells(editor, edit);
+    else if (op === "add_sheet") addSheet(editor, edit);
+    else if (op === "rename_sheet") renameSheet(editor, edit);
+    else if (op === "delete_sheet") deleteSheet(editor, edit);
+    else if (op === "move_sheet") moveSheet(editor, edit);
+    else if (op === "add_image") addSheetImage(editor, edit);
+    else throw new UsageError(`unknown xlsx edit: ${JSON.stringify(op)}`);
+  }
+  // The editor knows whether the call changed the sheet's content at all — a
+  // shift that moved nothing writes no part, a delete that took the last line of a
+  // sheet with no extent to shrink removes cells though it moves no address, and a
+  // repeated write states what the cell already held. A note about a chart or a
+  // pivot is owed on that: nothing recomputes their cached values when a value or
+  // an address really changed, and a call that changed neither leaves them as
+  // valid as they were.
+  const content = editor.content();
+  // Informational, not a loss: the condition only knows the sheet's content
+  // changed, not that a chart or pivot reads the changed cells, so marking them a
+  // loss would make every content edit of a chart-bearing workbook answer partial.
+  // Their references are copied intact; only a cached snapshot goes stale, which
+  // the consumer recomputes — unlike a formula the tool left naming a moved cell.
+  if (content && charts) editor.note("[the workbook's charts were copied unchanged — nothing recomputes them, so a chart that reads the changed cells keeps the values it had]");
+  if (content && pivots) editor.note("[the workbook's pivot tables were copied unchanged — nothing recomputes them, so a pivot that reads the changed cells keeps the values it had]");
+  return editor.finish();
+}
+
+// ── pptx_edit ──────────────────────────────────────────────────
+// A slide is addressed by its 1-based number as the reader shows it, which is
+// the order `src/ooxml.rs::resolve_slide_parts` resolves the slide list in:
+// `ppt/presentation.xml`'s `<p:sldIdLst>` relationship ids through
+// `ppt/_rels/presentation.xml.rels`, and, when neither resolves, the
+// conventionally numbered `ppt/slides/slideN.xml` parts. The model reads a deck
+// with that reader and edits it here, so the two must agree on what "slide N" is
+// — a change to either resolution belongs in both.
+const PPT_PRESENTATION = "ppt/presentation.xml";
+const PPT_RELS = "ppt/_rels/presentation.xml.rels";
+const PPT_BASE = "ppt/";
+const PPT_SLIDES = "ppt/slides/";
+const PPT_LAYOUTS = "ppt/slideLayouts/";
+const PPT_NOTES_SLIDES = "ppt/notesSlides/";
+const PPT_NOTES_MASTERS = "ppt/notesMasters/";
+const PPT_MEDIA = "ppt/media/";
+const SLIDE_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.slide+xml";
+const NOTES_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml";
+// The relationships namespace the parts this kit writes declare as `r`, and the
+// base its relationship types are built from.
+const REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const REL_BASE = `${REL_NS}/`;
+const SLIDE_REL = `${REL_BASE}slide`;
+const SLIDE_LAYOUT_REL = `${REL_BASE}slideLayout`;
+const NOTES_REL = `${REL_BASE}notesSlide`;
+const NOTES_MASTER_REL = `${REL_BASE}notesMaster`;
+const IMAGE_REL = `${REL_BASE}image`;
+// The run language of a slide this kit writes; a placeholder inherits its type,
+// size and bullets from the layout, so nothing else about it is stated here.
+const SLIDE_LANG = "en-US";
+// The alignments a `format_text` may name, in the order the shared rules state
+// them: each word a caller may name and the `algn` value ECMA-376 writes for it.
+const SLIDE_ALIGNMENTS = new Map(RULES.slide_alignments);
+// The slide size a presentation stating none is read at, in EMU: the
+// 10in × 7½in one MS-OI29500 Part 1 §19.2.1.39 states PowerPoint assumes — a
+// `<p:sldSz cx="9144000" cy="6858000"/>` — when the element is absent. A picture
+// or a table added to such a slide is placed by fraction of this.
+const SLIDE_SIZE_DEFAULT = { width: 9144000, height: 6858000 };
+
+// The value of the attribute `name` of an XML tag. A longer name never matches a
+// shorter one (`\bTarget=` is not `TargetMode=`, and the `Id` of a relationship
+// is not the `rId` a slide points with).
+const xmlAttribute = (tag, name) => (tag.match(new RegExp(`\\b${name}="([^"]*)"`)) || [])[1];
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// The relationship id of an element that refers to a part (`r:id="rId1"`): the
+// prefixed `id`, never the element's own unprefixed one, the way the reader's
+// `rel_id` picks it out.
+const relationshipId = (tag) => (tag.match(/\b[A-Za-z0-9_]+:id="([^"]*)"/) || [])[1];
+
+// One element of `name` whose attribute `attr` holds exactly `value`, in either
+// shape it can be written in — the self-closing one and the paired one — so an
+// element written the paired way goes with the self-closing one. Anchored on the
+// attribute's own value, so a longer value never matches a shorter one and the
+// element's own text is never rewritten. Built on the same two-shape rule as
+// `elementPattern` (see `elementForms`).
+const elementWithAttribute = (name, attr, value) => elementForms(name, `\\b[^<>]*\\b${attr}="${escapeRegExp(value)}"[^<>]*`);
+
+// One `<Relationship>` of a `.rels` part; an element without an id or a target
+// names no part and is dropped, the way the reader's own scan keeps only
+// complete ones.
+function relationships(xml) {
+  const list = [];
+  for (const match of xml.matchAll(/<Relationship\b[^>]*>/g)) {
+    const id = xmlAttribute(match[0], "Id");
+    const target = xmlAttribute(match[0], "Target");
+    if (id === undefined || target === undefined) continue;
+    list.push({ id, target, type: xmlAttribute(match[0], "Type") || "" });
+  }
+  return list;
+}
+const relationshipMap = (xml) => new Map(relationships(xml).map((rel) => [rel.id, rel.target]));
+
+// A relationship target resolved against the part that owns it, the way
+// `src/ooxml.rs::resolve_part` does: an absolute target drops its leading slash,
+// a relative one appends to `base`, and `..` segments are folded away.
+function resolvePart(base, target) {
+  const path = target.startsWith("/") ? target.slice(1) : base + target;
+  const parts = [];
+  for (const segment of path.split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") parts.pop();
+    else parts.push(segment);
+  }
+  return parts.join("/");
+}
+
+// The `.rels` part that belongs to `part`, by the OPC convention all three
+// families follow.
+function relsPartFor(part) {
+  const cut = part.lastIndexOf("/");
+  return `${part.slice(0, cut)}/_rels/${part.slice(cut + 1)}.rels`;
+}
+
+// The directory a part's own relationships resolve their targets against.
+const partDirectory = (part) => part.slice(0, part.lastIndexOf("/") + 1);
+
+// Whether a `.rels` part is one a relationship can be written into: a part with no
+// close of its own has nowhere to insert one. The close is read with the shared
+// spelling rule (see `closeTag`), so a part spelled `</Relationships >` is not read
+// as one that never closes. A package whose relationships cannot be read is still
+// edited — a reader falls back to the conventional part names for it and so does
+// this kit (`workbookSheetList`) — so this says what can be written, not what is
+// refused.
+const RELATIONSHIPS_CLOSE = new RegExp(closeTag("Relationships"));
+const relsWritable = (rels) => rels !== undefined && RELATIONSHIPS_CLOSE.test(rels);
+// Add a relationship of `type` to `part`'s own relationships, naming the
+// absolute package path `target`, and return the fresh id it took. The
+// relationship part is created when the package has none.
+function addRelationship(editor, part, type, target) {
+  const rels = relsPartFor(part);
+  const file = editor.zip.file(rels);
+  // Every id the owning part already holds is stepped over: the `.rels` part's own
+  // `Id="rIdN"` when the package has one, else the part's own `r:id="rIdN"`
+  // references — a package with no `.rels` part still spells references of its own
+  // (`<sheet r:id="rId1"/>`), and an id one of those took must not be handed to the
+  // new relationship, or the reference would point at it. Two relationships sharing
+  // an id name each other either way, so an element this kit would not read counts.
+  const holder = file ? file.asText() : editor.zip.file(part)?.asText() ?? "";
+  editor.charge(holder.length);
+  const pattern = file ? /\bId="rId(\d+)"/g : /\br:id="rId(\d+)"/g;
+  const used = [...holder.matchAll(pattern)].map((match) => Number(match[1]));
+  const id = `rId${Math.max(0, ...used) + 1}`;
+  const element = `<Relationship Id="${id}" Type="${type}" Target="${relativeTarget(partDirectory(part), target)}"/>`;
+  if (!file) {
+    editor.add(rels, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${element}</Relationships>`);
+    return id;
+  }
+  editor.part(rels, (xml) => {
+    const close = xml.match(RELATIONSHIPS_CLOSE);
+    if (!close) throw new UsageError(`the relationships of ${part} are not readable`);
+    return xml.slice(0, close.index) + element + xml.slice(close.index);
+  });
+  return id;
+}
+
+// The package's `<base>N.xml` parts: the number each carries and the name it
+// really has. A package that numbers with a leading zero (`slideLayout01.xml`)
+// holds no `slideLayout1.xml`, so a reference to a part that is already there
+// must use the matched name; only a name for a part about to be written may be
+// built from the number.
+const numberedParts = (zip, base) => Object.keys(zip.files).flatMap((name) => {
+  const match = name.match(new RegExp(`^${escapeRegExp(base)}(\\d+)\\.xml$`));
+  return match ? [{ number: Number(match[1]), name }] : [];
+});
+// Those parts in the order the reader numbers them: by number, then by name.
+const byPartNumber = (a, b) => a.number - b.number || (a.name < b.name ? -1 : 1);
+// The `ppt/slides/slideN.xml` numbers the package holds, whatever order the
+// presentation lists them in, and the notes-slide ones — the numbers a fresh
+// part of that kind takes the next of.
+const slideFileNumbers = (zip) => numberedParts(zip, `${PPT_SLIDES}slide`).map((part) => part.number);
+const notesSlideNumbers = (zip) => numberedParts(zip, `${PPT_NOTES_SLIDES}notesSlide`).map((part) => part.number);
+// The name of the numerically first `<base>N.xml` part a package holds, or null
+// when it holds none.
+function firstPartName(zip, base) {
+  const parts = numberedParts(zip, base).sort(byPartNumber);
+  return parts.length ? parts[0].name : null;
+}
+
+// The slide parts in the order the presentation's own `<p:sldId>` list declares
+// them, or `null` when that list is not what the reader numbers by: a presentation
+// without a readable list, or one whose entries resolve to nothing, is read by the
+// conventional file naming instead. A slot is null when that slide's relationship
+// cannot be resolved, so the slides after it keep their own number; a `<p:sldId>`
+// without a relationship id is not a slide the reader numbers at all — its own
+// scan keeps only elements `rel_id` returns something for — and is dropped here
+// too rather than counted as an unreadable one.
+function listedSlideParts(zip) {
+  const presentation = zip.file(PPT_PRESENTATION);
+  const rels = zip.file(PPT_RELS);
+  if (!presentation || !rels) return null;
+  const map = relationshipMap(rels.asText());
+  const ids = [...presentation.asText().matchAll(/<p:sldId\b[^>]*>/g)].map((match) => relationshipId(match[0])).filter((id) => id !== undefined);
+  const parts = ids.map((id) => {
+    const target = map.get(id);
+    return target === undefined ? null : resolvePart(PPT_BASE, target);
+  });
+  // One resolvable slide is enough to trust the declared order.
+  return parts.some(Boolean) ? parts : null;
+}
+
+// The slide parts in presentation order, one slot per slide the reader would
+// number. Mirrors the reader (see above).
+function slideParts(zip) {
+  const listed = listedSlideParts(zip);
+  if (listed) return listed;
+  const named = numberedParts(zip, `${PPT_SLIDES}slide`);
+  named.sort(byPartNumber);
+  return named.map((slide) => slide.name);
+}
+
+// The part slide number `number` addresses, refused when the deck has no such
+// slide (named with the count the reader would number) or when the part it names
+// is not in the package.
+function addressedSlide(zip, number) {
+  const parts = slideParts(zip);
+  if (!Number.isInteger(number) || number < 1 || number > parts.length) {
+    throw new UsageError(`no slide ${number}: this presentation has ${parts.length} slide(s)`);
+  }
+  const part = parts[number - 1];
+  if (!part || !zip.file(part)) throw new UsageError(`slide ${number} could not be read`);
+  return part;
+}
+
+// The notes part a slide declares through its own relationships, the way
+// `src/ooxml.rs::slide_notes` resolves them, or null when it declares none. A
+// target is resolved against the directory the package actually put the slide
+// part in (see `src/ooxml.rs::part_dir`), not the conventional `ppt/slides/`.
+function slideNotesPart(zip, slidePart) {
+  const rels = zip.file(relsPartFor(slidePart));
+  if (!rels) return null;
+  const rel = relationships(rels.asText()).find((candidate) => candidate.type.endsWith("/notesSlide"));
+  return rel ? resolvePart(partDirectory(slidePart), rel.target) : null;
+}
+
+// The layout part a slide's relationship names, or null when it has none. Like
+// `slideNotesPart`, the target resolves against the slide part's own directory.
+function slideLayoutPart(zip, slidePart) {
+  const rels = zip.file(relsPartFor(slidePart));
+  if (!rels) return null;
+  const rel = relationships(rels.asText()).find((candidate) => candidate.type.endsWith("/slideLayout"));
+  return rel ? resolvePart(partDirectory(slidePart), rel.target) : null;
+}
+
+// The layout the new slide is inserted after uses, the deck's last slide's, or
+// the first the package holds. A slide that names a layout the package does not
+// have falls through to one that is really there.
+function newSlideLayout(zip, slides, after) {
+  const source = after === undefined ? slides[slides.length - 1] : slides[after - 1];
+  const layout = source && slideLayoutPart(zip, source);
+  if (layout && zip.file(layout)) return layout;
+  const first = firstPartName(zip, `${PPT_LAYOUTS}slideLayout`);
+  if (!first) throw new UsageError("the presentation has no slide layout to build a new slide on");
+  return first;
+}
+
+// A target for `to` written relative to the directory `from`, e.g. the layout a
+// `ppt/slides/slideN.xml.rels` points at (`../slideLayouts/slideLayout1.xml`).
+function relativeTarget(from, to) {
+  const fromParts = from.split("/").filter(Boolean);
+  const toParts = to.split("/").filter(Boolean);
+  let common = 0;
+  while (common < fromParts.length && common < toParts.length - 1 && fromParts[common] === toParts[common]) common += 1;
+  return [...fromParts.slice(common).map(() => ".."), ...toParts.slice(common)].join("/");
+}
+
+// A `<a:p>` paragraph and an `<a:r>` run of a slide part. `<a:pPr>` and
+// `<a:rPr>` are not paragraph/run starts: the character after `a:p`/`a:r` is `P`,
+// which the optional whitespace-and-attributes group does not swallow.
+const SLIDE_PARAGRAPH = tagPattern("a:p");
+const SLIDE_RUN = tagPattern("a:r");
+const SLIDE_RUN_PROPERTIES = elementPattern("a:rPr");
+const SLIDE_PPR = elementPattern("a:pPr");
+// The text element of a drawing part, the same pattern the filler substitutes
+// through.
+const SLIDE_TEXT = runPattern("a:");
+
+// The `[start, end]` spans of a part's `<a:p>` paragraphs, at any nesting — a
+// table cell's `p:txBody`, a group shape — in part order. An empty paragraph
+// written self-closing still counts, so "the last paragraph" is the last one a
+// reader would see.
+function slideParagraphs(xml) {
+  return tagSpans(xml, SLIDE_PARAGRAPH).map(({ start, end }) => ({ start, end }));
+}
+
+// The slide's shape tree and the object shapes its own text never lives in: a
+// `<p:graphicFrame>` carries a table or a chart, a `<p:grpSp>` holds other
+// shapes. A top-level `<p:sp>` directly under the shape tree is a shape the
+// slide's text belongs to (a title or body placeholder).
+const SLIDE_SHAPE_TREE = tagPattern("p:spTree");
+const SLIDE_SHAPE = tagPattern("p:sp");
+const SLIDE_FRAME = tagPattern("p:graphicFrame");
+const SLIDE_GROUP = tagPattern("p:grpSp");
+const SLIDE_TX_BODY = new RegExp(`${openTag("p:txBody")}([\\s\\S]*?)(${closeTag("p:txBody")})`);
+
+// The `<p:txBody>` span of a shape, or null when it holds none (a self-closing
+// `<p:txBody/>` has nowhere for a paragraph to go). `closeAt` is where the body's
+// own close tag begins — the place a paragraph added at its end goes — taken from
+// the match rather than from a close tag spelled out again.
+function shapeTextBody(xml, shape) {
+  const body = xml.slice(shape.start, shape.end).match(SLIDE_TX_BODY);
+  if (!body) return null;
+  const start = shape.start + body.index;
+  const end = start + body[0].length;
+  return { start, end, closeAt: end - body[2].length };
+}
+
+// The slide's own top-level `<p:sp>` shapes, in part order: the shape tree's
+// direct children that are not inside a table's frame or a group. This is the set
+// the slide's own text lives in (see `slideTextBodies`), and the set the shape a
+// slide declares its title in is looked for among (see `declarePptxTitles`).
+function slideShapeSpans(xml) {
+  const tree = tagSpans(xml, SLIDE_SHAPE_TREE).find((span) => !span.selfClosing);
+  if (!tree) return [];
+  const excluded = [...tagSpans(xml, SLIDE_FRAME), ...tagSpans(xml, SLIDE_GROUP)];
+  const inside = (span) => excluded.some((other) => other.start < span.start && span.end < other.end);
+  return tagSpans(xml, SLIDE_SHAPE)
+    .filter((span) => !span.selfClosing && span.depth === 1 && tree.start < span.start && span.end < tree.end && !inside(span));
+}
+
+// The `name` a shape states for itself. The `<p:cNvPr>` a `<p:sp>` opens with is
+// its own, so the first one in the shape names it.
+const shapeName = (xml, shape) => xmlAttribute((xml.slice(shape.start, shape.end).match(/<p:cNvPr\b[^>]*>/) || [""])[0], "name");
+
+// The slide's OWN text: the `<p:txBody>` bodies of its top-level `<p:sp>` shapes
+// and the paragraphs inside them. A table's cells, a chart's frame and a group
+// shape's children are not the slide's text, so a paragraph added here never
+// lands in a frame the caller did not address. This is deliberately narrower than
+// `slideParagraphs`, which numbers every paragraph (tables included) for the
+// text ops that address the same text the reader shows.
+function slideTextBodies(xml) {
+  const bodies = slideShapeSpans(xml)
+    .map((shape) => shapeTextBody(xml, shape))
+    .filter(Boolean);
+  const paragraphs = slideParagraphs(xml).filter((span) => bodies.some((body) => body.start < span.start && span.end < body.end));
+  return { bodies, paragraphs };
+}
+
+// A paragraph's runs and text slots, shaped like `docxRuns` so the shared
+// `replaceOccurrences` rewrites one. A slot is an `<a:t>` inside a run; a
+// field's text (a slide number) is not addressed, the same text the reader
+// leaves out of what it shows.
+function slideRuns(fragment) {
+  const runs = [];
+  const slots = [];
+  for (const span of tagSpans(fragment, SLIDE_RUN)) {
+    if (span.selfClosing) continue;
+    const runXml = fragment.slice(span.start, span.end);
+    const index = runs.length;
+    runs.push({ start: span.start, end: span.end, rpr: runPropertiesOf(runXml) });
+    for (const text of runXml.matchAll(SLIDE_TEXT)) {
+      const at = span.start + text.index;
+      slots.push({ start: at, end: at + text[0].length, raw: text[1], unescaped: /&(#\d+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/.test(text[1]), run: index });
+    }
+  }
+  return { runs, slots };
+}
+
+// A paragraph's joined, unescaped run text — the text an edit addresses.
+const slideParagraphText = (paragraph) => slideRuns(paragraph).slots.map((slot) => xmlUnescape(slot.raw)).join("");
+
+// `xml` with `change` applied to every paragraph in part order: `change` returns
+// the paragraph's replacement text, `null` to drop it, or `undefined` to leave
+// it alone. The paragraphs are written from the last to the first so an earlier
+// one's byte positions stay valid.
+function mapSlideParagraphs(xml, change) {
+  const spans = slideParagraphs(xml);
+  let out = xml;
+  for (let i = spans.length - 1; i >= 0; i -= 1) {
+    const span = spans[i];
+    const element = xml.slice(span.start, span.end);
+    const edited = change(element);
+    if (edited === undefined) continue;
+    out = out.slice(0, span.start) + (edited === null ? "" : edited) + out.slice(span.end);
+  }
+  return out;
+}
+
+// The labels the reader prints for a slide — its number, its notes, its comments
+// and its marks — which are not the slide's own text. The label templates are the
+// reader's own (`src/reader_output.rs` builds them from the same `rules.json`
+// entries) and the marks come from the kit's own list, so a refusal names the
+// words the reader really printed.
+const slideLabels = (slide) => [
+  RULES.ppt_slide_labels.slide.replace("{n}", slide),
+  RULES.ppt_slide_labels.notes.replace("{n}", slide),
+  RULES.ppt_slide_labels.comments.replace("{n}", slide),
+  ...Object.values(RULES.ppt_marks),
+];
+
+// The reader's slide-label templates with any slide's number in them, so a label
+// naming a number other than the addressed slide's is recognised too.
+const SLIDE_LABEL_PATTERNS = Object.values(RULES.ppt_slide_labels)
+  .map((template) => new RegExp(`^${escapeRegExp(template).replace(escapeRegExp("{n}"), "\\d+")}`));
+
+// The reader label `find` names, or undefined when it names none. The longest
+// label that fits wins: a find of the whole `(diagram text could not be read)`
+// mark names that mark rather than the shorter `(diagram text)` heading written
+// inside it.
+const namedSlideLabel = (find, slide) => {
+  // The addressed slide's own labels and marks, sitting anywhere in the find (a
+  // mark may follow the slide's heading).
+  const own = slideLabels(slide).filter((candidate) => find.includes(candidate));
+  // And a label naming ANOTHER slide's number, which is only ever at the start of
+  // one: a fragment copied from a reading of slide 2 is not text slide 1 holds.
+  const other = SLIDE_LABEL_PATTERNS.map((pattern) => (find.match(pattern) || [])[0]).filter(Boolean);
+  return [...own, ...other].sort((left, right) => right.length - left.length)[0];
+};
+
+// A part's text as a reading prints it: one line per paragraph, so a find copied
+// across paragraphs matches the part that holds it. The reader prints a slide's
+// paragraphs and a notes part's the same way, so the one join serves both the
+// notes check and the paragraph-boundary check.
+const paragraphLines = (xml) => slideParagraphs(xml)
+  .map(({ start, end }) => slideParagraphText(xml.slice(start, end)))
+  .join("\n");
+
+// The reasons one part's own text gives for a miss, or undefined when none holds:
+// a fragment reaching from one paragraph into the next, a leading whitespace the
+// reader printed rather than the file holding it, a reader's label the part's own
+// text does not spell, and a tab or a line break the reading shows. Each is
+// VERIFIED — the boundary against the paragraphs really joined, the indentation
+// and the label against the part's own text (a slide whose text literally begins
+// with `Slide 1: ` really says so, and then the label is no reason at all), the
+// break against the fragment itself — so the sentence names a cause that is true,
+// and a caller adds only the reasons of its own (`slideFindRefusal` reads the
+// diagrams and the notes first). The checks are asked most-specific first: what a
+// fragment copied across lines is, then the reader's own printing of it, then the
+// break it holds. `miss` is the part's wording — what a fragment is said not to be
+// in, what a label is said to be instead of text, the op that addresses one
+// paragraph at a time, and the slide the labels are read for — which the two
+// callers build where a slide's own text and its speaker notes state it
+// differently; the checks and the rest of every sentence are shared here.
+function partMissReason(miss, xml, find) {
+  const needle = withoutIndent(find);
+  // Only a fragment holding a newline can reach from one paragraph into the next:
+  // a newline sits between the paragraphs of the join, never inside one, and an
+  // `<a:br/>` inside a paragraph is not in a paragraph's addressed text at all.
+  if (/\n/.test(needle) && paragraphLines(xml).includes(needle)) return `the text ${JSON.stringify(find)} is not ${miss.where}: the fragment reaches across a paragraph boundary, and ${miss.what} addresses one paragraph at a time`;
+  if (needle !== find && needle && paragraphLines(xml).includes(needle)) return `the text ${JSON.stringify(find)} is not ${miss.where}: the fragment's leading whitespace is either the indentation the reader prints under a block or whitespace the file's text does not hold — search for ${JSON.stringify(needle)}`;
+  const label = namedSlideLabel(needle, miss.slide);
+  if (label !== undefined && !paragraphLines(xml).includes(label)) return `the text ${JSON.stringify(find)} is not ${miss.where}: ${JSON.stringify(label)} is a label the reader prints, not ${miss.notText}`;
+  if (/[\t\n\r]/.test(find)) return `the text ${JSON.stringify(find)} is not ${miss.where}: ${holdsBreakReason("a:", "<a:p>")}`;
+  return undefined;
+}
+
+// The refusal a slide text op states when its `find` is not on the slide: a
+// diagram's text, a slide's speaker notes, the fragment's own paragraph boundary,
+// the indentation the reader printed under a block, the reader's own labels, and a
+// tab or a line break it holds are all things a reading showed but no slide text op
+// changes, so naming them is what the refusal says rather than passing them off as
+// text the slide does not have. A miss names the reason it VERIFIES — a diagram's
+// text against what the reader reported for this part, the notes against the notes
+// part's own text, the rest against the slide part itself (see `partMissReason`) —
+// and the verified reasons are asked before the remaining one, so a find the notes
+// really hold is named as the notes' rather than as a label spelling the same words.
+//
+// The diagram text is not read here: the request carries what a reading showed
+// per slide part, computed by the reader itself (see
+// `src/ooxml.rs::pptx_diagram_text`), so a refusal can only name text a reading
+// really showed — a diagram the reader reported as unreadable is absent from the
+// request, and thus names nothing.
+//
+// A lookup naming no text never reaches a refusal: the tool refuses one before
+// the kit runs (see `require_pptx_lookup`), so a find here always names text.
+//
+// A tab or a line break the reading shows is markup of its own in the file, not
+// text a slide text op addresses: a fragment holding one was copied out of the
+// reading, where a paragraph is a line and an `<a:br/>` inside one is a line end,
+// so it names that rather than passing it off as text the slide lacks. The notes,
+// the boundary, the indentation and the labels are asked first: the notes really
+// hold a find copied across their own lines, a fragment reaching from one paragraph
+// into the next holds a newline the file has no `<a:br/>` for (see
+// `paragraphLines`), and a fragment copied with a label line or the reader's
+// indentation holds what the reader printed rather than what the slide says. `xml`
+// is the slide part as this edit found it.
+function slideFindRefusal(editor, xml, part, find, slide) {
+  const needle = withoutIndent(find);
+  const diagrams = editor.diagramText[part] ?? [];
+  if (diagrams.some((text) => text.includes(needle))) return `the text ${JSON.stringify(find)} is inside a diagram on slide ${slide}, whose text a presentation edit does not change`;
+  // The notes are read under the reader's notes label and edited by the notes
+  // ops, so a find the slide's own notes hold names them rather than passing it
+  // off as text the slide lacks.
+  const notes = slideNotesPart(editor.zip, part);
+  const notesFile = notes === null ? null : editor.zip.file(notes);
+  if (notesFile && paragraphLines(notesFile.asText()).includes(needle)) return `the text ${JSON.stringify(find)} is in the speaker notes of slide ${slide}, which a slide text op does not edit (replace_notes and remove_notes do)`;
+  const miss = {
+    where: `on slide ${slide}`,
+    notText: "text on the slide",
+    what: "a slide text op",
+    slide,
+  };
+  return partMissReason(miss, xml, find) ?? `the text ${JSON.stringify(find)} is not ${miss.where}`;
+}
+
+// The pptx text ops over one part: every occurrence of `find` in a matching
+// paragraph's joined text is rewritten, the replacement taking the formatting of
+// the run it starts in. `replacing` is what tells a replace op from a remove one,
+// and `missing` words the refusal a search that found nothing states, handed the
+// part's text as this edit found it.
+function editPartText(editor, part, edit, replacing, missing) {
+  const find = editText(edit && edit.find, "find");
+  if (!find) throw new UsageError("find must not be empty");
+  const replacement = replacing ? editText(edit.replace, "replace") : "";
+  let found = false;
+  editor.part(part, (xml) => {
+    const out = mapSlideParagraphs(xml, (paragraph) => {
+      const { runs, slots } = slideRuns(paragraph);
+      const offsets = occurrences(slots.map((slot) => xmlUnescape(slot.raw)).join(""), find);
+      if (!offsets.length) return undefined;
+      found = true;
+      // A rewrite must not bridge a tab or a line break the joined text skips
+      // over (see `requireNoBridgedMarkup`).
+      requireNoBridgedMarkup(paragraph, slots, offsets, find, BRIDGED_MARKUP["a:"]);
+      return replaceOccurrences(paragraph, runs, slots, offsets, replacement, editor.note, "a:").xml;
+    });
+    if (!found) throw new UsageError(missing(find, xml));
+    return out;
+  });
+}
+
+// `pptx_edit`'s `replace_text`/`remove_text` on a slide's own text: a fragment
+// the slide does not hold is refused with the reason the reader's labels and any
+// diagram's text give it (see `slideFindRefusal`).
+function editSlideText(editor, edit, op) {
+  const part = addressedSlide(editor.zip, edit.slide);
+  editPartText(editor, part, edit, op === "replace_text", (find, xml) => slideFindRefusal(editor, xml, part, find, edit.slide));
+}
+
+// The run markup a new paragraph takes: the anchor's own first-run properties,
+// or a bare run when there is no anchor to copy.
+function slideRunXml(anchor, text) {
+  const rpr = anchor === undefined ? undefined : slideRuns(anchor).runs[0]?.rpr;
+  return `<a:r>${rpr || ""}${textElement("a:", xmlEscape(text))}</a:r>`;
+}
+
+// The `<a:pPr>` a new paragraph takes: the anchor's own with `level` merged in,
+// or a bare level when there is no anchor.
+function slideParagraphProperties(anchor, level) {
+  const ppr = anchor === undefined ? undefined : (anchor.match(SLIDE_PPR) || [])[0];
+  if (level === undefined) return ppr || "";
+  if (!ppr) return `<a:pPr lvl="${level}"/>`;
+  return /\blvl="[^"]*"/.test(ppr) ? ppr.replace(/\blvl="[^"]*"/, `lvl="${level}"`) : ppr.replace(/<a:pPr/, `<a:pPr lvl="${level}"`);
+}
+
+// `pptx_edit`'s `add_paragraph`: a new `<a:p>` after the first paragraph of the
+// slide's OWN text whose text holds `after`, or after its last one, carrying the
+// anchor's own paragraph and run properties so the new bullet keeps the deck's
+// style. "The slide's own text" is the `<p:txBody>` of its top-level `<p:sp>`
+// shapes — the title and body placeholders (see `slideTextBodies`) — because a
+// table's cells hold paragraphs too and a new one added there lands where the
+// caller did not ask. An `after` that names text only inside such a frame is
+// refused rather than placed silently, and one naming a reader label or a
+// diagram's text is refused for what it really is (see `slideFindRefusal`); a
+// slide with no text body at all has nowhere for one to go.
+function addSlideParagraph(editor, edit) {
+  const part = addressedSlide(editor.zip, edit.slide);
+  const text = editText(edit.text, "text");
+  let level;
+  if (edit.level !== undefined) {
+    if (!Number.isInteger(edit.level) || edit.level < 0 || edit.level > RULES.paragraph_level_max) throw new UsageError(`level must be a whole number from 0 to ${RULES.paragraph_level_max}, got: ${JSON.stringify(edit.level)}`);
+    level = edit.level;
+  }
+  editor.part(part, (xml) => {
+    const { bodies, paragraphs } = slideTextBodies(xml);
+    let anchor;
+    let at;
+    if (edit.after !== undefined) {
+      const after = editText(edit.after, "after");
+      if (!after) throw new UsageError("after must not be empty");
+      const span = paragraphs.find((candidate) => slideParagraphText(xml.slice(candidate.start, candidate.end)).includes(after));
+      if (!span) {
+        // The text may still be on the slide inside a table. Say where it is
+        // rather than writing into a shape the caller did not address.
+        const frames = tagSpans(xml, SLIDE_FRAME);
+        const buried = slideParagraphs(xml).find((candidate) => frames.some((frame) => frame.start < candidate.start && candidate.end < frame.end) && slideParagraphText(xml.slice(candidate.start, candidate.end)).includes(after));
+        if (buried) throw new UsageError(`the text ${JSON.stringify(after)} is inside a table on slide ${edit.slide}: add_paragraph writes into the slide's own text, not into a table`);
+        throw new UsageError(slideFindRefusal(editor, xml, part, after, edit.slide));
+      }
+      anchor = xml.slice(span.start, span.end);
+      at = span.end;
+    } else if (paragraphs.length) {
+      const span = paragraphs[paragraphs.length - 1];
+      anchor = xml.slice(span.start, span.end);
+      at = span.end;
+    } else if (bodies.length) {
+      at = bodies[bodies.length - 1].closeAt;
+    } else {
+      throw new UsageError("the slide has no text body to add a paragraph to");
+    }
+    return xml.slice(0, at) + `<a:p>${slideParagraphProperties(anchor, level)}${slideRunXml(anchor, text)}</a:p>` + xml.slice(at);
+  });
+}
+
+// The text bodies of a slide part — a shape's `<p:txBody>` and a table cell's
+// `<a:txBody>` — each a `CT_TextBody`, which ECMA-376 requires to hold at least
+// one paragraph. A body never nests inside another, so one sweep over the bodies
+// and the paragraphs in order groups the paragraphs by the body holding them.
+const SLIDE_TEXT_BODIES = new RegExp(`${openTag("p:txBody")}[\\s\\S]*?${closeTag("p:txBody")}|${openTag("a:txBody")}[\\s\\S]*?${closeTag("a:txBody")}`, "g");
+
+// `pptx_edit`'s `remove_paragraph`: every paragraph whose joined text holds
+// `find` is dropped whole, so a fragment matching several paragraphs removes
+// each of them. A slide part has no paragraph nesting to pick an innermost one
+// from. A removal that would leave a text body with no paragraph is refused,
+// since that body would be one no reader may hold, and a `find` the slide does
+// not hold is refused for what it really is (see `slideFindRefusal`).
+function removeSlideParagraphs(editor, edit) {
+  const part = addressedSlide(editor.zip, edit.slide);
+  const find = editText(edit && edit.find, "find");
+  if (!find) throw new UsageError("find must not be empty");
+  editor.part(part, (xml) => {
+    const spans = slideParagraphs(xml);
+    const matched = new Set(spans.filter((span) => slideParagraphText(xml.slice(span.start, span.end)).includes(find)).map((span) => span.start));
+    if (!matched.size) throw new UsageError(slideFindRefusal(editor, xml, part, find, edit.slide));
+    // The paragraphs of each text body, so a body whose every paragraph goes is
+    // caught before any of them is dropped. Both lists are in part order and
+    // neither kind nests, so the body holding a paragraph is the first one that
+    // has not ended before it — asking each paragraph on its own would walk the
+    // whole part once per paragraph.
+    const bodies = [...xml.matchAll(SLIDE_TEXT_BODIES)].map((match) => ({ start: match.index, end: match.index + match[0].length, cell: match[0].startsWith("<a:") }));
+    const groups = new Map();
+    let body = 0;
+    for (const span of spans) {
+      while (body < bodies.length && bodies[body].end <= span.start) body += 1;
+      const holder = body < bodies.length ? bodies[body] : null;
+      const key = holder ? `${holder.start}:${holder.end}` : `at:${span.start}`;
+      if (!groups.has(key)) groups.set(key, { body: holder, spans: [] });
+      groups.get(key).spans.push(span);
+    }
+    for (const { body: holder, spans: group } of groups.values()) {
+      if (holder && group.every((span) => matched.has(span.start))) {
+        throw new UsageError(`removing ${JSON.stringify(find)} would leave the ${holder.cell ? "table cell" : "shape"}'s text body with no paragraph — a text body must keep one`);
+      }
+    }
+    return mapSlideParagraphs(xml, (paragraph) => (slideParagraphText(paragraph).includes(find) ? null : undefined));
+  });
+}
+
+// The minimal slide part a new slide is built from: the group shape properties, a
+// title when a title was given and a body placeholder holding one paragraph per
+// bullet, then the colour-map override. The slide deliberately carries no notes and
+// no animation, and nothing layout-specific beyond its placeholders — the layout
+// supplies the body's geometry. The title's is stated (see `titleShape`), and a
+// blank title is no title at all (`titledText`): the slide is built without a
+// title shape rather than with an empty title frame standing in for one.
+function newSlideXml(title, bullets, slide) {
+  const shapes = [];
+  const titled = titledText(title);
+  if (titled !== undefined) shapes.push(titleShape(titled, slide));
+  if (bullets.length) shapes.push(placeholderShape(3, "Body", `<p:ph type="body" idx="1"/>`, bullets));
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+    `<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="${REL_NS}" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">` +
+    `<p:cSld><p:spTree>` +
+    `<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>` +
+    `<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>` +
+    shapes.join("") +
+    `</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`;
+}
+
+// The title a generated slide opens with: the shape `createPptx`'s opening block
+// is declared in, written out in full — the frame, the vertical centring, the left
+// alignment and the run's size, weight, colour and fonts (see the title block). The
+// block a created slide opens with gets them from the create arm; a slide named
+// into an existing deck has no layout of this kit's to inherit them from, and a
+// title that states neither its frame nor its formatting is drawn as a broken one.
+// `slide` is the deck's own size in EMU, so the frame is the one a slide of that
+// size holds (see `titleFrameEmu`) rather than a frame drawn for the default deck.
+function titleShape(text, slide) {
+  const frame = titleFrameEmu(slide);
+  return `<p:sp><p:nvSpPr><p:cNvPr id="2" name="${TITLE_SHAPE}"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr>${TITLE_PLACEHOLDER}</p:nvPr></p:nvSpPr>` +
+    `<p:spPr><a:xfrm><a:off x="${frame.x}" y="${frame.y}"/><a:ext cx="${frame.w}" cy="${frame.h}"/></a:xfrm>` +
+    `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln/></p:spPr>` +
+    `<p:txBody><a:bodyPr wrap="square" rtlCol="0" anchor="ctr"/><a:lstStyle/>` +
+    `<a:p><a:pPr algn="${TITLE_ALIGNMENT}" indent="0" marL="0"><a:buNone/></a:pPr>` +
+    `<a:r><a:rPr lang="${SLIDE_LANG}" sz="${TITLE_POINTS * 100}" b="1" dirty="0"><a:solidFill><a:srgbClr val="${TITLE_COLOR}"/></a:solidFill>${TITLE_FONTS}</a:rPr>${textElement("a:", xmlEscape(text))}</a:r>` +
+    `<a:endParaRPr lang="${SLIDE_LANG}" sz="${TITLE_POINTS * 100}" dirty="0"/></a:p></p:txBody></p:sp>`;
+}
+
+// A placeholder shape holding one paragraph per text, each run stating only the
+// run language.
+function placeholderShape(id, name, placeholder, texts) {
+  const paragraphs = texts.map((text) => `<a:p><a:r><a:rPr lang="${SLIDE_LANG}"/>${textElement("a:", xmlEscape(text))}</a:r></a:p>`).join("");
+  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr>${placeholder}</p:nvPr></p:nvSpPr>` +
+    `<p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>${paragraphs}</p:txBody></p:sp>`;
+}
+
+// A new slide's relationships part: one relationship to the layout it is built
+// on.
+const newSlideRelsXml = (layout) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+  `<Relationship Id="rId1" Type="${SLIDE_LAYOUT_REL}" Target="${relativeTarget(PPT_SLIDES, layout)}"/></Relationships>`;
+
+// The next free `<p:sldId id>`: one past the largest the presentation uses, and
+// never below 256, the value real decks start at.
+function nextSldId(xml) {
+  const ids = [...xml.matchAll(/<p:sldId\b[^>]*\bid="(\d+)"/g)].map((match) => Number(match[1]));
+  return Math.max(255, ...ids) + 1;
+}
+
+// Add the presentation relationship naming slide `part` and return its fresh id;
+// the relationships part is created when the deck has none.
+const addSlideRelationship = (editor, part) => addRelationship(editor, PPT_PRESENTATION, SLIDE_REL, part);
+
+// The presentation's `<p:sldIdLst>` and the `<p:sldId>` entries that name a
+// slide, or `null` when the presentation has no such list. An entry with no
+// relationship id names no slide the reader shows, so it takes no slot and no
+// position counts it; the entries are matched against the list's own text, so
+// each `entry.index` is relative to `text`, and `closeAt` is where the list's own
+// close tag begins inside `text` — the place an entry appended at its end goes,
+// taken from the match so a close tag carrying whitespace is not mis-measured.
+function slideListEntries(xml) {
+  const match = xml.match(new RegExp(`${openTag("p:sldIdLst")}([\\s\\S]*?)(${closeTag("p:sldIdLst")})`));
+  if (!match) return null;
+  const entries = [...match[0].matchAll(/<p:sldId\b[^>]*>/g)].filter((entry) => relationshipId(entry[0]) !== undefined);
+  return { index: match.index, text: match[0], entries, closeAt: match[0].length - match[2].length };
+}
+
+// That list, when its entries are exactly the slides the reader numbers — one per
+// slide, in that same order — or `null` when they are not. The reader numbers every
+// `<p:sldId>` the presentation holds while the list holds only its own, so a
+// `<p:sldId>` outside it is numbered by the reader and not by the list, and the
+// entry at a position is then another slide than the reader shows there; a deck the
+// reader numbers by file naming differs the same way. A slide's number is a
+// position in the list only while the two agree, which is what every operation that
+// reorders, copies or deletes a slide by its number asks here first. The entries
+// and their positions are relative to the presentation part's text as it stands,
+// which is the text an edit rewrites.
+function numberedSlideList(zip) {
+  const presentation = zip.file(PPT_PRESENTATION);
+  const rels = zip.file(PPT_RELS);
+  const list = presentation && rels ? slideListEntries(presentation.asText()) : null;
+  const parts = slideParts(zip);
+  if (!list || list.entries.length !== parts.length) return null;
+  const map = relationshipMap(rels.asText());
+  const agrees = list.entries.every((entry, index) => {
+    const target = map.get(relationshipId(entry[0]));
+    return (target === undefined ? null : resolvePart(PPT_BASE, target)) === parts[index];
+  });
+  return agrees ? list : null;
+}
+
+// The presentation part with a `<p:sldId>` for `element` inserted into its
+// `<p:sldIdLst>` as its entry `before` — before the slide the reader numbers
+// `before + 1`, or at the end of the list for `before` past its last entry or
+// absent. A deck without a slide list is refused rather than given one that would
+// renumber its slides. An entry position is a slide's number only while the list is
+// the numbering the reader shows (see `numberedSlideList`), so a caller handing one
+// over has asked that first; appending needs no such proof, since it makes the new
+// slide the deck's last one whichever numbering it is.
+function withSldId(xml, element, before) {
+  const list = slideListEntries(xml);
+  if (!list) throw new UsageError("the presentation has no slide list to add a slide to");
+  const at = before === undefined || before >= list.entries.length
+    ? list.index + list.closeAt
+    : list.index + list.entries[before].index;
+  return xml.slice(0, at) + element + xml.slice(at);
+}
+
+// The `<Override>` a package already declares for `part`, or `undefined` when it
+// declares none. OPC gives a part one content type, so this is the declaration no
+// caller may add a second of.
+const overrideFor = (xml, part) => [...xml.matchAll(/<Override\b[^>]*>/g)].find((match) => (xmlAttribute(match[0], "PartName") || "").toLowerCase() === `/${part}`.toLowerCase());
+
+// `[Content_Types].xml` declaring `part`'s `contentType`, through the `<Override>`
+// written before the closing `</Types>` — after every `<Default>`, the
+// schema-correct place for one. A package that already declares the part has that
+// declaration given the type instead of a second one added beside it, which is also
+// what leaves a stale declaration saying what the part really is. The close is
+// found with the shared spelling rule (`closeTag`), never spelled out again.
+const TYPES_CLOSE = new RegExp(closeTag("Types"));
+function withOverride(xml, part, contentType) {
+  const close = xml.match(TYPES_CLOSE);
+  if (!close) throw new UsageError("[Content_Types].xml has no <Types> close to hold a part's content type");
+  const declaration = `<Override PartName="/${part}" ContentType="${contentType}"/>`;
+  const declared = overrideFor(xml, part);
+  if (declared === undefined) return xml.slice(0, close.index) + declaration + xml.slice(close.index);
+  return xml.slice(0, declared.index) + declaration + xml.slice(declared.index + declared[0].length);
+}
+
+// `pptx_edit`'s `add_slide`: a whole new slide part, wired into the presentation
+// and the content types.
+function addSlide(editor, edit) {
+  const zip = editor.zip;
+  const slides = slideParts(zip);
+  const title = edit.title === undefined ? undefined : editText(edit.title, "title");
+  let bullets = [];
+  if (edit.bullets !== undefined) {
+    if (!Array.isArray(edit.bullets)) throw new UsageError("bullets must be a list");
+    if (edit.bullets.length > RULES.bullets_max) throw new UsageError(`a slide may hold at most ${RULES.bullets_max} bullets, got: ${edit.bullets.length}`);
+    bullets = edit.bullets.map((bullet) => editText(bullet, "a bullet"));
+  }
+  let after;
+  if (edit.after !== undefined) {
+    after = edit.after;
+    if (!Number.isInteger(after) || after < 1 || after > slides.length) throw new UsageError(`no slide ${after}: this presentation has ${slides.length} slide(s)`);
+    // Asked before any edit, since the list is about to gain the new entry: the
+    // named position is a slide's number only while the list is that numbering.
+    if (!numberedSlideList(zip)) throw new UsageError(`a slide cannot be placed after slide ${after}: the presentation's slide list does not number its slides the way the reader shows them`);
+  }
+  const part = `${PPT_SLIDES}slide${Math.max(0, ...slideFileNumbers(zip)) + 1}.xml`;
+  editor.add(part, newSlideXml(title, bullets, slideSize(zip)));
+  editor.add(relsPartFor(part), newSlideRelsXml(newSlideLayout(zip, slides, after)));
+  // `openEdit` already proved the presentation part is the family's own, so it
+  // is read here rather than re-checked.
+  const id = addSlideRelationship(editor, part);
+  const sldId = `<p:sldId id="${nextSldId(zip.file(PPT_PRESENTATION).asText())}" r:id="${id}"/>`;
+  editor.part(PPT_PRESENTATION, (xml) => withSldId(xml, sldId, after));
+  editor.part("[Content_Types].xml", (xml) => withOverride(xml, part, SLIDE_CONTENT_TYPE));
+}
+
+// `[Content_Types].xml` with the `<Override>` of `part` removed — the same
+// declaration `overrideFor` finds, by the same rule.
+function removeOverride(editor, part) {
+  editor.part("[Content_Types].xml", (xml) => {
+    const declared = overrideFor(xml, part);
+    return declared === undefined ? xml : xml.slice(0, declared.index) + xml.slice(declared.index + declared[0].length);
+  });
+}
+
+// `pptx_edit`'s `delete_slide`: the slide part, its relationships, its notes
+// part and that part's relationships, its `<p:sldId>`, the matching presentation
+// relationship, and the content-type overrides of both parts. The addressed
+// POSITION is what goes — the reader numbers the resolved list, and two entries
+// may name the same part — so exactly that `<p:sldId>` and exactly that
+// relationship are removed, and a part another remaining slide still names is
+// kept (its `<Override>` with it). A deck the reader could only number by file
+// naming has no entry at that position: the entry whose target resolves to the
+// addressed part goes instead, and when none does the deletion is refused rather
+// than a `<p:sldId>` belonging to another slide going. The deck's only slide is
+// refused — a presentation with no slides is not one.
+function deleteSlide(editor, edit) {
+  const zip = editor.zip;
+  const parts = slideParts(zip);
+  const at = edit.slide - 1;
+  if (parts.length <= 1) throw new UsageError("the presentation's only slide cannot be deleted");
+  const part = addressedSlide(zip, edit.slide);
+  // The `<p:sldId>` the reader numbered as `at`. Only while the list is that
+  // numbering is the entry at that position the reader's own (see
+  // `numberedSlideList`): a deck whose list holds another slide there — or numbers a
+  // `<p:sldId>` its list does not — has the entry whose relationship target
+  // resolves to the addressed part taken instead, so the removed `<p:sldId>` is
+  // always the addressed slide's own.
+  const presentation = zip.file(PPT_PRESENTATION);
+  const list = presentation ? slideListEntries(presentation.asText()) : null;
+  const entries = list ? list.entries : [];
+  const rels = zip.file(PPT_RELS);
+  const targets = rels ? relationshipMap(rels.asText()) : new Map();
+  const sldId = numberedSlideList(zip)
+    ? entries[at]
+    : entries.find((match) => {
+      const target = targets.get(relationshipId(match[0]));
+      return target !== undefined && resolvePart(PPT_BASE, target) === part;
+    });
+  if (!sldId) throw new UsageError(`slide ${edit.slide} cannot be deleted: the presentation's slide list does not name it`);
+  const id = relationshipId(sldId[0]);
+  const cut = list.index + sldId.index;
+  const notes = slideNotesPart(zip, part);
+  const others = parts.filter((_, index) => index !== at).filter(Boolean);
+  // A part another remaining slide still references is not this slide's alone:
+  // removing it would leave that slide dangling.
+  const partShared = others.includes(part);
+  const notesShared = notes !== null && others.some((other) => slideNotesPart(zip, other) === notes);
+  if (!partShared) {
+    editor.remove(part);
+    editor.remove(relsPartFor(part));
+    removeOverride(editor, part);
+  }
+  if (notes && !notesShared) {
+    editor.remove(notes);
+    editor.remove(relsPartFor(notes));
+    removeOverride(editor, notes);
+  }
+  editor.part(PPT_PRESENTATION, (xml) => xml.slice(0, cut) + xml.slice(cut + sldId[0].length));
+  if (id !== undefined) {
+    editor.part(PPT_RELS, (xml) => xml.replace(elementWithAttribute("Relationship", "Id", id), ""));
+  }
+}
+
+// The relationships `xml` with the `Target` of every relationship whose type
+// `match` accepts replaced by `target`; every other relationship keeps its own
+// bytes. A `match` compares the LAST segment of a type because a strict package
+// spells the same relationship under another namespace — and the segments are
+// distinct enough that `/slide` cannot match `/slideLayout`.
+function withRelationshipTarget(xml, match, target) {
+  return xml.replace(/<Relationship\b[^>]*>/g, (element) => (match(xmlAttribute(element, "Type") || "")
+    ? element.replace(/\bTarget="[^"]*"/, () => `Target="${target}"`)
+    : element));
+}
+
+// `pptx_edit`'s `move_slide`: the addressed slide's `<p:sldId>` is taken out of
+// the presentation's own slide list and put back at another position of it, so
+// the deck's order — the one the reader numbers and `slideParts` resolves — is
+// the only thing that changes. Only a list that IS that order has the position the
+// caller named (see `numberedSlideList`), and a slide already at the named position
+// is refused because the move would change nothing.
+function moveSlide(editor, edit) {
+  const zip = editor.zip;
+  addressedSlide(zip, edit.slide);
+  const slides = slideParts(zip);
+  if (!Number.isInteger(edit.to) || edit.to < 1 || edit.to > slides.length) throw new UsageError(`no position ${edit.to}: this presentation has ${slides.length} slide(s)`);
+  if (edit.to === edit.slide) throw new UsageError(`slide ${edit.slide} is already at position ${edit.to} — moving it there would change nothing`);
+  const list = numberedSlideList(zip);
+  if (!list) throw new UsageError("the presentation's slide list does not number its slides the way the reader shows them, so a slide cannot be moved");
+  const from = edit.slide - 1;
+  const entry = list.entries[from];
+  const rest = list.entries.filter((_, index) => index !== from);
+  const cut = list.index + entry.index;
+  // The slide takes the position the `to`-th slide of the RESULT holds: in front
+  // of the entry that follows it there, or after the last one when it is that
+  // deck's last slide.
+  const before = edit.to - 1 < rest.length ? list.index + rest[edit.to - 1].index : list.index + list.closeAt;
+  editor.part(PPT_PRESENTATION, (xml) => {
+    const out = xml.slice(0, cut) + xml.slice(cut + entry[0].length);
+    const at = before > cut ? before - entry[0].length : before;
+    return out.slice(0, at) + entry[0] + out.slice(at);
+  });
+}
+
+// The notes part of a duplicated slide: a copy of `notes` — a part the package
+// holds, which is what the caller has checked — under a fresh name, with its own
+// relationships (the notes master stays the shared part it was) and its slide
+// back-reference pointed at the copy. The notes themselves are the copy's own, so
+// editing one slide's notes leaves the other's alone.
+function duplicateNotes(editor, notes, slidePart) {
+  const zip = editor.zip;
+  const part = `${PPT_NOTES_SLIDES}notesSlide${Math.max(0, ...notesSlideNumbers(zip)) + 1}.xml`;
+  editor.add(part, zip.file(notes).asText());
+  const rels = zip.file(relsPartFor(notes));
+  if (rels) editor.add(relsPartFor(part), withRelationshipTarget(rels.asText(), (type) => type.endsWith("/slide"), relativeTarget(partDirectory(part), slidePart)));
+  editor.part("[Content_Types].xml", (xml) => withOverride(xml, part, NOTES_CONTENT_TYPE));
+  return part;
+}
+
+// `pptx_edit`'s `duplicate_slide`: a fresh slide part holding exactly what the
+// addressed slide held, with a notes copy and its own relationships, inserted
+// right after the source — where the reader that numbered it shows it next. The
+// layout, the masters and the media the copy names stay shared parts, because no
+// edit this kit makes writes to them. Only a deck whose slide list numbers its
+// slides the way the reader shows them can place a copy (see `numberedSlideList`).
+function duplicateSlide(editor, edit) {
+  const zip = editor.zip;
+  const source = addressedSlide(zip, edit.slide);
+  // A copy is written among the presentation's own slides, while the source's
+  // relationships are written for the folder it sits in: a slide stored elsewhere
+  // is one whose links a copy in this folder would not resolve.
+  if (partDirectory(source) !== PPT_SLIDES) {
+    throw new UsageError(`slide ${edit.slide} is stored outside ${PPT_SLIDES}, so a copy of it cannot be placed among the presentation's other slides`);
+  }
+  if (!numberedSlideList(zip)) throw new UsageError("the presentation's slide list does not number its slides the way the reader shows them, so a slide cannot be duplicated");
+  const notes = slideNotesPart(zip, source);
+  // A copy carries the source's notes as its own, so a source declaring notes the
+  // package does not hold has none to carry: a copy left naming that declaration
+  // would put the two slides' notes in the one part a later edit rewrites. Both
+  // checks are made before the copy is written.
+  if (notes !== null && !zip.file(notes)) {
+    throw new UsageError(`slide ${edit.slide} declares speaker notes (${notes}) the presentation does not hold, so a copy of it cannot have notes of its own`);
+  }
+  const part = `${PPT_SLIDES}slide${Math.max(0, ...slideFileNumbers(zip)) + 1}.xml`;
+  editor.add(part, zip.file(source).asText());
+  const notesCopy = notes === null ? null : duplicateNotes(editor, notes, part);
+  const rels = zip.file(relsPartFor(source));
+  if (rels) {
+    // The source's own relationships with the notes relationship pointed at the
+    // copy: the source's notes belong to the source.
+    editor.add(relsPartFor(part), notesCopy === null ? rels.asText() : withRelationshipTarget(rels.asText(), (type) => type.endsWith("/notesSlide"), relativeTarget(partDirectory(part), notesCopy)));
+  }
+  editor.part("[Content_Types].xml", (xml) => withOverride(xml, part, SLIDE_CONTENT_TYPE));
+  const id = addSlideRelationship(editor, part);
+  const sldId = `<p:sldId id="${nextSldId(zip.file(PPT_PRESENTATION).asText())}" r:id="${id}"/>`;
+  editor.part(PPT_PRESENTATION, (xml) => withSldId(xml, sldId, edit.slide));
+}
+
+// A run of speaker notes carrying `text`; notes are plain text, so the run
+// states nothing but the language a reader draws it in.
+const notesParagraph = (text) => `<a:p><a:r><a:rPr lang="${SLIDE_LANG}" dirty="0"/>${textElement("a:", xmlEscape(text))}</a:r></a:p>`;
+
+// The `<p:notes>` part a slide with no notes is given: the slide image and notes
+// body placeholders every notes slide holds, the body carrying `text`. Its
+// relationships and content type are written by `addSlideNotes`, which is the
+// only caller.
+function newNotesXml(text) {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+    `<p:notes xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="${REL_NS}" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">` +
+    `<p:cSld><p:spTree>` +
+    `<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>` +
+    `<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>` +
+    `<p:sp><p:nvSpPr><p:cNvPr id="2" name="Slide Image Placeholder 1"/><p:cNvSpPr><a:spLocks noGrp="1" noRot="1" noChangeAspect="1"/></p:cNvSpPr><p:nvPr><p:ph type="sldImg"/></p:nvPr></p:nvSpPr><p:spPr/></p:sp>` +
+    `<p:sp><p:nvSpPr><p:cNvPr id="3" name="Notes Placeholder 2"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr>` +
+    `<p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>${notesParagraph(text)}</p:txBody></p:sp>` +
+    `</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:notes>`;
+}
+
+// The notes master a notes slide is wired to: the one the presentation's own
+// `<p:notesMasterIdLst>` declares — the master its notes slides are drawn through
+// — or, for a deck stating none, the first the package holds. Either way it is a
+// part that is already there, so the name is the one the package really has.
+function notesMasterPart(zip) {
+  const presentation = zip.file(PPT_PRESENTATION);
+  const rels = zip.file(PPT_RELS);
+  const tag = presentation ? (presentation.asText().match(/<p:notesMasterId\b[^>]*>/) || [])[0] : undefined;
+  const id = tag === undefined ? undefined : relationshipId(tag);
+  const target = id === undefined || !rels ? undefined : relationshipMap(rels.asText()).get(id);
+  const declared = target === undefined ? null : resolvePart(PPT_BASE, target);
+  if (declared !== null && zip.file(declared)) return declared;
+  return firstPartName(zip, `${PPT_NOTES_MASTERS}notesMaster`);
+}
+
+// A notes part's relationships, written relative to its own directory: back to the
+// slide whose notes it holds, and to the master it draws through.
+const newNotesRelsXml = (base, slidePart, master) =>
+  `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+  `<Relationship Id="rId1" Type="${SLIDE_REL}" Target="${relativeTarget(base, slidePart)}"/>` +
+  `<Relationship Id="rId2" Type="${NOTES_MASTER_REL}" Target="${relativeTarget(base, master)}"/></Relationships>`;
+
+// The notes part `slidePart` is given its notes in: the one the slide declares —
+// created at that very name when the package has lost it, so the relationship it
+// already has resolves again — or a fresh part wired into the slide. A
+// presentation with no notes master cannot hold a notes slide, so adding one to
+// it is refused rather than written as a file a reader has to repair.
+function createNotesPart(editor, slidePart, text) {
+  const zip = editor.zip;
+  const declared = slideNotesPart(zip, slidePart);
+  const master = notesMasterPart(zip);
+  if (!master) throw new UsageError("the presentation has no notes master, so a notes slide cannot be created for it");
+  const part = declared || `${PPT_NOTES_SLIDES}notesSlide${Math.max(0, ...notesSlideNumbers(zip)) + 1}.xml`;
+  editor.add(part, newNotesXml(text));
+  editor.add(relsPartFor(part), newNotesRelsXml(partDirectory(part), slidePart, master));
+  if (!declared) addRelationship(editor, slidePart, NOTES_REL, part);
+  // A package that declares the part already says what it is — a `.pptm` declares
+  // its notes slides macro-enabled — and only a part the package knows nothing
+  // about is declared here. `pptxEdit` refuses a package with no
+  // `[Content_Types].xml`, so the part is there to rewrite.
+  editor.part("[Content_Types].xml", (xml) => (overrideFor(xml, part) === undefined ? withOverride(xml, part, NOTES_CONTENT_TYPE) : xml));
+  return part;
+}
+
+// The notes body of a notes slide: the `<p:txBody>` of the shape whose `<p:ph>`
+// is the body placeholder — the one place a reader draws notes from. A notes
+// slide's other shapes hold the slide image and the slide number, and a paragraph
+// must not land in either.
+function notesTextBody(xml) {
+  for (const shape of tagSpans(xml, SLIDE_SHAPE)) {
+    if (shape.selfClosing || shape.depth !== 1) continue;
+    const placeholder = xml.slice(shape.start, shape.end).match(/<p:ph\b[^>]*>/);
+    if (!placeholder) continue;
+    // Only a `<p:ph>` naming `body` is the notes one. The schema defaults
+    // `p:ph/@type` to `obj`, which a reader draws no speaker notes from, so a
+    // placeholder naming no type is not this body either — and the slide image
+    // and slide number placeholders always name a type of their own.
+    if (xmlAttribute(placeholder[0], "type") !== "body") continue;
+    const body = shapeTextBody(xml, shape);
+    if (body) return body;
+  }
+  return null;
+}
+
+// `pptx_edit`'s `add_notes`: `text` as a new paragraph of the addressed slide's
+// speaker notes, the notes part being written when the slide has none — a slide
+// without notes is not a failure to add them to.
+function addSlideNotes(editor, edit) {
+  const zip = editor.zip;
+  const part = addressedSlide(zip, edit.slide);
+  const text = editText(edit.text, "text");
+  const declared = slideNotesPart(zip, part);
+  if (declared && zip.file(declared)) {
+    editor.part(declared, (xml) => {
+      const body = notesTextBody(xml);
+      if (!body) throw new UsageError(`the notes of slide ${edit.slide} have no body to add a paragraph to`);
+      const at = body.closeAt;
+      return xml.slice(0, at) + notesParagraph(text) + xml.slice(at);
+    });
+    return;
+  }
+  createNotesPart(editor, part, text);
+}
+
+// The refusal a notes edit that searched and found nothing states. Notes hold no
+// diagram, so the reasons are the ones every part gives (see `partMissReason`) —
+// each verified against the notes part's own text — and a `find` naming one says
+// so rather than passing it off as text the notes lack. `xml` is the notes part as
+// this edit found it.
+const missingNotesFind = (find, xml, slide) => {
+  const miss = {
+    where: `in the speaker notes of slide ${slide}`,
+    notText: "text in the notes",
+    what: "a notes edit",
+    slide,
+  };
+  return partMissReason(miss, xml, find) ?? `the text ${JSON.stringify(find)} is not ${miss.where}`;
+};
+
+// `pptx_edit`'s `replace_notes`/`remove_notes`: the notes are plain text, so a
+// fragment is matched in one notes paragraph's joined run text exactly as it is
+// on a slide. A slide that holds no notes part at all has nothing to search, and
+// that is said rather than reported as text that is not there.
+function editSlideNotes(editor, edit, op) {
+  const part = addressedSlide(editor.zip, edit.slide);
+  const notes = slideNotesPart(editor.zip, part);
+  if (!notes || !editor.zip.file(notes)) {
+    throw new UsageError(`slide ${edit.slide} has no speaker notes to ${op === "replace_notes" ? "replace text in" : "remove text from"}`);
+  }
+  editPartText(editor, notes, edit, op === "replace_notes", (find, xml) => missingNotesFind(find, xml, edit.slide));
+}
+
+// The children of a run-properties body at its own level: `<a:ln>` holds a
+// `<a:solidFill>` of its own — the outline's fill, not the run's — so the level
+// a child sits at is what tells the two apart.
+function topLevelChildren(body) {
+  const children = [];
+  const open = new RegExp(`${openTag("a:([A-Za-z0-9_]+)")}|${selfClosingTag("a:([A-Za-z0-9_]+)")}`, "g");
+  let match;
+  while ((match = open.exec(body)) !== null) {
+    const name = match[1] ?? match[2];
+    let end = match.index + match[0].length;
+    if (!match[0].endsWith("/>")) {
+      // The element's own close, found with the shared spelling rule (`name` is the
+      // capture, so the `a:` prefix the pattern names is put back): a close tag
+      // carrying whitespace before its `>` ends the child there too.
+      const close = new RegExp(closeTag(`a:${name}`), "g");
+      close.lastIndex = open.lastIndex;
+      const found = close.exec(body);
+      if (!found) continue;
+      end = found.index + found[0].length;
+    }
+    children.push({ name, start: match.index, end });
+    open.lastIndex = end;
+  }
+  return children;
+}
+
+// DrawingML's `CT_TextCharacterProperties` children in the sequence ECMA-376
+// requires: a `<a:solidFill>` written after a later child is dropped by a reader,
+// so a colour goes where the sequence puts it.
+const RUN_CHILD_ORDER = ["ln", "noFill", "solidFill", "gradFill", "blipFill", "pattFill", "grpFill", "effectLst", "effectDag", "highlight", "uLnTx", "uLn", "uFillTx", "uFill", "latin", "ea", "cs", "sym", "hlinkClick", "hlinkMouseOver", "rtl", "extLst"];
+// The members of DrawingML's `EG_FillProperties`, which is a choice group: the
+// six are exclusive, so a run stating its own fill drops whichever one it had.
+const RUN_FILL_CHILDREN = ["noFill", "solidFill", "gradFill", "blipFill", "pattFill", "grpFill"];
+
+// The `<a:rPr>` of a run as the run wrote it, or "" when it has none. DrawingML
+// states no run properties inside run properties, so the first element of the
+// family in a run is the run's own.
+const runPropertiesOf = (runXml) => (runXml.match(SLIDE_RUN_PROPERTIES) || [])[0] || "";
+
+// `body` with the run's own text fill replaced by `element`. The six members of
+// DrawingML's `EG_FillProperties` are a choice group, so whichever one the run
+// had goes, and the replacement is written where ECMA-376's child sequence puts
+// it rather than after a child it must precede. The removal and the write work on
+// the body's own level (see `topLevelChildren`).
+function withRunFill(body, element) {
+  // A name the sequence does not list ranks last, so a fill is written before it.
+  const rank = (name) => {
+    const at = RUN_CHILD_ORDER.indexOf(name);
+    return at < 0 ? RUN_CHILD_ORDER.length : at;
+  };
+  const fill = rank("solidFill");
+  let out = "";
+  let cursor = 0;
+  let written = false;
+  for (const child of topLevelChildren(body)) {
+    out += body.slice(cursor, child.start);
+    cursor = child.end;
+    if (RUN_FILL_CHILDREN.includes(child.name)) continue;
+    if (!written && rank(child.name) > fill) {
+      out += element;
+      written = true;
+    }
+    out += body.slice(child.start, cursor);
+  }
+  out += body.slice(cursor);
+  return written ? out : out + element;
+}
+
+// The run properties a format request writes for one run: `bold`, `italic`,
+// `underline` and `strike` are attributes of `<a:rPr>`, `size` replaces its `sz`
+// attribute (DrawingML counts hundredths of a point in it) and `color` the run's own
+// solid fill. Everything the request does not name keeps the bytes it had, and a
+// toggle set to `false` writes the off value so it overrides what the run inherits.
+function formattedSlideRunProperties(runXml, format) {
+  const current = runPropertiesOf(runXml);
+  // The properties read through the shared element rule — `elementParts` opens a
+  // self-closing tag and gives the body of a closed one — so a close tag carrying
+  // whitespace before its `>` is not read as part of the body.
+  const { open, body: own } = current === "" ? { open: "<a:rPr>", body: "" } : elementParts(current, "a:rPr");
+  let body = own;
+  let tag = open;
+  if (format.bold !== undefined) tag = setXmlAttribute(tag, "b", format.bold ? "1" : "0");
+  if (format.italic !== undefined) tag = setXmlAttribute(tag, "i", format.italic ? "1" : "0");
+  if (format.underline !== undefined) tag = setXmlAttribute(tag, "u", format.underline ? "sng" : "none");
+  if (format.strike !== undefined) tag = setXmlAttribute(tag, "strike", format.strike ? "sngStrike" : "noStrike");
+  if (format.size !== undefined) tag = setXmlAttribute(tag, "sz", format.size);
+  if (format.color !== undefined) {
+    body = withRunFill(body, `<a:solidFill><a:srgbClr val="${format.color}"/></a:solidFill>`);
+  }
+  // `elementParts`'s open tag is the opened form, so an empty body is written back
+  // as the self-closing tag it was.
+  return body ? `${tag}${body}</a:rPr>` : `${tag.slice(0, -1)}/>`;
+}
+
+// `xml` with the run-level properties of `format` written on the runs the named
+// fragments cover. A run is the smallest unit DrawingML states run properties in,
+// so a fragment covering part of a run formats that whole run — which the note
+// the caller raises says.
+function formatSlideRuns(xml, runs, runIndices, format) {
+  const pieces = [];
+  for (const index of [...runIndices].sort((a, b) => a - b)) {
+    const run = runs[index];
+    const runXml = xml.slice(run.start, run.end);
+    const open = runXml.match(new RegExp(openTag("a:r")))[0];
+    const own = runPropertiesOf(runXml);
+    const at = own === "" ? -1 : runXml.indexOf(own);
+    const next = formattedSlideRunProperties(runXml, format);
+    pieces.push({
+      start: run.start,
+      end: run.end,
+      xml: at >= 0 ? runXml.slice(0, at) + next + runXml.slice(at + own.length) : open + next + runXml.slice(open.length),
+    });
+  }
+  pieces.sort((a, b) => b.start - a.start);
+  let out = xml;
+  for (const piece of pieces) out = out.slice(0, piece.start) + piece.xml + out.slice(piece.end);
+  return out;
+}
+
+// The paragraph with its alignment set. `<a:pPr>` is a paragraph's first child,
+// so one is written there when the paragraph has none; otherwise the attribute
+// goes on the paragraph's own `<a:pPr>` tag, never on its close.
+function alignSlideParagraph(element, align) {
+  const open = element.match(new RegExp(openTag("a:p")));
+  if (!open) return element;
+  const ppr = element.match(SLIDE_PPR);
+  if (!ppr) return `${element.slice(0, open[0].length)}<a:pPr algn="${align}"/>${element.slice(open[0].length)}`;
+  const tag = ppr[0].match(new RegExp(`^(?:${selfClosingTag("a:pPr")}|${openTag("a:pPr")})`))[0];
+  const at = element.indexOf(ppr[0]);
+  return element.slice(0, at) + setXmlAttribute(tag, "algn", align) + ppr[0].slice(tag.length) + element.slice(at + ppr[0].length);
+}
+
+// The formatting a `format_text` states, normalized to what the writer needs:
+// `size` in DrawingML's hundredths of a point, `color` as `RULES.color_digits`
+// uppercase hex digits and `align` as the `algn` value its word names.
+function slideFormat(edit) {
+  const format = { runs: false };
+  // A `null` property counts as absent — the caller's own boundary treats a
+  // null-valued key that way — so only a stated one is written.
+  for (const name of ["bold", "italic", "underline", "strike"]) {
+    if (edit[name] == null) continue;
+    if (typeof edit[name] !== "boolean") throw new UsageError(`${name} must be true or false`);
+    format[name] = edit[name];
+    format.runs = true;
+  }
+  if (edit.size != null) {
+    if (!inSpan(edit.size, RULES.slide_text_size_points)) throw new UsageError(`size must be ${spanBounds(RULES.slide_text_size_points)} points, got: ${JSON.stringify(edit.size)}`);
+    format.size = String(Math.round(edit.size * 100));
+    format.runs = true;
+  }
+  if (edit.color != null) {
+    format.color = hexDigits(edit.color).toUpperCase();
+    format.runs = true;
+  }
+  if (edit.align != null) {
+    // The rules' own table, so an alignment with no `algn` value — or an
+    // inherited name such as "constructor" — is refused rather than written as
+    // an alignment no reader knows.
+    if (!SLIDE_ALIGNMENTS.has(edit.align)) throw new UsageError(`align must be ${listed([...SLIDE_ALIGNMENTS.keys()])}, got: ${JSON.stringify(edit.align)}`);
+    format.align = SLIDE_ALIGNMENTS.get(edit.align);
+  }
+  if (!format.runs && format.align === undefined) throw new UsageError("format_text needs at least one of bold, italic, underline, strike, size, color or align");
+  return format;
+}
+
+// `pptx_edit`'s `format_text`: the run properties of `edit` on the runs the named
+// fragment covers, and its alignment on the paragraph holding it. Two things the
+// caller is owed a note about: run properties live on the run, so a fragment
+// covering part of one formats all of it, and `algn` is a paragraph's, so it
+// applies to the paragraph's whole text. A `find` no run covers is refused with
+// the reason the reader's labels and any diagram's text give it (see
+// `slideFindRefusal`).
+function formatSlideText(editor, edit) {
+  const part = addressedSlide(editor.zip, edit.slide);
+  const find = editText(edit.find, "find");
+  if (!find) throw new UsageError("find must not be empty");
+  const format = slideFormat(edit);
+  editor.part(part, (xml) => {
+    let found = false;
+    const out = mapSlideParagraphs(xml, (paragraph) => {
+      const { runs, slots } = slideRuns(paragraph);
+      const text = slots.map((slot) => xmlUnescape(slot.raw)).join("");
+      const offsets = occurrences(text, find);
+      if (!offsets.length) return undefined;
+      found = true;
+      // The code points the fragments cover, so a run or paragraph the request
+      // reaches beyond them can be reported.
+      const covered = new Array([...text].length).fill(false);
+      for (const span of offsets) {
+        for (let at = span.start; at < span.end; at += 1) covered[at] = true;
+      }
+      const ranges = [];
+      let walked = 0;
+      for (const slot of slots) {
+        const length = [...xmlUnescape(slot.raw)].length;
+        ranges.push({ start: walked, end: walked + length });
+        walked += length;
+      }
+      const runIndices = new Set();
+      for (const span of offsets) {
+        const first = locateSlot(slots, span.start);
+        const last = locateSlot(slots, span.end, true);
+        for (let index = first.index; index <= last.index; index += 1) runIndices.add(slots[index].run);
+      }
+      // A run the fragments only partly cover: its properties are the run's, so
+      // the whole of it is formatted.
+      const partial = (slot, index) => {
+        if (!runIndices.has(slot.run)) return false;
+        for (let point = ranges[index].start; point < ranges[index].end; point += 1) {
+          if (!covered[point]) return true;
+        }
+        return false;
+      };
+      if (format.runs && slots.some(partial)) editor.note("[the named text is part of a longer run, so the formatting also applied to the rest of that run]");
+      let element = paragraph;
+      if (format.runs) element = formatSlideRuns(element, runs, runIndices, format);
+      if (format.align !== undefined) {
+        if (!covered.every(Boolean)) editor.note("[a paragraph's alignment is the whole paragraph's, so the text beside the named fragment was aligned too]");
+        element = alignSlideParagraph(element, format.align);
+      }
+      return element;
+    });
+    if (!found) throw new UsageError(slideFindRefusal(editor, xml, part, find, edit.slide));
+    return out;
+  });
+}
+
+// The `N` numbers of the `<directory>imageN.ext` parts the package holds,
+// whatever extension each carries.
+const mediaNumbers = (zip, directory) => Object.keys(zip.files).flatMap((name) => {
+  const match = name.match(new RegExp(`^${escapeRegExp(directory)}image(\\d+)\\.[A-Za-z0-9]+$`));
+  return match ? [Number(match[1])] : [];
+});
+
+// A free `<directory>imageN.ext` name: one past the largest number the package
+// uses in that directory, whatever extension it carries, so the name is free by
+// construction. A package's own media names are left alone — Word writes
+// `imageN.ext`, a library a content hash.
+function nextMediaPart(zip, directory, extension) {
+  return `${directory}image${Math.max(0, ...mediaNumbers(zip, directory)) + 1}.${extension}`;
+}
+
+// The slide's own size in EMU, from the presentation's `<p:sldSz>`, or the
+// default a presentation stating none is read at (see `SLIDE_SIZE_DEFAULT`).
+function slideSize(zip) {
+  const presentation = zip.file(PPT_PRESENTATION);
+  const tag = presentation ? (presentation.asText().match(/<p:sldSz\b[^>]*>/) || [])[0] : undefined;
+  const side = (name, fallback) => {
+    const value = tag === undefined ? Number.NaN : Number(xmlAttribute(tag, name));
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+  };
+  return { width: side("cx", SLIDE_SIZE_DEFAULT.width), height: side("cy", SLIDE_SIZE_DEFAULT.height) };
+}
+
+// Where a shape the caller places goes, in EMU: `x_fraction` and `y_fraction`
+// are fractions of the slide's own width and height and so are `width_fraction`
+// and `height_fraction`, which is what lets a caller place a shape without
+// knowing the deck's size; an absent place is the slide's middle. An absent size
+// follows `grows`: a picture takes the largest that fits the slide with its own
+// proportions, while a table keeps its own size, shrunk only as far as the slide
+// forces so its text is not scaled up to a page's worth of cells. A size named on
+// one side only keeps those proportions. `natural` is the shape's own size in EMU.
+function placementBox(natural, edit, slide, grows) {
+  for (const name of ["x_fraction", "y_fraction", "width_fraction", "height_fraction"]) {
+    const value = edit[name];
+    if (value == null) continue;
+    const span = name === "width_fraction" || name === "height_fraction" ? RULES.slide_size_fraction : RULES.slide_position_fraction;
+    if (!inSpan(value, span)) throw new UsageError(`${name} must be ${spanBounds(span)}, got: ${JSON.stringify(value)}`);
+  }
+  let width;
+  let height;
+  if (edit.width_fraction != null && edit.height_fraction != null) {
+    width = edit.width_fraction * slide.width;
+    height = edit.height_fraction * slide.height;
+  } else if (edit.width_fraction != null) {
+    width = edit.width_fraction * slide.width;
+    height = width * natural.height / natural.width;
+  } else if (edit.height_fraction != null) {
+    height = edit.height_fraction * slide.height;
+    width = height * natural.width / natural.height;
+  } else {
+    const fits = Math.min(slide.width / natural.width, slide.height / natural.height);
+    const scale = grows ? fits : Math.min(1, fits);
+    width = natural.width * scale;
+    height = natural.height * scale;
+  }
+  const round = (value) => Math.max(1, Math.round(value));
+  return {
+    x: Math.round(edit.x_fraction != null ? edit.x_fraction * slide.width : (slide.width - width) / 2),
+    y: Math.round(edit.y_fraction != null ? edit.y_fraction * slide.height : (slide.height - height) / 2),
+    cx: round(width),
+    cy: round(height),
+  };
+}
+
+// Where an added image goes, in EMU: the file's own size is the shape's, and an
+// absent size is the largest that fits the slide (see `placementBox`).
+function imagePlacement(image, edit, slide) {
+  return placementBox({ width: image.width * PX_TO_EMU, height: image.height * PX_TO_EMU }, edit, slide, true);
+}
+
+// Where a new shape goes in a slide: the end of the slide's shape tree's own
+// content, before the tree's trailing `<p:extLst>`, which `CT_GroupShape` keeps
+// last — a shape written after it is out of the tree's element order. The tree's
+// own list is told from a nested one by its tail: a nested `<p:extLst>` sits
+// inside a shape, so that shape's close follows it, while the tree's own is
+// followed by nothing but whitespace to the tree's close. `null` when the xml
+// holds no shape tree — there is then nowhere for a shape to go. A self-closing
+// `<p:spTree/>` is not one: `CT_GroupShape` requires the group's own properties,
+// so a slide holding only that element is not a slide a picture may be added to.
+function shapeTreeEnd(xml) {
+  const tree = tagSpans(xml, SLIDE_SHAPE_TREE).find((span) => !span.selfClosing);
+  if (!tree) return null;
+  // Where the tree's own close begins, read from the scan's own span rather than
+  // measured off a close tag spelled out again (see `tagSpans`).
+  const close = tree.closeAt;
+  const trailing = (span) => tree.start < span.start && span.end <= close && xml.slice(span.end, close).trim() === "";
+  const extension = tagSpans(xml, tagPattern("p:extLst")).find(trailing);
+  return extension ? extension.start : close;
+}
+
+// The part's root declaring `prefix` when it does not already: the picture reaches
+// its media part through `r:embed`, and the run properties it writes are
+// DrawingML's `a:` — an undeclared prefix is not XML, in a part the kit did not
+// write itself. `root` is the element the part opens with (`p:sld`, `worksheet`,
+// `xdr:wsDr`).
+function withNamespace(xml, root, prefix, uri) {
+  const found = xml.match(new RegExp(openTag(root)));
+  if (!found || new RegExp(`\\bxmlns:${prefix}=`).test(found[0])) return xml;
+  const declared = setXmlAttribute(found[0], `xmlns:${prefix}`, uri);
+  return xml.slice(0, found.index) + declared + xml.slice(found.index + found[0].length);
+}
+const withRelationshipNamespace = (xml, root) => withNamespace(xml, root, "r", REL_NS);
+
+// `pptx_edit`'s `add_image`: the file's bytes become a media part, the slide
+// gains a relationship to it and a `<p:pic>` is appended to the slide's shape
+// tree — the picture is the slide's last shape and takes the next free shape id,
+// so nothing else on the slide is renamed. The image is placed and sized by
+// fraction of the slide (see `imagePlacement`). The part's own content type is
+// declared as an Override: the deck's `<Default>` for the extension may carry
+// another spelling of it (a writer's `image/jpg`, say), and an Override is the
+// declaration that decides for a part. A place the caller named verbatim can put
+// the picture partly outside the slide, which is the documented contract and
+// stays; the reply says so rather than reporting a plain success.
+function addSlideImage(editor, edit) {
+  const zip = editor.zip;
+  const part = addressedSlide(zip, edit.slide);
+  const image = readImage(edit.image);
+  const media = nextMediaPart(zip, PPT_MEDIA, image.kind);
+  editor.add(media, image.bytes);
+  editor.part("[Content_Types].xml", (xml) => withOverride(xml, media, image.contentType));
+  const id = addRelationship(editor, part, IMAGE_REL, media);
+  editor.part(part, (xml) => {
+    const namespaced = withRelationshipNamespace(xml, "p:sld");
+    const at = shapeTreeEnd(namespaced);
+    if (at === null) throw new UsageError("the slide has no shape tree to place an image in");
+    const shapeId = nextShapeId(namespaced);
+    const slide = slideSize(zip);
+    const placement = imagePlacement(image, edit, slide);
+    if (outsideSlide(placement, slide)) editor.note(pastEdgeNote("picture", "the slide"));
+    const picture = `<p:pic><p:nvPicPr><p:cNvPr id="${shapeId}" name="Image ${shapeId}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>` +
+      `<p:blipFill><a:blip r:embed="${id}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>` +
+      `<p:spPr><a:xfrm><a:off x="${placement.x}" y="${placement.y}"/><a:ext cx="${placement.cx}" cy="${placement.cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`;
+    return namespaced.slice(0, at) + picture + namespaced.slice(at);
+  });
+}
+
+// Whether a placement's own box reaches past the slide it is placed on.
+const outsideSlide = (placement, slide) => placement.x < 0 || placement.y < 0
+  || placement.x + placement.cx > slide.width || placement.y + placement.cy > slide.height;
+
+// The id a shape this call adds takes: one past the highest the slide already
+// numbers, so the shape is the slide's last and never renames one it holds.
+function nextShapeId(xml) {
+  return Math.max(1, ...[...xml.matchAll(/<p:cNvPr\b[^>]*\bid="(\d+)"/g)].map((match) => Number(match[1]))) + 1;
+}
+
+// One line of the table's own text (`TABLE_TEXT_POINTS`) at 1.2 leading, and
+// DrawingML's default cell insets (0.05in at the top and the bottom): the shortest
+// a row may be and still show its own line. A smaller row is one PowerPoint grows
+// back on open, which would push the table past the slide a frame inside it
+// reported.
+const TABLE_LINE_EMU = Math.round(TABLE_TEXT_POINTS * 1.2 * EMU_PER_INCH / 72);
+const TABLE_MIN_ROW_EMU = TABLE_LINE_EMU + 2 * Math.round(0.05 * EMU_PER_INCH);
+// The row height a table placed into a slide takes: a fifth taller than that
+// shortest row, so the text has room around it. A table's own size is one row per
+// line it holds, which is what an absent size is shrunk from — never grown, so
+// cells keep the size their text needs.
+const TABLE_ROW_EMU = Math.round(TABLE_MIN_ROW_EMU * 6 / 5);
+// The `graphicData` URI a DrawingML table is held under in a slide.
+const TABLE_GRAPHIC_URI = "http://schemas.openxmlformats.org/drawingml/2006/table";
+
+// The table's grid and rows, from what the caller gave: every column and every
+// row takes the same share of the frame, the last one taking the remainder so the
+// cells add up to it exactly. A row is padded to the widest one — a DrawingML
+// table states the same number of cells in every row, and the grid's own columns
+// say how many — and a heading cell is bold, which `firstRow` asks the style to
+// treat as a heading row.
+function tableRowsXml(headers, rows, placement) {
+  const columns = Math.max(headers.length, ...rows.map((row) => row.length));
+  const headingRows = headers.length ? 1 : 0;
+  const count = headingRows + rows.length;
+  const share = (total, parts, index) => (index === parts - 1 ? total - Math.floor(total / parts) * (parts - 1) : Math.floor(total / parts));
+  function cell(text, bold) {
+    const run = text === undefined || text === "" ? "" : `<a:r><a:rPr lang="${SLIDE_LANG}" sz="${TABLE_TEXT_POINTS * 100}"${bold ? ' b="1"' : ""}/>${textElement("a:", xmlEscape(String(text)))}</a:r>`;
+    const end = `<a:endParaRPr lang="${SLIDE_LANG}" sz="${TABLE_TEXT_POINTS * 100}"/>`;
+    return `<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p>${run}${end}</a:p></a:txBody><a:tcPr/></a:tc>`;
+  }
+  function line(cells, bold, index) {
+    const texts = Array.from({ length: columns }, (_, at) => cell(cells[at], bold));
+    return `<a:tr h="${share(placement.cy, count, index)}">${texts.join("")}</a:tr>`;
+  }
+  const grid = Array.from({ length: columns }, (_, index) => `<a:gridCol w="${share(placement.cx, columns, index)}"/>`).join("");
+  const head = headers.length ? [line(headers, true, 0)] : [];
+  const body = rows.map((cells, index) => line(cells, false, index + headingRows));
+  return `<a:tblPr${headers.length ? ' firstRow="1"' : ""}/><a:tblGrid>${grid}</a:tblGrid>${[...head, ...body].join("")}`;
+}
+
+// `pptx_edit`'s `add_table`: a `<p:graphicFrame>` holding a DrawingML table,
+// appended to the slide's shape tree exactly as a picture is — the slide's last
+// shape, taking the next free shape id, so nothing already on the slide is
+// touched and nothing is replaced. The table is placed and sized by fraction of
+// the slide, the same contract an image is placed by (see `placementBox`); its
+// cell text is `<a:t>` inside the cell's paragraph, which is where a reading
+// finds a slide's text.
+function addSlideTable(editor, edit) {
+  const zip = editor.zip;
+  const part = addressedSlide(zip, edit.slide);
+  const headings = edit.headers ?? [];
+  const headers = headings.map((cell) => scalarOf(cell, "a table heading"));
+  const rows = (edit.rows ?? [])
+    .map((row) => {
+      if (!Array.isArray(row)) throw new UsageError("a table's rows must be arrays of cells");
+      return row.map((cell) => scalarOf(cell, "a table cell"));
+    })
+    .filter((row) => row.length);
+  if (!headers.length && !rows.length) throw new UsageError("the table states no rows and no headers — hint: give it at least one row or one header");
+  editor.part(part, (xml) => {
+    const at = shapeTreeEnd(xml);
+    if (at === null) throw new UsageError("the slide has no shape tree to place a table in");
+    const shapeId = nextShapeId(xml);
+    const slide = slideSize(zip);
+    const lines = (headers.length ? 1 : 0) + rows.length;
+    // An unnamed table spans the width a created deck lays its own content out
+    // in — the flow's own column, scaled with the deck — one row per line of its
+    // text. A row holds a line of the table's own text, so its height is stated
+    // in the text's own measure rather than scaled with the deck.
+    const flow = slideBox(slide.width / EMU_PER_INCH, slide.height / EMU_PER_INCH);
+    const natural = {
+      width: Math.max(1, Math.round(flow.width * EMU_PER_INCH)),
+      height: Math.max(1, lines * TABLE_ROW_EMU),
+    };
+    const placement = placementBox(natural, edit, slide, false);
+    // A size the call leaves entirely unnamed is shrunk to fit the slide, but
+    // never below a row that shows its own text: a table the slide cannot hold at
+    // that height is left taller than the slide, and the note below says so rather
+    // than the call reporting a table that PowerPoint would grow off the slide on
+    // open. The floor is a height alone, so the table keeps the width it has of
+    // its own rather than the narrower one the abandoned fit gave it, and every
+    // axis the call left unnamed is centred again. A size the call names on either
+    // side keeps the size its fractions state, as every placed shape does.
+    if (edit.width_fraction == null && edit.height_fraction == null && placement.cy < lines * TABLE_MIN_ROW_EMU) {
+      placement.cx = natural.width;
+      placement.cy = lines * TABLE_MIN_ROW_EMU;
+      if (edit.x_fraction == null) placement.x = Math.round((slide.width - placement.cx) / 2);
+      if (edit.y_fraction == null) placement.y = Math.max(0, Math.round((slide.height - placement.cy) / 2));
+    }
+    if (outsideSlide(placement, slide)) editor.note(pastEdgeNote("table", "the slide"));
+    const frame = `<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="${shapeId}" name="Table ${shapeId}"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>` +
+      `<p:xfrm><a:off x="${placement.x}" y="${placement.y}"/><a:ext cx="${placement.cx}" cy="${placement.cy}"/></p:xfrm>` +
+      `<a:graphic><a:graphicData uri="${TABLE_GRAPHIC_URI}"><a:tbl>${tableRowsXml(headers, rows, placement)}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`;
+    return xml.slice(0, at) + frame + xml.slice(at);
+  });
+}
+
+function pptxEdit(req) {
+  const editor = openEdit(req, "pptx");
+  // A package without content types is not a presentation this kit can edit: it
+  // could not name a new slide's type. The caller can supply one that has it,
+  // not the kit.
+  if (!editor.zip.file("[Content_Types].xml")) throw missingContentTypes(req.input);
+  const edits = editList(req);
+  for (const edit of edits) {
+    const op = edit && edit.op;
+    if (op === "replace_text" || op === "remove_text") editSlideText(editor, edit, op);
+    else if (op === "format_text") formatSlideText(editor, edit);
+    else if (op === "add_paragraph") addSlideParagraph(editor, edit);
+    else if (op === "remove_paragraph") removeSlideParagraphs(editor, edit);
+    else if (op === "add_image") addSlideImage(editor, edit);
+    else if (op === "add_table") addSlideTable(editor, edit);
+    else if (op === "add_slide") addSlide(editor, edit);
+    else if (op === "delete_slide") deleteSlide(editor, edit);
+    else if (op === "move_slide") moveSlide(editor, edit);
+    else if (op === "duplicate_slide") duplicateSlide(editor, edit);
+    else if (op === "replace_notes" || op === "remove_notes") editSlideNotes(editor, edit, op);
+    else if (op === "add_notes") addSlideNotes(editor, edit);
+    else throw new UsageError(`unknown pptx edit: ${JSON.stringify(op)}`);
+  }
+  return editor.finish();
+}
+
+// ── pdf description ────────────────────────────────────────────
+// The document information dictionary: what a reader shows as the file's
+// description. A loaded PDF's own entries are the author's record of the file,
+// so they are preserved unless the request names them.
+const PRODUCT = "mahbot";
+// The request keys a metadata object may name, each with its Info entry name and
+// whether its value is a PDF date.
+const PDF_METADATA = Object.fromEntries(RULES.pdf_metadata_fields
+  .map((field) => [field.key, field]));
+// The file's own Info dictionary, without creating one.
+function existingInfo(pdf) {
+  const existing = pdf.context.lookup(pdf.context.trailerInfo.Info);
+  return existing instanceof PDFDict ? existing : undefined;
+}
+// The caller's entries over a file's own: a field left out keeps what the file
+// had, and dates arrive in the PDF's `D:…` spelling from the tool.
+function applyMetadata(pdf, metadata) {
+  if (metadata === undefined) return;
+  let info = existingInfo(pdf);
+  for (const [key, field] of Object.entries(PDF_METADATA)) {
+    const value = metadata[key];
+    if (value === undefined) continue;
+    if (typeof value !== "string") throw new UsageError(`"${key}" must be text`);
+    const cleared = value === "";
+    // Clearing an entry must not add an Info dictionary to a file that has none;
+    // setting one always does.
+    if (cleared && !info) continue;
+    if (!info) {
+      info = pdf.context.obj({});
+      pdf.context.trailerInfo.Info = pdf.context.register(info);
+    }
+    if (cleared) info.delete(PDFName.of(field.name));
+    else info.set(PDFName.of(field.name), field.date ? PDFString.of(value) : PDFHexString.fromText(value));
+  }
+}
+function pdfDate(date) {
+  // `toString()` wraps the value in literal-string parentheses; `asString()` is
+  // the raw `D:…` the Info dictionary wants.
+  return PDFString.fromDate(date).asString();
+}
+// A document built by this kit names itself as the producer and dates the file
+// it just made; a caller's metadata then overrides or clears any of that.
+async function freshPdf(metadata) {
+  const pdf = await PDFDocument.create({ updateMetadata: false });
+  const now = new Date();
+  applyMetadata(pdf, { producer: PRODUCT, created: pdfDate(now), modified: pdfDate(now) });
+  applyMetadata(pdf, metadata);
+  return pdf;
+}
+// An edit keeps the description the file carried, but dates the write: an entry
+// the file already has reflects the modification, so it advances. A caller
+// naming `modified` — even with an empty string — decides it instead, and a file
+// carrying no modification date gains none (nothing is invented for it).
+function applyEditMetadata(pdf, metadata) {
+  const named = metadata ?? {};
+  const entries = { ...named };
+  if (!Object.hasOwn(named, "modified") && existingInfo(pdf)?.has(PDFName.of("ModDate"))) {
+    entries.modified = pdfDate(new Date());
+  }
+  applyMetadata(pdf, entries);
+}
+
+// ── pdf page operations ────────────────────────────────────────
+// A PDF the library cannot parse is the request's own input, not a kit fault.
+const loadPdf = async (p) => {
+  const bytes = readInput(p);
+  let pdf;
+  try {
+    // `ignoreEncryption` is what makes an encrypted document load far enough to
+    // be NAMED as one: the library refuses it before this side can see why, and
+    // a cause the caller recognises is worth more than a library message.
+    // `updateMetadata: false` keeps the file's own producer and dates: loading
+    // must not restamp them with pdf-lib's identity as a side effect of editing.
+    pdf = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+    // The page tree must resolve too: a header-valid file whose body the
+    // library cannot read would otherwise fail deep inside an operation, with a
+    // raw library message. Touching it here refuses such a file in this same
+    // place, as the request's own input.
+    pdf.getPageIndices();
+  } catch {
+    // The library's own text for a body it cannot read ("undefined is not an
+    // object (evaluating '_this.catalog.Pages')") names nothing the caller can
+    // act on, so the refusal states only what is known here.
+    throw new UsageError(`cannot read ${nodePath.basename(p)} as a PDF — its bytes do not form a PDF this tool can read`);
+  }
+  if (pdf.isEncrypted) {
+    throw new UsageError(`${nodePath.basename(p)} is password-protected — the tool cannot open an encrypted PDF`);
+  }
+  return pdf;
+};
+// The zero-based page indices `pages` names, rejecting one the document does
+// not have: the library's own message for that names neither the page nor the
+// document's length.
+function pageIndices(pdf, pages) {
+  const indices = !pages || pages === "all" ? pdf.getPageIndices() : pages.map((n) => n - 1);
+  const count = pdf.getPageCount();
+  for (const index of indices) {
+    if (index < 0 || index >= count) throw new UsageError(`no page ${index + 1}: this document has ${count} page(s)`);
+  }
+  pageCountLimit(indices.length);
+  return indices;
+}
+// The Rust boundary counts the pages a caller names explicitly, but a selection
+// resolving against the document's own length ("all") is only known here, so the
+// shared limit is enforced on the count a selection really resolves to.
+function pageCountLimit(count) {
+  if (count > RULES.max_pages_per_request) {
+    throw new UsageError(`the request names ${count} pages, more than one call takes (limit ${RULES.max_pages_per_request})`);
+  }
+}
+// A PDF position or angle a page operation may state: a finite number whose
+// magnitude no page can carry (a page is laid out in points). One helper, so
+// the coordinates and the rotation are refused the same way rather than by a
+// pdf-lib fault further in.
+function pointNumber(value, name) {
+  if (typeof value !== "number" || !Number.isFinite(value) || Math.abs(value) > RULES.pdf_point_abs_max) {
+    throw new UsageError(`"${name}" must be within ±${RULES.pdf_point_abs_max} points, got ${value}`);
+  }
+  return value;
+}
+// The area a page currently shows and how it is displayed. The page's own boxes
+// may lie outside one another — the format clips nothing — so the visible area is
+// the intersection of the media and crop boxes, a degenerate one falling back to
+// the media box. Display coordinates are measured from the displayed page's
+// top-left, x right and y down, whatever the page's own rotation — the format's
+// quarter turns, of which anything else, which the format does not allow, is read
+// as the nearest — and `toUser` maps one back into PDF user space: every
+// operation that places something reads its numbers in that one frame.
+function visibleFrame(page) {
+  const media = page.getMediaBox();
+  const crop = page.getCropBox();
+  let x0 = Math.max(media.x, crop.x);
+  let y0 = Math.max(media.y, crop.y);
+  let x1 = Math.min(media.x + media.width, crop.x + crop.width);
+  let y1 = Math.min(media.y + media.height, crop.y + crop.height);
+  if (x1 <= x0 || y1 <= y0) {
+    x0 = media.x;
+    y0 = media.y;
+    x1 = media.x + media.width;
+    y1 = media.y + media.height;
+  }
+  const rotation = ((Math.round(page.getRotation().angle / 90) * 90) % 360 + 360) % 360;
+  const toUser = (dx, dy) => {
+    if (rotation === 90) return { x: x0 + dy, y: y0 + dx };
+    if (rotation === 180) return { x: x1 - dx, y: y0 + dy };
+    if (rotation === 270) return { x: x1 - dy, y: y1 - dx };
+    return { x: x0 + dx, y: y1 - dy };
+  };
+  // The inverse of `toUser`: where a user-space point falls on the displayed page.
+  const fromUser = (x, y) => {
+    if (rotation === 90) return { x: y - y0, y: x - x0 };
+    if (rotation === 180) return { x: x1 - x, y: y - y0 };
+    if (rotation === 270) return { x: y1 - y, y: x1 - x };
+    return { x: x - x0, y: y1 - y };
+  };
+  const origin = toUser(0, 0);
+  const right = toUser(1, 0);
+  const down = toUser(0, 1);
+  const sideways = rotation === 90 || rotation === 270;
+  return {
+    width: sideways ? y1 - y0 : x1 - x0,
+    height: sideways ? x1 - x0 : y1 - y0,
+    rotation,
+    origin,
+    right: { x: right.x - origin.x, y: right.y - origin.y },
+    down: { x: down.x - origin.x, y: down.y - origin.y },
+    toUser,
+    fromUser,
+  };
+}
+// The axis-aligned rectangle a set of corners encloses, in whatever space they
+// were mapped into: PDF user space for `toUser`'s corners, the displayed page's
+// for `fromUser`'s.
+function userRect(corners) {
+  const xs = corners.map((point) => point.x);
+  const ys = corners.map((point) => point.y);
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+}
+// The user-space box a rectangle on the displayed page covers: a rotated page
+// turns the box, and the extremes of its four mapped corners are the box pdf-lib
+// can be handed.
+function frameRect(frame, x, y, width, height) {
+  return userRect([
+    frame.toUser(x, y),
+    frame.toUser(x + width, y),
+    frame.toUser(x, y + height),
+    frame.toUser(x + width, y + height),
+  ]);
+}
+// The margins a placement gets by default: the page's own breathing room, kept to
+// a quarter of itself on each side where the visible area is too small for both
+// margins, so a fitted picture always has a box and a default placement never
+// starts outside the page.
+function insetOf(frame) {
+  return Math.min(MARGIN, frame.width / 4, frame.height / 4);
+}
+// The digits a colour must have, taken once from the shared rules.
+const HEX_COLOR = new RegExp(`^[0-9a-fA-F]{${RULES.color_digits}}$`);
+// The digits of a colour the tool accepts: `color_digits` hex digits with an
+// optional leading "#". A colour is a string, so a JSON number is refused here
+// too rather than coerced into digits.
+const hexDigits = (color) => {
+  const digits = typeof color === "string" ? color.replace(/^#/, "") : "";
+  if (!HEX_COLOR.test(digits)) throw new UsageError(`color must be ${RULES.color_digits} hex digits, with an optional leading "#", got: ${color}`);
+  return digits;
+};
+const hexColor = (hex) => {
+  const digits = hexDigits(hex);
+  const per = RULES.color_digits / 3;
+  const channel = (index) => parseInt(digits.slice(index * per, (index + 1) * per), 16) / 255;
+  return rgb(channel(0), channel(1), channel(2));
+};
+
+// `copyPages` copies a page's own dictionary, so a MediaBox or CropBox inherited
+// from the page tree is dropped: the copy states the area its source showed. A
+// CropBox is written only where it says something its MediaBox does not, so an
+// uncropped page keeps no explicit one.
+function keepVisibleArea(copied, source) {
+  const media = source.getMediaBox();
+  const crop = source.getCropBox();
+  copied.setMediaBox(media.x, media.y, media.width, media.height);
+  if (["x", "y", "width", "height"].some((side) => Math.abs(crop[side] - media[side]) > 1e-6)) {
+    copied.setCropBox(crop.x, crop.y, crop.width, crop.height);
+  }
+}
+// Copy `indices` of `source` into `out`, in that order, each with the area it
+// showed. Both merging and splitting copy pages, so both go through here.
+async function copyPagesInto(out, source, indices) {
+  const copies = await out.copyPages(source, indices);
+  copies.forEach((page, i) => {
+    out.addPage(page);
+    keepVisibleArea(page, source.getPage(indices[i]));
+  });
+}
+
+async function pdfMerge(req) {
+  const out = await freshPdf(req.metadata);
+  for (const input of req.inputs) {
+    const source = await loadPdf(input);
+    await copyPagesInto(out, source, source.getPageIndices());
+  }
+  return out.save();
+}
+
+async function pdfSplit(req) {
+  const source = await loadPdf(req.input);
+  // Every group's indices resolve first, so the cap is checked on the TOTAL the
+  // call names — 50 groups of "all" would each pass a per-selection check on their
+  // own — before any output is built.
+  const groups = req.groups.map((group) => pageIndices(source, group));
+  pageCountLimit(groups.reduce((total, indices) => total + indices.length, 0));
+  const outputs = [];
+  for (const indices of groups) {
+    const out = await freshPdf(req.metadata);
+    await copyPagesInto(out, source, indices);
+    outputs.push(await out.save());
+  }
+  return outputs;
+}
+
+async function pdfRotate(req) {
+  // A rotation the pdf-lib writer cannot take is refused here, in the request's
+  // own terms, rather than surfacing as an internal fault of the library.
+  if (typeof req.degrees !== "number" || !Number.isFinite(req.degrees) || req.degrees % RULES.degrees_step !== 0) {
+    throw new UsageError(`"degrees" must be a multiple of ${RULES.degrees_step}, got: ${req.degrees}`);
+  }
+  const pdf = await loadPdf(req.input);
+  applyEditMetadata(pdf, req.metadata);
+  for (const index of pageIndices(pdf, req.pages)) {
+    const page = pdf.getPage(index);
+    page.setRotation(degrees((((page.getRotation().angle + req.degrees) % 360) + 360) % 360));
+  }
+  return pdf.save();
+}
+
+// The fractional area a crop names, refused unless it lies inside the page and
+// has a size: the format itself silently clips an area outside the page, so the
+// product must refuse it rather than answer a smaller crop than it asked for.
+function cropArea(area) {
+  if (typeof area !== "object" || area === null) {
+    throw new UsageError(`"area" must be an object of x, y, width and height, as fractions of the page`);
+  }
+  for (const side of ["x", "y", "width", "height"]) {
+    if (!inSpan(area[side], RULES.pdf_page_fraction)) {
+      throw new UsageError(`"area.${side}" must be ${spanBounds(RULES.pdf_page_fraction)} of the page, got: ${area[side]}`);
+    }
+  }
+  // A tolerance, so a fraction a caller computed (1/3 with 2/3) is not refused
+  // for the last bit a double cannot hold. The tool's own boundary check reads
+  // the same slack, so the two cannot disagree about an area.
+  const slack = RULES.pdf_fraction_slack;
+  if (area.width <= 0 || area.height <= 0 || area.x + area.width > 1 + slack || area.y + area.height > 1 + slack) {
+    throw new UsageError(`"area" must lie inside the page and be non-degenerate: its x and y must leave room for its width and height, and both must be positive`);
+  }
+  return area;
+}
+
+async function pdfCrop(req) {
+  const area = cropArea(req.area);
+  const pdf = await loadPdf(req.input);
+  applyEditMetadata(pdf, req.metadata);
+  // A fraction is of what the page currently SHOWS — a page cropped before is
+  // cropped again inside its own visible area — and it is measured from the
+  // displayed top-left, so a rotated page is cropped where the caller sees it.
+  // Only the visible area changes: nothing is moved or removed.
+  for (const index of pageIndices(pdf, req.pages)) {
+    const page = pdf.getPage(index);
+    const frame = visibleFrame(page);
+    if (!(frame.width > 0 && frame.height > 0)) throw new UsageError(`page ${index + 1} has no visible area to crop`);
+    const box = frameRect(frame, area.x * frame.width, area.y * frame.height, area.width * frame.width, area.height * frame.height);
+    page.setCropBox(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
+  }
+  return pdf.save();
+}
+
+// Move every annotation's geometry with the content it marks, and answer how many
+// could not follow. A link's or a widget's coordinates are user-space ones, so they
+// take the transform the page's own content did: the keys the library scales
+// itself, less `/RD`, which is an inset relative to `/Rect` and so only scales.
+// A stored appearance stream is deliberately left alone: the format maps the
+// appearance's transformed bounding box into `/Rect`, so moving the rectangle is
+// what carries the drawing, and rewriting the stream would apply the move twice.
+function moveAnnotations(pdf, page, scale, tx, ty) {
+  const moved = (numbers, shift) => {
+    const points = [];
+    for (let i = 0; i + 1 < numbers.length; i += 2) points.push(scale * numbers[i] + (shift ? tx : 0), scale * numbers[i + 1] + (shift ? ty : 0));
+    return points;
+  };
+  const numbersOf = (array) => {
+    const numbers = [];
+    for (let i = 0; i < array.size(); i += 1) {
+      const value = array.lookup(i);
+      if (!(value instanceof PDFNumber)) return undefined;
+      numbers.push(value.asNumber());
+    }
+    return numbers;
+  };
+  const annots = page.node.Annots();
+  let stuck = 0;
+  for (let i = 0; i < (annots ? annots.size() : 0); i += 1) {
+    const annot = pdf.context.lookup(annots.get(i));
+    if (!(annot instanceof PDFDict)) {
+      stuck += 1;
+      continue;
+    }
+    let follows = false;
+    // `/Rect` is a pair of corners like the rest, so the same point transform
+    // keeps its order; `/CL` is the callout line a free-text note draws back to
+    // what it marks, which moves with it.
+    for (const [key, shift] of [["Rect", true], ["CL", true], ["QuadPoints", true], ["Vertices", true], ["L", true], ["RD", false]]) {
+      const list = annot.lookup(PDFName.of(key));
+      const numbers = list instanceof PDFArray ? numbersOf(list) : undefined;
+      if (numbers === undefined) continue;
+      annot.set(PDFName.of(key), pdf.context.obj(moved(numbers, shift)));
+      follows = true;
+    }
+    // An ink annotation holds one number array per stroke.
+    const inkLists = annot.lookup(PDFName.of("InkList"));
+    if (inkLists instanceof PDFArray) {
+      for (let j = 0; j < inkLists.size(); j += 1) {
+        const stroke = inkLists.lookup(j);
+        const numbers = stroke instanceof PDFArray ? numbersOf(stroke) : undefined;
+        if (numbers === undefined) continue;
+        inkLists.set(j, pdf.context.obj(moved(numbers, true)));
+        follows = true;
+      }
+    }
+    if (!follows) stuck += 1;
+  }
+  return stuck;
+}
+
+async function pdfResize(req) {
+  // Both sides are named: a side left out is not "keep the page's own".
+  for (const side of ["width", "height"]) {
+    if (!inSpan(req[side], RULES.dimension_points)) {
+      throw new UsageError(`"${side}" must be ${spanBounds(RULES.dimension_points)} points, and a resize names both sides, got: ${req[side]}`);
+    }
+  }
+  const pdf = await loadPdf(req.input);
+  applyEditMetadata(pdf, req.metadata);
+  // The pages whose annotations could not follow their content, with how many on
+  // each, so the answer carries one sentence however many pages the call names.
+  const stuck = new Map();
+  for (const index of pageIndices(pdf, req.pages)) {
+    const page = pdf.getPage(index);
+    const frame = visibleFrame(page);
+    if (!(frame.width > 0 && frame.height > 0)) throw new UsageError(`page ${index + 1} has no visible area to resize`);
+    // A resize never stretches: the page keeps its proportions and is scaled to
+    // the larger size both asked sides allow, then centred in what was asked.
+    const scale = Math.min(req.width / frame.width, req.height / frame.height);
+    const tdx = (req.width - frame.width * scale) / 2;
+    const tdy = (req.height - frame.height * scale) / 2;
+    // The display-space move in user space: `right` and `down` are where the
+    // displayed axes point, and the origin is the corner the scale keeps fixed.
+    const tx = frame.right.x * tdx + frame.down.x * tdy + (1 - scale) * frame.origin.x;
+    const ty = frame.right.y * tdx + frame.down.y * tdy + (1 - scale) * frame.origin.y;
+    // The page's own content is scaled about its origin and then moved where the
+    // fitted picture sits, through the library's own content-stream wrappers: a
+    // page with no content, an array of streams and an unnormalized dictionary
+    // are each handled the way every other pdf-lib edit handles them.
+    page.scaleContent(scale, scale);
+    page.translateContent(tx, ty);
+    // The visible area reads exactly the asked size afterwards. Both boxes are
+    // written, since a page cropped before would keep its old CropBox otherwise.
+    const box = frameRect(frame, 0, 0, req.width, req.height);
+    page.setMediaBox(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
+    page.setCropBox(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
+    const couldNot = moveAnnotations(pdf, page, scale, tx, ty);
+    if (couldNot) stuck.set(index + 1, couldNot);
+  }
+  const total = [...stuck.values()].reduce((sum, count) => sum + count, 0);
+  return {
+    bytes: await pdf.save(),
+    notes: stuck.size ? [`[${total} annotation(s) could not follow the resized content on ${pagesPhrase(stuck.keys())}]`] : [],
+  };
+}
+
+async function pdfText(req) {
+  const pdf = await loadPdf(req.input);
+  applyEditMetadata(pdf, req.metadata);
+  pdf.registerFontkit(fontkit);
+  const bytes = fs.readFileSync(req.font);
+  const font = await pdf.embedFont(bytes, { subset: true });
+  const glyphs = fontkit.create(bytes);
+  // An absent size takes the body default; a stated one is a measure the page
+  // must be able to show, so a zero is refused rather than read as "absent".
+  const size = req.size === undefined ? 12 : req.size;
+  if (!inSpan(size, RULES.dimension_points)) {
+    throw new UsageError(`"size" must be ${spanBounds(RULES.dimension_points)} points, got ${size}`);
+  }
+  // A colour that is present but not a hex string (an empty string, a number,
+  // `null`) is refused by `hexColor`; only an absent one takes the default.
+  const color = hexColor(req.color === undefined ? "#000000" : req.color);
+  const rotate = req.rotate === undefined ? 0 : pointNumber(req.rotate, "rotate");
+  // An absent opacity draws solid, exactly as before; a stated one must leave the
+  // mark visible at all, so a zero is refused rather than read as "absent".
+  const opacity = req.opacity;
+  if (opacity !== undefined && !inSpan(opacity, RULES.pdf_opacity)) {
+    throw new UsageError(`"opacity" must be ${spanBounds(RULES.pdf_opacity)}, got: ${opacity}`);
+  }
+  const alpha = opacity === undefined ? {} : { opacity };
+  const edgeAlpha = opacity === undefined ? {} : { borderOpacity: opacity };
+  // The pages a mark reached past, and whether it was the stamp's own box.
+  const past = new Set();
+  let boxCut = false;
+  for (const index of pageIndices(pdf, req.pages)) {
+    const page = pdf.getPage(index);
+    const frame = visibleFrame(page);
+    // `x` and `y` are display coordinates: `x` from the displayed left edge and
+    // `y` from its bottom edge, so a rotated page takes them where the caller
+    // sees it. The text is drawn at the user-space point they name, and a call
+    // that names no position takes the same margin a picture does.
+    const x = req.x === undefined ? insetOf(frame) : pointNumber(req.x, "x");
+    const y = req.y === undefined ? frame.height / 2 : pointNumber(req.y, "y");
+    const anchor = frame.toUser(x, frame.height - y);
+    const textWidth = font.widthOfTextAtSize(req.text, size);
+    // What the call draws, in user space: the text's own line from the anchor it
+    // is drawn at, and the stamp's border around it when one is asked for. The
+    // rotation is the caller's, about the anchor, exactly as both are drawn.
+    const marks = [{ what: "text", x: anchor.x, y: anchor.y, width: textWidth, height: font.heightAtSize(size) }];
+    if (req.stamp) {
+      const box = { x: anchor.x - 8, y: anchor.y - 8, width: textWidth + 16, height: size + 16 };
+      page.drawRectangle({ ...box, borderWidth: 1.5, borderColor: rgb(0.7, 0, 0), rotate: degrees(rotate), ...alpha, ...edgeAlpha });
+      marks.push({ what: "stamp", ...box });
+    }
+    page.drawText(req.text, { x: anchor.x, y: anchor.y, size, font, color, rotate: degrees(rotate), ...alpha });
+    noteGlyphs(glyphs, req.text);
+    // What the page shows of each mark, mapped back to its displayed area: both
+    // the caller's rotation and the page's are the placement, so only a mark that
+    // fits the visible area is shown whole. Each mark names itself, so the note
+    // says which of them was cut rather than assuming the box encloses the text.
+    const radians = (rotate * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    for (const mark of marks) {
+      const shown = userRect([[0, 0], [mark.width, 0], [0, mark.height], [mark.width, mark.height]].map(([dx, dy]) => frame.fromUser(
+        mark.x + dx * cos - dy * sin,
+        mark.y + dx * sin + dy * cos,
+      )));
+      if (shown.x0 >= 0 && shown.y0 >= 0 && shown.x1 <= frame.width && shown.y1 <= frame.height) continue;
+      if (mark.what === "stamp") boxCut = true;
+      past.add(index + 1);
+    }
+  }
+  // A stamp is its box, so a cut box names the stamp; the text is named when the
+  // text itself is what pokes past — a size larger than the box a stamp draws.
+  return { bytes: await pdf.save(), notes: past.size ? [pastAreaNote(boxCut ? "stamp" : "text", past)] : [] };
+}
+
+async function pdfImage(req) {
+  const pdf = await loadPdf(req.input);
+  applyEditMetadata(pdf, req.metadata);
+  const image = await embedImage(pdf, req.image);
+  // Whether the call names a side: a named size is drawn exactly as named, while
+  // an unnamed one is fitted whole into the page's visible area (see `imageSize`).
+  const sized = req.width != null || req.height != null;
+  // Whether a page cannot show the picture whole. Only a place or size the call
+  // names can reach past the visible area — a fitted picture is inside it by
+  // construction — and the reply says so rather than reporting a plain success,
+  // the way the pptx arm's own note does.
+  const past = new Set();
+  for (const index of pageIndices(pdf, req.pages)) {
+    const page = pdf.getPage(index);
+    const frame = visibleFrame(page);
+    // The page's own breathing room, so a fitted picture always has a box to fit
+    // into rather than collapsing to a dot.
+    const inset = insetOf(frame);
+    const size = imageSize(image, req.width, req.height, RULES.dimension_points, {
+      width: Math.round((frame.width - 2 * inset) / PX_TO_POINTS),
+      height: Math.round((frame.height - 2 * inset) / PX_TO_POINTS),
+    });
+    const drawn = { width: size.width * PX_TO_POINTS, height: size.height * PX_TO_POINTS };
+    // A place the call names is drawn where it names, even past the page — the
+    // documented contract. An unnamed one is the visible area's column: its left
+    // edge, and, for a picture the call fitted itself, its top edge on the
+    // column's own top, so the picture hangs off neither edge. `x` and `y` are
+    // display coordinates, `y` measured to the picture's own bottom.
+    const x = req.x === undefined ? inset : pointNumber(req.x, "x");
+    const y = req.y !== undefined ? pointNumber(req.y, "y") : sized ? frame.height / 2 : frame.height - inset - drawn.height;
+    const top = frame.height - y - drawn.height;
+    // The picture is turned with the page, so the displayed box is the picture's
+    // own extents and it reads upright on the page the caller sees — a rotated
+    // page would otherwise stretch it to the swapped ratio. Drawn text and a
+    // stamp are not turned this way: they keep the page's own rotation and read
+    // sideways on a rotated page, as they always have.
+    const anchor = frame.toUser(x, top + drawn.height);
+    page.drawImage(image, {
+      x: anchor.x,
+      y: anchor.y,
+      width: drawn.width,
+      height: drawn.height,
+      rotate: degrees(frame.rotation),
+    });
+    if (x < 0 || top < 0 || x + drawn.width > frame.width || top + drawn.height > frame.height) past.add(index + 1);
+  }
+  return {
+    bytes: await pdf.save(),
+    notes: past.size ? [pastAreaNote("picture", past)] : [],
+  };
+}
+
+// The fields a request can fill, with the kind and the values each accepts.
+// The catalogue is what the refusal for a missing field names, so a caller with
+// a blank form learns every fillable field and its choices from one call. It is
+// bounded like the reading's own list: a pathological form cannot turn one
+// refusal into an unbounded message, and the fill itself is by name unaffected.
+const CATALOGUE_MAX = 1000;
+const CATALOGUE_MAX_CHARS = 4000;
+function fillableFields(form) {
+  const fields = [];
+  for (const field of form.getFields()) {
+    const name = field.getName();
+    if (name === "") continue;
+    let kind;
+    let options = [];
+    if (field instanceof PDFTextField) kind = RULES.pdf_field_kinds.text;
+    else if (field instanceof PDFCheckBox) kind = RULES.pdf_field_kinds.checkbox;
+    else if (field instanceof PDFRadioGroup) {
+      options = field.getOptions();
+      // A radio group with no option to select is one no fill can reach.
+      if (options.length === 0) continue;
+      kind = RULES.pdf_field_kinds.radio;
+    } else if (field instanceof PDFOptionList) {
+      options = field.getOptions();
+      // A list box offers only the options the file names; without one it cannot
+      // be filled. A dropdown (below) accepts a value of its own instead.
+      if (options.length === 0) continue;
+      kind = RULES.pdf_field_kinds.choice;
+    } else if (field instanceof PDFDropdown) {
+      options = field.getOptions();
+      kind = RULES.pdf_field_kinds.choice;
+    } else continue;
+    fields.push({ name, kind, options });
+    // One past the cap tells a truncated catalogue from one that ends exactly at
+    // it, without walking an unbounded form.
+    if (fields.length > CATALOGUE_MAX) break;
+  }
+  return fields;
+}
+function catalogue(form) {
+  const fields = fillableFields(form);
+  if (fields.length === 0) return "no fillable fields";
+  const truncated = fields.length > CATALOGUE_MAX;
+  const listed = fields.slice(0, CATALOGUE_MAX).map(describeField).join(", ");
+  if (truncated) return `${listed}, and more`;
+  return listed.length > CATALOGUE_MAX_CHARS ? `${listed.slice(0, CATALOGUE_MAX_CHARS)}…` : listed;
+}
+function describeField(field) {
+  return field.options.length
+    ? `${field.name} (${field.kind}; options: ${field.options.join(", ")})`
+    : `${field.name} (${field.kind})`;
+}
+// The library refuses an option it does not know with a bare Error that names
+// neither the field nor the accepted values, and it would surface as a kit
+// fault; a request the caller can fix is a usage refusal.
+function selectOption(field, name, value, fieldsHint) {
+  const options = field.getOptions();
+  const chosen = String(value);
+  if (options.length === 0) throw new UsageError(`form field "${name}" offers no choice to select; this document has: ${fieldsHint()}`);
+  if (!options.includes(chosen)) {
+    throw new UsageError(`form field "${name}" takes one of: ${options.join(", ")}; got: ${chosen}`);
+  }
+  // A file whose option list outruns the field's own states makes the library
+  // throw a bare error for an option it advertised; the value is still the
+  // caller's, so it is a usage refusal rather than a kit fault.
+  try {
+    field.select(chosen);
+  } catch (error) {
+    throw new UsageError(`form field "${name}" cannot take "${chosen}": ${(error && error.message) || error}`);
+  }
+}
+
+async function pdfFormFill(req) {
+  const pdf = await loadPdf(req.input);
+  applyEditMetadata(pdf, req.metadata);
+  pdf.registerFontkit(fontkit);
+  const bytes = fs.readFileSync(req.font);
+  const font = await pdf.embedFont(bytes, { subset: true });
+  const glyphs = fontkit.create(bytes);
+  const form = pdf.getForm();
+  const fieldsHint = () => catalogue(form);
+  for (const [name, value] of Object.entries(req.values)) {
+    // An empty name is never resolvable, so it falls into the refusal below,
+    // which names it as `""`.
+    const field = name ? form.getFieldMaybe(name) : undefined;
+    if (!field) throw new UsageError(`no such form field: ${name === "" ? '""' : name}; this document has: ${fieldsHint()}`);
+    if (field instanceof PDFCheckBox) {
+      if (typeof value !== "boolean") throw new UsageError(`form field "${name}" is a checkbox and takes true or false, got: ${JSON.stringify(value)}`);
+      value ? field.check() : field.uncheck();
+      continue;
+    }
+    if (field instanceof PDFTextField) { field.setText(String(value)); noteGlyphs(glyphs, String(value)); continue; }
+    if (field instanceof PDFRadioGroup) { selectOption(field, name, value, fieldsHint); noteGlyphs(glyphs, String(value)); continue; }
+    if (field instanceof PDFOptionList) { selectOption(field, name, value, fieldsHint); noteGlyphs(glyphs, String(value)); continue; }
+    // A dropdown accepts a value outside its list by turning editing on, which
+    // is the permissive behaviour callers already rely on.
+    if (field instanceof PDFDropdown) { field.select(String(value)); noteGlyphs(glyphs, String(value)); continue; }
+    throw new UsageError(`form field "${name}" cannot take a value — it is not a fillable field; this document has: ${fieldsHint()}`);
+  }
+  form.updateFieldAppearances(font);
+  if (req.flatten) form.flatten();
+  return pdf.save();
+}
+
+// ── the closed operation set ───────────────────────────────────
+const operations = {
+  probe: async (req) => {
+    const scratch = req.scratch;
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP8z8Dwn4GBgYGJAQoAHgQCAZ1n4sEAAAAASUVORK5CYII=", "base64");
+    writeOut(`${scratch}/probe.png`, png);
+    // Each operation the tool exposes, on the smallest input that exercises it:
+    // a kit that loads but fails an operation is what the tool must not offer.
+    // The step's name rides the error, since a failure is reported as the probe's
+    // own message.
+    const step = async (name, task) => {
+      try { await task(); } catch (error) { throw new Error(`${name}: ${(error && error.message) || error}`); }
+    };
+    await step("create_docx", async () => writeOut(`${scratch}/probe.docx`, (await createDocx({
+      header: "Проверка {page} of {pages}",
+      footer: "Страница {page}",
+      content: [
+        { type: "heading", level: 1, text: "Проверка" },
+        { type: "paragraph", text: "текст", footnote: "сноска" },
+        { type: "link", text: "ссылка", url: "https://example.com" },
+        { type: "contents" },
+        { type: "page_break" },
+        { type: "heading", level: 2, text: "Второй" },
+      ],
+    })).bytes));
+    await step("create_xlsx", () => writeOut(`${scratch}/probe.xlsx`, createXlsx({ sheets: [{ rows: [["Проверка {name}", 1, { formula: "B1" }]] }] })));
+    await step("create_pptx", async () => {
+      writeOut(`${scratch}/probe.pptx`, await createPptx({ content: [{ type: "heading", level: 1, text: "Проверка" }, { type: "list", items: ["раз", "два"] }] }));
+      // The same blocks at a named size: the one arm whose geometry is not the
+      // default deck's.
+      writeOut(`${scratch}/probe_portrait.pptx`, await createPptx({ size: "portrait", content: [{ type: "heading", level: 1, text: "Проверка" }, { type: "paragraph", text: "Текст" }] }));
+    });
+    await step("create_pdf", async () => writeOut(`${scratch}/probe.pdf`, await createPdf({ font: req.font, content: [{ type: "paragraph", text: "Проверка" }] })));
+    await step("create_pdf_pictures", async () => writeOut(`${scratch}/probe_pictures.pdf`, await createPdf({ content: [{ type: "image", image: `${scratch}/probe.png` }, { type: "image", image: `${scratch}/probe.png` }] })));
+    await step("merge", async () => writeOut(`${scratch}/probe_merged.pdf`, await pdfMerge({ inputs: [`${scratch}/probe.pdf`, `${scratch}/probe.pdf`] })));
+    await step("split", async () => {
+      const parts = await pdfSplit({ input: `${scratch}/probe_merged.pdf`, groups: [[1], [2]] });
+      parts.forEach((bytes, i) => writeOut(`${scratch}/probe_part${i + 1}.pdf`, bytes));
+    });
+    await step("rotate", async () => writeOut(`${scratch}/probe_rotated.pdf`, await pdfRotate({ input: `${scratch}/probe.pdf`, pages: "all", degrees: RULES.degrees_step })));
+    await step("crop", async () => writeOut(`${scratch}/probe_cropped.pdf`, await pdfCrop({ input: `${scratch}/probe.pdf`, pages: "all", area: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 } })));
+    await step("resize", async () => writeOut(`${scratch}/probe_resized.pdf`, (await pdfResize({ input: `${scratch}/probe.pdf`, pages: "all", width: 300, height: 400 })).bytes));
+    await step("text", async () => writeOut(`${scratch}/probe_text.pdf`, (await pdfText({ input: `${scratch}/probe.pdf`, pages: "all", text: "Проверка", font: req.font, opacity: 0.5 })).bytes));
+    await step("image", async () => writeOut(`${scratch}/probe_image.pdf`, (await pdfImage({ input: `${scratch}/probe.pdf`, pages: "all", image: `${scratch}/probe.png` })).bytes));
+    // A picture on a ROTATED page, read back from the page's own content stream:
+    // it must be turned with the page and read at the extents it was fitted to,
+    // rather than stretched to the swapped ones. The picture is deliberately not
+    // square (8 by 2), so a page-rotation-blind placement shows as 1:4 here.
+    await step("rotated_picture", async () => {
+      writeOut(`${scratch}/probe_wide.png`, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAgAAAACCAIAAADq9gq6AAAAEUlEQVR42mM4oaGBFTHgkgAAv8ERgdwl/oEAAAAASUVORK5CYII=", "base64"));
+      const source = await PDFDocument.create();
+      source.addPage(A4).setRotation(degrees(90));
+      writeOut(`${scratch}/probe_turned.pdf`, await source.save());
+      const drawn = await pdfImage({ input: `${scratch}/probe_turned.pdf`, pages: "all", image: `${scratch}/probe_wide.png` });
+      const produced = await PDFDocument.load(drawn.bytes);
+      const page = produced.getPage(0);
+      const contents = page.node.Contents();
+      const stream = contents instanceof PDFArray ? contents.lookup(0) : contents;
+      const operators = zlib
+        .inflateSync(stream.getContents())
+        .toString("latin1")
+        .split("\n")
+        .map((line) => line.trim());
+      // The picture's placement is the matrices the library writes just before it
+      // paints it — as many as it takes to state one transform, so the probe reads
+      // whatever it finds rather than pinning a count.
+      const painted = operators.findLastIndex((line) => line.endsWith(" Do"));
+      const matrices = [];
+      for (let i = painted - 1; i >= 0 && operators[i].endsWith(" cm"); i -= 1) {
+        const [a, b, c, d, e, f] = operators[i].split(/\s+/).map(Number);
+        matrices.unshift({ a, b, c, d, e, f });
+      }
+      if (matrices.length === 0) throw new UsageError("a placed picture writes no placement matrix");
+      // The drawing is the translate, the turn and the scale, composed in the
+      // order the stream writes them; the unit square it covers is the picture.
+      const compose = (m, n) => ({
+        a: m.a * n.a + m.c * n.b, b: m.b * n.a + m.d * n.b,
+        c: m.a * n.c + m.c * n.d, d: m.b * n.c + m.d * n.d,
+        e: m.a * n.e + m.c * n.f + m.e, f: m.b * n.e + m.d * n.f + m.f,
+      });
+      const placement = matrices.slice(1).reduce(compose, matrices[0]);
+      const frame = visibleFrame(page);
+      const shown = userRect([[0, 0], [1, 0], [0, 1], [1, 1]].map(([u, v]) => frame.fromUser(
+        placement.a * u + placement.c * v + placement.e,
+        placement.b * u + placement.d * v + placement.f,
+      )));
+      const ratio = (shown.x1 - shown.x0) / (shown.y1 - shown.y0);
+      if (Math.abs(ratio - 4) > 0.01) throw new UsageError(`a picture on a rotated page reads ${ratio.toFixed(2)}:1 where it is 4:1`);
+    });
+    // A form to fill, authored here: the tool has no operation that writes one,
+    // and a kit broken only in form filling must not stay advertised.
+    await step("form_fill", async () => {
+      const form = await PDFDocument.create();
+      const field = form.getForm().createTextField("name");
+      field.addToPage(form.addPage(A4), { x: MARGIN, y: MARGIN, width: 200, height: 20 });
+      writeOut(`${scratch}/probe_form.pdf`, await form.save());
+      writeOut(`${scratch}/probe_form_filled.pdf`, await pdfFormFill({ input: `${scratch}/probe_form.pdf`, values: { name: "Проверка" }, font: req.font, flatten: true }));
+    });
+    // The fill path needs a sample that really declares a placeholder, so the
+    // substitution runs rather than finding nothing to do; the presentation's
+    // notes slide exercises the part the library does not render itself.
+    await step("template_docx", async () => {
+      writeOut(`${scratch}/probe_template.docx`, (await createDocx({ content: [{ type: "paragraph", text: "Проверка {name}" }] })).bytes);
+      const filled = fillDocxOrPptx({ template: `${scratch}/probe_template.docx`, format: "docx", values: { name: "Проверка" } });
+      writeOut(`${scratch}/probe_filled.docx`, filled.buffer);
+    });
+    await step("template_pptx", async () => {
+      const template = await createPptx({ content: [{ type: "paragraph", text: "Проверка {name}" }, { type: "notes", text: "Заметка {name}" }] });
+      writeOut(`${scratch}/probe_template.pptx`, template);
+      const filled = fillDocxOrPptx({ template: `${scratch}/probe_template.pptx`, format: "pptx", values: { name: "Проверка" } });
+      writeOut(`${scratch}/probe_filled.pptx`, filled.buffer);
+    });
+    await step("template_xlsx", () => {
+      const filled = fillXlsx({ template: `${scratch}/probe.xlsx`, values: { name: "Проверка" } });
+      writeOut(`${scratch}/probe_filled.xlsx`, filled.buffer);
+    });
+    // The edit paths run over packages the create arms just wrote, and each
+    // family's step runs every op it advertises, so an op that fails on the
+    // smallest input really runs rather than being probed on a package that
+    // skips it.
+    await step("edit_docx", async () => {
+      writeOut(`${scratch}/probe_edit.docx`, (await createDocx({ content: [
+        { type: "heading", level: 1, text: "Заголовок" },
+        { type: "paragraph", text: "Проверка текста" }, { type: "paragraph", text: "Лишний абзац" },
+      ] })).bytes);
+      const edited = docxEdit({ input: `${scratch}/probe_edit.docx`, edits: [
+        { op: "replace_text", find: "текста", replace: "правки" },
+        { op: "insert_text", find: "Проверка", insert: " новая", position: "after" },
+        { op: "remove_text", find: " новая" },
+        { op: "format_text", find: "Проверка", bold: true, italic: true, size: 14 },
+        { op: "format_text", find: "правки", color: "FF0000", underline: true, strike: true },
+        { op: "format_text", find: "правки", underline: false, strike: false },
+        { op: "format_paragraph", find: "Проверка", align: "center", style: "Heading 1",
+          indent_left: 12, indent_right: 6, indent_first_line: 10,
+          spacing_before: 6, spacing_after: 6, line_spacing: 14, list: "bullet", level: 1 },
+        { op: "add_paragraph", after: "Проверка", text: "Добавлено" },
+        { op: "add_paragraph", after: "Заголовок", text: "После заголовка" },
+        { op: "remove_paragraph", find: "Лишний" },
+        { op: "add_image", after: "Добавлено", image: `${scratch}/probe.png`, width: 60 },
+        { op: "add_table", after: "После заголовка", headers: ["Колонка"], rows: [["значение"]] },
+      ] });
+      writeOut(`${scratch}/probe_edited.docx`, edited.buffer);
+    });
+    await step("edit_xlsx", () => {
+      writeOut(`${scratch}/probe_edit.xlsx`, createXlsx({ sheets: [{ name: "Данные", rows: [["Проверка", 1], ["черновик", 2]], merges: ["A1:B1"] }] }));
+      const edited = xlsxEdit({ input: `${scratch}/probe_edit.xlsx`, edits: [
+        { op: "set_cell", sheet: "Данные", cell: "C3", value: "правка" },
+        { op: "clear_cell", sheet: "Данные", cell: "A2" },
+        { op: "format_cells", sheet: "Данные", range: "A1:B1", size: 12, bold: true, italic: false, underline: true, strike: false, color: "FF0000", fill: "FFF2CC", border: { top: true, bottom: false }, align: "center", vertical: "top", wrap: true, number_format: "#,##0.00" },
+        { op: "format_cells", sheet: "Данные", column: "A", width_chars: 14 },
+        { op: "format_cells", sheet: "Данные", row: 1, height_points: 20 },
+        { op: "insert_row", sheet: "Данные", row: 1 },
+        { op: "delete_row", sheet: "Данные", row: 4 },
+        { op: "insert_column", sheet: "Данные", column: "A" },
+        { op: "delete_column", sheet: "Данные", column: "A" },
+        { op: "merge_cells", sheet: "Данные", range: "E5:D6" },
+        { op: "unmerge_cells", sheet: "Данные", range: "D5:E6" },
+        { op: "add_sheet", name: "Лист2" },
+        { op: "rename_sheet", sheet: "Лист2", name: "Лист3" },
+        { op: "move_sheet", sheet: "Лист3", to: 1 },
+        { op: "add_image", sheet: "Данные", cell: "B2", image: `${scratch}/probe.png`, width: 60 },
+        { op: "delete_sheet", sheet: "Лист3" },
+      ] });
+      writeOut(`${scratch}/probe_edited.xlsx`, edited.buffer);
+    });
+    // A deck with two slides and notes, edited through every presentation
+    // operation: a text replacement and a removal, formatting, an image, an
+    // added and a removed paragraph, notes replaced, removed and added, an added
+    // and a deleted slide, and a moved and a duplicated one — the last two on the
+    // slide whose notes the added notes landed on.
+    await step("edit_pptx", async () => {
+      writeOut(`${scratch}/probe_edit.pptx`, await createPptx({ content: [
+        { type: "heading", level: 1, text: "Первый" }, { type: "paragraph", text: "Текст слайда" },
+        { type: "notes", text: "Заметка" }, { type: "heading", level: 1, text: "Второй" },
+      ] }));
+      const edited = pptxEdit({ input: `${scratch}/probe_edit.pptx`, edits: [
+        { op: "replace_text", slide: 1, find: "слайда", replace: "правки" },
+        { op: "format_text", slide: 1, find: "Текст", bold: true, strike: true, color: "#FF0000", align: "center" },
+        { op: "add_image", slide: 1, image: `${scratch}/probe.png`, width_fraction: 0.3 },
+        { op: "add_table", slide: 1, headers: ["А", "Б"], rows: [["раз", "два"]], x_fraction: 0.2, y_fraction: 0.4 },
+        { op: "add_paragraph", slide: 1, text: "Лишнее" },
+        { op: "remove_paragraph", slide: 1, find: "Лишнее" },
+        { op: "add_paragraph", slide: 1, text: "Добавлено" },
+        { op: "remove_text", slide: 1, find: "правки" },
+        { op: "replace_notes", slide: 1, find: "Заметка", replace: "Заметка правлена" },
+        { op: "remove_notes", slide: 1, find: "правлена" },
+        { op: "add_notes", slide: 2, text: "Новые заметки" },
+        { op: "add_slide", after: 1, title: "Новый", bullets: ["раз", "два"] },
+        { op: "delete_slide", slide: 2 },
+        { op: "duplicate_slide", slide: 2 },
+        { op: "move_slide", slide: 3, to: 2 },
+      ] });
+      writeOut(`${scratch}/probe_edited.pptx`, edited.buffer);
+    });
+    return {};
+  },
+  create: async (req) => {
+    if (req.format === "docx") {
+      const made = await createDocx(req);
+      writeOut(req.output, made.bytes);
+      return { outputs: [req.output], notes: made.notes, losses: made.losses };
+    }
+    refuseWordOnly(req);
+    if (req.format === "xlsx") writeOut(req.output, createXlsx(req));
+    else if (req.format === "pptx") writeOut(req.output, await createPptx(req));
+    else if (req.format === "pdf") writeOut(req.output, await createPdf(req));
+    else throw new UsageError(`unknown format: ${req.format}`);
+    return { outputs: [req.output] };
+  },
+  fill_template: async (req) => {
+    // `format` is the sample's own family: a workbook has its own cell-wise
+    // filler, while a document and a presentation both go through the template
+    // library (which reads the package's file type itself).
+    checkValues(req.values);
+    const filled = req.format === "xlsx" ? fillXlsx(req) : fillDocxOrPptx(req);
+    writeOut(req.output, filled.buffer);
+    return { outputs: [req.output], missing: filled.missing, placeholders: filled.placeholders };
+  },
+  docx_edit: async (req) => {
+    const edited = docxEdit(req);
+    writeOut(req.output, edited.buffer);
+    return { outputs: [req.output], notes: edited.notes, losses: edited.losses };
+  },
+  xlsx_edit: async (req) => {
+    const edited = xlsxEdit(req);
+    writeOut(req.output, edited.buffer);
+    return { outputs: [req.output], notes: edited.notes, losses: edited.losses };
+  },
+  pptx_edit: async (req) => {
+    const edited = pptxEdit(req);
+    writeOut(req.output, edited.buffer);
+    return { outputs: [req.output], notes: edited.notes, losses: edited.losses };
+  },
+  pdf_merge: async (req) => { writeOut(req.output, await pdfMerge(req)); return { outputs: [req.output] }; },
+  pdf_split: async (req) => {
+    const pages = await pdfSplit(req);
+    pages.forEach((bytes, i) => writeOut(req.outputs[i], bytes));
+    return { outputs: req.outputs };
+  },
+  pdf_rotate: async (req) => { writeOut(req.output, await pdfRotate(req)); return { outputs: [req.output] }; },
+  pdf_crop: async (req) => { writeOut(req.output, await pdfCrop(req)); return { outputs: [req.output] }; },
+  pdf_resize: async (req) => {
+    const resized = await pdfResize(req);
+    writeOut(req.output, resized.bytes);
+    return { outputs: [req.output], notes: resized.notes };
+  },
+  pdf_text: async (req) => {
+    const stamped = await pdfText(req);
+    writeOut(req.output, stamped.bytes);
+    return { outputs: [req.output], notes: stamped.notes };
+  },
+  pdf_image: async (req) => {
+    const drawn = await pdfImage(req);
+    writeOut(req.output, drawn.bytes);
+    return { outputs: [req.output], notes: drawn.notes };
+  },
+  pdf_form_fill: async (req) => {
+    checkValues(req.values);
+    writeOut(req.output, await pdfFormFill(req));
+    return { outputs: [req.output] };
+  },
+};
+
+async function main() {
+  const request = readJson(process.argv[2]);
+  const result = { ok: false };
+  try {
+    // An OWN-property lookup: the operation set is closed, so a name from the
+    // prototype chain ("constructor", "__proto__") is not an operation and is
+    // reported as the unknown name it is.
+    const operation = Object.hasOwn(operations, request.op) ? operations[request.op] : null;
+    if (!operation) throw new Error(`unknown document kit operation: ${request.op}`);
+    Object.assign(result, await operation(request), { ok: true });
+    if (missingGlyphs.size) result.unsupported = [...missingGlyphs];
+  } catch (error) {
+    result.ok = false;
+    result.error = String((error && error.message) || error);
+    if (error instanceof UsageError) result.class = "usage";
+  }
+  const text = JSON.stringify(result);
+  if (request.result) fs.writeFileSync(request.result, text);
+  else process.stdout.write(text);
+}
+
+await main();
