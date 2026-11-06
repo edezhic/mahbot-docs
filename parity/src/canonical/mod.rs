@@ -8,8 +8,7 @@
 //! - what is normalised away because it carries no meaning — metadata dates, archive entry
 //!   timestamps, generated identifiers, object numbering, compression, absolute paths, nonces,
 //!   timings;
-//! - what is compared byte for byte (an embedded binary part, by digest, unless the operation
-//!   legitimately re-encodes it).
+//! - what is compared byte for byte (an embedded binary part, by digest).
 //!
 //! A comparison that cannot decide whether two documents differ says so ([`Comparison::undecidable`])
 //! rather than passing.
@@ -88,15 +87,28 @@ impl Comparison {
 #[must_use]
 pub fn compare(expected: &Value, actual: &Value) -> Comparison {
     let mut comparison = Comparison::default();
-    walk(expected, actual, "", &mut comparison);
+    walk(expected, actual, "", &mut comparison, 0);
     comparison
 }
 
 const MAX_DIFFERENCES: usize = 40;
 const PREVIEW_CHARS: usize = 160;
+/// The deepest nesting the comparison descends into. The canonical tree nests two JSON levels per
+/// XML element (the node object and its `children` array) plus the part map and the tree's root,
+/// and the parser bounds elements at [`ooxml::MAX_XML_DEPTH`]; the margin covers that overhead, so
+/// the comparison never refuses a document the model can hold. Deeper is reported as undecidable
+/// rather than walked, because a stack overflow is not a verdict.
+const MAX_DEPTH: usize = 2 * ooxml::MAX_XML_DEPTH + 16;
 
-fn walk(expected: &Value, actual: &Value, path: &str, out: &mut Comparison) {
+fn walk(expected: &Value, actual: &Value, path: &str, out: &mut Comparison, depth: usize) {
     if out.differences.len() >= MAX_DIFFERENCES {
+        return;
+    }
+    if depth > MAX_DEPTH {
+        if out.undecidable.len() < MAX_DIFFERENCES {
+            out.undecidable
+                .push(format!("{path} nests deeper than {MAX_DEPTH} levels"));
+        }
         return;
     }
     match (expected, actual) {
@@ -104,7 +116,7 @@ fn walk(expected: &Value, actual: &Value, path: &str, out: &mut Comparison) {
             for (key, value) in left {
                 let child = format!("{path}[{key:?}]");
                 match right.get(key) {
-                    Some(other) => walk(value, other, &child, out),
+                    Some(other) => walk(value, other, &child, out, depth + 1),
                     None => out.differences.push(Diff {
                         path: child,
                         expected: preview(value),
@@ -131,10 +143,9 @@ fn walk(expected: &Value, actual: &Value, path: &str, out: &mut Comparison) {
                 });
             }
             for (index, (value, other)) in left.iter().zip(right).enumerate() {
-                walk(value, other, &format!("{path}[{index}]"), out);
+                walk(value, other, &format!("{path}[{index}]"), out, depth + 1);
             }
         }
-        (Value::String(left), Value::String(right)) if left == right => {}
         (left, right) if left == right => {}
         (left, right) => out.differences.push(Diff {
             path: path.to_string(),
@@ -155,4 +166,52 @@ fn preview(value: &Value) -> String {
     }
     let cut: String = text.chars().take(PREVIEW_CHARS).collect();
     format!("{cut}…")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// `levels` nested `{"children": [...]}` objects around `leaf`: two JSON levels per step.
+    fn nested(levels: usize, leaf: Value) -> Value {
+        let mut value = leaf;
+        for _ in 0..levels {
+            value = json!({ "children": [value] });
+        }
+        value
+    }
+
+    #[test]
+    fn a_value_nested_past_the_bound_is_undecidable() {
+        let levels = MAX_DEPTH / 2 + 1;
+        let left = nested(levels, json!(0));
+        let right = nested(levels, json!(1));
+        let comparison = compare(&left, &right);
+        assert!(comparison.differences.is_empty());
+        assert!(
+            !comparison.undecidable.is_empty(),
+            "the comparison says it cannot decide"
+        );
+        assert!(!comparison.is_same(), "undecidable is never a pass");
+    }
+
+    #[test]
+    fn the_bound_admits_the_deepest_tree_the_model_can_hold() {
+        // The deepest model is an XML part: one object and one `children` array per element, up to
+        // `MAX_XML_DEPTH` elements, under the transcript, its output name, the document, the part
+        // map and the tree's root — six levels. The comparison must decide it, not refuse it, so
+        // this is the test that pins the relation between the two bounds.
+        let deepest = 2 * ooxml::MAX_XML_DEPTH + 6;
+        let comparison = compare(
+            &nested(deepest / 2, json!("a")),
+            &nested(deepest / 2, json!("b")),
+        );
+        assert!(
+            comparison.undecidable.is_empty(),
+            "{:?}",
+            comparison.undecidable
+        );
+        assert!(!comparison.differences.is_empty(), "the leaf still differs");
+    }
 }

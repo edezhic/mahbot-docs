@@ -2,6 +2,7 @@
 //! baseline on its own, so a difference is always something a person chose to accept.
 
 use document_parity::baseline::Baseline;
+use document_parity::engine::{Reader, Writer};
 use document_parity::harness::Harness;
 use document_parity::reference::{ReferenceReader, ReferenceWriter};
 use document_parity::transcript::identity_line;
@@ -33,16 +34,16 @@ fn main() {
 }
 
 fn record(path: &Path) -> anyhow::Result<()> {
-    let root = Harness::temp_root();
-    let harness = Harness::at(
-        root.clone(),
-        Box::new(ReferenceWriter::new(&root)?),
-        Box::new(ReferenceReader::new()?),
-    )?;
-    let run = harness.run()?;
+    let harness = Harness::new_with(|root| {
+        Ok((
+            Box::new(ReferenceWriter::new(root)?) as Box<dyn Writer>,
+            Box::new(ReferenceReader) as Box<dyn Reader>,
+        ))
+    })?;
+    let run = harness.run();
     // A run that could not produce a transcript is a broken harness or a broken engine; recording
     // it would bake the failure into the reference.
-    let broken: Vec<String> = run
+    let mut broken: Vec<String> = run
         .outcomes
         .iter()
         .filter_map(|outcome| {
@@ -52,6 +53,12 @@ fn record(path: &Path) -> anyhow::Result<()> {
                 .map(|problem| format!("{}: {problem}", outcome.key))
         })
         .collect();
+    broken.extend(run.readings.iter().filter_map(|outcome| {
+        outcome
+            .problem
+            .as_ref()
+            .map(|problem| format!("reading {}: {problem}", outcome.document))
+    }));
     if !broken.is_empty() {
         anyhow::bail!(
             "refusing to record a run that did not complete:\n  {}",

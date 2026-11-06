@@ -4,18 +4,42 @@
 use crate::baseline::Baseline;
 use crate::canonical::{self, Comparison};
 use crate::corpus::{Case, Document, Expect};
-use crate::engine::{EngineIdentity, Key, Reader, Writer};
+use crate::engine::{EngineIdentity, Key, Reader, Reading, Writer};
+use crate::shutdown::panic_message;
 use crate::transcript::{self, CaseTranscript, ReadingTranscript, Status};
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
+
+/// The whole run's budget. A kit that hangs on every case must fail the gate in bounded time
+/// rather than once per case, each at its own timeout: once the budget is spent, every entry it
+/// did not reach fails with a budget problem.
+const RUN_BUDGET: Duration = Duration::from_secs(600);
+
+/// How long one reading may take before it is one failed reading, matching the writer's own run
+/// timeout: a reader that never returns must not hold the gate open.
+const READ_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The largest produced file the harness reads into memory to canonicalise. An engine's outputs
+/// are small; a bigger file is a case failure with a message, not an exhaustion of the run.
+pub const MAX_OUTPUT_BYTES: u64 = 64 * 1024 * 1024;
+
+/// The prefix every harness root carries: a root is a directory this harness named.
+const ROOT_PREFIX: &str = "document-parity-";
 
 /// A harness owns one temporary root, and nothing outside it is ever written.
 pub struct Harness {
     root: PathBuf,
     writer: Box<dyn Writer>,
-    reader: Box<dyn Reader>,
+    reader: Arc<dyn Reader>,
+    budget: Duration,
+    read_timeout: Duration,
+    /// Whether this harness created the root, and may therefore remove it.
+    owned: bool,
 }
 
 impl Harness {
@@ -23,54 +47,138 @@ impl Harness {
     #[must_use]
     pub fn temp_root() -> PathBuf {
         std::env::temp_dir().join(format!(
-            "document-parity-{}-{:016x}",
+            "{ROOT_PREFIX}{}-{:016x}",
             std::process::id(),
             rand_nonce()
         ))
     }
 
-    /// A harness rooted at `root`, which must be a directory this run may own.
+    /// A harness rooted at `root`, which must be a directory this harness may own: one named the
+    /// way [`Harness::temp_root`] names it, under the OS temporary directory. A root this call
+    /// creates is removed by `Drop`; one that already exists is left alone.
     pub fn at(root: PathBuf, writer: Box<dyn Writer>, reader: Box<dyn Reader>) -> Result<Self> {
-        std::fs::create_dir_all(&root)
-            .with_context(|| format!("cannot create the harness root {}", root.display()))?;
-        Ok(Self {
+        let owned = create_root(&root)?;
+        Ok(Self::new(root, writer, reader, owned))
+    }
+
+    /// A harness with a fresh temporary root, whose engines are built against that root.
+    ///
+    /// The root is created before the engines are, so an engine that cannot be built — the writer
+    /// materialises the kit — leaves nothing behind.
+    pub fn new_with(
+        engines: impl FnOnce(&Path) -> Result<(Box<dyn Writer>, Box<dyn Reader>)>,
+    ) -> Result<Self> {
+        let root = Self::temp_root();
+        let owned = create_root(&root)?;
+        let (writer, reader) = match engines(&root) {
+            Ok(engines) => engines,
+            Err(e) => {
+                // A root this call created is removed when the engine cannot be built.
+                if owned {
+                    let _ = std::fs::remove_dir_all(&root);
+                }
+                return Err(e);
+            }
+        };
+        Ok(Self::new(root, writer, reader, owned))
+    }
+
+    fn new(root: PathBuf, writer: Box<dyn Writer>, reader: Box<dyn Reader>, owned: bool) -> Self {
+        Self {
             root,
             writer,
-            reader,
-        })
+            reader: Arc::from(reader),
+            budget: RUN_BUDGET,
+            read_timeout: READ_TIMEOUT,
+            owned,
+        }
     }
 
-    /// A harness with a fresh temporary root.
-    pub fn new(writer: Box<dyn Writer>, reader: Box<dyn Reader>) -> Result<Self> {
-        Self::at(Self::temp_root(), writer, reader)
-    }
-
+    /// A harness whose whole run is bounded by `budget` rather than [`RUN_BUDGET`].
     #[must_use]
-    pub fn root(&self) -> &Path {
-        &self.root
+    pub fn with_budget(mut self, budget: Duration) -> Self {
+        self.budget = budget;
+        self
+    }
+
+    /// A harness whose single reading is bounded by `timeout` rather than [`READ_TIMEOUT`].
+    #[must_use]
+    pub fn with_read_timeout(mut self, timeout: Duration) -> Self {
+        self.read_timeout = timeout;
+        self
     }
 
     /// Run every writer case and every reading.
-    pub fn run(&self) -> Result<Run> {
+    ///
+    /// Nothing here fails the run: an entry the budget did not reach is that entry's problem, so a
+    /// slow engine still produces a verdict for every other case rather than erasing them all.
+    pub fn run(&self) -> Run {
         let cases = crate::corpus::writer_cases();
         let documents = crate::corpus::reader_documents();
-        let mut outcomes = Vec::with_capacity(cases.len());
-        for case in &cases {
-            outcomes.push(self.run_case(case));
-        }
-        let mut readings = Vec::with_capacity(documents.len());
-        for document in &documents {
-            readings.push(self.read_document(*document)?);
-        }
-        Ok(Run {
+        let started = Instant::now();
+        let outcomes = cases
+            .iter()
+            .map(|case| {
+                if self.spent(started) {
+                    CaseOutcome::problem(case.key(), self.over_budget())
+                } else {
+                    self.run_case(case)
+                }
+            })
+            .collect();
+        let readings = documents
+            .iter()
+            .map(|document| {
+                if self.spent(started) {
+                    ReadingOutcome::problem(document.name.to_string(), self.over_budget())
+                } else {
+                    self.read_document(*document)
+                }
+            })
+            .collect();
+        Run {
             writer: self.writer.identity(),
             reader: self.reader.identity(),
             outcomes,
             readings,
-        })
+        }
+    }
+
+    /// Whether the run has spent its whole budget.
+    fn spent(&self, started: Instant) -> bool {
+        started.elapsed() > self.budget
+    }
+
+    /// What an entry the budget did not reach reports.
+    fn over_budget(&self) -> String {
+        format!(
+            "the run spent its {}s budget before reaching this entry",
+            self.budget.as_secs_f64()
+        )
     }
 
     fn run_case(&self, case: &Case) -> CaseOutcome {
+        let key = case.key();
+        // The corpus builder and the canonicaliser run under this: a slip in either is one case's
+        // problem, because one failure must not hide every other verdict. The engine has its own
+        // containment below, so its panic is named as the engine's.
+        let mut outcome = match crate::shutdown::contain_panics(|| self.run_case_inner(case)) {
+            Ok(outcome) => outcome,
+            Err(payload) => CaseOutcome::problem(
+                key,
+                format!(
+                    "the harness panicked running the case: {}",
+                    panic_message(&*payload)
+                ),
+            ),
+        };
+        if let Some(problem) = &mut outcome.problem {
+            *problem = transcript::normalise(problem, &self.root);
+        }
+        outcome
+    }
+
+    fn run_case_inner(&self, case: &Case) -> CaseOutcome {
         let key = case.key();
         let directory = self.root.join("cases").join(key.slug().replace('/', "-"));
         let input_dir = directory.join("in");
@@ -91,45 +199,76 @@ impl Harness {
         }
         let mut request = case.request.clone();
         substitute(&mut request, &input_dir, &output_dir);
-        let outcome = match self.writer.run(&request, &scratch) {
-            Ok(outcome) => outcome,
-            // A run that never reached a result says nothing about the request: it is a harness
-            // or engine failure, and the verdict must not read as a difference.
+        // The prefix an output must lie under, resolved before the engine runs: an engine that
+        // replaced its own `out/` with a link could otherwise choose the prefix it is checked
+        // against. A directory the harness itself just created must resolve, so a failure here is
+        // the case's own problem, never a reason to read whatever the engine names.
+        let allowed = match std::fs::canonicalize(&output_dir) {
+            Ok(allowed) => allowed,
             Err(e) => {
                 return CaseOutcome::problem(
                     key,
-                    format!("the engine did not complete the run: {e}"),
+                    format!("cannot resolve the case's output directory: {e}"),
+                );
+            }
+        };
+        // A panicking engine is one failed case, not a failed run: one failure must not hide every
+        // other verdict.
+        let outcome = match crate::shutdown::contain_panics(|| self.writer.run(&request, &scratch))
+        {
+            Ok(Ok(outcome)) => outcome,
+            // A run that never reached a result says nothing about the request: it is a harness
+            // or engine failure, and the verdict must not read as a difference.
+            Ok(Err(e)) => {
+                return CaseOutcome::problem(
+                    key,
+                    format!("the engine did not complete the run: {e:#}"),
+                );
+            }
+            Err(payload) => {
+                return CaseOutcome::problem(
+                    key,
+                    format!("the engine panicked: {}", panic_message(&*payload)),
                 );
             }
         };
         let family = case.family;
         // The harness reads only what the engine wrote inside this case's own output directory:
         // a path an engine echoes from anywhere else is recorded as such, never opened.
-        let allowed = std::fs::canonicalize(&output_dir).ok();
         let mut transcript = match CaseTranscript::build(&outcome, |path| {
             if !path.is_file() {
                 return Ok(serde_json::json!("<not written>"));
             }
-            let inside = path
-                .canonicalize()
-                .ok()
-                .zip(allowed.as_ref())
-                .is_some_and(|(path, allowed)| path.starts_with(allowed));
-            if !inside {
+            // An output the harness cannot locate is a case failure, not a comparison: a
+            // difference the model cannot place must not read as content. The name is what a
+            // person can act on; a path is not a transcript's business.
+            let resolved = path.canonicalize().with_context(|| {
+                let name = path.file_name().unwrap_or_default().to_string_lossy();
+                format!("cannot resolve the output {name}")
+            })?;
+            if !resolved.starts_with(&allowed) {
                 return Ok(serde_json::json!("<outside the case>"));
             }
-            let bytes = std::fs::read(path)?;
+            // One bounded read: the file is never sized first and read after, so a file that grows
+            // between the two cannot slip past the bound.
+            let mut bytes = Vec::new();
+            std::fs::File::open(path)?
+                .take(MAX_OUTPUT_BYTES + 1)
+                .read_to_end(&mut bytes)?;
+            if bytes.len() as u64 > MAX_OUTPUT_BYTES {
+                anyhow::bail!(
+                    "the output is {} bytes, over the {MAX_OUTPUT_BYTES}-byte read limit",
+                    bytes.len()
+                );
+            }
             canonical::canonicalize(family, &bytes)
         }) {
             Ok(transcript) => transcript,
             Err(e) => {
-                return CaseOutcome::problem(key, format!("cannot canonicalise an output: {e}"));
+                return CaseOutcome::problem(key, format!("cannot canonicalise an output: {e:#}"));
             }
         };
         normalise_transcript(&mut transcript, &self.root);
-        for part in &case.reencoded {
-            drop_parts(&mut transcript.outputs, part);
-        }
         CaseOutcome {
             key,
             transcript: Some(transcript),
@@ -137,7 +276,33 @@ impl Harness {
         }
     }
 
-    fn read_document(&self, document: Document) -> Result<ReadingTranscript> {
+    /// One reading. A reader that answers with an error, panics or never returns is one failing
+    /// reading, not a failed run: against another implementation one failure must not hide every
+    /// other verdict.
+    fn read_document(&self, document: Document) -> ReadingOutcome {
+        let name = document.name.to_string();
+        let mut outcome = match crate::shutdown::contain_panics(|| self.try_read(document)) {
+            Ok(Ok(transcript)) => ReadingOutcome {
+                document: name,
+                transcript: Some(transcript),
+                problem: None,
+            },
+            Ok(Err(e)) => ReadingOutcome::problem(name, format!("the reader failed: {e:#}")),
+            Err(payload) => ReadingOutcome::problem(
+                name,
+                format!(
+                    "the harness panicked reading the document: {}",
+                    panic_message(&*payload)
+                ),
+            ),
+        };
+        if let Some(problem) = &mut outcome.problem {
+            *problem = transcript::normalise(problem, &self.root);
+        }
+        outcome
+    }
+
+    fn try_read(&self, document: Document) -> Result<ReadingTranscript> {
         let directory = self
             .root
             .join("readings")
@@ -146,24 +311,84 @@ impl Harness {
         std::fs::create_dir_all(&out_dir)?;
         let path = directory.join(document.name);
         std::fs::write(&path, (document.build)())?;
-        let reading = self
-            .reader
-            .read(&path, document.name, &out_dir)
-            .with_context(|| format!("the reader failed on {}", document.name))?;
+        let reading = self.read_within(&path, document.name, &out_dir)?;
         let mut transcript = ReadingTranscript {
             document: document.name.to_string(),
-            file_name: document.name.to_string(),
             reading,
         };
         normalise_reading(&mut transcript, &self.root);
         Ok(transcript)
     }
+
+    /// One reading, bounded. The reader runs on a thread of its own so a reader that never returns
+    /// costs one reading instead of the gate; a thread cannot be killed, so a hung one is left
+    /// behind rather than waited for. A panicking reader answers with its own message.
+    fn read_within(&self, path: &Path, file_name: &str, out_dir: &Path) -> Result<Reading> {
+        let reader = Arc::clone(&self.reader);
+        let path = path.to_path_buf();
+        let file_name = file_name.to_string();
+        let out_dir = out_dir.to_path_buf();
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let reading =
+                crate::shutdown::contain_panics(|| reader.read(&path, &file_name, &out_dir))
+                    .unwrap_or_else(|payload| {
+                        Err(anyhow::anyhow!(
+                            "the reader panicked: {}",
+                            panic_message(&*payload)
+                        ))
+                    });
+            let _ = sender.send(reading);
+        });
+        match receiver.recv_timeout(self.read_timeout) {
+            Ok(reading) => reading,
+            Err(mpsc::RecvTimeoutError::Timeout) => bail!(
+                "the reader did not finish within {}s",
+                self.read_timeout.as_secs_f64()
+            ),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                bail!("the reader's thread ended without an answer")
+            }
+        }
+    }
 }
 
 impl Drop for Harness {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.root);
+        if self.owned {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
     }
+}
+
+/// Validate a root and create it, answering whether this call created it.
+fn create_root(root: &Path) -> Result<bool> {
+    validate_root(root)?;
+    let owned = !root.exists();
+    std::fs::create_dir_all(root)
+        .with_context(|| format!("cannot create the harness root {}", root.display()))?;
+    Ok(owned)
+}
+
+/// Refuse a root the harness may not own: it must be named the way [`Harness::temp_root`] names
+/// one, and its parent must be the OS temporary directory.
+fn validate_root(root: &Path) -> Result<()> {
+    let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
+    let parent = root
+        .parent()
+        .and_then(|parent| std::fs::canonicalize(parent).ok());
+    let named = root
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with(ROOT_PREFIX));
+    if !named || !parent.is_some_and(|parent| parent.starts_with(&temp)) {
+        bail!(
+            "the harness root {} must be a `{ROOT_PREFIX}…` directory under the OS temporary \
+             directory ({})",
+            root.display(),
+            temp.display()
+        );
+    }
+    Ok(())
 }
 
 /// A nonce for the harness root, so two runs cannot share one directory.
@@ -203,54 +428,36 @@ fn substitute(value: &mut Value, input: &Path, output: &Path) {
     }
 }
 
+/// Normalise the engine's own prose, and only its prose: the reason it gave and the notes, losses,
+/// missing values and unsupported fields it wrote. The documents themselves are compared exactly
+/// as they are — a date in a paragraph is content, not a timestamp of the run.
 fn normalise_transcript(transcript: &mut CaseTranscript, root: &Path) {
     if let Some(reason) = &mut transcript.reason {
         *reason = transcript::normalise(reason, root);
     }
     for list in [
         &mut transcript.notes,
+        &mut transcript.losses,
         &mut transcript.missing,
         &mut transcript.unsupported,
-        &mut transcript.losses,
     ] {
         for item in list.iter_mut() {
             *item = transcript::normalise(item, root);
         }
     }
-    for value in transcript.outputs.values_mut() {
-        transcript::normalise_value(value, root);
-    }
 }
 
 fn normalise_reading(transcript: &mut ReadingTranscript, root: &Path) {
     match &mut transcript.reading {
-        crate::engine::Reading::Text {
-            text,
-            notes,
-            unshown,
-            ..
-        } => {
-            *text = transcript::normalise(text, root);
-            for item in notes.iter_mut() {
-                *item = transcript::normalise(item, root);
-            }
-            for item in unshown.iter_mut() {
+        Reading::Text { notes, unshown, .. } => {
+            for item in notes.iter_mut().chain(unshown.iter_mut()) {
                 *item = transcript::normalise(item, root);
             }
         }
-        crate::engine::Reading::Unreadable { reason } => {
+        Reading::Unreadable { reason } => {
             *reason = transcript::normalise(reason, root);
         }
-        crate::engine::Reading::Unsupported => {}
-    }
-}
-
-/// Remove a part's digest from every output, for an operation that legitimately re-encodes it.
-fn drop_parts(outputs: &mut BTreeMap<String, Value>, part: &str) {
-    for value in outputs.values_mut() {
-        if let Some(parts) = value.get_mut("parts").and_then(Value::as_object_mut) {
-            parts.remove(part);
-        }
+        Reading::Unsupported => {}
     }
 }
 
@@ -271,12 +478,29 @@ impl CaseOutcome {
     }
 }
 
+/// One reading's run: its transcript, or why there is none.
+pub struct ReadingOutcome {
+    pub document: String,
+    pub transcript: Option<ReadingTranscript>,
+    pub problem: Option<String>,
+}
+
+impl ReadingOutcome {
+    fn problem(document: String, problem: String) -> Self {
+        Self {
+            document,
+            transcript: None,
+            problem: Some(problem),
+        }
+    }
+}
+
 /// Everything one run produced.
 pub struct Run {
     pub writer: EngineIdentity,
     pub reader: EngineIdentity,
     pub outcomes: Vec<CaseOutcome>,
-    pub readings: Vec<ReadingTranscript>,
+    pub readings: Vec<ReadingOutcome>,
 }
 
 /// The gate's answer for one case.
@@ -285,7 +509,6 @@ pub struct Verdict {
     pub passed: bool,
     /// Every reason the case failed, in terms a person can act on.
     pub problems: Vec<String>,
-    pub effects: Vec<crate::corpus::effect::EffectCheck>,
 }
 
 /// The gate's answer for one reading.
@@ -299,32 +522,42 @@ pub struct ReadingVerdict {
 pub struct Report {
     pub writer: EngineIdentity,
     pub reader: EngineIdentity,
+    /// The identities the baseline was recorded with, so a difference is attributable.
+    pub recorded_writer: EngineIdentity,
+    pub recorded_reader: EngineIdentity,
     pub verdicts: Vec<Verdict>,
     pub readings: Vec<ReadingVerdict>,
     /// Baseline cases the corpus no longer holds.
     pub stale: Vec<String>,
+    /// Baseline readings the corpus no longer holds.
+    pub stale_readings: Vec<String>,
 }
 
 impl Report {
+    /// Whether the engine in hand is the build the baseline was recorded from. Informative: the
+    /// harness must be usable against another implementation, so only the reference gate — the
+    /// reference engine checked against its own baseline — treats a difference as a failure.
+    #[must_use]
+    pub fn identity_matches(&self) -> bool {
+        self.writer == self.recorded_writer && self.reader == self.recorded_reader
+    }
+
+    /// The shared verdict aggregate: every verdict and every reading matches the baseline, and the
+    /// corpus still holds every baseline entry. The engine's identity is deliberately not part of
+    /// it — being pointed at another implementation is what the harness is for.
     #[must_use]
     pub fn passed(&self) -> bool {
         self.stale.is_empty()
+            && self.stale_readings.is_empty()
             && self.verdicts.iter().all(|verdict| verdict.passed)
             && self.readings.iter().all(|reading| reading.passed)
     }
 
+    /// The reference gate's answer: [`Report::passed`], and that the engine is the build the
+    /// baseline was recorded from. Only the reference engine's own check adds the second condition.
     #[must_use]
-    pub fn failures(&self) -> usize {
-        self.verdicts
-            .iter()
-            .filter(|verdict| !verdict.passed)
-            .count()
-            + self
-                .readings
-                .iter()
-                .filter(|reading| !reading.passed)
-                .count()
-            + self.stale.len()
+    pub fn passes_reference_gate(&self) -> bool {
+        self.passed() && self.identity_matches()
     }
 }
 
@@ -354,18 +587,32 @@ impl Run {
             .cloned()
             .collect();
         stale.sort();
+        let mut stale_readings: Vec<String> = baseline
+            .readings
+            .keys()
+            .filter(|name| {
+                !self
+                    .readings
+                    .iter()
+                    .any(|reading| &reading.document == *name)
+            })
+            .cloned()
+            .collect();
+        stale_readings.sort();
         Report {
             writer: self.writer.clone(),
             reader: self.reader.clone(),
+            recorded_writer: baseline.writer.clone(),
+            recorded_reader: baseline.reader.clone(),
             verdicts,
             readings,
             stale,
+            stale_readings,
         }
     }
 
     fn verdict(&self, outcome: &CaseOutcome, case: Option<&Case>, baseline: &Baseline) -> Verdict {
         let mut problems = Vec::new();
-        let mut effects = Vec::new();
         if let Some(problem) = &outcome.problem {
             problems.push(problem.clone());
         }
@@ -373,15 +620,21 @@ impl Run {
         if let (Some(case), Some(transcript)) = (case, transcript) {
             problems.extend(check_expectation(&case.expect, transcript));
             if case.expect == Expect::Produced {
-                for effect in &case.effects {
-                    let check = effect.check(&transcript.outputs);
-                    if !check.passed {
-                        problems.push(format!(
-                            "effect not met: {} — {}",
-                            check.effect, check.detail
-                        ));
+                // Every case names at least one output; `every_output_the_request_names_is_declared`
+                // holds the corpus to it, and a slip is a verdict problem rather than an abort.
+                match case.outputs.first() {
+                    Some(first) => {
+                        for effect in &case.effects {
+                            let check = effect.check(&transcript.outputs, first);
+                            if !check.passed {
+                                problems.push(format!(
+                                    "effect not met: {} — {}",
+                                    check.effect, check.detail
+                                ));
+                            }
+                        }
                     }
-                    effects.push(check);
+                    None => problems.push("the case names no output to check".to_string()),
                 }
             }
         }
@@ -390,7 +643,8 @@ impl Run {
                 "no baseline entry: record the baseline deliberately before gating".to_string(),
             ),
             Some(recorded) => {
-                let comparison = compare_transcripts(recorded, transcript);
+                let comparison =
+                    compare_transcript(recorded, transcript, "the case produced no transcript");
                 problems.extend(
                     comparison
                         .lines(12)
@@ -403,21 +657,32 @@ impl Run {
             key: outcome.key.clone(),
             passed: problems.is_empty(),
             problems,
-            effects,
         }
     }
 }
 
-fn compare_transcripts(recorded: &CaseTranscript, actual: Option<&CaseTranscript>) -> Comparison {
+/// Compare one transcript with the baseline's, or say that the comparison could not be made: a
+/// missing transcript and an unserialisable one are both undecidable, never a pass.
+fn compare_transcript<T: serde::Serialize>(
+    recorded: &T,
+    actual: Option<&T>,
+    missing: &str,
+) -> Comparison {
     let Some(actual) = actual else {
-        return Comparison {
-            differences: Vec::new(),
-            undecidable: vec!["the case produced no transcript".to_string()],
-        };
+        return undecidable(missing);
     };
-    let expected = serde_json::to_value(recorded).unwrap_or(Value::Null);
-    let actual = serde_json::to_value(actual).unwrap_or(Value::Null);
-    canonical::compare(&expected, &actual)
+    match (serde_json::to_value(recorded), serde_json::to_value(actual)) {
+        (Ok(expected), Ok(actual)) => canonical::compare(&expected, &actual),
+        _ => undecidable("the transcripts could not be serialised for comparison"),
+    }
+}
+
+/// A comparison the harness could not make. Never a pass.
+fn undecidable(why: &str) -> Comparison {
+    Comparison {
+        differences: Vec::new(),
+        undecidable: vec![why.to_string()],
+    }
 }
 
 fn check_expectation(expect: &Expect, transcript: &CaseTranscript) -> Vec<String> {
@@ -471,19 +736,82 @@ fn refusal(
     problems
 }
 
-fn compare_reading(reading: &ReadingTranscript, baseline: &Baseline) -> ReadingVerdict {
+fn compare_reading(outcome: &ReadingOutcome, baseline: &Baseline) -> ReadingVerdict {
     let mut problems = Vec::new();
-    match baseline.readings.get(&reading.document) {
+    if let Some(problem) = &outcome.problem {
+        problems.push(problem.clone());
+    }
+    match baseline.readings.get(&outcome.document) {
         None => problems.push("no baseline reading: record the baseline deliberately".to_string()),
         Some(recorded) => {
-            let expected = serde_json::to_value(recorded).unwrap_or(Value::Null);
-            let actual = serde_json::to_value(reading).unwrap_or(Value::Null);
-            problems.extend(canonical::compare(&expected, &actual).lines(12));
+            let comparison = compare_transcript(
+                recorded,
+                outcome.transcript.as_ref(),
+                "the reading produced no transcript",
+            );
+            problems.extend(
+                comparison
+                    .lines(12)
+                    .into_iter()
+                    .map(|line| format!("baseline {line}")),
+            );
         }
     }
     ReadingVerdict {
-        document: reading.document.clone(),
+        document: outcome.document.clone(),
         passed: problems.is_empty(),
         problems,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::Family;
+    use crate::reference::{NoOpReader, NoOpWriter};
+    use serde_json::json;
+
+    /// A case whose one document cannot be built: a corpus-authoring slip.
+    fn case_that_cannot_build() -> Case {
+        Case {
+            family: Family::Docx,
+            operation: "create",
+            sub_operation: None,
+            documents: vec![Document {
+                name: "boom.docx",
+                build: || -> Vec<u8> { panic!("the builder panicked") },
+            }],
+            request: json!({ "op": "create", "format": "docx", "output": "$out/out.docx" }),
+            outputs: vec!["out.docx"],
+            effects: Vec::new(),
+            expect: Expect::Produced,
+        }
+    }
+
+    fn harness() -> Harness {
+        Harness::at(
+            Harness::temp_root(),
+            Box::new(NoOpWriter),
+            Box::new(NoOpReader),
+        )
+        .expect("a harness root")
+    }
+
+    #[test]
+    fn a_panicking_document_builder_is_one_case_problem() {
+        // A corpus slip is a verdict, not an abort: the same rule the engine's own panics follow.
+        let outcome = harness().run_case(&case_that_cannot_build());
+        let problem = outcome.problem.expect("a problem");
+        assert!(problem.contains("panicked"), "{problem}");
+    }
+
+    #[test]
+    fn a_panicking_document_builder_is_one_failed_reading() {
+        let outcome = harness().read_document(Document {
+            name: "boom.docx",
+            build: || -> Vec<u8> { panic!("the builder panicked") },
+        });
+        let problem = outcome.problem.expect("a problem");
+        assert!(problem.contains("panicked"), "{problem}");
     }
 }

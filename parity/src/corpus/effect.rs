@@ -54,12 +54,6 @@ pub enum Effect {
         text: &'static str,
         present: bool,
     },
-    /// An OOXML part is present (or absent).
-    Part {
-        output: Option<&'static str>,
-        part: &'static str,
-        present: bool,
-    },
     /// How many elements with this name a part holds (a `w:tbl`, a `w:drawing`, …).
     ElementCount {
         output: Option<&'static str>,
@@ -182,8 +176,8 @@ pub enum Effect {
         page: usize,
         count: usize,
     },
-    /// How many annotations a page carries.
-    PageAnnotations {
+    /// How many form XObjects a page paints (a flattened field's appearance is one).
+    PageForms {
         output: Option<&'static str>,
         page: usize,
         count: usize,
@@ -220,10 +214,11 @@ pub struct EffectCheck {
 }
 
 impl Effect {
-    /// Check the effect against the produced documents, keyed by file name.
+    /// Check the effect against the produced documents, keyed by file name. `first` is the case's
+    /// own first output, which an effect that names none reads.
     #[must_use]
-    pub fn check(&self, outputs: &BTreeMap<String, Value>) -> EffectCheck {
-        let result = self.evaluate(outputs);
+    pub fn check(&self, outputs: &BTreeMap<String, Value>, first: &str) -> EffectCheck {
+        let result = self.evaluate(outputs, first);
         EffectCheck {
             passed: result.is_ok(),
             effect: self.spelled(),
@@ -231,9 +226,8 @@ impl Effect {
         }
     }
 
-    fn evaluate(&self, outputs: &BTreeMap<String, Value>) -> Result<(), String> {
-        let output = self.output();
-        let value = output_value(outputs, output)?;
+    fn evaluate(&self, outputs: &BTreeMap<String, Value>, first: &str) -> Result<(), String> {
+        let value = output_value(outputs, self.output().unwrap_or(first))?;
         match *self {
             Self::Text {
                 part,
@@ -247,16 +241,6 @@ impl Effect {
                         format!("the document does not hold {text:?}")
                     } else {
                         format!("the document still holds {text:?}")
-                    }
-                })
-            }
-            Self::Part { part, present, .. } => {
-                let found = part_of(value, part).is_some();
-                expect(found == present, || {
-                    if present {
-                        format!("the package has no part {part:?}")
-                    } else {
-                        format!("the package still has part {part:?}")
                     }
                 })
             }
@@ -300,10 +284,14 @@ impl Effect {
                 let container = format_container(tree, scope, text)
                     .ok_or_else(|| format!("no {} holds {text:?}", scope.spelled()))?;
                 let found = property_value(container, scope, property);
+                // A property spelled off (`w:val="0"`, `b="false"`) is not set.
+                let set = found
+                    .as_deref()
+                    .is_some_and(|value| !matches!(value, "0" | "false" | "off" | "none"));
                 let matches = match (on, expected) {
-                    (false, _) => found.is_none(),
-                    (true, None) => found.is_some(),
-                    (true, Some(want)) => found.as_deref() == Some(want),
+                    (false, _) => !set,
+                    (true, None) => set,
+                    (true, Some(want)) => set && found.as_deref() == Some(want),
                 };
                 expect(matches, || {
                     format!(
@@ -466,10 +454,11 @@ impl Effect {
                 };
                 let found = entry.get(key).and_then(box_value);
                 let matches = found.as_ref().is_some_and(|found| {
-                    found
-                        .iter()
-                        .zip(want.iter())
-                        .all(|(a, b)| (a - b).abs() < 1e-3)
+                    found.len() == want.len()
+                        && found
+                            .iter()
+                            .zip(want.iter())
+                            .all(|(a, b)| (a - b).abs() < 1e-3)
                 });
                 expect(matches, || {
                     format!(
@@ -495,17 +484,14 @@ impl Effect {
                     format!("page {} paints {found} images, expected {count}", page + 1)
                 })
             }
-            Self::PageAnnotations { page, count, .. } => {
+            Self::PageForms { page, count, .. } => {
                 let entry = page_of(value, page)?;
                 let found = entry
-                    .get("annots")
+                    .get("forms")
                     .and_then(Value::as_array)
                     .map_or(0, Vec::len);
                 expect(found == count, || {
-                    format!(
-                        "page {} carries {found} annotations, expected {count}",
-                        page + 1
-                    )
+                    format!("page {} paints {found} forms, expected {count}", page + 1)
                 })
             }
             Self::Info {
@@ -550,7 +536,6 @@ impl Effect {
     fn output(&self) -> Option<&'static str> {
         match *self {
             Self::Text { output, .. }
-            | Self::Part { output, .. }
             | Self::ElementCount { output, .. }
             | Self::TableCell { output, .. }
             | Self::FormatOn { output, .. }
@@ -569,7 +554,7 @@ impl Effect {
             | Self::PageBox { output, .. }
             | Self::PageText { output, .. }
             | Self::PageImages { output, .. }
-            | Self::PageAnnotations { output, .. }
+            | Self::PageForms { output, .. }
             | Self::Info { output, .. }
             | Self::FormValue { output, .. }
             | Self::FormFlattened { output }
@@ -582,12 +567,6 @@ impl Effect {
         match *self {
             Self::Text { text, present, .. } => {
                 format!("text {} {text:?}", if present { "holds" } else { "lacks" })
-            }
-            Self::Part { part, present, .. } => {
-                format!(
-                    "part {part:?} {}",
-                    if present { "present" } else { "absent" }
-                )
             }
             Self::ElementCount {
                 part,
@@ -674,8 +653,8 @@ impl Effect {
             Self::PageImages { page, count, .. } => {
                 format!("page {} paints {count} image(s)", page + 1)
             }
-            Self::PageAnnotations { page, count, .. } => {
-                format!("page {} carries {count} annotation(s)", page + 1)
+            Self::PageForms { page, count, .. } => {
+                format!("page {} paints {count} form(s)", page + 1)
             }
             Self::Info { key, value, .. } => format!("{key} = {value:?}"),
             Self::FormValue { field, value, .. } => format!("form field {field:?} = {value:?}"),
@@ -698,49 +677,49 @@ fn expect(matches: bool, detail: impl FnOnce() -> String) -> Result<(), String> 
     if matches { Ok(()) } else { Err(detail()) }
 }
 
-/// The canonical value of the named output, or of the case's first output.
-fn output_value<'a>(
-    outputs: &'a BTreeMap<String, Value>,
-    output: Option<&str>,
-) -> Result<&'a Value, String> {
-    match output {
-        Some(name) => outputs
-            .get(name)
-            .ok_or_else(|| format!("no output named {name:?} was produced")),
-        None => outputs
-            .values()
-            .next()
-            .ok_or_else(|| "no output was produced".to_string()),
-    }
-}
-
-fn part_of<'a>(value: &'a Value, part: &str) -> Option<&'a Value> {
-    value.get("parts")?.get(part)
+/// The canonical value of the named output.
+fn output_value<'a>(outputs: &'a BTreeMap<String, Value>, name: &str) -> Result<&'a Value, String> {
+    outputs
+        .get(name)
+        .ok_or_else(|| format!("no output named {name:?} was produced"))
 }
 
 fn part_tree<'a>(value: &'a Value, part: &str) -> Result<&'a Value, String> {
-    part_of(value, part)
+    value
+        .get("parts")
+        .and_then(|parts| parts.get(part))
         .ok_or_else(|| format!("the package has no part {part:?}"))?
         .get("tree")
         .ok_or_else(|| format!("{part:?} is not an XML part"))
 }
 
-/// Every element named `name`, in document order.
-fn elements<'a>(tree: &'a Value, name: &str) -> Vec<&'a Value> {
+/// Every element `matches` accepts, in document order.
+fn elements_where(tree: &Value, matches: impl Fn(&str) -> bool) -> Vec<&Value> {
+    fn walk<'a>(node: &'a Value, matches: &dyn Fn(&str) -> bool, found: &mut Vec<&'a Value>) {
+        if let Some(name) = node.get("name").and_then(Value::as_str)
+            && matches(name)
+        {
+            found.push(node);
+        }
+        if let Some(children) = node.get("children").and_then(Value::as_array) {
+            for child in children {
+                walk(child, matches, found);
+            }
+        }
+    }
     let mut found = Vec::new();
-    collect_elements(tree, name, &mut found);
+    walk(tree, &matches, &mut found);
     found
 }
 
-fn collect_elements<'a>(node: &'a Value, name: &str, found: &mut Vec<&'a Value>) {
-    if node.get("name").and_then(Value::as_str) == Some(name) {
-        found.push(node);
-    }
-    if let Some(children) = node.get("children").and_then(Value::as_array) {
-        for child in children {
-            collect_elements(child, name, found);
-        }
-    }
+/// Every element named `name`, in document order.
+fn elements<'a>(tree: &'a Value, name: &str) -> Vec<&'a Value> {
+    elements_where(tree, |candidate| candidate == name)
+}
+
+/// An element or attribute name without its namespace prefix.
+fn local(name: &str) -> &str {
+    name.rsplit_once(':').map_or(name, |(_, local)| local)
 }
 
 /// A node's own text: its text children, concatenated.
@@ -859,25 +838,7 @@ fn attribute_local<'a>(node: &'a Value, name: &str) -> Option<&'a str> {
 
 /// Every element with this local name, whatever its prefix.
 fn elements_local<'a>(tree: &'a Value, name: &str) -> Vec<&'a Value> {
-    let mut found = Vec::new();
-    collect_elements_local(tree, name, &mut found);
-    found
-}
-
-fn collect_elements_local<'a>(node: &'a Value, name: &str, found: &mut Vec<&'a Value>) {
-    if let Some(node_name) = node.get("name").and_then(Value::as_str)
-        && node_name
-            .rsplit_once(':')
-            .map_or(node_name, |(_, local)| local)
-            == name
-    {
-        found.push(node);
-    }
-    if let Some(children) = node.get("children").and_then(Value::as_array) {
-        for child in children {
-            collect_elements_local(child, name, found);
-        }
-    }
+    elements_where(tree, |candidate| local(candidate) == name)
 }
 
 /// `(name, part)` for every sheet, in workbook order.

@@ -5,9 +5,9 @@
 //! and, more importantly, contain none of the change the operation promises. A gate that passes
 //! this engine is not a gate.
 
-use crate::engine::{EngineIdentity, Failure, Reader, Reading, Writer, WriterOutcome};
+use crate::engine::{EngineIdentity, Reader, Reading, Writer, WriterOutcome};
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub struct NoOpWriter;
 
@@ -38,29 +38,12 @@ impl Writer for NoOpWriter {
             Some(source) => std::fs::read(source)?,
             None => Vec::new(),
         };
-        let mut outputs = Vec::new();
-        for key in ["output", "outputs"] {
-            match request.get(key) {
-                Some(Value::String(path)) => outputs.push(PathBuf::from(path)),
-                Some(Value::Array(paths)) => {
-                    outputs.extend(paths.iter().filter_map(Value::as_str).map(PathBuf::from))
-                }
-                _ => {}
-            }
-        }
+        let outputs = crate::engine::request_outputs(request);
         if outputs.is_empty() {
-            return Ok(WriterOutcome {
-                outputs: Vec::new(),
-                missing: Vec::new(),
-                placeholders: None,
-                unsupported: Vec::new(),
-                notes: Vec::new(),
-                losses: Vec::new(),
-                failure: Some(Failure {
-                    class: "usage".to_string(),
-                    reason: "the no-op engine produces no output".to_string(),
-                }),
-            });
+            return Ok(WriterOutcome::failed(
+                "usage",
+                "the no-op engine produces no output",
+            ));
         }
         for path in &outputs {
             if let Some(parent) = path.parent() {

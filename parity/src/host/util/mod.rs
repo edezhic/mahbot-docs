@@ -4,6 +4,8 @@
 
 pub(crate) mod html;
 pub(crate) mod media_target;
+#[cfg(test)]
+pub(crate) mod test;
 
 /// Recognized image extensions, matching the product's list.
 pub(crate) const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "heic", "heif"];

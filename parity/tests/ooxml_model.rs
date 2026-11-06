@@ -2,8 +2,8 @@
 //! model retains is shown to be sensitive, and every field it normalises is shown to be ignored.
 //!
 //! The normalisation tables are read from the model itself (`DROPPED_ATTRIBUTES`,
-//! `DROPPED_ELEMENTS`, `IGNORED_PARTS`, `MEDIA_DIRS`), so a rule added to the model without a test
-//! here fails the table rather than passing silently.
+//! `DROPPED_ELEMENTS`, `IGNORED_PARTS`, `MEDIA_DIRS`, `RELATIONSHIP_ATTRIBUTES`), so a rule added
+//! to the model without a test here fails the table rather than passing silently.
 
 use document_parity::canonical::ooxml;
 use document_parity::canonical::{Comparison, compare};
@@ -364,45 +364,41 @@ fn every_dropped_attribute_is_ignored() {
 
 #[test]
 fn every_dropped_element_is_ignored() {
-    // One core-properties part, carrying every element the model drops.
-    let core = |created: &str, modified: &str, revision: &str| {
-        format!(
-            "<?xml version=\"1.0\"?><cp:coreProperties \
-             xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" \
-             xmlns:dc=\"http://purl.org/dc/elements/1.1/\" \
-             xmlns:dcterms=\"http://purl.org/dc/terms/\" \
-             xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\
-             <dc:title>Parity</dc:title>\
-             <dcterms:created xsi:type=\"dcterms:W3CDTF\">{created}</dcterms:created>\
-             <dcterms:modified xsi:type=\"dcterms:W3CDTF\">{modified}</dcterms:modified>\
-             <cp:revision>{revision}</cp:revision></cp:coreProperties>"
-        )
-    };
-    let mut first = basic();
-    add(
-        &mut first,
-        "docProps/core.xml",
-        core("2020-01-01T00:00:00Z", "2020-01-01T00:00:00Z", "1").as_bytes(),
-    );
-    let mut second = basic();
-    add(
-        &mut second,
-        "docProps/core.xml",
-        core("2026-11-06T12:34:56Z", "2026-11-07T01:02:03Z", "99").as_bytes(),
-    );
-    // The parts are present on both sides and differ only in the dropped elements.
-    let left = canonical(&first);
-    let right = canonical(&second);
-    assert_same(&left, &right, "different dates and revision");
+    // Each entry is given two different values in its own part: the model must not see the
+    // difference. The test follows the table wherever it points rather than naming the elements.
+    for (part, element) in ooxml::DROPPED_ELEMENTS {
+        let core = |value: &str| {
+            format!(
+                "<?xml version=\"1.0\"?><cp:coreProperties \
+                 xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" \
+                 xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\
+                 <dc:title>Parity</dc:title>\
+                 <x:{element} xmlns:x=\"urn:parity\">{value}</x:{element}>\
+                 </cp:coreProperties>"
+            )
+        };
+        let package = |value: &str| {
+            let mut parts = basic();
+            add(&mut parts, part, core(value).as_bytes());
+            canonical(&parts)
+        };
+        assert_same(&package("one"), &package("two"), element);
 
-    // The title, which is not dropped, stays sensitive.
-    replace(
-        &mut second,
-        "docProps/core.xml",
-        "<dc:title>Parity",
-        "<dc:title>Other",
-    );
-    assert_differs(&left, &canonical(&second), "a different title");
+        // A neighbouring element of the same part, which the table does not name, stays
+        // sensitive: the part is read, only the dropped element is ignored.
+        let titled = |title: &str| {
+            let mut parts = basic();
+            add(
+                &mut parts,
+                part,
+                core("one")
+                    .replace("<dc:title>Parity", &format!("<dc:title>{title}"))
+                    .as_bytes(),
+            );
+            canonical(&parts)
+        };
+        assert_differs(&titled("Parity"), &titled("Other"), element);
+    }
 }
 
 #[test]
@@ -425,6 +421,101 @@ fn every_ignored_part_is_ignored() {
         );
         assert_same(&with_part, &canonical(&other), name);
     }
+}
+
+#[test]
+fn every_media_directory_is_normalised() {
+    // A media part's generated file name is replaced by one derived from its content, in every
+    // directory the model declares.
+    let png = build::png();
+    for dir in ooxml::MEDIA_DIRS {
+        let package = |name: &str| {
+            let mut parts = basic();
+            add(&mut parts, &format!("{dir}{name}"), &png);
+            canonical(&parts)
+        };
+        assert_same(&package("image7.png"), &package("picture-xyz.png"), dir);
+    }
+}
+
+#[test]
+fn every_relationship_attribute_is_rewritten() {
+    // A reference to a relationship follows what the relationship means, not its generated id, for
+    // every attribute the model declares.
+    let png = build::png();
+    let package = |attribute: &str, id: &str, target: &str| {
+        let mut parts = basic();
+        add(&mut parts, "word/media/p.png", &png);
+        add(&mut parts, "word/media/other.png", &build::jpeg());
+        replace(
+            &mut parts,
+            "word/_rels/document.xml.rels",
+            "</Relationships>",
+            &format!(
+                "<Relationship Id=\"{id}\" Type=\"urn:parity:image\" Target=\"{target}\"/>\
+                 </Relationships>"
+            ),
+        );
+        replace(
+            &mut parts,
+            "word/document.xml",
+            "<w:p>",
+            &format!("<w:p {attribute}=\"{id}\">"),
+        );
+        canonical(&parts)
+    };
+    for attribute in ooxml::RELATIONSHIP_ATTRIBUTES {
+        assert_same(
+            &package(attribute, "rId5", "media/p.png"),
+            &package(attribute, "rId99", "media/p.png"),
+            attribute,
+        );
+        // The reference is not dropped: a relationship pointing at another picture is a
+        // difference.
+        assert_differs(
+            &package(attribute, "rId5", "media/p.png"),
+            &package(attribute, "rId5", "media/other.png"),
+            attribute,
+        );
+    }
+}
+
+#[test]
+fn two_media_parts_with_identical_bytes_stay_two_parts() {
+    let png = build::png();
+    let package = |names: [&str; 2]| {
+        let mut parts = basic();
+        for name in names {
+            add(&mut parts, &format!("word/media/{name}"), &png);
+        }
+        canonical(&parts)
+    };
+    let one = {
+        let mut parts = basic();
+        add(&mut parts, "word/media/image7.png", &png);
+        canonical(&parts)
+    };
+    let two = package(["image7.png", "image8.png"]);
+    assert_differs(&one, &two, "a duplicated media part");
+
+    let media = two["parts"]
+        .as_object()
+        .expect("a parts map")
+        .keys()
+        .filter(|key| key.starts_with("word/media/"))
+        .collect::<Vec<_>>();
+    assert_eq!(media.len(), 2, "both parts stay in the model: {media:?}");
+    assert!(
+        media.iter().any(|key| key.contains('#')),
+        "the duplicate keeps an occurrence number: {media:?}"
+    );
+
+    // The two copies are named differently and still compare equal: the name is generated.
+    assert_same(
+        &two,
+        &package(["picture-a.png", "picture-b.png"]),
+        "two identical media parts renamed",
+    );
 }
 
 #[test]
@@ -503,6 +594,91 @@ fn whitespace_and_entities_are_normalised_but_text_is_not() {
         "Alpha paragraph one ",
     );
     assert_differs(&canonical(&plain), &canonical(&tight), "a trailing space");
+}
+
+/// A package holding only the part a docx is classified by, with `body` inside it.
+fn minimal_docx(body: &str) -> Vec<(String, Vec<u8>)> {
+    vec![(
+        "word/document.xml".to_string(),
+        format!(
+            "<?xml version=\"1.0\"?><w:document              xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">             <w:body>{body}</w:body></w:document>"
+        )
+        .into_bytes(),
+    )]
+}
+
+const PARAGRAPH_A: &str = "<w:p><w:r><w:t>A</w:t></w:r></w:p>";
+const PARAGRAPH_B: &str = "<w:p><w:r><w:t>B</w:t></w:r></w:p>";
+
+#[test]
+fn element_order_is_meaningful() {
+    let before = canonical(&minimal_docx(&format!("{PARAGRAPH_A}{PARAGRAPH_B}")));
+    let after = canonical(&minimal_docx(&format!("{PARAGRAPH_B}{PARAGRAPH_A}")));
+    let comparison = compare(&before, &after);
+    assert!(!comparison.is_same(), "a reordered body is a difference");
+    assert!(
+        comparison
+            .differences
+            .iter()
+            .all(|difference| difference.path.contains("children")),
+        "the differences are in the body's order: {:?}",
+        comparison.lines(4)
+    );
+}
+
+#[test]
+fn a_content_types_part_is_a_set() {
+    let content_types = |first: &str, second: &str| {
+        format!(
+            "<?xml version=\"1.0\"?><Types              xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">             <Override PartName=\"{first}\" ContentType=\"application/xml\"/>             <Override PartName=\"{second}\" ContentType=\"application/xml\"/></Types>"
+        )
+    };
+    let mut before = minimal_docx(PARAGRAPH_A);
+    add(
+        &mut before,
+        "[Content_Types].xml",
+        content_types("/word/document.xml", "/word/styles.xml").as_bytes(),
+    );
+    let mut after = minimal_docx(PARAGRAPH_A);
+    add(
+        &mut after,
+        "[Content_Types].xml",
+        content_types("/word/styles.xml", "/word/document.xml").as_bytes(),
+    );
+    assert_same(
+        &canonical(&before),
+        &canonical(&after),
+        "the declarations are a set",
+    );
+}
+
+#[test]
+fn a_content_types_declaration_names_a_media_part_by_its_content() {
+    let png = build::png();
+    let package = |name: &str| {
+        let mut parts = minimal_docx(PARAGRAPH_A);
+        add(&mut parts, name, &png);
+        add(
+            &mut parts,
+            "[Content_Types].xml",
+            format!(
+                "<?xml version=\"1.0\"?><Types                  xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">                 <Override PartName=\"/{name}\" ContentType=\"image/png\"/></Types>"
+            )
+            .as_bytes(),
+        );
+        canonical(&parts)
+    };
+    let first = package("word/media/image1.png");
+    let second = package("word/media/picture-xyz.png");
+    assert_same(&first, &second, "a media part named two ways");
+    // The declaration itself is rewritten to the content-derived name, so the generated name is
+    // gone from the model rather than surviving in a part the model also compares.
+    let tree = &first["parts"]["[Content_Types].xml"]["tree"];
+    let text = tree.to_string();
+    assert!(
+        !text.contains("image1.png"),
+        "the generated name survives in [Content_Types].xml: {text}"
+    );
 }
 
 #[test]

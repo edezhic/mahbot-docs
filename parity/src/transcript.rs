@@ -1,8 +1,8 @@
 //! The normalised transcript: what a run of one case is compared on, with everything volatile
-//! (absolute paths, nonces, timestamps) replaced by a marker. Two runs of one engine must produce
-//! identical transcripts, whatever second they happen to land in.
+//! (absolute paths, the run's nonce, timestamps) replaced by a marker. Two runs of one engine must
+//! produce identical transcripts, whatever second they happen to land in.
 
-use crate::engine::{ImageArtifact, Reading, WriterOutcome};
+use crate::engine::{Reading, WriterOutcome};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -56,20 +56,30 @@ pub struct CaseTranscript {
 impl CaseTranscript {
     /// Build a transcript from one outcome, canonicalizing each produced file with `canonical`.
     ///
-    /// A file the engine claims but did not write is a `Failed` transcript rather than an error:
-    /// the claim is part of the answer and the difference belongs in the verdict.
+    /// An output is keyed by its file name, because the directory it was written to differs per
+    /// run; two outputs with one name keep an occurrence number rather than collapsing into one
+    /// entry. The closure decides what a claimed-but-unwritten file becomes — the harness records
+    /// `<not written>` and lets the verdict carry the difference.
     pub fn build(
         outcome: &WriterOutcome,
         canonical: impl Fn(&Path) -> anyhow::Result<serde_json::Value>,
     ) -> anyhow::Result<Self> {
         let mut outputs = BTreeMap::new();
+        let mut occurrences: BTreeMap<String, usize> = BTreeMap::new();
         for path in &outcome.outputs {
             let name = path
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.to_string_lossy().into_owned());
+            let occurrence = occurrences.entry(name.clone()).or_default();
+            *occurrence += 1;
+            let key = if *occurrence == 1 {
+                name
+            } else {
+                format!("{name}#{occurrence}")
+            };
             let value = canonical(path)?;
-            outputs.insert(name, value);
+            outputs.insert(key, value);
         }
         Ok(Self {
             status: Status::of(outcome),
@@ -94,69 +104,39 @@ impl CaseTranscript {
 /// One reading, as recorded and compared.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReadingTranscript {
-    /// The corpus document's name — the corpus's own key, never a path.
+    /// The corpus document's name — the corpus's own key, never a path. It is also the name the
+    /// document was given when read, so one field carries both.
     pub document: String,
-    /// The name the document was given when read.
-    pub file_name: String,
     pub reading: Reading,
 }
 
 /// Replace everything a transcript must not carry. `run_root` is the harness's own temporary root;
-/// any path under it becomes a relative marker, and a nonce or a timestamp becomes a marker of its
-/// own kind.
+/// any path under it becomes a relative marker, the run's own nonce becomes `<nonce>`, and a
+/// timestamp becomes `<date>`. Only the run's actual nonce is replaced: a sixteen-digit hex token
+/// the document or the engine happens to contain is not this run's and is left as it is.
 #[must_use]
 pub fn normalise(text: &str, run_root: &Path) -> String {
     let root = run_root.to_string_lossy().into_owned();
-    let text = text.replace(&root, "<run>");
-    replace_dates(&replace_nonces(&text))
+    let mut text = text.replace(&root, "<run>");
+    if let Some(nonce) = nonce_of(run_root) {
+        text = text.replace(nonce, "<nonce>");
+    }
+    replace_dates(&text)
 }
 
-/// Normalise every string in a JSON value, in place.
-pub fn normalise_value(value: &mut serde_json::Value, run_root: &Path) {
-    match value {
-        serde_json::Value::String(text) => *text = normalise(text, run_root),
-        serde_json::Value::Array(items) => {
-            for item in items {
-                normalise_value(item, run_root);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            for (_, item) in map.iter_mut() {
-                normalise_value(item, run_root);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Replace a sixteen-digit lowercase hex token that carries at least one letter — a run's nonce —
-/// with `<nonce>`. A digest is longer, and a plain number is not a nonce.
-fn replace_nonces(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut run = String::new();
-    let flush = |run: &mut String, out: &mut String| {
-        let is_nonce = run.len() == 16
-            && run.chars().any(|c| c.is_ascii_lowercase())
-            && run
-                .chars()
-                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase());
-        if is_nonce {
-            out.push_str("<nonce>");
-        } else {
-            out.push_str(run);
-        }
-        run.clear();
-    };
-    for ch in text.chars() {
-        if ch.is_ascii_hexdigit() && !ch.is_ascii_uppercase() {
-            run.push(ch);
-        } else {
-            flush(&mut run, &mut out);
-            out.push(ch);
-        }
-    }
-    flush(&mut run, &mut out);
-    out
+/// The nonce [`crate::harness::Harness::temp_root`] mints into the root's name.
+fn nonce_of(run_root: &Path) -> Option<&str> {
+    run_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.rsplit_once('-'))
+        .map(|(_, nonce)| nonce)
+        .filter(|nonce| {
+            nonce.len() == 16
+                && nonce
+                    .chars()
+                    .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        })
 }
 
 /// Replace ISO-8601 and PDF date spellings. Deliberately narrow: a bare number is never a date,
@@ -241,21 +221,4 @@ pub fn identity_line(identity: &crate::engine::EngineIdentity) -> String {
         .map(|runtime| format!(" on {runtime}"))
         .unwrap_or_default();
     format!("{} build {}{runtime}", identity.engine, identity.build)
-}
-
-/// The images a reading wrote, as the neutral artifact shape.
-#[must_use]
-pub fn image_artifacts(paths: &[std::path::PathBuf]) -> Vec<ImageArtifact> {
-    use sha2::Digest as _;
-    paths
-        .iter()
-        .filter_map(|path| {
-            let bytes = std::fs::read(path).ok()?;
-            Some(ImageArtifact {
-                name: path.file_name()?.to_string_lossy().into_owned(),
-                sha256: format!("{:x}", sha2::Sha256::digest(&bytes)),
-                len: bytes.len() as u64,
-            })
-        })
-        .collect()
 }

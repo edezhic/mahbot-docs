@@ -1,29 +1,33 @@
 {
   "note": "Recorded from the reference engine by `cargo run --bin record-baseline`. The harness never rewrites this file: recording is a deliberate act.",
-  "recorded_at_unix": 1793962596,
+  "recorded_at_unix": 1793988706,
   "writer": {
     "engine": "reference-writer",
-    "build": "04c76d7108056641f77e3efdb4a08cce69658dd0119aedfba5c2cad86d0eb267",
-    "runtime": "1.4.4",
+    "build": "1fc44a2162cd751942a258dffdeaaa7ebd44f217af747e9141be98783a4faa50",
+    "runtime": "bun 1.4.4",
     "components": {
       "bun.lock": "bd6aae02cbd5b8837a19e9c16ba3f7ddfa6a28300a2bfefb52829f64c39541d9",
       "bundle": "04c76d7108056641f77e3efdb4a08cce69658dd0119aedfba5c2cad86d0eb267",
       "font": "b85c38ecea8a7cfb39c24e395a4007474fa5a4fc864f6ee33309eb4948d232d5",
       "kit": "40e3f54211688e737cf9985ffca098234d7ba4311ed5a65dd941b68f97969455",
       "package": "8093a9d27cffe6137cdd27f3e7daff36c3998bc8c00cb2515680947ee71ff906",
-      "rules": "67e77a24afad336e0b5c5c171be81f740fe901646e07d5ecb77b0055ac596840"
+      "rules": "67e77a24afad336e0b5c5c171be81f740fe901646e07d5ecb77b0055ac596840",
+      "runner": "94a9f11b404ed6daefb8add35e85d4889475e25fab779205477f80e8c5e16ab0"
     }
   },
   "reader": {
     "engine": "reference-reader",
-    "build": "8e8808b49f558f09d1b1947ef43e0087e3a9ebd6e12b80d14b0b7b696ae55385",
+    "build": "50f544d7aca8409cdf2e4af02db88de4896ab4d3494e54c23b1dfce3c8ab8f33",
     "runtime": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
     "components": {
+      "assets/docgen/NotoSans-Regular.ttf": "b85c38ecea8a7cfb39c24e395a4007474fa5a4fc864f6ee33309eb4948d232d5",
+      "assets/docgen/rules.json": "67e77a24afad336e0b5c5c171be81f740fe901646e07d5ecb77b0055ac596840",
       "parity/src/host/docgen.rs": "15e9ae6496a0749abdedd8a66984d80d731846f075dc7b1f6b133501e592e4fc",
-      "parity/src/host/shutdown.rs": "05bba77b46487fe08f78d035dd0bcf37d070ec1d4320a170b4c97909daa38e7c",
+      "parity/src/host/shutdown.rs": "cdc73c599772c539d6c44cbfb0a68f5caaaff60e7b4fc79fb8a7324f1001be14",
       "parity/src/host/util/html.rs": "b2f4efe29f5f5bc200caecc7296a1e80d5fe8f4c4eb9a9f029c5c2f37a4e520c",
       "parity/src/host/util/media_target.rs": "a15655cd4125fcee9e02283fe1c5422477bbe06987dd699787e74da905f8d43e",
-      "parity/src/host/util/mod.rs": "5b89a8f5ff13449d0f66225062b8f3fbc2be999b4889b8fe4d528f6f3d39320b",
+      "parity/src/host/util/mod.rs": "7d76a28676e0ba1662f6252c3042f368b226ffaa0ca64ac89ff86108052ae5a6",
+      "parity/src/reference/reader.rs": "3fb79cb186a52ca9acd23501975b6b3cdb3552019c3c1873245f3ded11a1d45c",
       "src/document.rs": "20004bc15306da6a394727adb009d23c01a8cd856aa26acef648d6160a21c6fd",
       "src/legacy.rs": "097d5c1a2dadc72f2808ee898ae6bd1892bb565a6421cc0e339ea56c813a1d2e",
       "src/ooxml.rs": "d2a0444dcca82aeb2123b63c5d6ef467d328a174254c8e7b4969a8c718acba43",
@@ -4668,7 +4672,7 @@
                   {
                     "attrs": {
                       "ContentType": "image/png",
-                      "PartName": "/word/media/image1.png"
+                      "PartName": "/word/media/0340719d29d21e0f0b8c7510e576b316b32b92b6d4aa58cd073b02ba6d5f5a41.png"
                     },
                     "name": "Override"
                   }
@@ -4713,13 +4717,6 @@
                     "attrs": {
                       "Target": "word/header1.xml",
                       "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
-                    },
-                    "name": "Relationship"
-                  },
-                  {
-                    "attrs": {
-                      "Target": "word/media/0340719d29d21e0f0b8c7510e576b316b32b92b6d4aa58cd073b02ba6d5f5a41.png",
-                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
                     },
                     "name": "Relationship"
                   },
@@ -5602,13 +5599,6 @@
                   },
                   {
                     "attrs": {
-                      "Target": "word/media/image1.png",
-                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
-                    },
-                    "name": "Relationship"
-                  },
-                  {
-                    "attrs": {
                       "Target": "word/numbering.xml",
                       "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering"
                     },
@@ -6342,13 +6332,6 @@
                     "attrs": {
                       "Target": "word/header1.xml",
                       "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
-                    },
-                    "name": "Relationship"
-                  },
-                  {
-                    "attrs": {
-                      "Target": "word/media/image1.png",
-                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
                     },
                     "name": "Relationship"
                   },
@@ -7283,13 +7266,6 @@
                   },
                   {
                     "attrs": {
-                      "Target": "word/media/image1.png",
-                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
-                    },
-                    "name": "Relationship"
-                  },
-                  {
-                    "attrs": {
                       "Target": "word/numbering.xml",
                       "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering"
                     },
@@ -8005,13 +7981,6 @@
                     "attrs": {
                       "Target": "word/header1.xml",
                       "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
-                    },
-                    "name": "Relationship"
-                  },
-                  {
-                    "attrs": {
-                      "Target": "word/media/image1.png",
-                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
                     },
                     "name": "Relationship"
                   },
@@ -8734,13 +8703,6 @@
                   },
                   {
                     "attrs": {
-                      "Target": "word/media/image1.png",
-                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
-                    },
-                    "name": "Relationship"
-                  },
-                  {
-                    "attrs": {
                       "Target": "word/numbering.xml",
                       "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering"
                     },
@@ -9447,13 +9409,6 @@
                   },
                   {
                     "attrs": {
-                      "Target": "word/media/image1.png",
-                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
-                    },
-                    "name": "Relationship"
-                  },
-                  {
-                    "attrs": {
                       "Target": "word/numbering.xml",
                       "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering"
                     },
@@ -10112,13 +10067,6 @@
                     "attrs": {
                       "Target": "word/header1.xml",
                       "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
-                    },
-                    "name": "Relationship"
-                  },
-                  {
-                    "attrs": {
-                      "Target": "word/media/image1.png",
-                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
                     },
                     "name": "Relationship"
                   },
@@ -10825,13 +10773,6 @@
                     "attrs": {
                       "Target": "word/header1.xml",
                       "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
-                    },
-                    "name": "Relationship"
-                  },
-                  {
-                    "attrs": {
-                      "Target": "word/media/image1.png",
-                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
                     },
                     "name": "Relationship"
                   },
@@ -11620,6 +11561,7 @@
             {
               "annots": [],
               "crop": null,
+              "forms": [],
               "images": [],
               "media": [
                 0.0,
@@ -11664,6 +11606,7 @@
                 357.168,
                 757.701
               ],
+              "forms": [],
               "images": [],
               "media": [
                 0.0,
@@ -11683,6 +11626,7 @@
             {
               "annots": [],
               "crop": null,
+              "forms": [],
               "images": [],
               "media": [
                 0.0,
@@ -11726,6 +11670,28 @@
             {
               "annots": [],
               "crop": null,
+              "forms": [
+                {
+                  "len": 263,
+                  "sha256": "a24d9b13561eb47c9509b6b9b57b9d2587cec16a620ee16a618f6aafb43ae17e"
+                },
+                {
+                  "len": 25,
+                  "sha256": "9fe93db7b8893a2ca3d78332b28baa4e8d3e273f5daf780f25af051dbcce0b9a"
+                },
+                {
+                  "len": 0,
+                  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                },
+                {
+                  "len": 25,
+                  "sha256": "9fe93db7b8893a2ca3d78332b28baa4e8d3e273f5daf780f25af051dbcce0b9a"
+                },
+                {
+                  "len": 271,
+                  "sha256": "028d52519ae4df30aa3473a1bff07bd06c5dbf94085a4b0d988d489ab7cd83b2"
+                }
+              ],
               "images": [],
               "media": [
                 0.0,
@@ -11844,6 +11810,7 @@
                 }
               ],
               "crop": null,
+              "forms": [],
               "images": [],
               "media": [
                 0.0,
@@ -11882,6 +11849,7 @@
             {
               "annots": [],
               "crop": null,
+              "forms": [],
               "images": [
                 {
                   "height": 2,
@@ -11931,6 +11899,7 @@
             {
               "annots": [],
               "crop": null,
+              "forms": [],
               "images": [],
               "media": [
                 0.0,
@@ -11950,6 +11919,7 @@
             {
               "annots": [],
               "crop": null,
+              "forms": [],
               "images": [],
               "media": [
                 0.0,
@@ -11969,6 +11939,7 @@
             {
               "annots": [],
               "crop": null,
+              "forms": [],
               "images": [],
               "media": [
                 0.0,
@@ -11988,6 +11959,7 @@
             {
               "annots": [],
               "crop": null,
+              "forms": [],
               "images": [],
               "media": [
                 0.0,
@@ -12026,6 +11998,7 @@
             {
               "annots": [],
               "crop": null,
+              "forms": [],
               "images": [],
               "media": [
                 0.0,
@@ -12045,6 +12018,7 @@
             {
               "annots": [],
               "crop": null,
+              "forms": [],
               "images": [],
               "media": [
                 0.0,
@@ -12083,6 +12057,7 @@
             {
               "annots": [],
               "crop": null,
+              "forms": [],
               "images": [],
               "media": [
                 0.0,
@@ -12102,6 +12077,7 @@
             {
               "annots": [],
               "crop": null,
+              "forms": [],
               "images": [],
               "media": [
                 0.0,
@@ -12150,6 +12126,7 @@
             {
               "annots": [],
               "crop": null,
+              "forms": [],
               "images": [],
               "media": [
                 0.0,
@@ -12183,6 +12160,7 @@
             {
               "annots": [],
               "crop": null,
+              "forms": [],
               "images": [],
               "media": [
                 0.0,
@@ -12221,6 +12199,7 @@
             {
               "annots": [],
               "crop": null,
+              "forms": [],
               "images": [],
               "media": [
                 0.0,
@@ -12241,6 +12220,7 @@
             {
               "annots": [],
               "crop": null,
+              "forms": [],
               "images": [],
               "media": [
                 0.0,
@@ -20362,7 +20342,7 @@
                   {
                     "attrs": {
                       "ContentType": "image/png",
-                      "PartName": "/ppt/media/image1.png"
+                      "PartName": "/ppt/media/0340719d29d21e0f0b8c7510e576b316b32b92b6d4aa58cd073b02ba6d5f5a41.png"
                     },
                     "name": "Override"
                   }
@@ -50719,7 +50699,7 @@
                   {
                     "attrs": {
                       "ContentType": "image/png",
-                      "PartName": "/xl/media/image1.png"
+                      "PartName": "/xl/media/0340719d29d21e0f0b8c7510e576b316b32b92b6d4aa58cd073b02ba6d5f5a41.png"
                     },
                     "name": "Override"
                   }
@@ -60668,20 +60648,20 @@
   "readings": {
     "annotated.pdf": {
       "document": "annotated.pdf",
-      "file_name": "annotated.pdf",
       "reading": {
         "outcome": "text",
         "text": "Page 1:\nPage one text with a note on it\n\nAnnotations:\nnote on page 1:\n  A note",
         "images": [],
         "notes": [],
-        "unshown": [],
+        "unshown": [
+          "1 attached file(s) not shown"
+        ],
         "all_page_text_lost": false,
         "page_text": true
       }
     },
     "basic.docx": {
       "document": "basic.docx",
-      "file_name": "basic.docx",
       "reading": {
         "outcome": "text",
         "text": "[heading 1] Alpha paragraph one\nBeta paragraph two\nGamma paragraph three\nDelta paragraph four[footnote 1]\nHeader (default):\n  Header text\nFooter (default):\n  Footer text\nFootnote 1:\n  Footnote one text",
@@ -60694,7 +60674,6 @@
     },
     "basic.pdf": {
       "document": "basic.pdf",
-      "file_name": "basic.pdf",
       "reading": {
         "outcome": "text",
         "text": "Page 1:\nPage one text\n\nPage 2:\nPage two text",
@@ -60718,7 +60697,6 @@
     },
     "basic.pptx": {
       "document": "basic.pptx",
-      "file_name": "basic.pptx",
       "reading": {
         "outcome": "text",
         "text": "Slide 1:\n  (title) First slide\n  Alpha body\n\nSlide 1 notes:\n  Note one\n\nSlide 2:\n  (title) Second slide\n  Beta body\n\nSlide 3:\n  (title) Third slide\n  Gamma body",
@@ -60731,7 +60709,6 @@
     },
     "basic.xlsx": {
       "document": "basic.xlsx",
-      "file_name": "basic.xlsx",
       "reading": {
         "outcome": "text",
         "text": "Sheet \"First\":\n  A1: Name\n  B1: Value\n  A2: Alpha\n  B2: 1\n  A3: Beta\n  B3: 2\n  A5: Merged (merged A5:B5)\n  A6: 3\n  B6: 3 (=SUM(B2:B3))\n\nSheet \"Second\":\n  A1: Other",
@@ -60744,14 +60721,12 @@
     },
     "binary.bin": {
       "document": "binary.bin",
-      "file_name": "binary.bin",
       "reading": {
         "outcome": "unsupported"
       }
     },
     "broken-form.pdf": {
       "document": "broken-form.pdf",
-      "file_name": "broken-form.pdf",
       "reading": {
         "outcome": "text",
         "text": "Page 1:\nA form with one field of each kind",
@@ -60764,7 +60739,6 @@
     },
     "form.pdf": {
       "document": "form.pdf",
-      "file_name": "form.pdf",
       "reading": {
         "outcome": "text",
         "text": "Page 1:\nA form with one field of each kind\n\nForm fields:\nname (text) on page 1: (no value)\nagree (checkbox) on page 1: not checked\nchoice (radio; options: one, two) on page 1: not checked\ncolour (choice; options: red, green, blue) on page 1: red",
@@ -60775,9 +60749,84 @@
         "page_text": true
       }
     },
+    "legacy.doc": {
+      "document": "legacy.doc",
+      "reading": {
+        "outcome": "text",
+        "text": "Legacy Word body text\nFootnotes:\n  Legacy footnote",
+        "images": [],
+        "notes": [],
+        "unshown": [],
+        "all_page_text_lost": false,
+        "page_text": true
+      }
+    },
+    "legacy.ppt": {
+      "document": "legacy.ppt",
+      "reading": {
+        "outcome": "text",
+        "text": "Slide 1:\n  Legacy slide title\n\nSlide 1 notes:\n  Legacy note",
+        "images": [],
+        "notes": [],
+        "unshown": [],
+        "all_page_text_lost": false,
+        "page_text": true
+      }
+    },
+    "legacy.xls": {
+      "document": "legacy.xls",
+      "reading": {
+        "outcome": "text",
+        "text": "Sheet \"Данные\":\n  A1: Привет\n  B2: 3.5",
+        "images": [],
+        "notes": [],
+        "unshown": [],
+        "all_page_text_lost": false,
+        "page_text": true
+      }
+    },
+    "lost-text.pdf": {
+      "document": "lost-text.pdf",
+      "reading": {
+        "outcome": "text",
+        "text": "",
+        "images": [
+          {
+            "name": "page_1.jpg",
+            "sha256": "aa09a5fb5f364303aea3ad707901bc3bd3acf0870ee3341d417f9f57ef38b883",
+            "len": 58945
+          }
+        ],
+        "notes": [
+          "the text of page 1 could not be read (1 of 1 pages)"
+        ],
+        "unshown": [],
+        "all_page_text_lost": true,
+        "page_text": false
+      }
+    },
+    "partial-text.pdf": {
+      "document": "partial-text.pdf",
+      "reading": {
+        "outcome": "text",
+        "text": "Page 1:\nKept page text long enough",
+        "images": [
+          {
+            "name": "page_1.jpg",
+            "sha256": "09c1415b6033b210c55af20d76fe1be869e3826ea7eba51c664c707be4647af3",
+            "len": 61113
+          }
+        ],
+        "notes": [
+          "the text of page 1 could not be read in full (1 of 1 pages)"
+        ],
+        "unshown": [],
+        "all_page_text_lost": false,
+        "page_text": true
+      }
+    },
     "picture.docx": {
       "document": "picture.docx",
-      "file_name": "picture.docx",
       "reading": {
         "outcome": "text",
         "text": "[heading 1] Alpha paragraph one\nBeta paragraph two\nGamma paragraph three\nDelta paragraph four[footnote 1]\nHeader (default):\n  Header text\nFooter (default):\n  Footer text\nFootnote 1:\n  Footnote one text",
@@ -60796,7 +60845,6 @@
     },
     "picture.pdf": {
       "document": "picture.pdf",
-      "file_name": "picture.pdf",
       "reading": {
         "outcome": "text",
         "text": "Page 1:\nPage one text beside a picture",
@@ -60815,7 +60863,6 @@
     },
     "plain.txt": {
       "document": "plain.txt",
-      "file_name": "plain.txt",
       "reading": {
         "outcome": "text",
         "text": "A plain text document.\n",
@@ -60828,7 +60875,6 @@
     },
     "table.docx": {
       "document": "table.docx",
-      "file_name": "table.docx",
       "reading": {
         "outcome": "text",
         "text": "[heading 1] Alpha paragraph one\nBeta paragraph two\nGamma paragraph three\nDelta paragraph four[footnote 1]\nTable 1: 2 rows, 2 columns\n  R1: C1: Header A | C2: Header B\n  R2: C1: Cell A | C2: Cell B\nHeader (default):\n  Header text\nFooter (default):\n  Footer text\nFootnote 1:\n  Footnote one text",
@@ -60841,7 +60887,6 @@
     },
     "template.docx": {
       "document": "template.docx",
-      "file_name": "template.docx",
       "reading": {
         "outcome": "text",
         "text": "Hello {name} from {city}\n{name}",
@@ -60854,7 +60899,6 @@
     },
     "template.pptx": {
       "document": "template.pptx",
-      "file_name": "template.pptx",
       "reading": {
         "outcome": "text",
         "text": "Slide 1:\n  (title) Greeting\n  Hello {name}",
@@ -60867,7 +60911,6 @@
     },
     "template.xlsx": {
       "document": "template.xlsx",
-      "file_name": "template.xlsx",
       "reading": {
         "outcome": "text",
         "text": "Sheet \"People\":\n  A1: {name}\n  A2: {city}",
@@ -60880,7 +60923,6 @@
     },
     "truncated.pdf": {
       "document": "truncated.pdf",
-      "file_name": "truncated.pdf",
       "reading": {
         "outcome": "unreadable",
         "reason": "could not be parsed"

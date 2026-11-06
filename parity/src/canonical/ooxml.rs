@@ -21,7 +21,7 @@
 //!   `w:tblId` (and their `w14:`/`wp14:` spellings) are dropped; relationship `Id`s are dropped and
 //!   every reference to one is rewritten to the relationship's own key, so two engines may number
 //!   relationships differently; an embedded media part's generated file name is replaced by a name
-//!   derived from its content.
+//!   derived from its content, with an occurrence number when two parts carry identical bytes.
 //! - **Metadata dates and derived statistics**: `dcterms:created`/`dcterms:modified` and
 //!   `cp:revision` are dropped from `docProps/core.xml`; `docProps/app.xml` and
 //!   `docProps/custom.xml` are excluded entirely, because every element they hold is a statistic
@@ -32,9 +32,15 @@
 //!
 //! # What is compared byte for byte
 //!
-//! An embedded binary part (an image, a font, an embedded object) by its SHA-256 and length. An
-//! operation that legitimately re-encodes such a part declares it, and the case's comparison drops
-//! that part's digest from both sides.
+//! An embedded binary part (an image, a font, an embedded object) by its SHA-256 and length.
+//!
+//! # What the model refuses
+//!
+//! A part larger than 64 MiB, a package of more than 4096 parts or 256 MiB of parts in total, a
+//! package holding two parts of one name, and an XML part nesting deeper than 256 elements are
+//! errors rather than models: an engine that emits a zip bomb or an unbounded tree must fail the
+//! gate with a message, not exhaust the harness. The harness bounds its own read of a produced file
+//! for the same reason.
 
 use crate::engine::Family;
 use anyhow::{Context as _, Result, bail};
@@ -43,7 +49,23 @@ use quick_xml::events::{BytesStart, Event};
 use serde_json::{Map, Value, json};
 use sha2::Digest as _;
 use std::collections::BTreeMap;
-use std::io::Cursor;
+use std::io::{Cursor, Read as _};
+
+/// The largest part the model reads, matching the product's own per-entry bound. The read itself
+/// is capped, not just the declared size: an engine emitting a zip bomb must fail the gate with a
+/// message, not exhaust the harness.
+const MAX_PART_BYTES: u64 = 64 * 1024 * 1024;
+
+/// The most parts one package may hold.
+const MAX_PARTS: usize = 4096;
+
+/// The most bytes one package's parts may hold in total. A per-part bound alone would let a package
+/// of many large parts exhaust the harness, so the total is charged as each part is read.
+const MAX_PACKAGE_BYTES: u64 = 256 * 1024 * 1024;
+
+/// The deepest element nesting the model accepts. The model's trees are walked recursively, and a
+/// stack overflow is not a comparison that can be reported.
+pub const MAX_XML_DEPTH: usize = 256;
 
 /// Parts excluded from the model: generated statistics and custom properties carry no document
 /// content, and a producer may or may not write them.
@@ -57,6 +79,7 @@ pub const DROPPED_ATTRIBUTES: &[&str] = &[
     "rsidP",
     "rsidDel",
     "rsidSect",
+    "rsidTr",
     "paraId",
     "textId",
     "tblId",
@@ -115,11 +138,14 @@ pub fn canonical(family: Family, bytes: &[u8]) -> Result<Value> {
         let key = media.get(name).cloned().unwrap_or_else(|| name.clone());
         let part = if name.ends_with(".rels") {
             canonical_rels(name, bytes, &media)?
-        } else if name.ends_with(".xml") || name == "[Content_Types].xml" {
-            let mut tree = parse_xml(bytes, Some(name), &rels)?;
+        } else if name.ends_with(".xml") {
+            let mut tree = parse_xml(bytes, name, &rels)?;
             // A content-types part and a relationships part are sets: their members' order is
             // generated, so the model sorts them.
             if name == "[Content_Types].xml" {
+                // A declaration naming a generated media part is rewritten to the part's
+                // content-derived name, exactly as a relationship target is.
+                rewrite_part_names(&mut tree, &media);
                 sort_children(&mut tree);
             }
             json!({ "kind": "xml", "tree": tree })
@@ -146,12 +172,29 @@ fn binary_part(bytes: &[u8]) -> Value {
 }
 
 /// Every part's bytes, by name. Entry order, timestamps and compression are not read.
+///
+/// The archive reader resolves two central-directory entries of one name to the last of them, so a
+/// package whose stated entry count exceeds what the archive yields is refused rather than
+/// silently modelled as the entries' last. The check knows only the counts: it cannot say which
+/// name repeats, and a ZIP64 archive states its count in a record this model does not read, so a
+/// ZIP64 package with repeated names is not detected. A package the kit writes is neither.
 fn read_parts(bytes: &[u8]) -> Result<Parts> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes))
         .context("the package is not a readable ZIP archive")?;
+    if let Some(stated) = stated_entries(bytes)
+        && stated > archive.len()
+    {
+        bail!(
+            "the archive states {stated} entries but yields {}: the reader would drop the entries \
+             it resolves to an earlier one, so the package is refused rather than modelled \
+             without them",
+            archive.len()
+        );
+    }
     let mut parts = Parts::new();
+    let mut total = 0u64;
     for index in 0..archive.len() {
-        let mut entry = archive
+        let entry = archive
             .by_index(index)
             .with_context(|| format!("the package's entry {index} is unreadable"))?;
         if entry.is_dir() {
@@ -161,17 +204,63 @@ fn read_parts(bytes: &[u8]) -> Result<Parts> {
         if name.ends_with('/') {
             continue;
         }
+        if parts.len() >= MAX_PARTS {
+            bail!("the package holds more than {MAX_PARTS} parts");
+        }
         let mut content = Vec::new();
-        std::io::Read::read_to_end(&mut entry, &mut content)
+        entry
+            .take(MAX_PART_BYTES + 1)
+            .read_to_end(&mut content)
             .with_context(|| format!("the package's part {name} is unreadable"))?;
+        if content.len() as u64 > MAX_PART_BYTES {
+            bail!("the package's part {name} is larger than the {MAX_PART_BYTES}-byte limit");
+        }
+        charge(&mut total, content.len())?;
         parts.insert(name, content);
     }
     Ok(parts)
 }
 
-/// Generated media part names, replaced by a name derived from the part's content.
+/// The number of entries the archive's own end-of-central-directory record states, or `None` when
+/// there is no such record or the archive is ZIP64, whose real count lives in another record.
+fn stated_entries(bytes: &[u8]) -> Option<usize> {
+    const RECORD: &[u8] = b"PK\x05\x06";
+    /// The record's fixed part: signature, disk fields, counts, sizes and comment length.
+    const LEN: usize = 22;
+    if bytes.len() < LEN {
+        return None;
+    }
+    let last = bytes.len() - LEN;
+    let first = last.saturating_sub(0xFFFF);
+    // The record whose comment reaches the end of the file is the real one; the same signature
+    // inside a comment must not be mistaken for it.
+    let at = (first..=last).rev().find(|&at| {
+        let comment = bytes
+            .get(at + 20..at + 22)
+            .map(|len| usize::from(u16::from_le_bytes([len[0], len[1]])));
+        bytes.get(at..at + 4) == Some(RECORD)
+            && comment.is_some_and(|comment| at + LEN + comment == bytes.len())
+    })?;
+    let count = u16::from_le_bytes([*bytes.get(at + 10)?, *bytes.get(at + 11)?]);
+    (count != u16::MAX).then_some(usize::from(count))
+}
+
+/// Add one part's length to the package total, refusing a package over the bound. Kept apart from
+/// the read so the total is testable without a fixture of hundreds of megabytes.
+fn charge(total: &mut u64, len: usize) -> Result<()> {
+    *total += len as u64;
+    if *total > MAX_PACKAGE_BYTES {
+        bail!("the package's parts exceed the {MAX_PACKAGE_BYTES}-byte total limit");
+    }
+    Ok(())
+}
+
+/// Generated media part names, replaced by a name derived from the part's content. Two parts with
+/// identical bytes are two parts: the second and later keep an occurrence number, so the model
+/// never silently collapses a duplicate.
 fn media_names(parts: &Parts) -> BTreeMap<String, String> {
     let mut names = BTreeMap::new();
+    let mut occurrences: BTreeMap<String, usize> = BTreeMap::new();
     for (name, bytes) in parts {
         let Some(dir) = MEDIA_DIRS.iter().find(|dir| name.starts_with(**dir)) else {
             continue;
@@ -186,7 +275,16 @@ fn media_names(parts: &Parts) -> BTreeMap<String, String> {
         } else {
             format!(".{extension}")
         };
-        names.insert(name.clone(), format!("{dir}{digest}{suffix}"));
+        let occurrence = occurrences
+            .entry(format!("{dir}{digest}{suffix}"))
+            .or_default();
+        *occurrence += 1;
+        let key = if *occurrence == 1 {
+            format!("{dir}{digest}{suffix}")
+        } else {
+            format!("{dir}{digest}#{occurrence}{suffix}")
+        };
+        names.insert(name.clone(), key);
     }
     names
 }
@@ -223,12 +321,7 @@ fn relationships(parts: &Parts, media: &BTreeMap<String, String>) -> Rels {
         };
         let mut by_id = BTreeMap::new();
         for (id, kind, target, external) in entries {
-            let target = if external {
-                target
-            } else {
-                let resolved = resolve_target(&owner, &target);
-                media.get(&resolved).cloned().unwrap_or(resolved)
-            };
+            let target = canonical_target(&owner, &target, external, media);
             by_id.insert(id, Relationship { kind, target });
         }
         rels.insert(owner, by_id);
@@ -249,6 +342,21 @@ fn rels_owner(rels: &str) -> String {
         }
         None => String::new(),
     }
+}
+
+/// A relationship's canonical target: its own target when it is external, otherwise the package
+/// part it names, under that part's content-derived name where it names a media part.
+fn canonical_target(
+    owner: &str,
+    target: &str,
+    external: bool,
+    media: &BTreeMap<String, String>,
+) -> String {
+    if external {
+        return target.to_string();
+    }
+    let resolved = resolve_target(owner, target);
+    media.get(&resolved).cloned().unwrap_or(resolved)
 }
 
 /// A relationship target resolved to a package-absolute part name (no leading `/`).
@@ -321,12 +429,7 @@ fn canonical_rels(name: &str, bytes: &[u8], media: &BTreeMap<String, String>) ->
     let entries = parse_rels(bytes)?;
     let mut children = Vec::new();
     for (_, kind, target, external) in entries {
-        let target = if external {
-            target
-        } else {
-            let resolved = resolve_target(&owner, &target);
-            media.get(&resolved).cloned().unwrap_or(resolved)
-        };
+        let target = canonical_target(&owner, &target, external, media);
         let mut attrs = Map::new();
         attrs.insert("Type".to_string(), json!(kind));
         attrs.insert("Target".to_string(), json!(target));
@@ -339,29 +442,23 @@ fn canonical_rels(name: &str, bytes: &[u8], media: &BTreeMap<String, String>) ->
     Ok(json!({ "kind": "xml", "tree": { "name": "Relationships", "children": children } }))
 }
 
-/// Canonicalise one XML part with no relationship context. Exposed for the model's own tests.
-pub fn canonical_xml(bytes: &[u8]) -> Result<Value> {
-    parse_xml(bytes, None, &Rels::new())
-}
-
 /// Parse one XML part into the canonical tree.
 ///
-/// `owner` names the part whose relationships its `r:*` attributes refer to; `None` skips the
-/// rewrite (the model's own tests canonicalise a fragment on its own).
-fn parse_xml(bytes: &[u8], owner: Option<&str>, rels: &Rels) -> Result<Value> {
+/// `owner` names the part whose relationships its `r:*` attributes refer to.
+fn parse_xml(bytes: &[u8], owner: &str, rels: &Rels) -> Result<Value> {
     let mut reader = Reader::from_reader(bytes);
     // A tree under construction: each open element, and the children collected for it.
     let mut stack: Vec<(Value, Vec<Value>)> = Vec::new();
     let mut root: Option<Value> = None;
     let mut preserve_depth: Vec<bool> = Vec::new();
-    let drop_elements = owner
-        .and_then(|owner| DROPPED_ELEMENTS.iter().find(|(part, _)| *part == owner))
-        .map(|_| true)
-        .unwrap_or(false);
-    let owner_rels = owner.and_then(|owner| rels.get(owner));
+    let drop_elements = DROPPED_ELEMENTS.iter().any(|(part, _)| *part == owner);
+    let owner_rels = rels.get(owner);
     loop {
         match reader.read_event() {
             Ok(Event::Start(element)) => {
+                if stack.len() >= MAX_XML_DEPTH {
+                    bail!("{owner} nests elements more than {MAX_XML_DEPTH} deep");
+                }
                 let (node, preserve) = element_node(
                     &element,
                     owner_rels,
@@ -400,7 +497,6 @@ fn parse_xml(bytes: &[u8], owner: Option<&str>, rels: &Rels) -> Result<Value> {
                     .context("an XML text node holds an unknown entity")?;
                 push_text(
                     &mut stack,
-                    &mut root,
                     &text,
                     preserve_depth.last().copied().unwrap_or(false),
                 );
@@ -409,7 +505,6 @@ fn parse_xml(bytes: &[u8], owner: Option<&str>, rels: &Rels) -> Result<Value> {
                 let text = text.decode().context("an XML CDATA node is not UTF-8")?;
                 push_text(
                     &mut stack,
-                    &mut root,
                     &text,
                     preserve_depth.last().copied().unwrap_or(false),
                 );
@@ -424,10 +519,7 @@ fn parse_xml(bytes: &[u8], owner: Option<&str>, rels: &Rels) -> Result<Value> {
 }
 
 /// Whether this element is one [`DROPPED_ELEMENTS`] names for its part.
-fn dropped_element(owner: Option<&str>, element: &BytesStart<'_>) -> bool {
-    let Some(owner) = owner else {
-        return false;
-    };
+fn dropped_element(owner: &str, element: &BytesStart<'_>) -> bool {
     let name = element.name();
     let local = local_name(name.as_ref());
     DROPPED_ELEMENTS
@@ -498,21 +590,31 @@ fn push_node(stack: &mut [(Value, Vec<Value>)], root: &mut Option<Value>, node: 
     }
 }
 
-fn push_text(
-    stack: &mut [(Value, Vec<Value>)],
-    root: &mut Option<Value>,
-    text: &str,
-    preserve: bool,
-) {
+/// Append one text node to the element being read. Text outside the root element is not part of
+/// the document and is dropped.
+fn push_text(stack: &mut [(Value, Vec<Value>)], text: &str, preserve: bool) {
     if text.trim().is_empty() && !preserve {
         return;
     }
-    let node = json!({ "text": text });
-    match stack.last_mut() {
-        Some((_, children)) => children.push(node),
-        // Text outside the root element is not part of the document.
-        None => {
-            let _ = root;
+    if let Some((_, children)) = stack.last_mut() {
+        children.push(json!({ "text": text }));
+    }
+}
+
+/// Rewrite a content-types declaration's `PartName` through the media map.
+fn rewrite_part_names(node: &mut Value, media: &BTreeMap<String, String>) {
+    if node.get("name").and_then(Value::as_str) == Some("Override")
+        && let Some(attrs) = node.get_mut("attrs").and_then(Value::as_object_mut)
+        && let Some(Value::String(part)) = attrs.get_mut("PartName")
+    {
+        let absolute = part.strip_prefix('/').unwrap_or(part);
+        if let Some(canonical) = media.get(absolute) {
+            *part = format!("/{canonical}");
+        }
+    }
+    if let Some(children) = node.get_mut("children").and_then(Value::as_array_mut) {
+        for child in children {
+            rewrite_part_names(child, media);
         }
     }
 }
@@ -530,4 +632,102 @@ fn local_name(name: &[u8]) -> &str {
     name.rsplit_once(':')
         .map(|(_, local)| local)
         .unwrap_or(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+
+    /// A ZIP of `entries`, deflated, as an engine's package would be.
+    fn zip_with(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        for (name, bytes) in entries {
+            writer
+                .start_file(name.as_str(), options)
+                .expect("a zip entry");
+            writer.write_all(bytes).expect("the entry's bytes");
+        }
+        writer.finish().expect("the archive finishes").into_inner()
+    }
+
+    #[test]
+    fn a_part_larger_than_the_limit_is_refused() {
+        let big = vec![0u8; usize::try_from(MAX_PART_BYTES).expect("the bound fits") + 1];
+        let error = read_parts(&zip_with(&[("word/document.xml".to_string(), big)]))
+            .expect_err("a part over the size limit is refused");
+        assert!(error.to_string().contains("larger than"), "{error}");
+    }
+
+    #[test]
+    fn a_package_with_too_many_parts_is_refused() {
+        let entries: Vec<(String, Vec<u8>)> = (0..=MAX_PARTS)
+            .map(|index| (format!("part{index}.xml"), Vec::new()))
+            .collect();
+        let error =
+            read_parts(&zip_with(&entries)).expect_err("a package over the part count is refused");
+        assert!(error.to_string().contains("more than"), "{error}");
+    }
+
+    #[test]
+    fn a_package_with_two_parts_of_one_name_is_refused() {
+        // A ZIP writer refuses to create one, so the duplicate is spelled in after the fact: both
+        // names are five bytes, so every offset in the archive stays valid.
+        let bytes = zip_with(&[
+            ("a.xml".to_string(), b"one".to_vec()),
+            ("b.xml".to_string(), b"two".to_vec()),
+        ]);
+        let mut rewritten = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index..].starts_with(b"b.xml") {
+                rewritten.extend_from_slice(b"a.xml");
+                index += b"b.xml".len();
+            } else {
+                rewritten.push(bytes[index]);
+                index += 1;
+            }
+        }
+        let error =
+            read_parts(&rewritten).expect_err("a package with a duplicate part name is refused");
+        assert!(
+            error.to_string().contains("states 2 entries but yields 1"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn the_package_total_is_bounded() {
+        let mut total = 0;
+        charge(
+            &mut total,
+            usize::try_from(MAX_PACKAGE_BYTES).expect("the bound fits"),
+        )
+        .expect("the bound itself is allowed");
+        let error = charge(&mut total, 1).expect_err("one byte over the total is refused");
+        assert!(error.to_string().contains("total limit"), "{error}");
+    }
+
+    #[test]
+    fn xml_nested_past_the_depth_limit_is_refused() {
+        let deep = |depth: usize| {
+            let mut xml = String::from("<root>");
+            for _ in 0..depth {
+                xml.push_str("<a>");
+            }
+            for _ in 0..depth {
+                xml.push_str("</a>");
+            }
+            xml.push_str("</root>");
+            xml.into_bytes()
+        };
+        let rels = Rels::new();
+        parse_xml(&deep(MAX_XML_DEPTH - 2), "word/document.xml", &rels)
+            .expect("a part within the depth limit is read");
+        let error = parse_xml(&deep(MAX_XML_DEPTH), "word/document.xml", &rels)
+            .expect_err("a part past the depth limit is refused");
+        assert!(error.to_string().contains("deep"), "{error}");
+    }
 }

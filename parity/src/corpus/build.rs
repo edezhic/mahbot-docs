@@ -1,48 +1,17 @@
 //! The corpus builders: every input document is generated here, in code, by the harness itself.
 //! Nothing in this module asks the engine under test for a document.
 //!
-//! # What each builder is for, and why its parts are the minimum
-//!
-//! A builder is the smallest package that the reference reader accepts *and* that the kit's
-//! surgical edits can rewrite, so a case's difference is the operation's and never a malformed
-//! input's. The parts are chosen against two contracts:
-//!
-//! - the reader's: `src/ooxml.rs` decides a package's family from the one part it cannot do
-//!   without (`word/document.xml`, `xl/workbook.xml`, `ppt/presentation.xml`), `src/ooxml/docx.rs`
-//!   reaches a header, footer and footnote only through `word/_rels/document.xml.rels`, and
-//!   `src/ooxml/xlsx.rs` resolves sheets, the shared-string table and the styles part through
-//!   `xl/_rels/workbook.xml.rels`;
-//! - the kit's: `docxEdit`, `xlsxEdit` and `pptxEdit` rewrite one part at a time with `pizzip`, so
-//!   the part they address and the relationship list that names it must both be present; the
-//!   templates are filled by `docxtemplater` (docx, pptx) and by the kit's own cell walker
-//!   (`fillXlsx`), which resolve a package's family from `[Content_Types].xml` and read the text
-//!   out of `w:t`, `a:t` and the sheet's own cells.
-//!
-//! | builder | family | parts | for |
-//! |---|---|---|---|
-//! | [`docx_basic`] | docx | body, styles, numbering, header, footer, footnotes | the whole edit vocabulary: four findable paragraphs, a heading style, a character style, a list, a note |
-//! | [`docx_with_table`] | docx | `docx_basic` + a `w:tbl` | a table the reader numbers, an anchor a block edit lands after |
-//! | [`docx_template`] | docx | body, styles | `fill_template` on a docx |
-//! | [`docx_with_image`] | docx | `docx_basic` + `word/media/image1.png` | the reader's picture arm, an input already carrying a `w:drawing` |
-//! | [`xlsx_basic`] | xlsx | workbook, two sheets, styles, shared strings | the cell, row, column, merge and sheet edits |
-//! | [`xlsx_template`] | xlsx | workbook, one sheet | `fill_template` on a workbook |
-//! | [`pptx_basic`] | pptx | presentation, three slides, layout, master, notes master, one notes slide | the slide, notes and presentation edits |
-//! | [`pptx_template`] | pptx | presentation, one slide, layout, master | `fill_template` on a deck |
-//! | [`pdf_basic`] | pdf | two A4 pages, one Type1 font | the page operations and the text layer |
-//! | [`pdf_with_image`] | pdf | one page, a raw RGB image XObject | the reader's embedded-picture arm |
-//! | [`pdf_form`] | pdf | one page, an AcroForm with one field of each kind | `pdf_form_fill` and the field list |
-//! | [`pdf_annotated`] | pdf | one page, a `/Text` annotation | the annotation list |
-//! | [`pdf_truncated`] | pdf | — | the unreadable arm: magic bytes and nothing a parser can open |
-//! | [`plain_text`] | txt | — | the text arm |
-//! | [`unsupported_binary`] | bin | — | the unsupported arm |
-//!
-//! Every package declares every part it holds in `[Content_Types].xml`, and every relationship
-//! points at a part that exists: the reader is forgiving of a missing relationship, the kit is
-//! not, and a package that fails the second is a case failure attributed to nothing.
+//! Each builder is the smallest package the reference reader accepts *and* the kit's surgical edits
+//! can rewrite, so a case's difference is the operation's and never a malformed input's. The reader
+//! finds a package's family from its one indispensable part and reaches headers, footnotes, sheets
+//! and styles through the relationship lists; the kit rewrites one part at a time and refuses a
+//! part its relationship list does not name. Every package therefore declares every part it holds
+//! in `[Content_Types].xml`, and every relationship points at a part that exists.
 //!
 //! The PDFs are hand-assembled — numbered objects, offsets and a classic cross-reference table
-//! computed as the file is written — because a PDF fixture has no other source: no library here
-//! writes one, and asking the kit to would make the corpus depend on the engine it measures.
+//! computed as the file is written — because no library here writes one, and asking the kit to
+//! would make the corpus depend on the engine it measures. [`PdfObjects`] is shared with the PDF
+//! model's own tests for the same reason.
 //!
 //! Nothing is committed and nothing is written to disk here: each builder returns the file's
 //! bytes, and the harness writes them where the request names them.
@@ -210,16 +179,20 @@ fn docx_package(body: &str, image: Option<&[u8]>) -> Vec<u8> {
     let document = format!(
         "{DECLARATION}<w:document {DOCX_NAMESPACES}><w:body>{body}{DOCX_SECTION}</w:body></w:document>"
     );
-    let rels = concat!(
+    let mut rels = String::from(concat!(
         r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#,
         r#"<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>"#,
         r#"<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>"#,
         r#"<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>"#,
         r#"<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>"#,
         r#"<Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes" Target="footnotes.xml"/>"#,
-        r#"<Relationship Id="rId6" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>"#,
-        r#"</Relationships>"#,
-    );
+    ));
+    if image.is_some() {
+        rels.push_str(
+            r#"<Relationship Id="rId6" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>"#,
+        );
+    }
+    rels.push_str("</Relationships>");
     let content_types = format!(
         concat!(
             "{}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">",
@@ -991,21 +964,24 @@ const PDF_PAGE: &str = "[0 0 595.28 841.89]";
 
 /// A PDF under construction: objects are numbered in the order they are reserved, so a page can
 /// name the page tree that names it and the catalog can name a page tree written before it.
+///
+/// Shared with the PDF model's own tests, which build the same document with its objects in a
+/// different order to prove that object numbering is not part of the model.
 #[derive(Default)]
-struct PdfObjects {
+pub struct PdfObjects {
     /// One slot per object, index 0 holding object 1; `None` is reserved but not yet written.
     bodies: Vec<Option<Vec<u8>>>,
 }
 
 impl PdfObjects {
     /// Reserve the next object number and return the `N 0 R` that names it.
-    fn reserve(&mut self) -> String {
+    pub fn reserve(&mut self) -> String {
         self.bodies.push(None);
         format!("{} 0 R", self.bodies.len())
     }
 
     /// Write `body` as the object `reference` names.
-    fn set(&mut self, reference: &str, body: impl Into<Vec<u8>>) {
+    pub fn set(&mut self, reference: &str, body: impl Into<Vec<u8>>) {
         let number = reference
             .split(' ')
             .next()
@@ -1016,7 +992,7 @@ impl PdfObjects {
     }
 
     /// Reserve an object and write it at once.
-    fn push(&mut self, body: impl Into<Vec<u8>>) -> String {
+    pub fn push(&mut self, body: impl Into<Vec<u8>>) -> String {
         let reference = self.reserve();
         self.set(&reference, body);
         reference
@@ -1024,16 +1000,17 @@ impl PdfObjects {
 
     /// A stream object: its dictionary — `entries` beside the `/Length` the data gives it — and
     /// its data, with the one end-of-line either side that is not part of the stream.
-    fn stream(&mut self, entries: &str, data: &[u8]) -> String {
+    pub fn stream(&mut self, entries: &str, data: &[u8]) -> String {
         let mut body = format!("<< /Length {} {entries} >>\nstream\n", data.len()).into_bytes();
         body.extend_from_slice(data);
         body.extend_from_slice(b"\nendstream");
         self.push(body)
     }
 
-    /// The file: header, every object, the cross-reference table and the trailer. A slot left
+    /// The file: header, every object, the cross-reference table and the trailer. `entries` is
+    /// whatever the trailer states beyond `/Size` and `/Root`, written as it stands. A slot left
     /// empty is refused rather than written as an object no reader can use.
-    fn finish(self, root: &str) -> Vec<u8> {
+    pub fn finish(self, root: &str, entries: &str) -> Vec<u8> {
         let objects = self
             .bodies
             .into_iter()
@@ -1055,7 +1032,7 @@ impl PdfObjects {
         }
         pdf.extend_from_slice(
             format!(
-                "trailer\n<< /Size {} /Root {root} >>\nstartxref\n{start_xref}\n%%EOF\n",
+                "trailer\n<< /Size {} /Root {root}{entries} >>\nstartxref\n{start_xref}\n%%EOF\n",
                 objects.len() + 1
             )
             .as_bytes(),
@@ -1096,7 +1073,7 @@ pub fn pdf_basic() -> Vec<u8> {
         ),
     );
     let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
-    pdf.finish(&catalog)
+    pdf.finish(&catalog, "")
 }
 
 /// One A4 page drawing a line and painting the sample picture through `Do` — the input the
@@ -1132,7 +1109,7 @@ pub fn pdf_with_image() -> Vec<u8> {
         format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
     );
     let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
-    pdf.finish(&catalog)
+    pdf.finish(&catalog, "")
 }
 
 /// One A4 page carrying an AcroForm with one field of each kind a fill can reach: a text field, a
@@ -1235,11 +1212,12 @@ fn form_document(broken: bool) -> Vec<u8> {
     let catalog = pdf.push(format!(
         "<< /Type /Catalog /Pages {pages} /AcroForm {acroform} >>"
     ));
-    pdf.finish(&catalog)
+    pdf.finish(&catalog, "")
 }
 
-/// One A4 page drawing a line and carrying a `/Text` annotation whose `/Contents` is `A note` —
-/// the input the annotation list is read from.
+/// One A4 page drawing a line and carrying a `/Text` annotation whose `/Contents` is `A note` and
+/// a `/FileAttachment` annotation holding a file — the input the annotation list is read from and
+/// the input the reading's unshown report is recorded on.
 #[must_use]
 pub fn pdf_annotated() -> Vec<u8> {
     let mut pdf = PdfObjects::default();
@@ -1253,11 +1231,16 @@ pub fn pdf_annotated() -> Vec<u8> {
     let annot = pdf.push(format!(
         "<< /Type /Annot /Subtype /Text /Rect [72 700 92 720] /Contents (A note) /P {page} >>"
     ));
+    let attachment = pdf.push(format!(
+        "<< /Type /Annot /Subtype /FileAttachment /Rect [120 700 140 720] \
+         /Contents (An attached file) /FS << /Type /Filespec /F (notes.txt) >> /P {page} >>"
+    ));
     pdf.set(
         &page,
         format!(
             "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
-             /Resources << /Font << /F1 {font} >> >> /Contents {content} /Annots [{annot}] >>"
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} \
+             /Annots [{annot} {attachment}] >>"
         ),
     );
     pdf.set(
@@ -1265,7 +1248,47 @@ pub fn pdf_annotated() -> Vec<u8> {
         format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
     );
     let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
-    pdf.finish(&catalog)
+    pdf.finish(&catalog, "")
+}
+
+/// A one-page PDF whose content stream gives text and then fails the text reader part-way: the
+/// reading keeps the text and names the page as partly read.
+#[must_use]
+pub fn pdf_partial_text() -> Vec<u8> {
+    single_page_pdf(
+        &format!("/MediaBox {PDF_PAGE}"),
+        b"BT /F1 24 Tf 72 700 Td (Kept page text long enough) Tj ET \
+          BT /F1 24 Tf 72 600 Td 42 Tj ET",
+    )
+}
+
+/// A one-page PDF whose page states no `/MediaBox`: the text reader loses the page, so the reading
+/// reports the loss rather than a page with no text.
+#[must_use]
+pub fn pdf_text_lost() -> Vec<u8> {
+    single_page_pdf("", b"BT /F1 24 Tf 72 700 Td (Page text long enough) Tj ET")
+}
+
+/// One page drawing `content` with Helvetica, under the page attributes `attrs`.
+fn single_page_pdf(attrs: &str, content: &[u8]) -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let content = pdf.stream("", content);
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} {attrs} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
 }
 
 /// [`pdf_basic`] cut off in the middle of its page tree: a file by its magic bytes alone, which
@@ -1291,4 +1314,25 @@ pub fn plain_text() -> Vec<u8> {
 #[must_use]
 pub fn unsupported_binary() -> Vec<u8> {
     (0u8..0x40).collect()
+}
+
+// ── legacy containers ────────────────────────────────────────────────────────────────────────
+
+/// A `.doc` with one body paragraph and one footnote: a CFB container around a Word FIB and its
+/// CLX piece table.
+#[must_use]
+pub fn legacy_doc() -> Vec<u8> {
+    super::legacy_formats::doc("Legacy Word body text", "Legacy footnote")
+}
+
+/// A `.xls` with one sheet holding a Unicode string and a number: a BIFF workbook in a CFB.
+#[must_use]
+pub fn legacy_xls() -> Vec<u8> {
+    super::legacy_formats::xls("Привет")
+}
+
+/// A `.ppt` with one slide and its notes: a PowerPoint stream and a user-edit stream in a CFB.
+#[must_use]
+pub fn legacy_ppt() -> Vec<u8> {
+    super::legacy_formats::ppt("Legacy slide title", "Legacy note")
 }

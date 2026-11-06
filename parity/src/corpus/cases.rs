@@ -1,53 +1,20 @@
-//! Every scenario the gate runs: the thirteen operations, the thirty-seven edit sub-operations,
-//! the failure side, and the documents the reader reference is recorded on.
+//! Every scenario the gate runs: the thirteen operations, the thirty-seven edit sub-operations
+//! and the failure side. The documents they address are declared in [`super::documents`].
 //!
 //! A case's request is the one the product's tool layer would hand the kit, with `$in/<name>` and
 //! `$out/<name>` standing for the harness's own paths. The effect lists are what the operation
 //! promises, read off the kit's own semantics (`assets/docgen/kit.js`) and confirmed against the
 //! produced document: an effect that only a no-op could satisfy is not a check.
 
+use super::documents::{
+    BASIC_DOCX, BASIC_PDF, BASIC_PPTX, BASIC_XLSX, BROKEN_FORM_PDF, FORM_PDF, MERGE_A_PDF,
+    MERGE_B_PDF, PICTURE_JPEG, PICTURE_PDF, PICTURE_PNG, TEMPLATE_DOCX, TEMPLATE_PPTX,
+    TEMPLATE_XLSX, TRUNCATED_PDF,
+};
 use super::effect::{BoxKind, Scalar, Scope};
 use super::{Case, Document, Effect, Expect};
-use crate::corpus::build;
 use crate::engine::Family;
 use serde_json::{Value, json};
-
-// ── the corpus documents a request addresses ──────────────────────────────────────────────────
-
-/// The Word input the whole edit vocabulary is exercised on: four findable paragraphs, a heading,
-/// a list, a header, a footer and a footnote.
-const BASIC_DOCX: Document = Document {
-    name: "basic.docx",
-    build: build::docx_basic,
-};
-
-/// The workbook: two sheets, a header row in a bold filled format, a merged range and a formula.
-const BASIC_XLSX: Document = Document {
-    name: "basic.xlsx",
-    build: build::xlsx_basic,
-};
-
-/// The deck: three slides with a title and a body each, and speaker notes on the first.
-const BASIC_PPTX: Document = Document {
-    name: "basic.pptx",
-    build: build::pptx_basic,
-};
-
-/// The PDF: two A4 pages, each drawing its own line.
-const BASIC_PDF: Document = Document {
-    name: "basic.pdf",
-    build: build::pdf_basic,
-};
-
-/// The sample picture, as a PNG and as a JPEG: the two kinds a placement embeds.
-const PICTURE_PNG: Document = Document {
-    name: "picture.png",
-    build: build::png,
-};
-const PICTURE_JPG: Document = Document {
-    name: "picture.jpg",
-    build: build::jpeg,
-};
 
 // ── the case constructors ─────────────────────────────────────────────────────────────────────
 
@@ -70,19 +37,19 @@ fn produced(
         outputs,
         effects,
         expect: Expect::Produced,
-        reencoded: Vec::new(),
     }
 }
 
-/// A case the engine is expected to refuse as the caller's to fix.
-fn refused(
+/// A case the engine declines: either a refusal it classes as the caller's to fix or a failure it
+/// classes as its own, with the reason it must give.
+fn declined(
     family: Family,
     operation: &'static str,
     sub_operation: Option<&'static str>,
     documents: Vec<Document>,
     request: Value,
     outputs: Vec<&'static str>,
-    reason_contains: &'static str,
+    expect: Expect,
 ) -> Case {
     Case {
         family,
@@ -92,34 +59,20 @@ fn refused(
         request,
         outputs,
         effects: Vec::new(),
-        expect: Expect::Refused { reason_contains },
-        reencoded: Vec::new(),
+        expect,
     }
 }
 
-/// A case the engine accepts and then fails to carry out — a fault of the engine, not of the
-/// caller, reported with the `internal` class.
-fn failed(
-    family: Family,
-    operation: &'static str,
-    sub_operation: Option<&'static str>,
-    documents: Vec<Document>,
-    request: Value,
-    outputs: Vec<&'static str>,
-    reason_contains: &'static str,
-) -> Case {
-    Case {
-        family,
-        operation,
-        sub_operation,
-        documents,
-        request,
-        outputs,
-        effects: Vec::new(),
-        expect: Expect::Failed { reason_contains },
-        reencoded: Vec::new(),
+/// The inputs an edit needs: its family's basic document, and the sample picture when the
+/// sub-operation places one.
+fn inputs(sub_operation: &str, basic: Document) -> Vec<Document> {
+    if sub_operation == "add_image" {
+        vec![basic, PICTURE_PNG]
+    } else {
+        vec![basic]
     }
 }
+
 // ── create ────────────────────────────────────────────────────────────────────────────────────
 
 fn create_cases() -> Vec<Case> {
@@ -308,10 +261,7 @@ fn fill_template_cases() -> Vec<Case> {
             Family::Docx,
             "fill_template",
             None,
-            vec![Document {
-                name: "template.docx",
-                build: build::docx_template,
-            }],
+            vec![TEMPLATE_DOCX],
             json!({
                 "op": "fill_template",
                 "template": "$in/template.docx",
@@ -346,10 +296,7 @@ fn fill_template_cases() -> Vec<Case> {
             Family::Xlsx,
             "fill_template",
             None,
-            vec![Document {
-                name: "template.xlsx",
-                build: build::xlsx_template,
-            }],
+            vec![TEMPLATE_XLSX],
             json!({
                 "op": "fill_template",
                 "template": "$in/template.xlsx",
@@ -377,10 +324,7 @@ fn fill_template_cases() -> Vec<Case> {
             Family::Pptx,
             "fill_template",
             None,
-            vec![Document {
-                name: "template.pptx",
-                build: build::pptx_template,
-            }],
+            vec![TEMPLATE_PPTX],
             json!({
                 "op": "fill_template",
                 "template": "$in/template.pptx",
@@ -414,17 +358,12 @@ const DOCX_BODY: &str = "word/document.xml";
 
 /// One docx edit against `basic.docx` and whatever else the request names, written to
 /// `$out/edited.docx`.
-fn docx_edit(
-    sub_operation: &'static str,
-    documents: Vec<Document>,
-    edits: Value,
-    effects: Vec<Effect>,
-) -> Case {
+fn docx_edit(sub_operation: &'static str, edits: Value, effects: Vec<Effect>) -> Case {
     produced(
         Family::Docx,
         "docx_edit",
         Some(sub_operation),
-        documents,
+        inputs(sub_operation, BASIC_DOCX),
         json!({
             "op": "docx_edit",
             "input": "$in/basic.docx",
@@ -440,7 +379,6 @@ fn docx_edit_cases() -> Vec<Case> {
     vec![
         docx_edit(
             "replace_text",
-            vec![BASIC_DOCX],
             json!([{ "op": "replace_text", "find": "Beta", "replace": "Bravo" }]),
             vec![
                 Effect::Text {
@@ -459,7 +397,6 @@ fn docx_edit_cases() -> Vec<Case> {
         ),
         docx_edit(
             "insert_text",
-            vec![BASIC_DOCX],
             json!([{ "op": "insert_text", "find": "Gamma", "insert": " (inserted)", "position": "after" }]),
             vec![Effect::Text {
                 output: None,
@@ -470,7 +407,6 @@ fn docx_edit_cases() -> Vec<Case> {
         ),
         docx_edit(
             "remove_text",
-            vec![BASIC_DOCX],
             json!([{ "op": "remove_text", "find": "Delta" }]),
             vec![
                 Effect::Text {
@@ -489,7 +425,6 @@ fn docx_edit_cases() -> Vec<Case> {
         ),
         docx_edit(
             "remove_paragraph",
-            vec![BASIC_DOCX],
             json!([{ "op": "remove_paragraph", "find": "Gamma paragraph three" }]),
             vec![
                 Effect::Text {
@@ -509,7 +444,6 @@ fn docx_edit_cases() -> Vec<Case> {
         // `bold` writes `<w:b/>` and `<w:bCs/>` into the run's `<w:rPr>`.
         docx_edit(
             "format_text",
-            vec![BASIC_DOCX],
             json!([{ "op": "format_text", "find": "Alpha", "bold": true }]),
             vec![Effect::FormatOn {
                 output: None,
@@ -524,7 +458,6 @@ fn docx_edit_cases() -> Vec<Case> {
         // `align: "center"` writes `<w:jc w:val="center"/>` into the paragraph's `<w:pPr>`.
         docx_edit(
             "format_paragraph",
-            vec![BASIC_DOCX],
             json!([{ "op": "format_paragraph", "find": "Beta", "align": "center" }]),
             vec![Effect::FormatOn {
                 output: None,
@@ -538,7 +471,6 @@ fn docx_edit_cases() -> Vec<Case> {
         ),
         docx_edit(
             "add_paragraph",
-            vec![BASIC_DOCX],
             json!([{ "op": "add_paragraph", "text": "Added paragraph", "after": "Alpha paragraph one" }]),
             vec![Effect::Text {
                 output: None,
@@ -549,7 +481,6 @@ fn docx_edit_cases() -> Vec<Case> {
         ),
         docx_edit(
             "add_image",
-            vec![BASIC_DOCX, PICTURE_PNG],
             json!([{
                 "op": "add_image",
                 "after": "Alpha paragraph one",
@@ -567,7 +498,6 @@ fn docx_edit_cases() -> Vec<Case> {
         // The header row is row 0, so the data row the case names is row 1.
         docx_edit(
             "add_table",
-            vec![BASIC_DOCX],
             json!([{
                 "op": "add_table",
                 "after": "Alpha paragraph one",
@@ -597,17 +527,12 @@ fn docx_edit_cases() -> Vec<Case> {
 
 /// One workbook edit against `basic.xlsx` and whatever else the request names, written to
 /// `$out/edited.xlsx`.
-fn xlsx_edit(
-    sub_operation: &'static str,
-    documents: Vec<Document>,
-    edits: Value,
-    effects: Vec<Effect>,
-) -> Case {
+fn xlsx_edit(sub_operation: &'static str, edits: Value, effects: Vec<Effect>) -> Case {
     produced(
         Family::Xlsx,
         "xlsx_edit",
         Some(sub_operation),
-        documents,
+        inputs(sub_operation, BASIC_XLSX),
         json!({
             "op": "xlsx_edit",
             "input": "$in/basic.xlsx",
@@ -623,7 +548,6 @@ fn xlsx_edit_cases() -> Vec<Case> {
     vec![
         xlsx_edit(
             "set_cell",
-            vec![BASIC_XLSX],
             json!([{ "op": "set_cell", "sheet": "First", "cell": "C1", "value": "Set" }]),
             vec![Effect::Cell {
                 output: None,
@@ -634,7 +558,6 @@ fn xlsx_edit_cases() -> Vec<Case> {
         ),
         xlsx_edit(
             "clear_cell",
-            vec![BASIC_XLSX],
             json!([{ "op": "clear_cell", "sheet": "First", "cell": "A2" }]),
             vec![Effect::CellAbsent {
                 output: None,
@@ -649,7 +572,6 @@ fn xlsx_edit_cases() -> Vec<Case> {
         // cell-format effect resolves as a child element and so cannot read.
         xlsx_edit(
             "format_cells",
-            vec![BASIC_XLSX],
             json!([{ "op": "format_cells", "sheet": "First", "range": "A2:B2", "bold": true }]),
             vec![
                 Effect::CellFormat {
@@ -671,7 +593,6 @@ fn xlsx_edit_cases() -> Vec<Case> {
         // empty row 2 behind.
         xlsx_edit(
             "insert_row",
-            vec![BASIC_XLSX],
             json!([{ "op": "insert_row", "sheet": "First", "row": 2 }]),
             vec![
                 Effect::Cell {
@@ -690,7 +611,6 @@ fn xlsx_edit_cases() -> Vec<Case> {
         // The delete takes row 2 (`Alpha`) and moves the line below it up into its place.
         xlsx_edit(
             "delete_row",
-            vec![BASIC_XLSX],
             json!([{ "op": "delete_row", "sheet": "First", "row": 2 }]),
             vec![
                 Effect::Cell {
@@ -710,7 +630,6 @@ fn xlsx_edit_cases() -> Vec<Case> {
         // `B1 Value` to `C1` and leaves the new column empty.
         xlsx_edit(
             "insert_column",
-            vec![BASIC_XLSX],
             json!([{ "op": "insert_column", "sheet": "First", "column": "B" }]),
             vec![
                 Effect::Cell {
@@ -729,7 +648,6 @@ fn xlsx_edit_cases() -> Vec<Case> {
         // Deleting column `B` takes `B2`'s value with it and leaves column `A` where it was.
         xlsx_edit(
             "delete_column",
-            vec![BASIC_XLSX],
             json!([{ "op": "delete_column", "sheet": "First", "column": "B" }]),
             vec![
                 Effect::CellAbsent {
@@ -747,7 +665,6 @@ fn xlsx_edit_cases() -> Vec<Case> {
         ),
         xlsx_edit(
             "merge_cells",
-            vec![BASIC_XLSX],
             json!([{ "op": "merge_cells", "sheet": "First", "range": "A7:B7" }]),
             vec![Effect::Merged {
                 output: None,
@@ -758,7 +675,6 @@ fn xlsx_edit_cases() -> Vec<Case> {
         ),
         xlsx_edit(
             "unmerge_cells",
-            vec![BASIC_XLSX],
             json!([{ "op": "unmerge_cells", "sheet": "First", "range": "A5:B5" }]),
             vec![Effect::Merged {
                 output: None,
@@ -769,7 +685,6 @@ fn xlsx_edit_cases() -> Vec<Case> {
         ),
         xlsx_edit(
             "add_sheet",
-            vec![BASIC_XLSX],
             json!([{ "op": "add_sheet", "name": "Third" }]),
             vec![Effect::SheetNames {
                 output: None,
@@ -778,7 +693,6 @@ fn xlsx_edit_cases() -> Vec<Case> {
         ),
         xlsx_edit(
             "rename_sheet",
-            vec![BASIC_XLSX],
             json!([{ "op": "rename_sheet", "sheet": "Second", "name": "Renamed" }]),
             vec![Effect::SheetNames {
                 output: None,
@@ -787,7 +701,6 @@ fn xlsx_edit_cases() -> Vec<Case> {
         ),
         xlsx_edit(
             "delete_sheet",
-            vec![BASIC_XLSX],
             json!([{ "op": "delete_sheet", "sheet": "Second" }]),
             vec![Effect::SheetNames {
                 output: None,
@@ -796,7 +709,6 @@ fn xlsx_edit_cases() -> Vec<Case> {
         ),
         xlsx_edit(
             "move_sheet",
-            vec![BASIC_XLSX],
             json!([{ "op": "move_sheet", "sheet": "Second", "to": 1 }]),
             vec![Effect::SheetNames {
                 output: None,
@@ -805,7 +717,6 @@ fn xlsx_edit_cases() -> Vec<Case> {
         ),
         xlsx_edit(
             "add_image",
-            vec![BASIC_XLSX, PICTURE_PNG],
             json!([{
                 "op": "add_image",
                 "sheet": "First",
@@ -829,17 +740,12 @@ const SLIDE_ONE: &str = "ppt/slides/slide1.xml";
 
 /// One presentation edit against `basic.pptx` and whatever else the request names, written to
 /// `$out/edited.pptx`.
-fn pptx_edit(
-    sub_operation: &'static str,
-    documents: Vec<Document>,
-    edits: Value,
-    effects: Vec<Effect>,
-) -> Case {
+fn pptx_edit(sub_operation: &'static str, edits: Value, effects: Vec<Effect>) -> Case {
     produced(
         Family::Pptx,
         "pptx_edit",
         Some(sub_operation),
-        documents,
+        inputs(sub_operation, BASIC_PPTX),
         json!({
             "op": "pptx_edit",
             "input": "$in/basic.pptx",
@@ -855,7 +761,6 @@ fn pptx_edit_cases() -> Vec<Case> {
     vec![
         pptx_edit(
             "replace_text",
-            vec![BASIC_PPTX],
             json!([{ "op": "replace_text", "slide": 1, "find": "Alpha", "replace": "Bravo" }]),
             vec![
                 Effect::SlideText {
@@ -874,7 +779,6 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "remove_text",
-            vec![BASIC_PPTX],
             json!([{ "op": "remove_text", "slide": 2, "find": "Beta" }]),
             vec![
                 Effect::SlideText {
@@ -897,7 +801,6 @@ fn pptx_edit_cases() -> Vec<Case> {
         // what the case can assert, and a copy of the input holds none.
         pptx_edit(
             "format_text",
-            vec![BASIC_PPTX],
             json!([{
                 "op": "format_text",
                 "slide": 1,
@@ -922,7 +825,6 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "add_paragraph",
-            vec![BASIC_PPTX],
             json!([{ "op": "add_paragraph", "slide": 1, "text": "Added line" }]),
             vec![Effect::SlideText {
                 output: None,
@@ -936,7 +838,6 @@ fn pptx_edit_cases() -> Vec<Case> {
         // call adds first, so the body still has a paragraph afterwards.
         pptx_edit(
             "remove_paragraph",
-            vec![BASIC_PPTX],
             json!([
                 { "op": "add_paragraph", "slide": 2, "text": "Kept line" },
                 { "op": "remove_paragraph", "slide": 2, "find": "Beta body" },
@@ -958,7 +859,6 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "add_image",
-            vec![BASIC_PPTX, PICTURE_PNG],
             json!([{
                 "op": "add_image",
                 "slide": 1,
@@ -974,7 +874,6 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "add_table",
-            vec![BASIC_PPTX],
             json!([{
                 "op": "add_table",
                 "slide": 1,
@@ -990,7 +889,6 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "add_slide",
-            vec![BASIC_PPTX],
             json!([{ "op": "add_slide", "after": 1, "title": "Inserted", "bullets": ["x", "y"] }]),
             vec![
                 Effect::SlideCount {
@@ -1011,7 +909,6 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "delete_slide",
-            vec![BASIC_PPTX],
             json!([{ "op": "delete_slide", "slide": 2 }]),
             vec![
                 Effect::SlideCount {
@@ -1026,7 +923,6 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "move_slide",
-            vec![BASIC_PPTX],
             json!([{ "op": "move_slide", "slide": 3, "to": 1 }]),
             vec![Effect::SlideTitles {
                 output: None,
@@ -1035,7 +931,6 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "duplicate_slide",
-            vec![BASIC_PPTX],
             json!([{ "op": "duplicate_slide", "slide": 1 }]),
             vec![
                 Effect::SlideCount {
@@ -1050,7 +945,6 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "replace_notes",
-            vec![BASIC_PPTX],
             json!([{ "op": "replace_notes", "slide": 1, "find": "Note", "replace": "Replaced" }]),
             vec![
                 Effect::NotesText {
@@ -1069,7 +963,6 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "remove_notes",
-            vec![BASIC_PPTX],
             json!([{ "op": "remove_notes", "slide": 1, "find": "Note one" }]),
             vec![Effect::NotesText {
                 output: None,
@@ -1080,7 +973,6 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "add_notes",
-            vec![BASIC_PPTX],
             json!([{ "op": "add_notes", "slide": 2, "text": "Fresh notes" }]),
             vec![Effect::NotesText {
                 output: None,
@@ -1100,16 +992,7 @@ fn pdf_cases() -> Vec<Case> {
             Family::Pdf,
             "pdf_merge",
             None,
-            vec![
-                Document {
-                    name: "a.pdf",
-                    build: build::pdf_basic,
-                },
-                Document {
-                    name: "b.pdf",
-                    build: build::pdf_basic,
-                },
-            ],
+            vec![MERGE_A_PDF, MERGE_B_PDF],
             json!({
                 "op": "pdf_merge",
                 "inputs": ["$in/a.pdf", "$in/b.pdf"],
@@ -1284,13 +1167,7 @@ fn pdf_cases() -> Vec<Case> {
             Family::Pdf,
             "pdf_image",
             None,
-            vec![
-                Document {
-                    name: "picture.pdf",
-                    build: build::pdf_with_image,
-                },
-                PICTURE_JPG,
-            ],
+            vec![PICTURE_PDF, PICTURE_JPEG],
             json!({
                 "op": "pdf_image",
                 "input": "$in/picture.pdf",
@@ -1313,10 +1190,7 @@ fn pdf_cases() -> Vec<Case> {
             Family::Pdf,
             "pdf_form_fill",
             Some("keep_fields"),
-            vec![Document {
-                name: "form.pdf",
-                build: build::pdf_form,
-            }],
+            vec![FORM_PDF],
             json!({
                 "op": "pdf_form_fill",
                 "input": "$in/form.pdf",
@@ -1359,10 +1233,7 @@ fn pdf_cases() -> Vec<Case> {
             Family::Pdf,
             "pdf_form_fill",
             Some("flatten"),
-            vec![Document {
-                name: "form.pdf",
-                build: build::pdf_form,
-            }],
+            vec![FORM_PDF],
             json!({
                 "op": "pdf_form_fill",
                 "input": "$in/form.pdf",
@@ -1376,7 +1247,16 @@ fn pdf_cases() -> Vec<Case> {
                 "output": "$out/filled.pdf",
             }),
             vec!["filled.pdf"],
-            vec![Effect::FormFlattened { output: None }],
+            vec![
+                Effect::FormFlattened { output: None },
+                // A flatten paints each widget's appearance as a form XObject rather than merely
+                // dropping the fields: five widgets, one form each.
+                Effect::PageForms {
+                    output: None,
+                    page: 0,
+                    count: 5,
+                },
+            ],
         ),
     ]
 }
@@ -1385,9 +1265,8 @@ fn pdf_cases() -> Vec<Case> {
 
 fn failure_cases() -> Vec<Case> {
     vec![
-        // A fragment no paragraph of the body holds is a caller's miss, and the refusal says so
-        // rather than passing it off as a document with no text.
-        refused(
+        // A fragment the body does not hold: the caller's miss, named as such.
+        declined(
             Family::Docx,
             "docx_edit",
             Some("replace_text_missing"),
@@ -1399,10 +1278,12 @@ fn failure_cases() -> Vec<Case> {
                 "output": "$out/edited.docx",
             }),
             vec!["edited.docx"],
-            "is not in the document's body",
+            Expect::Refused {
+                reason_contains: "is not in the document's body",
+            },
         ),
-        // A rotation the writer cannot take is refused in the request's own terms.
-        refused(
+        // A rotation the writer cannot take, refused in the request's own terms.
+        declined(
             Family::Pdf,
             "pdf_rotate",
             Some("degrees_not_a_quarter_turn"),
@@ -1415,18 +1296,17 @@ fn failure_cases() -> Vec<Case> {
                 "output": "$out/rotated.pdf",
             }),
             vec!["rotated.pdf"],
-            "must be a multiple of 90",
+            Expect::Refused {
+                reason_contains: "must be a multiple of 90",
+            },
         ),
-        // A file that is a PDF by its magic bytes alone is refused as an input the caller can
-        // replace: the kit names it rather than letting the library's own text surface.
-        refused(
+        // A file that is a PDF by its magic bytes alone: the kit names it rather than letting the
+        // library's own text surface.
+        declined(
             Family::Pdf,
             "pdf_rotate",
             Some("unreadable_input"),
-            vec![Document {
-                name: "truncated.pdf",
-                build: build::pdf_truncated,
-            }],
+            vec![TRUNCATED_PDF],
             json!({
                 "op": "pdf_rotate",
                 "input": "$in/truncated.pdf",
@@ -1435,19 +1315,17 @@ fn failure_cases() -> Vec<Case> {
                 "output": "$out/rotated.pdf",
             }),
             vec!["rotated.pdf"],
-            "do not form a PDF this tool can read",
+            Expect::Refused {
+                reason_contains: "do not form a PDF this tool can read",
+            },
         ),
-        // A request the engine accepts and cannot carry out: the catalog names an `/AcroForm`
-        // that is not a dictionary, which the PDF library refuses. The kit has no usage verdict
-        // for it — the document is simply not one it can fill — so the class is `internal`.
-        failed(
+        // A request the engine accepts and cannot carry out: the catalog names an `/AcroForm` that
+        // is not a dictionary, which the PDF library refuses.
+        declined(
             Family::Pdf,
             "pdf_form_fill",
             Some("broken_form"),
-            vec![Document {
-                name: "broken-form.pdf",
-                build: build::pdf_broken_form,
-            }],
+            vec![BROKEN_FORM_PDF],
             json!({
                 "op": "pdf_form_fill",
                 "input": "$in/broken-form.pdf",
@@ -1456,7 +1334,9 @@ fn failure_cases() -> Vec<Case> {
                 "output": "$out/filled.pdf",
             }),
             vec!["filled.pdf"],
-            "PDFDict",
+            Expect::Failed {
+                reason_contains: "PDFDict",
+            },
         ),
     ]
 }
@@ -1473,75 +1353,4 @@ pub fn all() -> Vec<Case> {
     cases.extend(pdf_cases());
     cases.extend(failure_cases());
     cases
-}
-
-/// Every document the reader reference is recorded on, in the order the reference is recorded.
-#[must_use]
-pub fn reader_documents() -> Vec<Document> {
-    vec![
-        Document {
-            name: "basic.docx",
-            build: build::docx_basic,
-        },
-        Document {
-            name: "table.docx",
-            build: build::docx_with_table,
-        },
-        Document {
-            name: "template.docx",
-            build: build::docx_template,
-        },
-        Document {
-            name: "picture.docx",
-            build: build::docx_with_image,
-        },
-        Document {
-            name: "basic.xlsx",
-            build: build::xlsx_basic,
-        },
-        Document {
-            name: "template.xlsx",
-            build: build::xlsx_template,
-        },
-        Document {
-            name: "basic.pptx",
-            build: build::pptx_basic,
-        },
-        Document {
-            name: "template.pptx",
-            build: build::pptx_template,
-        },
-        Document {
-            name: "basic.pdf",
-            build: build::pdf_basic,
-        },
-        Document {
-            name: "picture.pdf",
-            build: build::pdf_with_image,
-        },
-        Document {
-            name: "form.pdf",
-            build: build::pdf_form,
-        },
-        Document {
-            name: "annotated.pdf",
-            build: build::pdf_annotated,
-        },
-        Document {
-            name: "broken-form.pdf",
-            build: build::pdf_broken_form,
-        },
-        Document {
-            name: "truncated.pdf",
-            build: build::pdf_truncated,
-        },
-        Document {
-            name: "plain.txt",
-            build: build::plain_text,
-        },
-        Document {
-            name: "binary.bin",
-            build: build::unsupported_binary,
-        },
-    ]
 }

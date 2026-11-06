@@ -17,6 +17,10 @@
 //! - `"images": [{"sha256": …, "width": …, "height": …}]` — the images the content paints, by the
 //!   digest of their **decoded** samples and the pixel size they decode to, so re-encoding an
 //!   image is not a difference;
+//! - `"forms": [{"sha256": …, "len": …}]` — the form XObjects the content paints, by the digest of
+//!   their decoded content. A form's *content* is not walked into (an engine may nest one
+//!   differently), but its presence and its bytes are compared: a flattened form that draws its
+//!   fields' appearances is not the same page as one that simply dropped them;
 //! - `"vector": {"count": …, "sha256": …}` — how many path operators the page draws and a digest
 //!   of them with their operands;
 //! - `"annots": [{"subtype": …, "rect": […], "contents": …}]` — the page's own annotations, in
@@ -54,26 +58,49 @@
 //!
 //! - A page's text and images are what its **own** content stream draws. A form XObject's content
 //!   is not walked: it is a resource of its own, drawn through `/Do`, and two engines nest one
-//!   differently.
+//!   differently. The form is still recorded, by digest, so painting one is a difference.
+//! - **What the model does not look at at all**: outlines, page labels, the catalog's language,
+//!   XMP metadata and a link annotation's action target. A difference confined to those is not
+//!   seen; the model states that here rather than implying it compares them.
 //! - **How a drawn string is decoded**: text is compared as the characters the page draws, resolved
 //!   through the font's `/ToUnicode` map where the font has one; a page whose text cannot be
-//!   resolved through a map falls back to its raw codes, which the model states. The font's
-//!   identity — its name and its subset numbering — is not part of the model: engines name and
-//!   subset fonts differently, and only the characters are compared.
+//!   resolved through a map falls back to its raw codes, which the model states. The map is read by
+//!   the same CMap parser the renderer uses (`hayro-cmap`), and a character code is a two-byte
+//!   value — what a `/ToUnicode` map for a simple font states. The font's identity — its name and
+//!   its subset numbering — is not part of the model: engines name and subset fonts differently,
+//!   and only the characters are compared.
 //! - A field's kind is inherited along its `/Parent` chain, which is where a widget keeps it.
 //! - A field with no `/Subtype` annotation, or a page with no `/Annots`, contributes nothing.
+//!
+//! # What the model refuses
+//!
+//! A document of more than 10,000 pages, or a page that runs more than 100,000 content-stream
+//! operators, is an error rather than a model: a page tree or a stream that never ends must fail
+//! the gate with a message, not exhaust the harness. The annotation, field, option and attachment
+//! lists are bounded for the same reason.
+//!
+//! Every stream the model decodes is charged its decoded length against one document-wide total
+//! (256 MiB): a page's content, a form XObject, a font's `/ToUnicode` map. An image is charged at
+//! four bytes per declared pixel **before** it is decoded (64 MiB for one image), so a stream that
+//! claims an enormous size is refused rather than allocated. A stream object is charged once
+//! however often it is painted — it is still decoded on each paint, which is work rather than
+//! memory — and an inline image, which has no object identity, is charged on every paint. A
+//! non-image stream is decoded before it can be charged, so one stream's own expansion is the
+//! decoder's; the charge refuses the document rather than letting a document of many streams
+//! exhaust the run.
 //!
 //! An unreadable PDF is an `Err`, never an empty value: a comparison must not pass because the
 //! model could not read what it was given.
 
 use crate::util::hex_string;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use hayro::hayro_syntax::Pdf;
 use hayro::hayro_syntax::metadata::Metadata;
 use hayro::hayro_syntax::object::dict::Dict;
 use hayro::hayro_syntax::object::stream::{ImageDecodeParams, Stream};
 use hayro::hayro_syntax::object::{Array, Name, Object, ObjectIdentifier, String as PdfString};
 use hayro::hayro_syntax::page::{Page, Rotation};
+use hayro_cmap::{BfString, CMap};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -101,6 +128,24 @@ const MAX_NAME_TREE_DEPTH: usize = 8;
 /// Maximum embedded files named for one document.
 const MAX_ATTACHMENTS: usize = 1000;
 
+/// Maximum pages one document may hold, so a page tree that never ends is a refusal rather than an
+/// exhaustion. This is the model's own bound, not the kit's: `rules.json`'s `max_pages_per_request`
+/// bounds the pages a request may name, which is a different quantity.
+const MAX_PAGES: usize = 10_000;
+
+/// Maximum content-stream operators one page may run. A stream that never ends is a refusal rather
+/// than an exhaustion, and no real page comes near it.
+const MAX_PAGE_OPERATORS: usize = 100_000;
+
+/// Maximum bytes one image may claim to decode to, charged at four bytes per declared pixel before
+/// the decode is attempted, so an image that claims more is refused rather than allocated.
+const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Maximum bytes one document's decoded streams may hold in total: many large images, content
+/// streams or font maps must fail the case, not the run. Independent of [`MAX_PAGES`] — a document
+/// may be refused by either bound, and the refusal names the one it crossed.
+const MAX_DECODED_BYTES: u64 = 256 * 1024 * 1024;
+
 /// `/Ff` bit 16: a `Btn` field is a radio group, whose kids are its buttons.
 const FIELD_FLAG_RADIO: i32 = 1 << 15;
 
@@ -118,30 +163,20 @@ const VECTOR_OPERATORS: &[&[u8]] = &[
     // Painting.
     b"S", b"s", b"f", b"F", b"f*", b"B", b"B*", b"b", b"b*", b"n",
 ];
-
-/// The most mappings one `/ToUnicode` map may hold. The map is a bounded table, but a malformed
-/// `beginbfrange` can name a range of 65 536 codes, so the parser stops at this many.
-const MAX_TO_UNICODE_ENTRIES: usize = 65_536;
-
-/// The most codes one `beginbfrange` entry may expand to: the whole 2-byte code space. A range
-/// that names more is truncated rather than trusted.
-const MAX_TO_UNICODE_RANGE: usize = 65_536;
-
-/// A font's `/ToUnicode` map: each 2-byte character code to the text the page draws for it.
-type ToUnicodeMap = HashMap<u16, String>;
-
 /// The parsed `/ToUnicode` maps of one page, by font object, so a page with many text runs parses
 /// each CMap once.
-type ToUnicodeCache = HashMap<ObjectIdentifier, Option<Rc<ToUnicodeMap>>>;
+type ToUnicodeCache = HashMap<ObjectIdentifier, Option<Rc<CMap>>>;
 
 /// The canonical form of one PDF's bytes. Never panics; an unreadable PDF is an `Err`.
 pub fn canonical(bytes: &[u8]) -> Result<Value> {
     // The parser is third-party code running over untrusted bytes; a panic inside it would unwind
-    // through the caller, and a caught one must not read as a model of anything.
-    match std::panic::catch_unwind(|| model(bytes)) {
+    // through the caller, and a caught one must not read as a model of anything. The shared
+    // containment keeps the panic's own message and its trace off the harness's stderr.
+    match crate::shutdown::contain_panics(|| model(bytes)) {
         Ok(value) => value,
-        Err(_) => Err(anyhow!(
-            "the PDF parser panicked, so the document is undecidable"
+        Err(payload) => Err(anyhow!(
+            "the PDF parser panicked ({}), so the document is undecidable",
+            crate::shutdown::panic_message(&*payload)
         )),
     }
 }
@@ -150,11 +185,13 @@ pub fn canonical(bytes: &[u8]) -> Result<Value> {
 fn model(bytes: &[u8]) -> Result<Value> {
     let pdf = Pdf::new(bytes.to_vec())
         .map_err(|error| anyhow!("the bytes are not a readable PDF ({error:?})"))?;
-    let pages = pdf
-        .pages()
+    let pages = pdf.pages();
+    charge_pages(pages.len())?;
+    let mut budget = Decoded::default();
+    let pages = pages
         .iter()
-        .map(|page| page_value(page))
-        .collect::<Vec<_>>();
+        .map(|page| page_value(page, &mut budget))
+        .collect::<Result<Vec<_>>>()?;
     Ok(json!({
         "pages": pages,
         "info": info_value(pdf.metadata()),
@@ -163,9 +200,91 @@ fn model(bytes: &[u8]) -> Result<Value> {
     }))
 }
 
+/// Refuse a document over the page bound.
+fn charge_pages(count: usize) -> Result<()> {
+    if count > MAX_PAGES {
+        bail!("the document holds more than {MAX_PAGES} pages");
+    }
+    Ok(())
+}
+
+/// Count one content-stream operator against the page's bound.
+fn charge_operators(count: &mut usize) -> Result<()> {
+    *count += 1;
+    if *count > MAX_PAGE_OPERATORS {
+        bail!("a page runs more than {MAX_PAGE_OPERATORS} content-stream operators");
+    }
+    Ok(())
+}
+
+/// The decoded bytes one document has been charged, and the stream objects already charged, so a
+/// stream painted many times is one charge.
+#[derive(Default)]
+struct Decoded {
+    total: u64,
+    charged: HashSet<ObjectIdentifier>,
+}
+
+impl Decoded {
+    /// Charge `bytes` against the document's total.
+    fn charge(&mut self, bytes: u64) -> Result<()> {
+        self.total = self.total.saturating_add(bytes);
+        if self.total > MAX_DECODED_BYTES {
+            bail!("the document's decoded streams exceed the {MAX_DECODED_BYTES}-byte total");
+        }
+        Ok(())
+    }
+
+    /// Charge a decoded stream, once per stream object.
+    fn stream(&mut self, stream: &Stream<'_>, bytes: u64) -> Result<()> {
+        if self.first(stream.dict().obj_id()) {
+            self.charge(bytes)?;
+        }
+        Ok(())
+    }
+
+    /// Charge an image's declared pixel area, at four bytes per pixel, **before** the decode is
+    /// attempted: the charge is what the decode may allocate.
+    fn image(&mut self, stream: &Stream<'_>, width: u32, height: u32) -> Result<()> {
+        if self.first(stream.dict().obj_id()) {
+            self.image_area(width, height)?;
+        }
+        Ok(())
+    }
+
+    /// Charge an image's declared area unconditionally, saturating rather than wrapping: a crafted
+    /// `/Width` of `u32::MAX` must be refused, not charged as zero.
+    fn image_area(&mut self, width: u32, height: u32) -> Result<()> {
+        let claimed = u64::from(width)
+            .saturating_mul(u64::from(height))
+            .saturating_mul(4);
+        if claimed > MAX_IMAGE_BYTES {
+            bail!("an image claims more than the {MAX_IMAGE_BYTES}-byte decode limit");
+        }
+        self.charge(claimed)
+    }
+
+    /// Whether this stream object has not been charged yet. An object without an identifier — an
+    /// inline image — is always charged: the model cannot tell two of them apart.
+    fn first(&mut self, id: Option<ObjectIdentifier>) -> bool {
+        match id {
+            Some(id) => self.charged.insert(id),
+            None => true,
+        }
+    }
+}
+
+/// Charge the page's own content stream(s) against the document's total. `page_stream()` decodes
+/// `/Contents` once and caches it — a single stream or an array joined as the format defines — so
+/// the operator walk below reads the same bytes instead of decoding them again. A stream that
+/// cannot be decoded is never walked, so nothing is charged for it.
+fn charge_content(page: &Page<'_>, budget: &mut Decoded) -> Result<()> {
+    budget.charge(page.page_stream().map_or(0, |stream| stream.len() as u64))
+}
+
 /// One page: the area it shows, the quarter turn it is displayed at, what it draws and what is
 /// marked on it.
-fn page_value(page: &Page<'_>) -> Value {
+fn page_value(page: &Page<'_>, budget: &mut Decoded) -> Result<Value> {
     let media = page.media_box();
     let crop = page.crop_box();
     let media_value = box_value(media.x0, media.y0, media.x1, media.y1);
@@ -183,13 +302,17 @@ fn page_value(page: &Page<'_>) -> Value {
 
     let mut text: Vec<Value> = Vec::new();
     let mut images: Vec<Value> = Vec::new();
+    let mut forms: Vec<Value> = Vec::new();
     let mut vector = Sha256::new();
     let mut vector_count = 0_usize;
     // The font the following text operators draw with, and the maps already parsed for this page.
     let mut font: Option<Dict<'_>> = None;
     let mut unicode_maps: ToUnicodeCache = HashMap::new();
+    charge_content(page, budget)?;
     let mut operations = page.operations();
+    let mut operators = 0_usize;
     while let Some(instruction) = operations.next() {
+        charge_operators(&mut operators)?;
         let operator: &[u8] = instruction.operator;
         match operator {
             // `Tf` names the font the following strings are drawn with. `get_font` walks the
@@ -209,7 +332,8 @@ fn page_value(page: &Page<'_>) -> Value {
                         drawn.as_bytes(),
                         font.as_ref(),
                         &mut unicode_maps,
-                    )));
+                        budget,
+                    )?));
                 }
             }
             // `"` sets the word and character spacing before it draws, so the string is last.
@@ -219,7 +343,8 @@ fn page_value(page: &Page<'_>) -> Value {
                         drawn.as_bytes(),
                         font.as_ref(),
                         &mut unicode_maps,
-                    )));
+                        budget,
+                    )?));
                 }
             }
             b"TJ" => {
@@ -231,7 +356,8 @@ fn page_value(page: &Page<'_>) -> Value {
                                 drawn.as_bytes(),
                                 font.as_ref(),
                                 &mut unicode_maps,
-                            ));
+                                budget,
+                            )?);
                         }
                     }
                     text.push(Value::from(line));
@@ -239,15 +365,19 @@ fn page_value(page: &Page<'_>) -> Value {
             }
             b"Do" => {
                 if let Some(Object::Name(name)) = instruction.operands().next()
-                    && let Some(image) = x_object_image(page, name)
+                    && let Some(stream) = page.resources().get_x_object(name)
                 {
-                    images.push(image);
+                    if stream.dict().get::<Name<'_>>(b"Subtype").as_deref() == Some(b"Form") {
+                        forms.push(form_value(&stream, budget)?);
+                    } else if let Some(image) = image_value(&stream, budget)? {
+                        images.push(image);
+                    }
                 }
             }
             // An inline image arrives as the one stream operand of its `BI`.
             b"BI" => {
                 if let Some(Object::Stream(stream)) = instruction.operands().next()
-                    && let Some(image) = image_value(stream)
+                    && let Some(image) = image_value(stream, budget)?
                 {
                     images.push(image);
                 }
@@ -267,15 +397,16 @@ fn page_value(page: &Page<'_>) -> Value {
         }
     }
 
-    json!({
+    Ok(json!({
         "media": media_value,
         "crop": crop,
         "rotate": rotation_degrees(page.rotation()),
         "text": text,
         "images": images,
+        "forms": forms,
         "vector": { "count": vector_count, "sha256": hex_string(&vector.finalize()) },
         "annots": annotations_value(page),
-    })
+    }))
 }
 
 /// The quarter turn a page is displayed at, in degrees clockwise.
@@ -333,296 +464,61 @@ fn pdf_text(bytes: &[u8]) -> String {
 /// A map names each character by a 2-byte code, so the bytes are split into 2-byte codes and each
 /// is looked up. A code the map does not name contributes the code point itself, and a font with no
 /// map keeps [`pdf_text`]'s own reading.
-fn drawn_text<'a>(bytes: &[u8], font: Option<&Dict<'a>>, cache: &mut ToUnicodeCache) -> String {
-    let Some(map) = font.and_then(|font| to_unicode_map(font, cache)) else {
-        return pdf_text(bytes);
+fn drawn_text<'a>(
+    bytes: &[u8],
+    font: Option<&Dict<'a>>,
+    cache: &mut ToUnicodeCache,
+    budget: &mut Decoded,
+) -> Result<String> {
+    let Some(map) = font
+        .map(|font| to_unicode_map(font, cache, budget))
+        .transpose()?
+        .flatten()
+    else {
+        return Ok(pdf_text(bytes));
     };
     let mut out = String::new();
     for pair in bytes.as_chunks::<2>().0 {
         let code = u16::from_be_bytes(*pair);
-        if let Some(text) = map.get(&code) {
-            out.push_str(text);
-        } else if let Some(character) = char::from_u32(u32::from(code)) {
+        match map.lookup_bf_string(u32::from(code)) {
+            Some(BfString::Char(character)) => out.push(character),
+            Some(BfString::String(text)) => out.push_str(&text),
             // A code the map does not name is still a code point the page draws.
-            out.push(character);
+            None => {
+                if let Some(character) = char::from_u32(u32::from(code)) {
+                    out.push(character);
+                }
+            }
         }
     }
-    out
+    Ok(out)
 }
 
 /// The font's parsed `/ToUnicode` map, if it has a decodable one. The parse happens once per font
 /// object: the page's later runs read the cached map.
-fn to_unicode_map<'a>(font: &Dict<'a>, cache: &mut ToUnicodeCache) -> Option<Rc<ToUnicodeMap>> {
+fn to_unicode_map<'a>(
+    font: &Dict<'a>,
+    cache: &mut ToUnicodeCache,
+    budget: &mut Decoded,
+) -> Result<Option<Rc<CMap>>> {
     let key = font.obj_id();
     if let Some(key) = key
         && let Some(cached) = cache.get(&key)
     {
-        return cached.clone();
+        return Ok(cached.clone());
     }
-    let parsed = font
-        .get::<Stream<'a>>(b"ToUnicode")
-        .and_then(|stream| stream.decoded().ok())
-        .map(|data| Rc::new(parse_cmap(data.as_ref())));
+    let Some(stream) = font.get::<Stream<'a>>(b"ToUnicode") else {
+        return Ok(None);
+    };
+    let Ok(data) = stream.decoded() else {
+        return Ok(None);
+    };
+    budget.stream(&stream, data.len() as u64)?;
+    let parsed = CMap::parse(data.as_ref(), |_| None).map(Rc::new);
     if let Some(key) = key {
         cache.insert(key, parsed.clone());
     }
-    parsed
-}
-
-/// One token of a CMap stream: the syntax the parser has to step over.
-enum CmapToken {
-    /// A hex string's bytes, `<…>`.
-    Hex(Vec<u8>),
-    /// The start of an array, `[`.
-    ArrayStart,
-    /// The end of an array, `]`.
-    ArrayEnd,
-    /// A bare word: a keyword or an operand the parser does not read.
-    Word(String),
-}
-
-/// The `/ToUnicode` mappings a CMap stream states, or none where it states none the parser reads.
-///
-/// The syntax is PostScript-like and may carry anything. Unknown bytes are skipped and a section
-/// that does not pair its operands contributes no mappings, so a malformed map is an empty or
-/// partial map rather than an error.
-fn parse_cmap(data: &[u8]) -> ToUnicodeMap {
-    let tokens = cmap_tokens(data);
-    let mut map = ToUnicodeMap::new();
-    let mut index = 0;
-    while index < tokens.len() {
-        match &tokens[index] {
-            CmapToken::Word(word) if word == "beginbfchar" => {
-                index = parse_bfchar(&tokens, index + 1, &mut map);
-            }
-            CmapToken::Word(word) if word == "beginbfrange" => {
-                index = parse_bfrange(&tokens, index + 1, &mut map);
-            }
-            _ => index += 1,
-        }
-    }
-    map
-}
-
-/// The `beginbfchar` section: pairs of `<code> <destination>`.
-fn parse_bfchar(tokens: &[CmapToken], mut index: usize, map: &mut ToUnicodeMap) -> usize {
-    while index < tokens.len() {
-        if matches!(&tokens[index], CmapToken::Word(word) if word == "endbfchar") {
-            return index + 1;
-        }
-        let CmapToken::Hex(source) = &tokens[index] else {
-            index += 1;
-            continue;
-        };
-        let Some(CmapToken::Hex(destination)) = tokens.get(index + 1) else {
-            index += 1;
-            continue;
-        };
-        if let Some(code) = code_value(source) {
-            insert_mapping(map, code, utf16_text(destination));
-        }
-        index += 2;
-    }
-    index
-}
-
-/// The `beginbfrange` section: `<first> <last> <destination>` where the destination is either one
-/// string, whose last code unit increments across the range, or an array with one entry per code.
-fn parse_bfrange(tokens: &[CmapToken], mut index: usize, map: &mut ToUnicodeMap) -> usize {
-    while index < tokens.len() {
-        if matches!(&tokens[index], CmapToken::Word(word) if word == "endbfrange") {
-            return index + 1;
-        }
-        let CmapToken::Hex(first) = &tokens[index] else {
-            index += 1;
-            continue;
-        };
-        let Some(CmapToken::Hex(last)) = tokens.get(index + 1) else {
-            index += 1;
-            continue;
-        };
-        let (Some(first), Some(last)) = (code_value(first), code_value(last)) else {
-            index += 2;
-            continue;
-        };
-        match tokens.get(index + 2) {
-            Some(CmapToken::Hex(destination)) => {
-                let base = utf16_units(destination);
-                for (offset, code) in (first..=last).take(MAX_TO_UNICODE_RANGE).enumerate() {
-                    if let Some(text) = increment_last(&base, offset) {
-                        insert_mapping(map, code, text);
-                    }
-                }
-                index += 3;
-            }
-            Some(CmapToken::ArrayStart) => {
-                index += 3;
-                let mut offset = 0_u32;
-                while index < tokens.len() {
-                    match &tokens[index] {
-                        CmapToken::ArrayEnd => {
-                            index += 1;
-                            break;
-                        }
-                        CmapToken::Hex(destination) => {
-                            let code = u16::try_from(offset)
-                                .ok()
-                                .and_then(|offset| first.checked_add(offset))
-                                .filter(|code| *code <= last);
-                            if let Some(code) = code {
-                                insert_mapping(map, code, utf16_text(destination));
-                            }
-                            offset += 1;
-                            index += 1;
-                        }
-                        _ => index += 1,
-                    }
-                }
-            }
-            _ => index += 2,
-        }
-    }
-    index
-}
-
-/// Split a CMap stream into the tokens its sections use. Every byte the tokenizer does not
-/// recognise is skipped, so a truncated or foreign stream is still total.
-fn cmap_tokens(data: &[u8]) -> Vec<CmapToken> {
-    let mut tokens = Vec::new();
-    let mut index = 0;
-    while index < data.len() {
-        match data[index] {
-            b'%' => {
-                while index < data.len() && data[index] != b'\n' && data[index] != b'\r' {
-                    index += 1;
-                }
-            }
-            b'<' => {
-                index += 1;
-                let mut digits = Vec::new();
-                while index < data.len() && data[index] != b'>' {
-                    if let Some(digit) = hex_digit(data[index]) {
-                        digits.push(digit);
-                    }
-                    index += 1;
-                }
-                if index < data.len() {
-                    index += 1;
-                }
-                tokens.push(CmapToken::Hex(
-                    digits
-                        .as_chunks::<2>()
-                        .0
-                        .iter()
-                        .map(|pair| (pair[0] << 4) | pair[1])
-                        .collect(),
-                ));
-            }
-            b'[' => {
-                tokens.push(CmapToken::ArrayStart);
-                index += 1;
-            }
-            b']' => {
-                tokens.push(CmapToken::ArrayEnd);
-                index += 1;
-            }
-            b'(' => {
-                // A literal string is never a mapping the model reads; skip it whole.
-                index += 1;
-                let mut depth = 1_u32;
-                while index < data.len() && depth > 0 {
-                    match data[index] {
-                        b'\\' => index += 1,
-                        b'(' => depth += 1,
-                        b')' => depth -= 1,
-                        _ => {}
-                    }
-                    index += 1;
-                }
-            }
-            b'/' => {
-                // A name operand, `/CMapName` and the like: never a mapping.
-                index += 1;
-                while index < data.len() && !is_cmap_delimiter(data[index]) {
-                    index += 1;
-                }
-            }
-            b')' | b'>' | b'{' | b'}' => index += 1,
-            byte if byte.is_ascii_whitespace() => index += 1,
-            _ => {
-                let start = index;
-                while index < data.len() && !is_cmap_delimiter(data[index]) {
-                    index += 1;
-                }
-                tokens.push(CmapToken::Word(
-                    String::from_utf8_lossy(&data[start..index]).into_owned(),
-                ));
-            }
-        }
-    }
-    tokens
-}
-
-/// Whether a byte ends a bare word in a CMap: whitespace or one of the syntax's delimiters.
-fn is_cmap_delimiter(byte: u8) -> bool {
-    byte.is_ascii_whitespace()
-        || matches!(
-            byte,
-            b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%'
-        )
-}
-
-/// The value of one hex digit, or `None` where the byte is not one.
-fn hex_digit(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
-}
-
-/// The code a hex string names, as the 2-byte value the model splits a string into.
-fn code_value(bytes: &[u8]) -> Option<u16> {
-    if bytes.is_empty() {
-        return None;
-    }
-    let mut value = 0_u32;
-    for byte in bytes {
-        value = value.checked_mul(256)?.checked_add(u32::from(*byte))?;
-    }
-    u16::try_from(value).ok()
-}
-
-/// A destination hex string as UTF-16BE code units.
-fn utf16_units(bytes: &[u8]) -> Vec<u16> {
-    bytes
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| u16::from_be_bytes(*pair))
-        .collect()
-}
-
-/// A destination hex string as text: UTF-16BE, as a CMap states it.
-fn utf16_text(bytes: &[u8]) -> String {
-    String::from_utf16_lossy(&utf16_units(bytes))
-}
-
-/// The `offset`th destination of a scalar `beginbfrange` entry: the base string with its last code
-/// unit incremented. An empty base has no last unit and contributes nothing.
-fn increment_last(base: &[u16], offset: usize) -> Option<String> {
-    let (last, head) = base.split_last()?;
-    let mut units = head.to_vec();
-    units.push(last.wrapping_add(u16::try_from(offset).unwrap_or(u16::MAX)));
-    Some(String::from_utf16_lossy(&units))
-}
-
-/// Add one mapping, stopping at the map's bound so a malformed range cannot grow it without limit.
-fn insert_mapping(map: &mut ToUnicodeMap, code: u16, text: String) {
-    if map.len() < MAX_TO_UNICODE_ENTRIES || map.contains_key(&code) {
-        map.insert(code, text);
-    }
+    Ok(parsed)
 }
 
 /// One operand of a path operator, as the digest reads it. Every variant is total, because a
@@ -671,16 +567,28 @@ fn operand_text(object: &Object<'_>, out: &mut String) {
     }
 }
 
-/// An image XObject the page's content paints, by its decoded samples.
-fn x_object_image(page: &Page<'_>, name: &Name<'_>) -> Option<Value> {
-    let stream = page.resources().get_x_object(name)?;
-    image_value(&stream)
+/// One form XObject as the model holds it: the digest of its decoded content and its length. A
+/// stream that cannot be decoded is identified by its raw bytes rather than dropped.
+fn form_value(stream: &Stream<'_>, budget: &mut Decoded) -> Result<Value> {
+    let raw;
+    let bytes = match stream.decoded() {
+        Ok(decoded) => decoded,
+        Err(_) => {
+            raw = stream.raw_data();
+            raw
+        }
+    };
+    budget.stream(stream, bytes.len() as u64)?;
+    Ok(json!({
+        "sha256": hex_string(&Sha256::digest(bytes.as_ref())),
+        "len": bytes.len(),
+    }))
 }
 
 /// One image stream — an image XObject or an inline image — as the model holds it: the digest of
 /// its decoded samples and the pixel size they decode to. Re-encoding the same picture is the same
 /// image; different samples are not.
-fn image_value(stream: &Stream<'_>) -> Option<Value> {
+fn image_value(stream: &Stream<'_>, budget: &mut Decoded) -> Result<Option<Value>> {
     let dict = stream.dict();
     // A form XObject draws content of its own and carries no samples. An inline image states no
     // subtype at all, so only a stated non-image subtype is skipped.
@@ -689,33 +597,43 @@ fn image_value(stream: &Stream<'_>) -> Option<Value> {
         .as_deref()
         .is_some_and(|subtype| subtype != b"Image")
     {
-        return None;
+        return Ok(None);
     }
     // An inline image abbreviates both keys.
-    let width = dict
+    let Some(width) = dict
         .get::<u32>(b"Width")
         .or_else(|| dict.get::<u32>(b"W"))
-        .filter(|width| *width > 0)?;
-    let height = dict
+        .filter(|width| *width > 0)
+    else {
+        return Ok(None);
+    };
+    let Some(height) = dict
         .get::<u32>(b"Height")
         .or_else(|| dict.get::<u32>(b"H"))
-        .filter(|height| *height > 0)?;
+        .filter(|height| *height > 0)
+    else {
+        return Ok(None);
+    };
+    // Charged before the decode: what an image claims to decode to is what the decode may allocate.
+    budget.image(stream, width, height)?;
     let params = ImageDecodeParams {
         width,
         height,
         ..ImageDecodeParams::default()
     };
-    let decoded = stream.decoded_image(&params).ok()?;
+    let Ok(decoded) = stream.decoded_image(&params) else {
+        return Ok(None);
+    };
     // What a decoder reports about its own output is authoritative over the dictionary.
     let (width, height) = match &decoded.image_data {
         Some(data) => (data.width, data.height),
         None => (width, height),
     };
-    Some(json!({
+    Ok(Some(json!({
         "sha256": hex_string(&Sha256::digest(decoded.data.as_ref())),
         "width": width,
         "height": height,
-    }))
+    })))
 }
 
 /// The page's own annotations, in `/Annots` order.
@@ -1027,4 +945,252 @@ fn collect_names(node: &Dict<'_>, names: &mut Vec<Value>, depth: usize) {
             }
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::corpus::build::PdfObjects;
+
+    #[test]
+    fn a_document_over_the_page_limit_is_refused() {
+        charge_pages(MAX_PAGES).expect("the bound itself is allowed");
+        let error = charge_pages(MAX_PAGES + 1).expect_err("one page over the bound is refused");
+        assert!(error.to_string().contains("pages"), "{error}");
+    }
+
+    #[test]
+    fn a_page_over_the_operator_limit_is_refused() {
+        let mut count = 0;
+        for _ in 0..MAX_PAGE_OPERATORS {
+            charge_operators(&mut count).expect("the bound itself is allowed");
+        }
+        let error =
+            charge_operators(&mut count).expect_err("one operator over the bound is refused");
+        assert!(error.to_string().contains("operators"), "{error}");
+    }
+
+    #[test]
+    fn an_image_over_the_decode_limit_is_refused() {
+        // Four bytes per pixel: the bound's own side in each dimension, then one pixel more.
+        let side = u32::try_from((MAX_IMAGE_BYTES / 4).isqrt()).expect("the bound's side fits");
+        let mut budget = Decoded::default();
+        budget
+            .image_area(side, side)
+            .expect("the bound itself is allowed");
+        let error = budget
+            .image_area(side + 1, side)
+            .expect_err("one row over the per-image bound is refused");
+        assert!(error.to_string().contains("decode limit"), "{error}");
+    }
+
+    #[test]
+    fn an_image_claiming_the_whole_u32_range_is_refused_rather_than_wrapping() {
+        // (2^32-1)^2 * 4 is past `u64`: the charge must saturate and refuse, not wrap to zero and
+        // let the decode the bound exists to prevent happen.
+        let mut budget = Decoded::default();
+        let error = budget
+            .image_area(u32::MAX, u32::MAX)
+            .expect_err("a crafted size is refused");
+        assert!(error.to_string().contains("decode limit"), "{error}");
+    }
+
+    #[test]
+    fn a_document_over_the_decoded_total_is_refused() {
+        let side = u32::try_from((MAX_IMAGE_BYTES / 4).isqrt()).expect("the bound's side fits");
+        let image = u64::from(side) * u64::from(side) * 4;
+        let mut budget = Decoded::default();
+        let mut charged = 0;
+        while budget.total + image <= MAX_DECODED_BYTES {
+            budget
+                .image_area(side, side)
+                .expect("each image is under the per-image bound");
+            charged += 1;
+        }
+        let error = budget
+            .image_area(side, side)
+            .expect_err("the total's own bound is not exceeded by an image under it");
+        assert!(error.to_string().contains("decoded streams"), "{error}");
+        assert!(charged > 1, "the total admits more than one image");
+    }
+
+    #[test]
+    fn one_stream_object_is_charged_once_however_often_it_is_painted() {
+        // A page painting one small image many times is one image in memory, so it is one charge;
+        // an object with no identifier is charged every time, because it cannot be told apart.
+        let mut budget = Decoded::default();
+        let image = ObjectIdentifier::new(7, 0);
+        assert!(budget.first(Some(image)), "the first paint is charged");
+        assert!(!budget.first(Some(image)), "the second paint is free");
+        assert!(budget.first(None), "an inline image is charged");
+        assert!(budget.first(None), "and so is the next one");
+    }
+
+    // ── the charge paths ──────────────────────────────────────────────────────────────────────
+    //
+    // Three of the four places the model decodes a stream — a page's content, a form XObject and a
+    // font's `/ToUnicode` map; images have their own test above — are what bound it. Each is driven
+    // here on a document that really holds the stream, with a budget already spent, so the charge,
+    // not the decode, is what refuses.
+
+    /// A one-page PDF: `page` writes the page's own dictionary, with `{parent}` standing for its
+    /// parent, and every object it names.
+    fn one_page(page: impl FnOnce(&mut PdfObjects) -> String) -> Vec<u8> {
+        let mut pdf = PdfObjects::default();
+        let catalog = pdf.reserve();
+        let pages = pdf.reserve();
+        let page_id = pdf.reserve();
+        let page = page(&mut pdf).replace("{parent}", &pages);
+        pdf.set(
+            &pages,
+            format!("<< /Type /Pages /Kids [{page_id}] /Count 1 >>"),
+        );
+        pdf.set(&page_id, page);
+        pdf.set(&catalog, format!("<< /Type /Catalog /Pages {pages} >>"));
+        pdf.finish(&catalog, "")
+    }
+
+    /// The first page of `bytes`, parsed.
+    fn first_page(bytes: Vec<u8>) -> Pdf {
+        let pdf = Pdf::new(bytes).expect("the fixture is a readable PDF");
+        assert_eq!(pdf.pages().len(), 1, "the fixture is one page");
+        pdf
+    }
+
+    /// A budget whose whole total is already spent, so any further charge refuses.
+    fn spent() -> Decoded {
+        Decoded {
+            total: MAX_DECODED_BYTES,
+            charged: HashSet::new(),
+        }
+    }
+
+    #[test]
+    fn one_content_stream_is_charged_its_decoded_length() {
+        let pdf = first_page(one_page(|pdf| {
+            let content = pdf.stream("", b"BT /F1 12 Tf (Hello) Tj ET");
+            format!(
+                "<< /Type /Page /Parent {{parent}} /MediaBox [0 0 200 100] /Contents {content} >>"
+            )
+        }));
+        let page = &pdf.pages()[0];
+        let mut budget = Decoded::default();
+        charge_content(page, &mut budget).expect("one small stream is under the bound");
+        assert_eq!(budget.total, 26, "the content stream's own bytes");
+        let error = charge_content(page, &mut spent()).expect_err("a spent total refuses it");
+        assert!(error.to_string().contains("decoded streams"), "{error}");
+    }
+
+    #[test]
+    fn an_array_of_content_streams_is_charged_with_the_joins_between_them() {
+        // The model charges what the operator walk will read: the format joins an array's streams
+        // with a space each, and reading them any other way would be a second decode.
+        let pdf = first_page(one_page(|pdf| {
+            let first = pdf.stream("", b"q");
+            let second = pdf.stream("", b"Q");
+            format!(
+                "<< /Type /Page /Parent {{parent}} /MediaBox [0 0 200 100] \
+                 /Contents [{first} {second}] >>"
+            )
+        }));
+        let page = &pdf.pages()[0];
+        let content = page.page_stream().expect("the fixture's page has content");
+        let mut budget = Decoded::default();
+        charge_content(page, &mut budget).expect("two small streams are under the bound");
+        assert_eq!(
+            budget.total, 4,
+            "two one-byte streams and the space after each"
+        );
+        assert!(
+            std::ptr::eq(content, page.page_stream().expect("the content is cached")),
+            "the charge and the operator walk read one decode, not two"
+        );
+        let error = charge_content(page, &mut spent()).expect_err("a spent total refuses them");
+        assert!(error.to_string().contains("decoded streams"), "{error}");
+    }
+
+    #[test]
+    fn a_form_xobject_is_charged_its_decoded_content() {
+        let pdf = first_page(one_page(|pdf| {
+            let form = pdf.stream(
+                "/Type /XObject /Subtype /Form /BBox [0 0 10 10]",
+                b"0 0 m S",
+            );
+            let content = pdf.stream("", b"/Fm1 Do");
+            format!(
+                "<< /Type /Page /Parent {{parent}} /MediaBox [0 0 200 100] /Contents {content} \
+                 /Resources << /XObject << /Fm1 {form} >> >> >>"
+            )
+        }));
+        let page = &pdf.pages()[0];
+        let form = page
+            .raw()
+            .get::<Dict<'_>>(b"Resources")
+            .and_then(|resources| resources.get::<Dict<'_>>(b"XObject"))
+            .and_then(|xobjects| xobjects.get::<Stream<'_>>(b"Fm1"))
+            .expect("the fixture's page names its form");
+        let mut budget = Decoded::default();
+        let value = form_value(&form, &mut budget).expect("a small form is under the bound");
+        assert_eq!(budget.total, 7, "the form's decoded content");
+        assert_eq!(
+            value["len"],
+            json!(7),
+            "and the model reports the same length"
+        );
+        let error = form_value(&form, &mut spent()).expect_err("a spent total refuses the form");
+        assert!(error.to_string().contains("decoded streams"), "{error}");
+    }
+
+    #[test]
+    fn a_to_unicode_map_is_charged_once_and_refused_past_the_total() {
+        let pdf = first_page(one_page(|pdf| {
+            let unicode = pdf.stream("", CMAP);
+            let font = pdf.push(format!(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode {unicode} >>"
+            ));
+            let content = pdf.stream("", b"BT /F1 12 Tf (A) Tj ET");
+            format!(
+                "<< /Type /Page /Parent {{parent}} /MediaBox [0 0 200 100] /Contents {content} \
+                 /Resources << /Font << /F1 {font} >> >> >>"
+            )
+        }));
+        let page = &pdf.pages()[0];
+        let font = page
+            .raw()
+            .get::<Dict<'_>>(b"Resources")
+            .and_then(|resources| resources.get::<Dict<'_>>(b"Font"))
+            .and_then(|fonts| fonts.get::<Dict<'_>>(b"F1"))
+            .expect("the fixture's page names its font");
+        let mut cache = ToUnicodeCache::new();
+        let mut budget = Decoded::default();
+        let map = to_unicode_map(&font, &mut cache, &mut budget).expect("the map parses");
+        assert!(map.is_some(), "the font names a readable /ToUnicode map");
+        assert_eq!(budget.total, CMAP.len() as u64, "the map's own bytes");
+        // The page's later runs read the cached map, so the document is charged once for it.
+        to_unicode_map(&font, &mut cache, &mut budget).expect("the cached map is read again");
+        assert_eq!(
+            budget.total,
+            CMAP.len() as u64,
+            "a cached map is not charged twice"
+        );
+        let error = to_unicode_map(&font, &mut ToUnicodeCache::new(), &mut spent())
+            .expect_err("a spent total refuses the map");
+        assert!(error.to_string().contains("decoded streams"), "{error}");
+    }
+
+    /// A minimal `/ToUnicode` map: the two-byte code space a simple font states, and one character.
+    const CMAP: &[u8] = b"/CIDInit /ProcSet findresource begin\n\
+12 dict begin\n\
+begincmap\n\
+/CMapName /Test def\n\
+1 begincodespacerange\n\
+<0000> <FFFF>\n\
+endcodespacerange\n\
+1 beginbfchar\n\
+<0041> <0042>\n\
+endbfchar\n\
+endcmap\n\
+CMapName currentdict /CMap defineresource pop\n\
+end\n\
+end\n";
 }

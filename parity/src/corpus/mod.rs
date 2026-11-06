@@ -8,7 +8,9 @@
 
 pub mod build;
 pub mod cases;
+pub mod documents;
 pub mod effect;
+pub mod legacy_formats;
 
 pub use effect::Effect;
 
@@ -49,9 +51,6 @@ pub struct Case {
     pub outputs: Vec<&'static str>,
     pub effects: Vec<Effect>,
     pub expect: Expect,
-    /// Parts the operation legitimately re-encodes: their digests are dropped from both sides of
-    /// the comparison.
-    pub reencoded: Vec<&'static str>,
 }
 
 impl Case {
@@ -70,5 +69,5 @@ pub fn writer_cases() -> Vec<Case> {
 /// Every document the reader reference is recorded on.
 #[must_use]
 pub fn reader_documents() -> Vec<Document> {
-    cases::reader_documents()
+    documents::reader_documents()
 }

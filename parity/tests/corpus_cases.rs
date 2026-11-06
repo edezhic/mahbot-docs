@@ -6,10 +6,10 @@
 //! Nothing here builds a document for a case that would hide a broken one: the builders are called
 //! once each, so a case that carries an empty file is a failure here rather than an engine result
 //! blamed on the operation.
+mod common;
 
 use document_parity::corpus::{Case, Document, Expect, reader_documents, writer_cases};
 use document_parity::engine::Family;
-use serde_json::Value;
 use std::collections::{BTreeSet, HashSet};
 
 /// Every operation the corpus must exercise, exactly.
@@ -74,20 +74,10 @@ const PPTX_EDITS: &[&str] = &[
     "add_notes",
 ];
 
-/// Every string a request carries, at any depth.
-fn strings(value: &Value, out: &mut Vec<String>) {
-    match value {
-        Value::String(text) => out.push(text.clone()),
-        Value::Array(items) => items.iter().for_each(|item| strings(item, out)),
-        Value::Object(fields) => fields.values().for_each(|item| strings(item, out)),
-        _ => {}
-    }
-}
-
 /// The names a request spells with `$prefix/`, without the prefix.
 fn named(case: &Case, prefix: &str) -> Vec<String> {
     let mut all = Vec::new();
-    strings(&case.request, &mut all);
+    common::strings(&case.request, &mut all);
     all.iter()
         .filter_map(|text| text.strip_prefix(prefix).map(str::to_string))
         .collect()
@@ -191,37 +181,6 @@ fn every_input_the_request_names_is_a_document_of_the_case() {
             );
         }
     }
-}
-
-#[test]
-fn the_reader_corpus_is_the_sixteen_documents_in_order() {
-    let found: Vec<&str> = reader_documents()
-        .iter()
-        .map(|document| document.name)
-        .collect();
-    assert_eq!(
-        found,
-        vec![
-            "basic.docx",
-            "table.docx",
-            "template.docx",
-            "picture.docx",
-            "basic.xlsx",
-            "template.xlsx",
-            "basic.pptx",
-            "template.pptx",
-            "basic.pdf",
-            "picture.pdf",
-            "form.pdf",
-            "annotated.pdf",
-            "broken-form.pdf",
-            "truncated.pdf",
-            "plain.txt",
-            "binary.bin",
-        ]
-    );
-    let unique: BTreeSet<&str> = found.iter().copied().collect();
-    assert_eq!(unique.len(), found.len(), "a document name is used twice");
 }
 
 #[test]

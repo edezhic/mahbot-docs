@@ -32,23 +32,6 @@ impl Family {
             Self::Pdf => "pdf",
         }
     }
-
-    #[must_use]
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "docx" => Some(Self::Docx),
-            "xlsx" => Some(Self::Xlsx),
-            "pptx" => Some(Self::Pptx),
-            "pdf" => Some(Self::Pdf),
-            _ => None,
-        }
-    }
-
-    /// The package part a family's content lives in, for a canonical model's part lookups.
-    #[must_use]
-    pub fn is_package(self) -> bool {
-        !matches!(self, Self::Pdf)
-    }
 }
 
 /// A verdict's key: one family, one operation, and — for the three Office edit operations — the
@@ -107,9 +90,10 @@ pub struct EngineIdentity {
     pub components: BTreeMap<String, String>,
 }
 
-/// How a writer run ended. `Failure` is the engine's own answer (`ok: false` in the result
-/// object); a run that never reached a result — a missing runtime, a killed process — is an
-/// `Err` from [`Writer::run`], because it says nothing about the request.
+/// How a writer run ended. `Failure` is the engine's own answer: `ok: false` in the result
+/// object, or a result object the engine never wrote (which the product's contract classifies as
+/// `internal`). A run that never started or never finished — a missing runtime, a killed process, a
+/// timeout — is an `Err` from [`Writer::run`], because it says nothing about the request.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WriterOutcome {
     /// The files the engine says it produced, as paths it echoed back.
@@ -139,6 +123,37 @@ impl WriterOutcome {
             failure: None,
         }
     }
+
+    /// The engine's own answer: it declined the request, in `class` and with `reason`.
+    #[must_use]
+    pub fn failed(class: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            failure: Some(Failure {
+                class: class.into(),
+                reason: reason.into(),
+            }),
+            ..Self::produced(Vec::new())
+        }
+    }
+}
+
+/// The paths a request names as its outputs, in order: `output` for one file, `outputs` for many.
+/// The writer contract has one shape, so every implementation reads it through this.
+#[must_use]
+pub fn request_outputs(request: &serde_json::Value) -> Vec<PathBuf> {
+    ["output", "outputs"]
+        .iter()
+        .filter_map(|key| request.get(*key))
+        .flat_map(|value| match value {
+            serde_json::Value::String(path) => vec![PathBuf::from(path)],
+            serde_json::Value::Array(paths) => paths
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(PathBuf::from)
+                .collect(),
+            _ => Vec::new(),
+        })
+        .collect()
 }
 
 /// A writer's own refusal or failure, as the product's contract classifies it: `usage` when the
@@ -198,7 +213,10 @@ pub trait Writer {
 }
 
 /// Drives one reader implementation at the bounded entry point a product read passes through.
-pub trait Reader {
+///
+/// `Send + Sync` because the harness runs one reading on a thread of its own, so a reader that
+/// never returns is one failed reading rather than a hung gate.
+pub trait Reader: Send + Sync {
     fn identity(&self) -> EngineIdentity;
 
     /// Read the document at `input`, named `file_name`, writing extracted images into `out_dir`.

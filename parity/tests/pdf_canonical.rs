@@ -6,8 +6,10 @@
 
 use document_parity::canonical::compare;
 use document_parity::canonical::pdf::canonical;
+use document_parity::corpus::build::PdfObjects;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
+use std::collections::BTreeMap;
 
 /// The samples of the fixture's image: four pixels wide, two high, three components each.
 const SAMPLES: &str = "0123456789abcdefghijklmn";
@@ -73,82 +75,44 @@ fn replace(haystack: &[u8], needle: &[u8], replacement: &[u8]) -> Vec<u8> {
 /// A PDF of `objects`, numbered from 1 in the order given, with a classic cross-reference table.
 ///
 /// A reference is written by name — `{page}` becomes `"3 0 R"` — so the same graph can be emitted
-/// with its objects in any order, which is what the renumbering case needs.
+/// with its objects in any order, which is what the renumbering case needs. The assembly itself is
+/// the corpus's own [`PdfObjects`], so the harness has one cross-reference writer rather than two.
 fn assemble(objects: &[Object], trailer: &str) -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let references: BTreeMap<&str, String> = objects
+        .iter()
+        .map(|object| (object.name, pdf.reserve()))
+        .collect();
     let resolve = |body: &[u8]| {
         let mut body = body.to_vec();
-        for (index, object) in objects.iter().enumerate() {
+        for (name, reference) in &references {
             body = replace(
                 &body,
-                format!("{{{}}}", object.name).as_bytes(),
-                format!("{} 0 R", index + 1).as_bytes(),
+                format!("{{{name}}}").as_bytes(),
+                reference.as_bytes(),
             );
         }
         body
     };
-
-    let mut pdf = b"%PDF-1.4\n".to_vec();
-    let mut offsets = Vec::new();
-    for (index, object) in objects.iter().enumerate() {
-        offsets.push(pdf.len());
-        pdf.extend_from_slice(format!("{} 0 obj\n", index + 1).as_bytes());
-        pdf.extend_from_slice(&resolve(&object.body));
-        pdf.extend_from_slice(b"\nendobj\n");
+    for object in objects {
+        pdf.set(&references[object.name], resolve(&object.body));
     }
-
-    let start_xref = pdf.len();
-    let trailer = resolve(
-        format!(
-            "<< /Size {} /Root {{catalog}}{trailer} >>",
-            objects.len() + 1
-        )
-        .as_bytes(),
-    );
-    pdf.extend_from_slice(format!("xref\n0 {}\n", objects.len() + 1).as_bytes());
-    pdf.extend_from_slice(b"0000000000 65535 f \n");
-    for offset in &offsets {
-        pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
-    }
-    pdf.extend_from_slice(b"trailer\n");
-    pdf.extend_from_slice(&trailer);
-    pdf.extend_from_slice(format!("\nstartxref\n{start_xref}\n%%EOF\n").as_bytes());
-    pdf
+    let trailer = String::from_utf8(resolve(trailer.as_bytes()))
+        .expect("a trailer this fixture states is UTF-8");
+    pdf.finish(&references["catalog"], &trailer)
 }
 
-/// A zlib stream of stored (uncompressed) deflate blocks: the smallest honest `FlateDecode` of
-/// `data`, so a case can prove that compression is decoded before the model reads a stream.
+/// A zlib stream of `data`, so a case can prove that compression is decoded before the model reads
+/// a stream.
 fn flate(data: &[u8]) -> Vec<u8> {
-    /// The largest run one stored block may hold.
-    const BLOCK: usize = 65_535;
-    let chunks = data.chunks(BLOCK).collect::<Vec<_>>();
-    let mut out = vec![0x78, 0x01];
-    let mut block = |chunk: &[u8], last: bool| {
-        out.push(u8::from(last));
-        let length = u16::try_from(chunk.len()).expect("a stored block holds at most 65 535 bytes");
-        out.extend_from_slice(&length.to_le_bytes());
-        out.extend_from_slice(&(!length).to_le_bytes());
-        out.extend_from_slice(chunk);
-    };
-    if chunks.is_empty() {
-        block(&[], true);
-    }
-    for (index, chunk) in chunks.iter().enumerate() {
-        block(chunk, index + 1 == chunks.len());
-    }
-    out.extend_from_slice(&adler32(data).to_be_bytes());
-    out
-}
-
-/// The Adler-32 checksum a zlib stream ends with.
-fn adler32(data: &[u8]) -> u32 {
-    /// The largest prime below 65 536, which the checksum reduces by.
-    const BASE: u32 = 65_521;
-    let (mut low, mut high) = (1_u32, 0_u32);
-    for byte in data {
-        low = (low + u32::from(*byte)) % BASE;
-        high = (high + low) % BASE;
-    }
-    (high << 16) | low
+    use flate2::Compression;
+    use flate2::write::ZlibEncoder;
+    use std::io::Write as _;
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder
+        .write_all(data)
+        .expect("a zlib encoder accepts bytes");
+    encoder.finish().expect("the encoder finishes")
 }
 
 /// The document the tables vary, and every part a case may change. The default is one page that
@@ -170,8 +134,14 @@ struct Variant {
     samples: &'static str,
     /// Compress the image's samples.
     image_compressed: bool,
+    /// The annotation's `/Subtype`.
+    note_subtype: &'static str,
+    /// The annotation's `/Rect`, as written.
+    note_rect: &'static str,
     /// The annotation's `/Contents`.
     note: &'static str,
+    /// The image's `/Width` and `/Height`.
+    image_size: (&'static str, &'static str),
     title: &'static str,
     author: &'static str,
     subject: &'static str,
@@ -180,6 +150,8 @@ struct Variant {
     producer: &'static str,
     created: &'static str,
     modified: &'static str,
+    /// The form field's `/T`.
+    field_name: &'static str,
     /// The form field's `/FT`.
     field_type: &'static str,
     /// The form field's `/Ff`.
@@ -210,7 +182,10 @@ impl Default for Variant {
             drawing: " q 10 0 0 10 20 20 cm /Im1 Do Q 0 0 m 50 50 l S",
             samples: SAMPLES,
             image_compressed: false,
+            note_subtype: "/Text",
+            note_rect: "[10 10 40 40]",
             note: "A note",
+            image_size: ("4", "2"),
             title: "Report",
             author: "Ada",
             subject: "Sums",
@@ -219,6 +194,7 @@ impl Default for Variant {
             producer: "Kit 1.0",
             created: "D:20200101000000Z",
             modified: "D:20200101000000Z",
+            field_name: "(full.name)",
             field_type: "/Tx",
             field_flags: 0,
             field_value: "(Ada)",
@@ -275,8 +251,8 @@ fn objects_for(variant: &Variant) -> Vec<Object> {
     let mut image_entries = vec![
         ("Type", "/XObject".to_string()),
         ("Subtype", "/Image".to_string()),
-        ("Width", "4".to_string()),
-        ("Height", "2".to_string()),
+        ("Width", variant.image_size.0.to_string()),
+        ("Height", variant.image_size.1.to_string()),
         ("ColorSpace", "/DeviceRGB".to_string()),
         ("BitsPerComponent", "8".to_string()),
     ];
@@ -288,7 +264,7 @@ fn objects_for(variant: &Variant) -> Vec<Object> {
         ("Type", "/Annot".to_string()),
         ("Subtype", "/Widget".to_string()),
         ("Rect", "[0 0 10 10]".to_string()),
-        ("T", "(full.name)".to_string()),
+        ("T", variant.field_name.to_string()),
         ("FT", variant.field_type.to_string()),
         ("Ff", variant.field_flags.to_string()),
         ("V", variant.field_value.to_string()),
@@ -361,8 +337,8 @@ fn objects_for(variant: &Variant) -> Vec<Object> {
             dict(
                 &[
                     ("Type", "/Annot".to_string()),
-                    ("Subtype", "/Text".to_string()),
-                    ("Rect", "[10 10 40 40]".to_string()),
+                    ("Subtype", variant.note_subtype.to_string()),
+                    ("Rect", variant.note_rect.to_string()),
                     ("Contents", format!("({})", variant.note)),
                 ],
                 reversed,
@@ -459,6 +435,7 @@ fn the_model_reads_what_the_fixture_states() {
             "rotate": 0,
             "text": ["Hello page"],
             "images": [image_value()],
+            "forms": [],
             "vector": { "count": 3, "sha256": value["pages"][0]["vector"]["sha256"].clone() },
             "annots": [
                 { "subtype": "Text", "rect": [10.0, 10.0, 40.0, 40.0], "contents": "A note" },
@@ -475,6 +452,72 @@ fn the_model_reads_what_the_fixture_states() {
         json!([{ "name": "full.name", "kind": "text", "value": "Ada", "options": [] }])
     );
     assert_eq!(value["attachments"], json!(["report.txt"]));
+}
+
+/// A one-page PDF whose content paints the form XObject holding `drawing` — or, with `painted`
+/// false, holds the form in its resources without painting it.
+fn pdf_with_form(drawing: &str, painted: bool) -> Vec<u8> {
+    let content: &[u8] = if painted {
+        b"q 1 0 0 1 10 10 cm /Fm1 Do Q"
+    } else {
+        b"q Q"
+    };
+    let objects = vec![
+        Object::new("catalog", "<< /Type /Catalog /Pages {pages} >>"),
+        Object::new("pages", "<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+        Object::new(
+            "page",
+            "<< /Type /Page /Parent {pages} /MediaBox [0 0 200 100] \
+             /Resources << /XObject << /Fm1 {form} >> >> /Contents {content} >>",
+        ),
+        Object::new("content", stream(&[], content, false)),
+        Object::new(
+            "form",
+            stream(
+                &[
+                    ("Type", "/XObject".to_string()),
+                    ("Subtype", "/Form".to_string()),
+                    ("BBox", "[0 0 50 50]".to_string()),
+                ],
+                drawing.as_bytes(),
+                false,
+            ),
+        ),
+    ];
+    assemble(&objects, "")
+}
+
+/// A page that paints a form records the form by its content, so a flattened field's appearance
+/// is a difference from a page that simply dropped the field.
+#[test]
+fn a_painted_form_is_recorded_by_its_content() {
+    let first = canonical(&pdf_with_form("0 0 m 10 10 l S", true)).expect("a readable PDF");
+    assert_eq!(
+        first["pages"][0]["forms"].as_array().map(Vec::len),
+        Some(1),
+        "the page paints one form"
+    );
+    let same = canonical(&pdf_with_form("0 0 m 10 10 l S", true)).expect("a readable PDF");
+    assert!(
+        compare(&first, &same).is_same(),
+        "the same form content is the same document"
+    );
+    let other = canonical(&pdf_with_form("0 0 m 20 20 l S", true)).expect("a readable PDF");
+    assert!(
+        !compare(&first, &other).is_same(),
+        "a different form content is a difference"
+    );
+    // A form the page holds but does not paint is not a form the page shows.
+    let unpainted = canonical(&pdf_with_form("0 0 m 10 10 l S", false)).expect("a readable PDF");
+    assert_eq!(
+        unpainted["pages"][0]["forms"].as_array().map(Vec::len),
+        Some(0),
+        "an unpainted form is not recorded"
+    );
+    assert!(
+        !compare(&first, &unpainted).is_same(),
+        "a page that paints no form is a difference"
+    );
 }
 
 /// The model is deterministic: one file is one value, so canonicalising a document twice and
@@ -704,6 +747,27 @@ fn compared_cases() -> Vec<(&'static str, Vec<u8>)> {
             },
         ),
         (
+            "image dimensions",
+            Variant {
+                image_size: ("4", "3"),
+                ..Variant::default()
+            },
+        ),
+        (
+            "annotation subtype",
+            Variant {
+                note_subtype: "/Square",
+                ..Variant::default()
+            },
+        ),
+        (
+            "annotation rectangle",
+            Variant {
+                note_rect: "[20 20 50 50]",
+                ..Variant::default()
+            },
+        ),
+        (
             "annotation contents",
             Variant {
                 note: "Another note",
@@ -735,6 +799,13 @@ fn compared_cases() -> Vec<(&'static str, Vec<u8>)> {
             "info keywords",
             Variant {
                 keywords: "beta",
+                ..Variant::default()
+            },
+        ),
+        (
+            "form field name",
+            Variant {
+                field_name: "(other.name)",
                 ..Variant::default()
             },
         ),
@@ -957,4 +1028,18 @@ fn an_unreadable_pdf_is_an_error_and_never_a_value() {
             result.map(|value| value.to_string())
         );
     }
+}
+
+/// An image that claims to decode to more than the model allows is a refusal with a message, not an
+/// attempt to allocate what it claims. The charge happens before the decode, so the samples here
+/// need not be the size the dictionary states.
+#[test]
+fn an_image_claiming_too_much_is_refused_rather_than_decoded() {
+    let variant = Variant {
+        image_size: ("100000", "100000"),
+        ..Variant::default()
+    };
+    let error = canonical(&document(&variant)).expect_err("an image claiming 40 GB is refused");
+    let message = error.to_string();
+    assert!(message.contains("decode limit"), "{message}");
 }

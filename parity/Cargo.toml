@@ -5,18 +5,26 @@ edition = "2024"
 publish = false
 
 # The reader half of the reference is the product's own reader sources, compiled in place (see
-# `src/lib.rs`), so their unit tests are not built here.
+# `src/lib.rs`). Their unit tests are built and run with this crate's, so the reference's own
+# suite is part of the gate rather than left behind.
 [lib]
 name = "document_parity"
 path = "src/lib.rs"
-test = false
+test = true
 
 [build-dependencies]
 sha2 = "0.10"
 
+# The reader sources carry their own tests, which build only when this crate's library tests are
+# built; they use these two helpers the product's own test modules use.
+[dev-dependencies]
+flate2 = "1.1"
+tempfile = "3"
+
 [dependencies]
 anyhow = "1.0"
 hayro = "0.7"
+hayro-cmap = "0.1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 office_oxide = { version = "=0.1.13" }
 pdf-extract = { version = "0.12", default-features = false }
@@ -29,4 +37,8 @@ strum = { version = "0.27", features = ["derive"] }
 tokio = { version = "1.50", default-features = false, features = ["fs", "macros", "process", "rt-multi-thread", "sync", "time"] }
 tracing = "0.1"
 zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[target.'cfg(unix)'.dependencies]
+# The writer runner kills a timed-out program's whole process group, not just the direct child.
+libc = "0.2"
 

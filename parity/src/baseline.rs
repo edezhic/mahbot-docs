@@ -52,7 +52,12 @@ impl Baseline {
         let readings = run
             .readings
             .iter()
-            .map(|reading| (reading.document.clone(), reading.clone()))
+            .filter_map(|outcome| {
+                outcome
+                    .transcript
+                    .as_ref()
+                    .map(|transcript| (outcome.document.clone(), transcript.clone()))
+            })
             .collect();
         Self {
             note: NOTE.to_string(),

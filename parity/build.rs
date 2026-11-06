@@ -1,5 +1,6 @@
-//! Record the identity of the reader sources this binary compiles in place, so a baseline names
-//! the exact bytes that produced it rather than whatever the working tree holds when it is read.
+//! Record the identity of what produced a transcript: the reader sources this binary compiles in
+//! place, and the writer runner that reads and classifies the kit's answer. A baseline names the
+//! exact bytes that produced it rather than whatever the working tree holds when it is read.
 
 use sha2::{Digest, Sha256};
 use std::path::Path;
@@ -16,18 +17,40 @@ const SOURCES: &[&str] = &[
     "src/ooxml/numfmt.rs",
     "src/legacy.rs",
     "src/pdf_marks.rs",
+    // The host embeds `rules.json` with `include_str!`, so the reader's printed vocabulary is a
+    // function of it.
+    "assets/docgen/rules.json",
     "parity/src/host/docgen.rs",
     "parity/src/host/shutdown.rs",
     "parity/src/host/util/mod.rs",
     "parity/src/host/util/html.rs",
     "parity/src/host/util/media_target.rs",
+    // The adapter that turns the reader's outcome into the transcript: a change there changes
+    // every recorded reading without touching a reader source.
+    "parity/src/reference/reader.rs",
+    // The reader rasterises a page with the embedded font when a page carries no text, so a
+    // different face is a different reading.
+    "assets/docgen/NotoSans-Regular.ttf",
 ];
+
+/// The writer's runner: the code that reads and classifies the kit's result file. A change there
+/// changes every case transcript, so it is part of the writer's identity, as the reader's adapter
+/// is part of the reader's.
+const WRITER_RUNNER: &str = "parity/src/reference/writer.rs";
 
 fn main() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace = manifest
         .parent()
         .expect("the crate lives inside the workspace");
+    let runner = workspace.join(WRITER_RUNNER);
+    println!("cargo:rerun-if-changed={}", runner.display());
+    let bytes =
+        std::fs::read(&runner).unwrap_or_else(|e| panic!("cannot read {}: {e}", runner.display()));
+    println!(
+        "cargo:rustc-env=PARITY_WRITER_RUNNER={:x}",
+        Sha256::digest(&bytes)
+    );
     let mut combined = Sha256::new();
     let mut components = String::new();
     for source in SOURCES {
