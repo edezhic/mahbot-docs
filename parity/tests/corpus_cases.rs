@@ -8,7 +8,7 @@
 //! blamed on the operation.
 mod common;
 
-use document_parity::corpus::{Case, Document, Expect, reader_documents, writer_cases};
+use document_parity::corpus::{Case, Document, Expect, documents, reader_documents, writer_cases};
 use document_parity::engine::Family;
 use std::collections::{BTreeSet, HashSet};
 
@@ -202,11 +202,16 @@ fn every_document_a_case_carries_builds_to_bytes() {
         }
     }
     // The reader corpus is built by the reference run rather than by a case, so it is proved
-    // non-empty here as well.
+    // non-empty here as well — except the one input that exists to be empty.
     let documents: Vec<Document> = reader_documents();
     for document in documents {
+        let bytes = (document.build)();
+        if document.name == documents::EMPTY_FILE.name {
+            assert!(bytes.is_empty(), "the empty input is the empty one");
+            continue;
+        }
         assert!(
-            !(document.build)().is_empty(),
+            !bytes.is_empty(),
             "the reader document {} builds empty",
             document.name
         );

@@ -23,7 +23,11 @@ was not modified.
 | `NotoSans-Regular.ttf` | 569 208 bytes, the PDF font. Also used by the rasterizer as a fallback. A real copy of `document-engine/assets/NotoSans-Regular.ttf`; the harness compares the two by digest, so the kit and the engine draw with one face. |
 | `NotoSans-LICENSE.txt` | Font licence. |
 
-### `src/` — Rust side of document handling
+### `src/` — the product's Rust side, the reference the crate is compared against
+
+These are the product's own sources, copied verbatim. The reader half is no longer only here: it
+now lives in `document-engine/` as well, and `parity/src/reference_sources/` holds the byte-for-byte
+copies the harness compiles. This directory remains the reference those copies are checked against.
 
 | Path | What it is |
 |---|---|
@@ -36,7 +40,7 @@ was not modified.
 | `tools/document.rs` | Tool registration, argument schema, validation, request building, file delivery. 7 394 lines, about 45% of them tests (44 tests). |
 | `tools/read_document.rs` | The document branch of the shared `read` tool; called from `tools/read.rs` and from the CLI. |
 | `prompt/tool/document.md` | Tool description for the model, 8 036 bytes, 13 substitutions. |
-| `prompt/tool/read.md` | Shared with other readers: lines 13–25 (seven paragraphs about documents) and 31 of 32 substitutions are document-related. |
+| `prompt/tool/read.md` | Shared with other readers: lines 13–25 (seven paragraphs about documents) and 32 of its 33 substitutions are document-related. |
 
 ### `product-touchpoints/` — copies of shared product files, for reference only
 
@@ -46,9 +50,9 @@ place. Document code inside them:
 
 - `src/lib.rs` — module declarations: `document`, `docgen`, `ooxml`, `legacy`, `pdf_marks`, `reader_output`, `tools::document`, `tools::read_document`.
 - `src/agent/role.rs` — `assistant_core_tools` adds `DocumentTool` (admin and guest; custom roles inherit).
-- `src/cli/mod.rs` — the `document` command family (817–1010), 21 flag constants (1106–1321), and the `FAMILIES` entry in `CALL_STORE` (3337) that marks `document` as a producing family.
+- `src/cli/mod.rs` — the `document` command family (817–1010), 26 document flag constants (1106–1314) plus the shared `IMAGE_EDITS_FLAG` (1200) and `OUTPUT_DIR_FLAG` (1096), and the `FAMILIES` entry (820–825) whose `protocol` is `CALL_STORE`, marking `document` as a producing family.
 - `src/cli/instance.rs` — the instance-side executor of `read`; its tests use document fixtures.
-- `src/tools/read.rs` — `resolve_content_read`, 31 document placeholder substitutions, document routing.
+- `src/tools/read.rs` — `resolve_content_read`, 32 document placeholder substitutions, document routing.
 - `src/tools/rasterize.rs` — three references: `render_page_image` (439), `TEXT_FONT_DATA` (594), and the `multi_page_pdf` fixture (tests only).
 - `src/channels/enrichment.rs` — the incoming document-attachment branch: `handle_file`, `deliver_document_images`, `extracted_text_annotation`, the `convert_document_file` call; tests on document fixtures.
 - `src/logs.rs` — the `pdf_extract=error` directive in `DEFAULT_LOG_FILTER`, its paragraph and its test.
@@ -66,12 +70,16 @@ place. Document code inside them:
 
 ## `parity/` — the engine parity harness (new work, not copied from the product)
 
-A separate Rust crate that judges every later stage of the document-engine work. It drives the
-current writer (the JavaScript kit, through the product's request-and-result contract) and the
-current reader (the reader sources in `src/`, compiled in place behind a minimal host) over a
-corpus generated in code, compares each run with a recorded baseline by a declared canonical model
-per format, and checks each scenario's declared effect. See `parity/README.md` for the model, the
-engine boundary, the baseline and how to run it. Nothing in the product was changed to build it.
+A separate Rust crate that judges every stage of the document-engine work. It drives the current
+writer (the JavaScript kit, through the product's request-and-result contract) and either the
+product's own reader or the crate's, over a corpus generated in code, compares each run with a
+recorded baseline by a declared canonical model per format, and checks each scenario's declared
+effect. The product's reader sources are byte-for-byte copies under `parity/src/reference_sources/`,
+so nothing in this workspace can rewrite the product's sources and a divergence fails the gate. The
+default engine is the crate's reader against the reference writer; `--engine reference` is the
+recorder. Detection is recorded and compared beside every reading. See `parity/README.md` for the
+model, the engine boundary, the baseline and how to run it. Nothing in the product was changed to
+build it.
 
 ## `document-engine/` — the document engine crate (new work, not copied from the product)
 
@@ -79,19 +87,26 @@ The crate the product will depend on instead of its own document modules. It own
 nothing of the tool interface: reading (`detect`, `read`, `render_page`), operations (one
 `execute` call for the thirteen operations, returning the neutral outcome the harness speaks), and
 the vocabulary (`vocabulary.json` plus the embedded font; a mark the `rules` section states is read
-from there at load time, never copied). The harness depends on it; it depends on
-nothing in this workspace. `document-engine/VOCABULARY.md` states the vocabulary's boundary and the
-restatement scan's blind spots.
+from there at load time, never copied). The harness depends on it; it depends on nothing in this
+workspace.
 
-The reader's and the operations' implementations land in later stages; the surface, the outcome
-shape, the operation set, the artifact naming and the vocabulary are final. `read` already answers
-plain text, unsupported bytes, encrypted packages, oversized files and unreadable files; the
-document arms it has no decoder for answer `Reading::Unreadable` until then.
+The reading half has landed: whole-file content-first detection, every family the product reads
+(PDF, Word, Excel, PowerPoint and the legacy binary formats), the pictures, notes and unshown report,
+and the flags that tell a document with no text layer from one that could not be read. It applies
+no input-size bound and clamps no page size or scale a caller asked for; it never overwrites the
+file it reads. The writing half's implementation lands in a later stage; its surface, the outcome
+shape, the operation set and the artifact naming are final.
+
+The document builders live in the crate's `test_support`, the one home shared by the crate's tests
+and the harness. `tests/standalone.rs` builds and tests the crate in a temporary copy with no
+product sources present. `document-engine/VOCABULARY.md` states the vocabulary's boundary, who
+enforces each bound, and the restatement scan's reviewed lists and blind spots.
 
 `assets/docgen/NotoSans-Regular.ttf` is a real copy of `document-engine/assets/NotoSans-Regular.ttf`
 (the harness compares their digests), so the kit, the reference reader and the crate draw with one
-face on a checkout that does not preserve symlinks. The four kit sources are unchanged, so the
-committed bundle's provenance hash still holds.
+face; the harness copies its sources rather than linking them, so nothing in this workspace can
+rewrite the product's. The four kit sources are unchanged, so the committed bundle's provenance
+hash still holds.
 
 ## Two traps when moving this code
 

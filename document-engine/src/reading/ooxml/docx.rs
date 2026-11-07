@@ -1,0 +1,3879 @@
+//! The Word (`.docx`/`.docm`) reader: a WordprocessingML walk that keeps the layout,
+//! the tracked changes and the non-body parts a reader needs.
+//!
+//! [`super`] owns the ZIP plumbing and the other two OOXML families; this module is
+//! the whole Word half. The body, headers and footers, footnotes and endnotes and the
+//! comments all go through the same walker, so a marker means the same thing wherever
+//! it appears.
+//!
+//! Every label and mark this walk prints is listed once in the engine's vocabulary
+//! (`docx_marks`), the list the document kit refuses a `find` carrying one by, and
+//! `every_docx_mark_the_reader_writes_is_in_the_shared_list` checks this reader's own
+//! output against it. A chart's field labels (`Title:`, `Text:`, `Label:`) and the bare
+//! `Chart:` of a part naming no kind are deliberately not refusal patterns: they are
+//! ordinary words a document's own text can carry.
+//!
+//! # Invariants
+//!
+//! - **No panics of its own.** A reader error, an element nested past
+//!   [`max_element_depth`] or a part that will not parse degrades: the body makes the
+//!   package [`DocOutcome::Unreadable`] and every other part is skipped.
+//! - **Elements are matched on their local name** (namespace- and prefix-blind), so a
+//!   producer using a prefix other than `w:` still parses.
+//! - **One sink stack**: text lands in the innermost open sink, so a cell or a text box
+//!   renders into its own buffer and is placed into the enclosing flow as one block.
+//! - **The walk's bookkeeping is bounded rather than document-decided**: table geometry
+//!   is clamped to [`max_table_columns`], a field marker is built from the head of its
+//!   instruction, and a part is looked up by name rather than by scanning.
+
+use super::chart;
+use super::{
+    DocOutcome, Family, Relationship, SkippedImages, append_entity, attr, ensure_out_dir, part_dir,
+    read_relationships, read_zip_entry, related_part, relationship_targets, relationships,
+    rels_part_of, resolve_part, scan_elements, unopened_parts, unreadable, write_media_parts,
+};
+use crate::reading::output::{labeled_block, lines_of, mark, note, text_lines};
+use crate::support::{one_line, truncate};
+use quick_xml::Reader;
+use quick_xml::events::{BytesStart, Event};
+use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _;
+use std::io::{Cursor, Read, Seek};
+use std::path::Path;
+use std::rc::Rc;
+use zip::ZipArchive;
+
+/// A cell annotation without the parentheses the shared mark carries: a cell line wraps every
+/// annotation in one pair, so the mark's own outer pair is dropped here.
+fn cell_annotation(key: &str, values: &[(&str, &str)]) -> String {
+    let text = note(key, values);
+    text.strip_prefix('(')
+        .and_then(|inner| inner.strip_suffix(')'))
+        .unwrap_or(&text)
+        .to_owned()
+}
+
+/// Maximum element nesting the walk enters. The walk recurses — one stack frame per
+/// level — on a blocking thread with a small stack, so a crafted package must not
+/// be able to exhaust it.
+fn max_element_depth() -> usize {
+    crate::vocabulary::vocabulary().limits.xml_element_depth_max
+}
+
+/// The most columns a table may be laid out over: the geometry the document asks for
+/// decides how much the walk allocates per column, so it is clamped where a
+/// `w:gridSpan`/`w:gridBefore` is read and where a cell is placed.
+fn max_table_columns() -> usize {
+    crate::vocabulary::vocabulary()
+        .limits
+        .docx_table_columns_max
+}
+
+pub(crate) const DOCX_BODY_PART: &str = "word/document.xml";
+const DOCX_MEDIA_PREFIX: &str = "word/media/";
+const DOCX_CHARTS_PREFIX: &str = "word/charts/";
+/// SmartArt data parts. Word's reading does not reach them, where the PowerPoint one
+/// reads a slide's diagram through its data.
+const DOCX_DIAGRAMS_PREFIX: &str = "word/diagrams/";
+/// The objects a Word package embeds — an object's own bytes, never opened.
+const DOCX_EMBEDDINGS_PREFIX: &str = "word/embeddings/";
+
+/// The body's relationships: the notes and header/footer parts are named there.
+const DOCX_RELS_PART: &str = "word/_rels/document.xml.rels";
+
+/// The conventional styles part, used when the relationships name none.
+const DOCX_STYLES_PART: &str = "word/styles.xml";
+
+const DOCX_BASE: &str = "word/";
+
+/// The most `w:basedOn` links followed: a document-controlled chain must not decide
+/// how long the walk looks.
+fn max_style_chain() -> usize {
+    crate::vocabulary::vocabulary().limits.docx_style_chain_max
+}
+
+/// A field instruction is reported up to this length — a runaway instruction must not
+/// dominate the text.
+fn max_field_instruction_chars() -> usize {
+    crate::vocabulary::vocabulary()
+        .limits
+        .docx_field_instruction_chars_max
+}
+
+/// A link's address is reported up to this length — it is document-controlled.
+fn max_link_target_chars() -> usize {
+    crate::vocabulary::vocabulary().limits.link_target_chars_max
+}
+
+type Xml<'a> = Reader<&'a [u8]>;
+
+/// The walker's only fault: the part being read is not usable.
+struct Fault;
+
+/// One element reduced to what the walk needs: its local name and its attributes, both
+/// owned so nothing borrows the event buffer while the walker mutates itself.
+struct Elem {
+    name: Vec<u8>,
+    attrs: Vec<(Vec<u8>, String)>,
+}
+
+impl Elem {
+    /// The element with every attribute name's prefix stripped and every value unescaped.
+    /// An unreadable value reads as empty rather than costing the part.
+    fn of(event: &BytesStart<'_>) -> Self {
+        Self {
+            name: event.local_name().as_ref().to_vec(),
+            attrs: event
+                .attributes()
+                .with_checks(false)
+                .flatten()
+                .map(|attribute| {
+                    (
+                        attribute.key.local_name().as_ref().to_vec(),
+                        attribute
+                            .unescape_value()
+                            .map(std::borrow::Cow::into_owned)
+                            .unwrap_or_default(),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    fn attr(&self, name: &str) -> Option<&str> {
+        self.attrs
+            .iter()
+            .find(|(key, _)| key.as_slice() == name.as_bytes())
+            .map(|(_, value)| value.as_str())
+    }
+}
+
+/// One XML event with every borrow resolved.
+enum Ev {
+    Start(Elem),
+    Empty(Elem),
+    /// Character data, with entity references already resolved.
+    Text(String),
+    End,
+    Eof,
+    /// An event that contributes nothing (CDATA, comments, declarations).
+    Skip,
+    /// The part can no longer be read.
+    Fault,
+}
+
+/// Read the next event, resolving text, entity references and errors into owned values.
+fn next_event(reader: &mut Xml<'_>, buffer: &mut Vec<u8>) -> Ev {
+    match reader.read_event_into(buffer) {
+        Ok(Event::Start(event)) => Ev::Start(Elem::of(&event)),
+        Ok(Event::Empty(event)) => Ev::Empty(Elem::of(&event)),
+        Ok(Event::End(_)) => Ev::End,
+        // A character that will not decode costs that text, not the part — the
+        // same bargain the run text made before this walker existed.
+        Ok(Event::Text(event)) => match event.xml10_content() {
+            Ok(text) => Ev::Text(text.into_owned()),
+            Err(_) => Ev::Skip,
+        },
+        Ok(Event::GeneralRef(reference)) => {
+            let mut text = String::new();
+            append_entity(&mut text, &reference);
+            Ev::Text(text)
+        }
+        Ok(Event::Eof) => Ev::Eof,
+        Ok(_) => Ev::Skip,
+        Err(_) => Ev::Fault,
+    }
+}
+
+/// Which dispatch table [`Word::content`] uses for a container's children.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Ctx {
+    Flow,
+    ParagraphProps,
+    /// `w:pPr/w:rPr` — the paragraph mark's own formatting.
+    MarkProps,
+    RunProps,
+    TableProps,
+    RowProps,
+    CellProps,
+    SectionProps,
+    /// An unknown child of a property container: it is not body text, and
+    /// recursing into it as one would turn `w:tabs/w:tab` into a tab.
+    Ignored,
+}
+
+/// One rendered block: its text and the chart parts whose content that text shows. A
+/// block placed into another carries them; one the walk drops takes them with it, so a
+/// chart never leaves both the reading and the report.
+#[derive(Default)]
+struct Sink {
+    text: String,
+    charts: Vec<String>,
+}
+
+/// One open `w:p`: the markers printed at its end and the heading it is given.
+#[derive(Default)]
+struct Para {
+    marks: Vec<&'static str>,
+    /// The `w:outlineLvl` the paragraph states, clamped to 0..=9 — 9 is the schema's body
+    /// text, which overrides what its style says.
+    outline: Option<usize>,
+    style: Option<String>,
+}
+
+struct Word {
+    /// The relationships of the part being walked: relationship id -> the part it targets.
+    /// One map, not a scan per reference, reset to each part's own list on entry.
+    rel_targets: HashMap<String, String>,
+    /// The directory the part sits in: relationship targets and chart references resolve
+    /// against it.
+    base: String,
+    footnotes: Notes,
+    endnotes: Notes,
+    comments: Notes,
+    /// The styles part, read once: a style id names a heading through it.
+    styles: Styles,
+    /// Text sinks; text goes to the last one, and so do the chart parts it shows.
+    buffers: Vec<Sink>,
+    /// The open `w:p`s, innermost last, with their end markers and headings.
+    paras: Vec<Para>,
+    /// Open tables, innermost last, so a nested table works.
+    tables: Vec<Table>,
+    /// Open cells, innermost last.
+    cells: Vec<Cell>,
+    /// Open fields, innermost last.
+    fields: Vec<Field>,
+    /// Comment ids whose range was opened in this part; a range does not run between parts.
+    comment_ranges: HashSet<String>,
+    /// Every chart part the package holds, read once so a chart prints where it sits.
+    charts: HashMap<String, chart::ChartRead>,
+    /// The chart parts already printed in place: the package's census leaves them out.
+    described: HashSet<String>,
+    /// Whether the run's `w:rPr` being read carries an `rPrChange`.
+    run_revised: bool,
+    /// Header and footer parts the body's section properties reference, with their variants.
+    headers: PartRefs,
+    footers: PartRefs,
+    /// Whether section properties are collected — the body part only.
+    collect_sections: bool,
+    /// How many `w:txbxContent` blocks are open.
+    text_boxes: usize,
+    /// How many tables the package opened, and how many had no rows and were not rendered: a
+    /// `Table N:` label counts their difference, so labels are unique across the package.
+    tables_opened: usize,
+    tables_empty: usize,
+    /// Whether the walk in progress is rendered: a duplicate copy the walk skips contributes
+    /// no text, raises no marker and counts no revision.
+    counting: bool,
+    /// The tracked changes seen, for the summary line.
+    revisions: Revisions,
+}
+
+impl Word {
+    /// A walker over the parts `rels` names, with those parts and the chart parts already read.
+    fn new<R: Read + Seek>(
+        rels: &[Relationship],
+        archive: &mut ZipArchive<R>,
+        charts: HashMap<String, chart::ChartRead>,
+    ) -> Self {
+        // The notes parts are named by relationship kind, so each is resolved
+        // from the list before the list becomes the id lookup the walk needs.
+        let footnotes_part = notes_part(rels, NoteKind::Footnote);
+        let endnotes_part = notes_part(rels, NoteKind::Endnote);
+        let comments_part = notes_part(rels, NoteKind::Comment);
+        Self {
+            rel_targets: relationship_targets(rels),
+            base: DOCX_BASE.to_owned(),
+            footnotes: Notes::load(NoteKind::Footnote, &footnotes_part, archive),
+            endnotes: Notes::load(NoteKind::Endnote, &endnotes_part, archive),
+            comments: Notes::load(NoteKind::Comment, &comments_part, archive),
+            styles: Styles::load(rels, archive),
+            buffers: Vec::new(),
+            paras: Vec::new(),
+            tables: Vec::new(),
+            cells: Vec::new(),
+            fields: Vec::new(),
+            comment_ranges: HashSet::new(),
+            charts,
+            described: HashSet::new(),
+            run_revised: false,
+            headers: PartRefs::default(),
+            footers: PartRefs::default(),
+            collect_sections: false,
+            text_boxes: 0,
+            tables_opened: 0,
+            tables_empty: 0,
+            counting: true,
+            revisions: Revisions::default(),
+        }
+    }
+
+    fn notes(&self, kind: NoteKind) -> &Notes {
+        match kind {
+            NoteKind::Footnote => &self.footnotes,
+            NoteKind::Endnote => &self.endnotes,
+            NoteKind::Comment => &self.comments,
+        }
+    }
+
+    fn notes_mut(&mut self, kind: NoteKind) -> &mut Notes {
+        match kind {
+            NoteKind::Footnote => &mut self.footnotes,
+            NoteKind::Endnote => &mut self.endnotes,
+            NoteKind::Comment => &mut self.comments,
+        }
+    }
+
+    fn rel(&self, id: &str) -> Option<&str> {
+        self.rel_targets.get(id).map(String::as_str)
+    }
+
+    fn push_str(&mut self, s: &str) {
+        if let Some(sink) = self.buffers.last_mut() {
+            sink.text.push_str(s);
+        }
+    }
+
+    /// End the current line: a newline unless the sink is empty or already ends with one.
+    fn end_line(&mut self) {
+        if let Some(sink) = self.buffers.last_mut()
+            && !sink.text.is_empty()
+            && !sink.text.ends_with('\n')
+        {
+            sink.text.push('\n');
+        }
+    }
+
+    /// Append a nested rendered block on a line of its own, carrying the chart parts it
+    /// shows into the enclosing sink.
+    fn block(&mut self, text: &str, charts: Vec<String>) {
+        self.end_line();
+        self.push_str(text);
+        self.end_line();
+        if let Some(sink) = self.buffers.last_mut() {
+            sink.charts.extend(charts);
+        }
+    }
+
+    /// Append run text. Text between a field's `begin` and its `separate` is that field's
+    /// instruction, which the marker reports instead; the field holds it until it closes, so
+    /// a field that never closes cannot swallow the rest of the flow.
+    fn push_text(&mut self, text: &str) {
+        if let Some(field) = self.fields.last_mut()
+            && field.pending
+        {
+            field.held.push_str(text);
+            return;
+        }
+        self.push_str(text);
+    }
+
+    /// Count one element as a tracked change, unless the walk is a duplicate copy.
+    fn record(&mut self, elem: &Elem) {
+        if self.counting {
+            self.revisions.record(elem);
+        }
+    }
+
+    /// Walk the body part, whose own content is the answer. The body's relationships are the
+    /// package's, set when the walker was built.
+    fn body(&mut self, xml: &[u8]) -> Option<String> {
+        let sink = self.read_part(xml, true).ok()?;
+        self.described.extend(sink.charts);
+        Some(sink.text)
+    }
+
+    /// Enter the story part `part`: its directory and relationship lookup are set together,
+    /// so a reference in it resolves the way that part's own relationships spell it.
+    fn enter_story_part<R: Read + Seek>(&mut self, archive: &mut ZipArchive<R>, part: &str) {
+        let rels = read_relationships(archive, &rels_part_of(part)).unwrap_or_default();
+        part_dir(part).clone_into(&mut self.base);
+        self.rel_targets = relationship_targets(&rels);
+    }
+
+    fn read_part(&mut self, xml: &[u8], collect_sections: bool) -> Result<Sink, Fault> {
+        self.reset_part();
+        self.collect_sections = collect_sections;
+        let mut reader = Reader::from_reader(xml);
+        // The part's own top level is a block like any other: a field it left open is
+        // reported at its end.
+        let result = self.render_block(&mut reader, 0);
+        self.collect_sections = false;
+        result
+    }
+
+    /// Drop what the part read left open: its tables, paragraph marks, fields and comment
+    /// ranges belong to that part's rendering.
+    fn reset_part(&mut self) {
+        self.paras.clear();
+        self.tables.clear();
+        self.cells.clear();
+        self.fields.clear();
+        self.comment_ranges.clear();
+        self.text_boxes = 0;
+    }
+
+    /// Read a container's children until the element's matching `End`.
+    fn content(&mut self, reader: &mut Xml<'_>, level: usize, ctx: Ctx) -> Result<(), Fault> {
+        if level >= max_element_depth() {
+            return Err(Fault);
+        }
+        let mut buffer = Vec::new();
+        loop {
+            match next_event(reader, &mut buffer) {
+                Ev::Start(elem) => {
+                    self.record(&elem);
+                    self.element(reader, level + 1, ctx, &elem, false)?;
+                }
+                Ev::Empty(elem) => {
+                    self.record(&elem);
+                    self.element(reader, level + 1, ctx, &elem, true)?;
+                }
+                Ev::End | Ev::Eof => return Ok(()),
+                Ev::Fault => return Err(Fault),
+                // Character data belongs to `w:t`/`w:delText`/`w:instrText` alone.
+                Ev::Text(_) | Ev::Skip => {}
+            }
+            buffer.clear();
+        }
+    }
+
+    fn element(
+        &mut self,
+        reader: &mut Xml<'_>,
+        level: usize,
+        ctx: Ctx,
+        elem: &Elem,
+        empty: bool,
+    ) -> Result<(), Fault> {
+        // A property change is a formatting revision, and most also raise the marker of the
+        // thing whose formatting changed.
+        if is_property_change(&elem.name) {
+            self.change_marker(ctx, &elem.name);
+            return self.ignored(reader, level, empty);
+        }
+        match ctx {
+            Ctx::Ignored | Ctx::RunProps | Ctx::TableProps => self.ignored(reader, level, empty),
+            Ctx::Flow => self.body_element(reader, level, elem, empty),
+            Ctx::ParagraphProps => self.paragraph_props(reader, level, elem, empty),
+            Ctx::MarkProps => self.mark_props(reader, level, elem, empty),
+            Ctx::RowProps => self.row_props(reader, level, elem, empty),
+            Ctx::CellProps => self.cell_props(reader, level, elem, empty),
+            Ctx::SectionProps => self.section_props(reader, level, elem, empty),
+        }
+    }
+
+    fn ignored(&mut self, reader: &mut Xml<'_>, level: usize, empty: bool) -> Result<(), Fault> {
+        if empty {
+            Ok(())
+        } else {
+            self.content(reader, level + 1, Ctx::Ignored)
+        }
+    }
+
+    /// Consume content the walk does not render — the duplicate half of a text box, or a construct
+    /// read only to be dropped.
+    fn discarded(&mut self, reader: &mut Xml<'_>, level: usize, empty: bool) -> Result<(), Fault> {
+        let counting = self.counting;
+        self.counting = false;
+        let result = self.ignored(reader, level, empty);
+        self.counting = counting;
+        result
+    }
+
+    fn flow(&mut self, reader: &mut Xml<'_>, level: usize, empty: bool) -> Result<(), Fault> {
+        if empty {
+            Ok(())
+        } else {
+            self.content(reader, level + 1, Ctx::Flow)
+        }
+    }
+
+    /// One `w:p`: its content, the heading at the start of the paragraph's own line, then its
+    /// paragraph-mark markers and the line end. An empty element is already over — reading a
+    /// matching `End` would take the enclosing element's.
+    fn paragraph(&mut self, reader: &mut Xml<'_>, level: usize, empty: bool) -> Result<(), Fault> {
+        if empty {
+            self.end_line();
+            return Ok(());
+        }
+        let start = self.buffers.last().map_or(0, |sink| sink.text.len());
+        self.paras.push(Para::default());
+        let result = self.content(reader, level + 1, Ctx::Flow);
+        let para = self.paras.pop().unwrap_or_default();
+        // The mark opens the first line the paragraph really printed — the line a block it
+        // holds opens, or the text after a leading break — and a heading that printed only
+        // whitespace gets none.
+        if let Some(heading) = self.heading_level(&para)
+            && let Some(sink) = self.buffers.last_mut().map(|sink| &mut sink.text)
+            && let Some(at) = sink[start..]
+                .find(|character: char| !character.is_whitespace())
+                .map(|offset| start + offset)
+        {
+            sink.insert_str(at, &note("docx_heading", &[("n", &heading.to_string())]));
+        }
+        for mark in para.marks {
+            self.push_str(mark);
+        }
+        self.end_line();
+        result
+    }
+
+    /// The heading level `para` states: its own `w:outlineLvl` — where the schema's body-text
+    /// value suppresses the style entirely — or else the level its style chain names.
+    fn heading_level(&self, para: &Para) -> Option<usize> {
+        match para.outline {
+            Some(outline) => outline_heading(outline),
+            None => self.styles.level(para.style.as_deref()),
+        }
+    }
+
+    /// The character data of a `w:t`/`w:delText`; a `w:t` inside `w:del` is deleted text.
+    fn run_text(&mut self, reader: &mut Xml<'_>, level: usize) -> Result<(), Fault> {
+        let mut buffer = Vec::new();
+        loop {
+            match next_event(reader, &mut buffer) {
+                Ev::Text(text) => self.push_text(&text),
+                Ev::Start(elem) => {
+                    self.record(&elem);
+                    self.ignored(reader, level, false)?;
+                }
+                Ev::Empty(elem) => self.record(&elem),
+                Ev::End | Ev::Eof => return Ok(()),
+                Ev::Fault => return Err(Fault),
+                Ev::Skip => {}
+            }
+            buffer.clear();
+        }
+    }
+
+    fn body_element(
+        &mut self,
+        reader: &mut Xml<'_>,
+        level: usize,
+        elem: &Elem,
+        empty: bool,
+    ) -> Result<(), Fault> {
+        match elem.name.as_slice() {
+            b"p" => self.paragraph(reader, level, empty),
+            b"t" | b"delText" => {
+                if empty {
+                    Ok(())
+                } else {
+                    self.run_text(reader, level)
+                }
+            }
+            b"tab" | b"br" | b"cr" | b"noBreakHyphen" | b"softHyphen" | b"sym" => {
+                self.leaf_text(elem);
+                self.ignored(reader, level, empty)
+            }
+            b"tbl" => self.table(reader, level, empty),
+            b"tr" if !self.tables.is_empty() => self.row(reader, level, empty),
+            b"tc" if !self.tables.is_empty() => self.cell(reader, level, empty),
+            b"pPr" => self.props(reader, level, Ctx::ParagraphProps, empty),
+            b"rPr" => self.run_props(reader, level, empty),
+            b"tblPr" => self.props(reader, level, Ctx::TableProps, empty),
+            b"tblGrid" => self.table_grid(reader, level, empty),
+            // The row's own properties, and the table-property exceptions Word writes beside
+            // `w:trPr` rather than inside it: the row reports both.
+            b"trPr" | b"tblPrEx" => self.props(reader, level, Ctx::RowProps, empty),
+            b"tcPr" => self.props(reader, level, Ctx::CellProps, empty),
+            b"sectPr" => self.props(reader, level, Ctx::SectionProps, empty),
+            b"ins" | b"del" | b"moveTo" | b"moveFrom" => self.revision(reader, level, elem, empty),
+            b"footnoteReference" => {
+                self.note_reference(elem, NoteKind::Footnote);
+                self.ignored(reader, level, empty)
+            }
+            b"endnoteReference" => {
+                self.note_reference(elem, NoteKind::Endnote);
+                self.ignored(reader, level, empty)
+            }
+            b"commentRangeStart" | b"commentRangeEnd" | b"commentReference" => {
+                self.comment_marker(elem);
+                self.ignored(reader, level, empty)
+            }
+            b"fldSimple" => self.simple_field(reader, level, elem, empty),
+            b"fldChar" => {
+                self.field_char(elem);
+                self.ignored(reader, level, empty)
+            }
+            b"instrText" => self.instr_text(reader, level, empty),
+            // `w:delInstrText` is part of a deleted field instruction and `w:numberingChange`
+            // names a list change: neither is text, and the `w:sdt` placeholder properties hold
+            // no content either.
+            b"delInstrText" | b"numberingChange" | b"sdtPr" | b"sdtEndPr" => {
+                self.ignored(reader, level, empty)
+            }
+            b"txbxContent" => self.text_box(reader, level, empty),
+            b"hyperlink" => self.hyperlink(reader, level, elem, empty),
+            b"chart" => {
+                self.chart(elem);
+                self.ignored(reader, level, empty)
+            }
+            b"AlternateContent" => self.alternate_content(reader, level, empty),
+            // Everything else is a plain container (`w:document`, `w:body`, `w:r`, `w:smartTag`,
+            // `w:sdt`, `w:drawing`, `w:pict`, the bookmarks, …): its children are body content.
+            _ => self.flow(reader, level, empty),
+        }
+    }
+
+    /// The text a leaf run element contributes: `w:softHyphen` and `w:sym` are formatting marks
+    /// with nothing readable, a tab is a tab, and a line break is a line end.
+    fn leaf_text(&mut self, elem: &Elem) {
+        match elem.name.as_slice() {
+            b"tab" => self.push_str("\t"),
+            b"br" | b"cr" => self.end_line(),
+            b"noBreakHyphen" => self.push_str("-"),
+            _ => {}
+        }
+    }
+
+    /// `w:hyperlink`: the link's content as flow, with the address it points at shown after the
+    /// link's own text. A picture-only link still shows its address — the link is a way to reach
+    /// something — and one whose address cannot be established reads as its text alone.
+    fn hyperlink(
+        &mut self,
+        reader: &mut Xml<'_>,
+        level: usize,
+        elem: &Elem,
+        empty: bool,
+    ) -> Result<(), Fault> {
+        let address = self.link_address(elem);
+        let start = self.buffers.last().map_or(0, |sink| sink.text.len());
+        let result = self.flow(reader, level, empty);
+        if let (Some(address), Some(sink)) =
+            (address, self.buffers.last_mut().map(|sink| &mut sink.text))
+        {
+            // The mark opens the line after the link's content: a space after its text, and a
+            // line of its own after a block the link holds. A link the flow printed nothing in
+            // front of needs neither.
+            let spans_lines = sink.len() > start && sink[start..].contains('\n');
+            if !sink.is_empty() && !sink.ends_with('\n') {
+                sink.push(if spans_lines { '\n' } else { ' ' });
+            }
+            let link = crate::vocabulary::vocabulary()
+                .marks
+                .format("docx_link", &[("address", address.as_str())]);
+            let _ = write!(sink, "{link}");
+        }
+        result
+    }
+
+    /// The address a `w:hyperlink` points at: the relationship target as the document spells it —
+    /// never resolved against the part's directory, which would mangle an external URL — plus the
+    /// anchor Word appends when a link names both. An anchor alone is a link inside the document; a
+    /// relationship id the part's own `.rels` does not establish names no address at all, not
+    /// `internal` either. The relationships are the walked part's, rebound by
+    /// [`Self::enter_story_part`].
+    fn link_address(&self, elem: &Elem) -> Option<String> {
+        let anchor = elem
+            .attr("anchor")
+            .map(str::trim)
+            .filter(|anchor| !anchor.is_empty())
+            .map(|anchor| one_line(anchor.to_owned()));
+        let Some(id) = elem.attr("id") else {
+            return anchor.map(|_| "internal".to_owned());
+        };
+        let target = self.rel(id).map(str::trim)?;
+        if target.is_empty() {
+            return None;
+        }
+        let mut address = one_line(target.to_owned());
+        if let Some(anchor) = anchor {
+            let _ = write!(address, "#{anchor}");
+        }
+        Some(truncate(&address, max_link_target_chars()))
+    }
+
+    /// The chart a `c:chart` reference names, printed where the drawing holding it sits — in the
+    /// body, a header or a footer, or a note. The reference resolves through the walked part's
+    /// relationships and directory, so a chart any of them shows is described.
+    fn chart(&mut self, elem: &Elem) {
+        let Some(part) = elem
+            .attr("id")
+            .and_then(|id| self.rel(id))
+            .map(|target| resolve_part(&self.base, target))
+        else {
+            return;
+        };
+        let (lines, described) = chart::lines(&self.charts, std::slice::from_ref(&part));
+        if !lines.is_empty() {
+            self.block(&lines.join("\n"), described);
+        }
+    }
+
+    fn props(
+        &mut self,
+        reader: &mut Xml<'_>,
+        level: usize,
+        ctx: Ctx,
+        empty: bool,
+    ) -> Result<(), Fault> {
+        if empty {
+            Ok(())
+        } else {
+            self.content(reader, level + 1, ctx)
+        }
+    }
+
+    /// `w:pPr`: the paragraph mark's formatting, the heading the paragraph states, and the
+    /// section properties a paragraph can carry.
+    fn paragraph_props(
+        &mut self,
+        reader: &mut Xml<'_>,
+        level: usize,
+        elem: &Elem,
+        empty: bool,
+    ) -> Result<(), Fault> {
+        match elem.name.as_slice() {
+            b"pStyle" => {
+                if let Some(para) = self.paras.last_mut() {
+                    para.style = elem
+                        .attr("val")
+                        .map(str::trim)
+                        .filter(|style| !style.is_empty())
+                        .map(str::to_owned);
+                }
+            }
+            b"outlineLvl" => {
+                if let Some(para) = self.paras.last_mut() {
+                    para.outline = outline_level(elem);
+                }
+            }
+            b"rPr" => return self.props(reader, level, Ctx::MarkProps, empty),
+            b"sectPr" => return self.props(reader, level, Ctx::SectionProps, empty),
+            _ => {}
+        }
+        self.ignored(reader, level, empty)
+    }
+
+    /// `w:pPr/w:rPr`: an insertion or deletion here is the paragraph mark's own, marked at the
+    /// paragraph's end.
+    fn mark_props(
+        &mut self,
+        reader: &mut Xml<'_>,
+        level: usize,
+        elem: &Elem,
+        empty: bool,
+    ) -> Result<(), Fault> {
+        match elem.name.as_slice() {
+            b"ins" => self.para_mark(mark("docx_para_mark_ins")),
+            b"del" => self.para_mark(mark("docx_para_mark_del")),
+            b"moveTo" => self.para_mark(mark("docx_para_mark_moved_here")),
+            b"moveFrom" => self.para_mark(mark("docx_para_mark_moved_away")),
+            _ => {}
+        }
+        self.ignored(reader, level, empty)
+    }
+
+    /// A run's own `w:rPr`: an `rPrChange` inside it marks the run's formatting just before its
+    /// text.
+    fn run_props(&mut self, reader: &mut Xml<'_>, level: usize, empty: bool) -> Result<(), Fault> {
+        self.run_revised = false;
+        let result = self.props(reader, level, Ctx::RunProps, empty);
+        if self.run_revised {
+            self.push_str(mark("docx_format_run"));
+        }
+        result
+    }
+
+    /// `w:trPr`: the row's own revision, and the `w:gridBefore` skipping grid columns.
+    fn row_props(
+        &mut self,
+        reader: &mut Xml<'_>,
+        level: usize,
+        elem: &Elem,
+        empty: bool,
+    ) -> Result<(), Fault> {
+        match elem.name.as_slice() {
+            b"ins" | b"moveTo" => self.row_mark(Mark::Inserted),
+            b"del" | b"moveFrom" => self.row_mark(Mark::Deleted),
+            b"gridBefore" => {
+                if let Some(table) = self.tables.last_mut() {
+                    table.column = table
+                        .column
+                        .saturating_add(numeric_attr(elem, max_table_columns()))
+                        .min(max_table_columns());
+                }
+            }
+            // Neither schema gives a row's mark properties (`w:rPr` is a child of `w:pPr` alone),
+            // so a stray producer's `w:rPr` here is read and dropped whole.
+            b"rPr" => return self.discarded(reader, level, empty),
+            _ => {}
+        }
+        self.ignored(reader, level, empty)
+    }
+
+    fn cell_props(
+        &mut self,
+        reader: &mut Xml<'_>,
+        level: usize,
+        elem: &Elem,
+        empty: bool,
+    ) -> Result<(), Fault> {
+        let restart = elem.attr("val") == Some("restart");
+        match elem.name.as_slice() {
+            b"gridSpan" => {
+                if let Some(cell) = self.cells.last_mut() {
+                    cell.span = numeric_attr(elem, max_table_columns()).max(1);
+                }
+            }
+            b"vMerge" => {
+                if let Some(cell) = self.cells.last_mut() {
+                    cell.merge = if restart {
+                        Merge::Restart
+                    } else {
+                        Merge::Continue
+                    };
+                }
+            }
+            b"hMerge" => {
+                if let Some(cell) = self.cells.last_mut() {
+                    cell.hmerge = if restart {
+                        Merge::Restart
+                    } else {
+                        Merge::Continue
+                    };
+                }
+            }
+            b"cellIns" => self.cell_mark(Mark::Inserted),
+            b"cellDel" => self.cell_mark(Mark::Deleted),
+            b"cellMerge" => self.cell_mark(Mark::MergeRevised),
+            _ => {}
+        }
+        self.ignored(reader, level, empty)
+    }
+
+    /// `w:sectPr`: record the header/footer parts it names, and mark a `sectPrChange`. A section
+    /// inside a text box is the box's own layout, so it names no parts.
+    fn section_props(
+        &mut self,
+        reader: &mut Xml<'_>,
+        level: usize,
+        elem: &Elem,
+        empty: bool,
+    ) -> Result<(), Fault> {
+        match elem.name.as_slice() {
+            b"headerReference" => self.reference_part(elem, true),
+            b"footerReference" => self.reference_part(elem, false),
+            _ => {}
+        }
+        self.ignored(reader, level, empty)
+    }
+
+    /// The marker a property change raises on the thing whose formatting changed. A copy the walk
+    /// is not rendering raises none.
+    fn change_marker(&mut self, ctx: Ctx, name: &[u8]) {
+        if !self.counting {
+            return;
+        }
+        match ctx {
+            Ctx::RunProps => self.run_revised = true,
+            Ctx::MarkProps | Ctx::ParagraphProps => self.para_mark(mark("docx_format_paragraph")),
+            // A paragraph carries its section's mark at its own end; the document's last section
+            // is carried by no paragraph.
+            Ctx::SectionProps => self.section_mark(),
+            Ctx::TableProps => self.table_mark(),
+            Ctx::RowProps => self.row_mark(Mark::FormatRevised),
+            Ctx::CellProps => self.cell_mark(Mark::FormatRevised),
+            // The one property change a table holds outside `w:tblPr`: a `w:tblGridChange`
+            // written beside its `w:tblGrid` is still that table's.
+            _ if name == b"tblGridChange" => self.table_mark(),
+            _ => {}
+        }
+    }
+
+    fn table_mark(&mut self) {
+        if let Some(table) = self.tables.last_mut() {
+            table.format_revised = true;
+        }
+    }
+
+    /// The marker a section's revision carries: at the end of the paragraph whose properties hold
+    /// the section, or — for the document's own last section — in the flow where it was read.
+    fn section_mark(&mut self) {
+        if self.paras.is_empty() {
+            self.push_str(mark("docx_format_section"));
+        } else {
+            self.para_mark(mark("docx_format_section"));
+        }
+    }
+
+    /// The marker a paragraph mark carries, at the end of the paragraph being read.
+    fn para_mark(&mut self, mark: &'static str) {
+        if let Some(para) = self.paras.last_mut() {
+            para.marks.push(mark);
+        }
+    }
+
+    fn row_mark(&mut self, mark: Mark) {
+        if let Some(table) = self.tables.last_mut() {
+            table.row_marks.push(mark);
+        }
+    }
+
+    fn cell_mark(&mut self, mark: Mark) {
+        if let Some(cell) = self.cells.last_mut() {
+            cell.marks.push(mark);
+        }
+    }
+
+    /// One `w:tbl`: buffered in its own record and appended to the enclosing sink when it closes.
+    fn table(&mut self, reader: &mut Xml<'_>, level: usize, empty: bool) -> Result<(), Fault> {
+        if empty {
+            return Ok(());
+        }
+        // The number is taken when the table opens, so a nested table is numbered after the one
+        // holding it.
+        self.tables.push(Table {
+            number: self.tables_opened + 1 - self.tables_empty,
+            ..Table::default()
+        });
+        self.tables_opened += 1;
+        let result = self.content(reader, level + 1, Ctx::Flow);
+        self.finish_table();
+        result
+    }
+
+    /// Close the innermost table: render its label and rows and append them with the chart parts
+    /// they show. A table with no rows has nothing to say, and its number passes on.
+    fn finish_table(&mut self) {
+        let Some(table) = self.tables.pop() else {
+            return;
+        };
+        if table.rows.is_empty() {
+            self.tables_empty += 1;
+            return;
+        }
+        let columns = table.columns.max(table.grid);
+        let rows = plural(table.rows.len(), mark("docx_table_row_noun"));
+        let columns = plural(columns, mark("docx_table_column_noun"));
+        let mut text = if table.format_revised {
+            note(
+                "block_table_summary_revised",
+                &[
+                    ("n", &table.number.to_string()),
+                    ("rows", &rows),
+                    ("columns", &columns),
+                ],
+            )
+        } else {
+            note(
+                "block_table_summary",
+                &[
+                    ("n", &table.number.to_string()),
+                    ("rows", &rows),
+                    ("columns", &columns),
+                ],
+            )
+        };
+        for row in &table.rows {
+            text.push('\n');
+            text.push_str(row);
+        }
+        self.block(&text, table.charts);
+    }
+
+    fn table_grid(&mut self, reader: &mut Xml<'_>, level: usize, empty: bool) -> Result<(), Fault> {
+        if empty {
+            return Ok(());
+        }
+        let mut buffer = Vec::new();
+        let mut columns = 0;
+        loop {
+            match next_event(reader, &mut buffer) {
+                Ev::Start(elem) => {
+                    self.record(&elem);
+                    if self.grid_child(&elem) {
+                        columns += 1;
+                    }
+                    self.ignored(reader, level + 1, false)?;
+                }
+                Ev::Empty(elem) => {
+                    self.record(&elem);
+                    if self.grid_child(&elem) {
+                        columns += 1;
+                    }
+                }
+                Ev::End | Ev::Eof => break,
+                Ev::Fault => return Err(Fault),
+                Ev::Text(_) | Ev::Skip => {}
+            }
+            buffer.clear();
+        }
+        if let Some(table) = self.tables.last_mut() {
+            table.grid = columns.min(max_table_columns());
+        }
+        Ok(())
+    }
+
+    /// One `w:tblGrid` child: a `w:gridCol` widens the declared grid, and a `w:tblGridChange` marks
+    /// the table revised. Returns whether the child is a column.
+    fn grid_child(&mut self, elem: &Elem) -> bool {
+        match elem.name.as_slice() {
+            b"gridCol" => true,
+            b"tblGridChange" => {
+                self.table_mark();
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// One `w:tr`: reset the column counter, read the cells, then render the row's line.
+    fn row(&mut self, reader: &mut Xml<'_>, level: usize, empty: bool) -> Result<(), Fault> {
+        if empty {
+            return Ok(());
+        }
+        if let Some(table) = self.tables.last_mut() {
+            table.column = 1;
+            table.hmerge = None;
+            table.cells.clear();
+            table.row_marks.clear();
+        }
+        let result = self.content(reader, level + 1, Ctx::Flow);
+        if let Some(table) = self.tables.last_mut() {
+            let cells = table.cells.join(" | ");
+            let mut line = if table.row_marks.is_empty() {
+                note(
+                    "block_table_row",
+                    &[
+                        ("n", &(table.rows.len() + 1).to_string()),
+                        ("cells", &cells),
+                    ],
+                )
+            } else {
+                // A row the document marked twice in two ways still names each change once.
+                table.row_marks.sort();
+                table.row_marks.dedup();
+                let names: Vec<&str> = table.row_marks.iter().map(|mark| mark.text()).collect();
+                note(
+                    "block_table_row_marks",
+                    &[
+                        ("n", &(table.rows.len() + 1).to_string()),
+                        ("marks", &names.join(", ")),
+                        ("cells", &cells),
+                    ],
+                )
+            };
+            if cells.is_empty() {
+                let trimmed = line.trim_end().len();
+                line.truncate(trimmed);
+            }
+            table.rows.push(line);
+        }
+        result
+    }
+
+    /// One `w:tc`: read its content into its own sink, then place it in the table's geometry.
+    fn cell(&mut self, reader: &mut Xml<'_>, level: usize, empty: bool) -> Result<(), Fault> {
+        if empty {
+            return Ok(());
+        }
+        let column = self.tables.last().map_or(1, |table| table.column);
+        self.cells.push(Cell {
+            column,
+            span: 1,
+            ..Cell::default()
+        });
+        let rendered = self.render_block(reader, level);
+        // The cell is popped whatever happened: a fault must not leave it on the stack.
+        let cell = self.cells.pop().unwrap_or_default();
+        let rendered = rendered?;
+        if let Some(table) = self.tables.last_mut() {
+            table.place(cell, &rendered);
+        }
+        Ok(())
+    }
+
+    /// A run-level revision (`w:ins`/`w:del`/`w:moveTo`/`w:moveFrom`): its content, wrapped in its
+    /// markers. A wrapper that produced no text is still counted, but emits nothing.
+    fn revision(
+        &mut self,
+        reader: &mut Xml<'_>,
+        level: usize,
+        elem: &Elem,
+        empty: bool,
+    ) -> Result<(), Fault> {
+        if empty {
+            return Ok(());
+        }
+        let (open, close) = match elem.name.as_slice() {
+            b"ins" => (mark("docx_ins_open"), mark("docx_ins_close")),
+            b"del" => (mark("docx_del_open"), mark("docx_del_close")),
+            b"moveTo" => (mark("docx_moved_here_open"), mark("docx_moved_here_close")),
+            _ => (mark("docx_moved_away_open"), mark("docx_moved_away_close")),
+        };
+        let before = self.buffers.last().map_or(0, |sink| sink.text.len());
+        let result = self.content(reader, level + 1, Ctx::Flow);
+        if let Some(sink) = self.buffers.last_mut().map(|sink| &mut sink.text)
+            && sink.len() > before
+        {
+            sink.insert_str(before, open);
+            sink.push_str(close);
+        }
+        result
+    }
+
+    /// `w:footnoteReference`/`w:endnoteReference`: the note's number where it is anchored.
+    fn note_reference(&mut self, elem: &Elem, kind: NoteKind) {
+        let Some(id) = elem.attr("id") else {
+            return;
+        };
+        let number = self.notes_mut(kind).reference(id);
+        let marker = note_marker(kind.marker(), number, "");
+        self.push_str(&marker);
+    }
+
+    /// A comment's range or point marker. A comment whose range was opened is
+    /// not reported again at its point reference.
+    fn comment_marker(&mut self, elem: &Elem) {
+        let Some(id) = elem.attr("id") else {
+            return;
+        };
+        let suffix = match elem.name.as_slice() {
+            b"commentRangeStart" => {
+                self.comment_ranges.insert(id.to_owned());
+                " starts"
+            }
+            b"commentRangeEnd" => " ends",
+            _ if self.comment_ranges.contains(id) => return,
+            _ => "",
+        };
+        let number = self.notes_mut(NoteKind::Comment).reference(id);
+        let marker = note_marker(NoteKind::Comment.marker(), number, suffix);
+        self.push_str(&marker);
+    }
+
+    /// `w:fldSimple`: its instruction's marker, then its cached result.
+    fn simple_field(
+        &mut self,
+        reader: &mut Xml<'_>,
+        level: usize,
+        elem: &Elem,
+        empty: bool,
+    ) -> Result<(), Fault> {
+        let marker = elem
+            .attr("instr")
+            .map_or_else(|| mark("docx_field_empty").to_owned(), field_marker);
+        self.push_str(&marker);
+        self.flow(reader, level, empty)
+    }
+
+    /// A complex field's `w:fldChar`: its instruction is reported at the
+    /// `separate`, or when the field closes without one.
+    fn field_char(&mut self, elem: &Elem) {
+        match elem.attr("fldCharType") {
+            Some("begin") => self.fields.push(Field {
+                pending: true,
+                ..Field::default()
+            }),
+            Some("separate") => {
+                let Some(field) = self.fields.last_mut() else {
+                    return;
+                };
+                field.pending = false;
+                // What was held back was the field's own code, which the marker
+                // reports instead of the text.
+                field.held.clear();
+                let marker = field_marker(&field.instr);
+                self.push_str(&marker);
+            }
+            Some("end") => {
+                let Some(field) = self.fields.pop() else {
+                    return;
+                };
+                if field.pending {
+                    self.close_field(&field);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Report a field that closed without a `separate`: its marker, then the
+    /// text it was holding.
+    fn close_field(&mut self, field: &Field) {
+        let marker = field_marker(&field.instr);
+        self.push_str(&marker);
+        self.push_str(&field.held);
+    }
+
+    /// Report the fields a flow left open. A `w:fldChar begin` without its
+    /// `separate` or its `end` must not go on swallowing the flow's text as its instruction.
+    fn close_fields(&mut self) {
+        for field in std::mem::take(&mut self.fields) {
+            if field.pending {
+                self.close_field(&field);
+            }
+        }
+    }
+
+    /// `w:instrText`: one piece of the open field's instruction. Word splits a
+    /// single instruction across runs, so the pieces are concatenated and only
+    /// collapsed when the field is reported.
+    fn instr_text(&mut self, reader: &mut Xml<'_>, level: usize, empty: bool) -> Result<(), Fault> {
+        if empty {
+            return Ok(());
+        }
+        let mut buffer = Vec::new();
+        let mut text = String::new();
+        loop {
+            match next_event(reader, &mut buffer) {
+                Ev::Text(piece) => text.push_str(&piece),
+                Ev::Start(_) => self.ignored(reader, level + 1, false)?,
+                Ev::End | Ev::Eof => break,
+                Ev::Fault => return Err(Fault),
+                Ev::Empty(_) | Ev::Skip => {}
+            }
+            buffer.clear();
+        }
+        if let Some(field) = self.fields.last_mut() {
+            field.instr.push_str(&text);
+        }
+        Ok(())
+    }
+
+    /// `w:txbxContent`: rendered as an indented `[text box]` block in the
+    /// enclosing flow.
+    fn text_box(&mut self, reader: &mut Xml<'_>, level: usize, empty: bool) -> Result<(), Fault> {
+        if empty {
+            return Ok(());
+        }
+        self.text_boxes += 1;
+        let inner = self.render_block(reader, level);
+        self.text_boxes = self.text_boxes.saturating_sub(1);
+        let inner = inner?;
+        let text = inner.text.trim_end();
+        if text.trim().is_empty() {
+            return Ok(());
+        }
+        self.block(
+            &text_lines(mark("docx_text_box"), &lines_of(text)),
+            inner.charts,
+        );
+        Ok(())
+    }
+
+    /// `mc:AlternateContent`: a text box is written twice, as an `mc:Choice`
+    /// and as the `mc:Fallback` beside it. The first choice that renders
+    /// anything wins; the fallback is read only when none of them renders
+    /// anything at all.
+    fn alternate_content(
+        &mut self,
+        reader: &mut Xml<'_>,
+        level: usize,
+        empty: bool,
+    ) -> Result<(), Fault> {
+        if empty {
+            return Ok(());
+        }
+        let mut buffer = Vec::new();
+        let mut choice: Option<Sink> = None;
+        let mut fallback: Option<Sink> = None;
+        // Every copy holds the same content, so only the copy the walk keeps
+        // counts its revisions: a copy that turned out to render nothing is
+        // rolled back before the next one is read, and at the end when no copy
+        // rendered anything.
+        let base = self.revisions.mark();
+        loop {
+            match next_event(reader, &mut buffer) {
+                // Every choice and fallback is consumed at the depth a child of
+                // this element has. A later one carries the text of one that had
+                // none, and the fallback speaks only when no choice rendered
+                // anything: Word writes the same content in each copy.
+                Ev::Start(elem) if elem.name == b"Choice" => {
+                    if renders_nothing(choice.as_ref()) {
+                        self.revisions.rollback(base);
+                        choice = Some(self.render_block(reader, level + 1)?);
+                    } else {
+                        self.discarded(reader, level + 1, false)?;
+                    }
+                }
+                Ev::Start(elem) if elem.name == b"Fallback" => {
+                    if renders_nothing(fallback.as_ref()) && renders_nothing(choice.as_ref()) {
+                        self.revisions.rollback(base);
+                        fallback = Some(self.render_block(reader, level + 1)?);
+                    } else {
+                        self.discarded(reader, level + 1, false)?;
+                    }
+                }
+                Ev::Start(_) => self.discarded(reader, level + 1, false)?,
+                Ev::End | Ev::Eof => break,
+                Ev::Fault => return Err(Fault),
+                Ev::Text(_) | Ev::Empty(_) | Ev::Skip => {}
+            }
+            buffer.clear();
+        }
+        // The copy that carries the text: the choice that rendered something, or
+        // the fallback beside it.
+        let kept = if renders_nothing(choice.as_ref()) {
+            fallback
+        } else {
+            choice
+        };
+        match kept {
+            Some(sink) if !renders_nothing(Some(&sink)) => {
+                let Sink { text, charts } = sink;
+                self.block(text.trim(), charts);
+            }
+            // Nothing is rendered at all, so no copy's revisions are part of the
+            // document's text either.
+            _ => self.revisions.rollback(base),
+        }
+        Ok(())
+    }
+
+    /// Render the element at `level` into its own sink and return the text: a
+    /// cell, a text box, a note definition, or a whole part (whose top level
+    /// sits below its document element). The block is a text flow of its own,
+    /// so a field it left open is closed with it.
+    fn render_block(&mut self, reader: &mut Xml<'_>, level: usize) -> Result<Sink, Fault> {
+        self.buffers.push(Sink::default());
+        let result = self.content(reader, level + 1, Ctx::Flow);
+        self.close_fields();
+        // The sink pushed above is the one popped: a nested block always pops
+        // its own, fault or not, so the stack cannot grow past this block.
+        let sink = self.buffers.pop().unwrap_or_default();
+        result.map(|()| sink)
+    }
+
+    /// Record a header/footer reference: the part it names, and the variant it
+    /// was named under. A part serving several variants is read once and keeps
+    /// them all, and the parts are held in first-encounter order with a position
+    /// index, so a package that names its parts a million times costs one lookup
+    /// per reference rather than a scan of everything named before it.
+    fn reference_part(&mut self, elem: &Elem, header: bool) {
+        if !self.collect_sections || self.text_boxes > 0 {
+            return;
+        }
+        let label = match elem.attr("type") {
+            Some("first") => mark("word_variant_first_page"),
+            Some("even") => mark("word_variant_even_pages"),
+            _ => mark("word_variant_default"),
+        };
+        let Some(target) = elem
+            .attr("id")
+            .and_then(|id| self.rel(id))
+            .map(str::to_owned)
+        else {
+            return;
+        };
+        let part = resolve_part(&self.base, &target);
+        let list = if header {
+            &mut self.headers
+        } else {
+            &mut self.footers
+        };
+        list.record(part, label);
+    }
+
+    /// Render the parts the body's section properties reference, then read and
+    /// render the notes parts: the blocks that follow the body text.
+    fn extra_sections<R: Read + Seek>(&mut self, archive: &mut ZipArchive<R>) -> Vec<String> {
+        let headers = std::mem::take(&mut self.headers);
+        let footers = std::mem::take(&mut self.footers);
+        let mut blocks = self.part_blocks(archive, &headers.parts, true);
+        blocks.extend(self.part_blocks(archive, &footers.parts, false));
+        for kind in [NoteKind::Footnote, NoteKind::Endnote, NoteKind::Comment] {
+            self.read_definitions(kind, archive);
+            blocks.extend(self.note_blocks(kind));
+        }
+        blocks
+    }
+
+    /// The blocks of the parts `refs` names, in first-encounter order. A part
+    /// that is missing, unreadable or empty costs only itself; the ordinal
+    /// appears only when more than one block is emitted.
+    fn part_blocks<R: Read + Seek>(
+        &mut self,
+        archive: &mut ZipArchive<R>,
+        refs: &[PartRef],
+        header: bool,
+    ) -> Vec<String> {
+        let mut rendered: Vec<(&[&'static str], String)> = Vec::new();
+        for entry in refs {
+            let Some(xml) = read_zip_entry(archive, &entry.part).bytes() else {
+                continue;
+            };
+            self.enter_story_part(archive, &entry.part);
+            // A part that shows nothing shows nothing of its revisions either.
+            let mark = self.revisions.mark();
+            match self.read_part(&xml, false) {
+                Ok(sink) if !sink.text.trim().is_empty() => {
+                    self.described.extend(sink.charts);
+                    rendered.push((&entry.labels, sink.text));
+                }
+                _ => self.revisions.rollback(mark),
+            }
+        }
+        let name = if header {
+            mark("word_header")
+        } else {
+            mark("word_footer")
+        };
+        let numbered = rendered.len() > 1;
+        rendered
+            .into_iter()
+            .enumerate()
+            .map(|(index, (labels, text))| {
+                let variants = labels.join(", ");
+                if variants.is_empty() {
+                    let label = if numbered {
+                        note(
+                            "docx_story_numbered",
+                            &[("story", name), ("n", &(index + 1).to_string())],
+                        )
+                    } else {
+                        name.to_owned()
+                    };
+                    return labeled_block(&label, &text);
+                }
+                let header = if numbered {
+                    note(
+                        "docx_story_numbered_variants",
+                        &[
+                            ("story", name),
+                            ("n", &(index + 1).to_string()),
+                            ("variants", &variants),
+                        ],
+                    )
+                } else {
+                    note(
+                        "docx_story_variants",
+                        &[("story", name), ("variants", &variants)],
+                    )
+                };
+                text_lines(&header, &lines_of(&text))
+            })
+            .collect()
+    }
+
+    /// Walk a notes part, rendering every definition it holds into its own
+    /// buffer. A part that is missing or will not parse is skipped, and so is
+    /// whatever the part before it left open.
+    fn read_definitions<R: Read + Seek>(&mut self, kind: NoteKind, archive: &mut ZipArchive<R>) {
+        // The part is read here rather than held since the body was walked: one
+        // notes part at a time is resident, like every other part.
+        let part = self.notes(kind).part.clone();
+        let Some(xml) = read_zip_entry(archive, &part).bytes() else {
+            return;
+        };
+        // A definition's drawing names its chart through the notes part's own
+        // relationships, against the part's own directory.
+        self.enter_story_part(archive, &part);
+        self.reset_part();
+        let mut reader = Reader::from_reader(xml.as_slice());
+        let _ = self.definitions(&mut reader, 0, kind);
+    }
+
+    /// The definitions of a notes part, in part order.
+    fn definitions(
+        &mut self,
+        reader: &mut Xml<'_>,
+        level: usize,
+        kind: NoteKind,
+    ) -> Result<(), Fault> {
+        if level >= max_element_depth() {
+            return Err(Fault);
+        }
+        let mut buffer = Vec::new();
+        loop {
+            match next_event(reader, &mut buffer) {
+                Ev::Start(elem) if elem.name == kind.element() => {
+                    self.definition(reader, level + 1, kind, &elem, false)?;
+                }
+                Ev::Empty(elem) if elem.name == kind.element() => {
+                    self.definition(reader, level + 1, kind, &elem, true)?;
+                }
+                Ev::Start(_) => self.definitions(reader, level + 1, kind)?,
+                Ev::End | Ev::Eof => return Ok(()),
+                Ev::Fault => return Err(Fault),
+                Ev::Text(_) | Ev::Empty(_) | Ev::Skip => {}
+            }
+            buffer.clear();
+        }
+    }
+
+    /// One `w:footnote`/`w:endnote`/`w:comment`. A notes part's separator and
+    /// continuationSeparator entries are not shown, and neither is a definition
+    /// that renders nothing and that the flow never references.
+    fn definition(
+        &mut self,
+        reader: &mut Xml<'_>,
+        level: usize,
+        kind: NoteKind,
+        elem: &Elem,
+        empty: bool,
+    ) -> Result<(), Fault> {
+        let id = elem.attr("id").unwrap_or_default().to_owned();
+        let author = elem.attr("author").map(str::to_owned);
+        if !keeps_definition(kind, &id, elem.attr("type")) {
+            return self.ignored(reader, level, empty);
+        }
+        let mark = self.revisions.mark();
+        let rendered = if empty {
+            Sink::default()
+        } else {
+            match self.render_block(reader, level) {
+                Ok(rendered) => rendered,
+                // The fault drops the definition with the rest of the part, so
+                // the revisions read out of it are not the document's either.
+                Err(fault) => {
+                    self.revisions.rollback(mark);
+                    return Err(fault);
+                }
+            }
+        };
+        let text = rendered.text.trim_end().to_owned();
+        // A definition the flow never references is shown only when it has text:
+        // an empty one would be a label with nothing under it, while a referenced
+        // one must appear or its anchor would name a note with no block.
+        if text.trim().is_empty() && !self.notes(kind).referenced.contains(&id) {
+            // One that is not shown contributes no revision either.
+            self.revisions.rollback(mark);
+            return Ok(());
+        }
+        self.described.extend(rendered.charts);
+        let notes = self.notes_mut(kind);
+        let number = notes.number(&id);
+        notes.defs.push(Definition {
+            id,
+            author,
+            text,
+            number,
+        });
+        Ok(())
+    }
+
+    /// The `Footnote`/`Endnote`/`Comment` blocks of a notes part: by assigned
+    /// number, with the definitions nothing references last.
+    fn note_blocks(&self, kind: NoteKind) -> Vec<String> {
+        let notes = self.notes(kind);
+        let mut defs: Vec<&Definition> = notes.defs.iter().collect();
+        defs.sort_by_key(|definition| definition.number);
+        defs.into_iter()
+            .map(|definition| {
+                let mut extras: Vec<String> = Vec::new();
+                if let Some(author) = &definition.author {
+                    extras.push(author.clone());
+                }
+                if !notes.referenced.contains(&definition.id) {
+                    extras.push(mark("docx_not_referenced").to_owned());
+                }
+                let n = definition.number.to_string();
+                let header = if extras.is_empty() {
+                    note("docx_note_block", &[("story", kind.label()), ("n", &n)])
+                } else {
+                    note(
+                        "docx_note_block_extras",
+                        &[
+                            ("story", kind.label()),
+                            ("n", &n),
+                            ("extras", &extras.join(", ")),
+                        ],
+                    )
+                };
+                // A definition with no text is still a block: its anchor points
+                // at it.
+                if definition.text.is_empty() {
+                    return header;
+                }
+                text_lines(&header, &lines_of(&definition.text))
+            })
+            .collect()
+    }
+
+    /// The `Unaccepted tracked changes: …` line, when the document carries any.
+    fn revision_summary(&self) -> Option<String> {
+        let tallies = self.revisions.tallies;
+        let mut parts: Vec<String> = Vec::new();
+        for (count, noun) in [
+            (tallies.insertions, mark("docx_tally_insertion")),
+            (tallies.deletions, mark("docx_tally_deletion")),
+            (tallies.moves(), mark("docx_tally_move")),
+            (tallies.formatting, mark("docx_tally_formatting")),
+        ] {
+            if count > 0 {
+                parts.push(plural(count, noun));
+            }
+        }
+        if parts.is_empty() {
+            return None;
+        }
+        let tallies = parts.join(", ");
+        Some(if self.revisions.authors.is_empty() {
+            note("docx_tracked_changes", &[("tallies", &tallies)])
+        } else {
+            note(
+                "docx_tracked_changes_authors",
+                &[
+                    ("tallies", &tallies),
+                    ("list", &self.revisions.authors.join(", ")),
+                ],
+            )
+        })
+    }
+}
+
+/// A table being read: the rows already rendered, the geometry of the row being read, and the
+/// vertical merges reaching into it.
+#[derive(Default)]
+struct Table {
+    rows: Vec<String>,
+    number: usize,
+    /// The column count, widened by the widest column covered.
+    columns: usize,
+    /// The `w:tblGrid/w:gridCol` children, at most [`max_table_columns`]: the declared grid
+    /// decides nothing but the label.
+    grid: usize,
+    column: usize,
+    /// The vertical merge origin of each column: `Some((row, column))` while a merge started
+    /// above still covers it.
+    merges: Vec<Option<(usize, usize)>>,
+    cells: Vec<String>,
+    row_marks: Vec<Mark>,
+    hmerge: Option<usize>,
+    format_revised: bool,
+    /// The chart parts a cell of this table shows: a chart a cell holds is described where the
+    /// table prints, unless the cell is a merge continuation.
+    charts: Vec<String>,
+}
+
+impl Table {
+    /// Place the cell that just closed: annotate it, advance the running column, and leave the
+    /// vertical merge map ready for the row below.
+    fn place(&mut self, cell: Cell, rendered: &Sink) {
+        let row = self.rows.len() + 1;
+        // One cell's span was clamped where it was read, but a row's cells add up: the running
+        // column is document-controlled arithmetic too, so the range is clamped here — never past
+        // [`max_table_columns`] — and the merge map never grows past that either.
+        let column = cell.column.min(max_table_columns());
+        let span = cell.span.max(1).min(max_table_columns() + 1 - column);
+        // A continuation is not a value of its own: it names the cell whose value it carries,
+        // and that value is not repeated.
+        let mut holds_value = true;
+        let mut origin: Option<(usize, usize)> = None;
+        match cell.merge {
+            // `restart` opens a merge over every column it covers; the map keeps its origin for
+            // the rows below.
+            Merge::Restart => {
+                for covered in column..column + span {
+                    set_merge(&mut self.merges, covered, Some((row, column)));
+                }
+            }
+            Merge::Continue => {
+                origin = self.merges.get(column).copied().flatten();
+                holds_value = origin.is_none();
+            }
+            Merge::None => {
+                for covered in column..column + span {
+                    set_merge(&mut self.merges, covered, None);
+                }
+                match cell.hmerge {
+                    Merge::Restart => self.hmerge = Some(column),
+                    Merge::Continue => {
+                        origin = self.hmerge.map(|origin| (row, origin));
+                        holds_value = origin.is_none();
+                    }
+                    Merge::None => {}
+                }
+            }
+        }
+        // The annotations read in one fixed order, whatever order the properties raising them
+        // were written in: the merge a cell continues, the columns it spans, then its own marks.
+        let mut notes: Vec<String> = Vec::new();
+        if let Some((origin_row, origin_column)) = origin {
+            notes.push(cell_annotation(
+                "docx_cell_part_of",
+                &[
+                    ("r", &origin_row.to_string()),
+                    ("c", &origin_column.to_string()),
+                ],
+            ));
+        }
+        if span > 1 {
+            notes.push(cell_annotation(
+                "docx_cell_spans",
+                &[
+                    ("a", &column.to_string()),
+                    ("b", &(column + span - 1).to_string()),
+                ],
+            ));
+        }
+        let mut marks = cell.marks;
+        marks.sort();
+        marks.dedup();
+        notes.extend(marks.iter().map(|mark| mark.text().to_owned()));
+        // A row is one line, so a cell's own line ends are spelled as spaces. A continuation
+        // shows no value, and so none of the charts that value's content names either.
+        let value = if holds_value {
+            self.charts.extend(rendered.charts.iter().cloned());
+            rendered.text.trim().replace('\n', " ")
+        } else {
+            String::new()
+        };
+        let mut token = if notes.is_empty() {
+            note(
+                "block_table_cell",
+                &[("n", &column.to_string()), ("value", &value)],
+            )
+        } else {
+            note(
+                "block_table_cell_marks",
+                &[
+                    ("n", &column.to_string()),
+                    ("marks", &notes.join(", ")),
+                    ("value", &value),
+                ],
+            )
+        };
+        if value.is_empty() {
+            let trimmed = token.trim_end().len();
+            token.truncate(trimmed);
+        }
+        self.cells.push(token);
+        self.column = column + span;
+        self.columns = self.columns.max(column + span - 1);
+    }
+}
+
+/// Record `origin` — or its absence — against `column`, growing the map. [`Table::place`] clamps
+/// the column and its span, so the map is at most [`max_table_columns`] + 1 entries.
+fn set_merge(
+    merges: &mut Vec<Option<(usize, usize)>>,
+    column: usize,
+    origin: Option<(usize, usize)>,
+) {
+    if column >= merges.len() {
+        merges.resize(column + 1, None);
+    }
+    merges[column] = origin;
+}
+
+/// A revision a table's row or one of its cells carries, in the fixed order a line's annotations
+/// read in.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Mark {
+    Inserted,
+    Deleted,
+    MergeRevised,
+    FormatRevised,
+}
+
+impl Mark {
+    fn text(self) -> &'static str {
+        match self {
+            Self::Inserted => mark("docx_mark_inserted"),
+            Self::Deleted => mark("docx_mark_deleted"),
+            Self::MergeRevised => mark("docx_mark_merge_revised"),
+            Self::FormatRevised => mark("docx_mark_formatting_revised"),
+        }
+    }
+}
+
+/// The cell being read.
+#[derive(Default)]
+struct Cell {
+    column: usize,
+    /// The column span, from `w:tcPr/w:gridSpan`, at most [`max_table_columns`].
+    span: usize,
+    merge: Merge,
+    /// `w:tcPr/w:hMerge`, the Transitional schema's horizontal merge: Word 2003 XML writes it
+    /// where the later output writes `w:gridSpan`.
+    hmerge: Merge,
+    marks: Vec<Mark>,
+}
+
+/// A merge state, vertical or horizontal: `w:vMerge w:val="restart"` opens a merge, and a bare
+/// `w:vMerge` continues the one above — the transitional `w:hMerge` reads the same way.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum Merge {
+    #[default]
+    None,
+    Restart,
+    Continue,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NoteKind {
+    Footnote,
+    Endnote,
+    Comment,
+}
+
+impl NoteKind {
+    fn element(self) -> &'static [u8] {
+        match self {
+            Self::Footnote => b"footnote",
+            Self::Endnote => b"endnote",
+            Self::Comment => b"comment",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Footnote => mark("word_footnote"),
+            Self::Endnote => mark("word_endnote"),
+            Self::Comment => mark("word_comment"),
+        }
+    }
+
+    /// The kind's own word: the one inside a reference marker, and the name its shared entry is
+    /// keyed by (see [`crate::vocabulary::docx_peripheral_part`]).
+    fn marker(self) -> &'static str {
+        match self {
+            Self::Footnote => mark("docx_note_kind_footnote"),
+            Self::Endnote => mark("docx_note_kind_endnote"),
+            Self::Comment => mark("docx_note_kind_comment"),
+        }
+    }
+}
+
+/// The part holding one kind of notes: the one the relationship list names by type, or the
+/// conventional name the kind's shared entry carries.
+fn notes_part(rels: &[Relationship], kind: NoteKind) -> String {
+    let entry = crate::vocabulary::docx_peripheral_part(kind.marker());
+    let conventional = entry
+        .part
+        .as_deref()
+        .expect("a note kind's shared entry names its conventional part");
+    related_part(
+        rels,
+        DOCX_BASE,
+        |kind| kind.ends_with(&entry.rel),
+        conventional,
+    )
+}
+
+/// One notes part: the definitions it holds, the numbering its references
+/// assigned, and the ids it defines at all.
+#[derive(Default)]
+struct Notes {
+    /// The part's definitions, in part order, once rendered.
+    defs: Vec<Definition>,
+    /// The ids this part defines, with the entries the walk skips left out, so
+    /// a reference to one of those can say `?`.
+    defined: HashSet<String>,
+    /// Definition id -> the number assigned to it.
+    numbers: HashMap<String, usize>,
+    /// The ids a reference named, as opposed to a definition alone.
+    referenced: HashSet<String>,
+    /// The next free number.
+    next: usize,
+    /// The part the definitions live in, read up front for the ids it defines
+    /// and again, after the body, for the definitions themselves.
+    part: String,
+}
+
+impl Notes {
+    /// Note the ids `part` defines, so a reference in the body can say `?` and
+    /// be numbered; the definitions themselves are read after the body.
+    fn load<R: Read + Seek>(kind: NoteKind, part: &str, archive: &mut ZipArchive<R>) -> Self {
+        let mut notes = Self {
+            part: part.to_owned(),
+            ..Self::default()
+        };
+        if let Some(xml) = read_zip_entry(archive, part).bytes() {
+            notes.defined = definition_ids(&xml, kind).into_iter().collect();
+        }
+        notes
+    }
+
+    /// The number `id` is displayed under at a reference: the one it already
+    /// has, or the next free one. `None` when the part defines no such entry, so
+    /// a reference to nothing can say `?`.
+    fn reference(&mut self, id: &str) -> Option<usize> {
+        if !self.defined.contains(id) {
+            return None;
+        }
+        self.referenced.insert(id.to_owned());
+        Some(self.number(id))
+    }
+
+    /// The number `id` is displayed under, assigning the next free one when it
+    /// has none yet — a definition nothing references is numbered in part order.
+    fn number(&mut self, id: &str) -> usize {
+        if let Some(&number) = self.numbers.get(id) {
+            return number;
+        }
+        self.next += 1;
+        self.numbers.insert(id.to_owned(), self.next);
+        self.next
+    }
+}
+
+/// One `w:footnote`/`w:endnote`/`w:comment`, rendered and numbered.
+struct Definition {
+    id: String,
+    /// `w:author`, which only comments carry.
+    author: Option<String>,
+    text: String,
+    number: usize,
+}
+
+/// Whether a definition survives into the report: a note's type must be absent
+/// or `normal` (a note part's separator entries are not text), and its id must
+/// not be negative.
+fn keeps_definition(kind: NoteKind, id: &str, type_attr: Option<&str>) -> bool {
+    if kind != NoteKind::Comment && type_attr.is_some_and(|value| value != "normal") {
+        return false;
+    }
+    id.parse::<i64>().is_ok_and(|number| number >= 0)
+}
+
+/// The ids a notes part defines, with the entries the walk skips left out.
+fn definition_ids(xml: &[u8], kind: NoteKind) -> Vec<String> {
+    scan_elements(xml, kind.element(), |event| {
+        let id = attr(event, b"id")?;
+        let type_attr = attr(event, b"type");
+        keeps_definition(kind, &id, type_attr.as_deref()).then_some(id)
+    })
+    .unwrap_or_default()
+}
+
+/// A header or footer part the body references, with every variant that named it.
+struct PartRef {
+    part: String,
+    /// The variants that named the part, in the order they named it.
+    labels: Vec<&'static str>,
+}
+
+/// The parts one kind of reference named: the parts in the order they were
+/// first named, and where each of them sits. A package is free to name a part
+/// a million times, so a naming costs one lookup rather than a scan of
+/// everything named before it.
+#[derive(Default)]
+struct PartRefs {
+    parts: Vec<PartRef>,
+    /// A part's position in [`Self::parts`].
+    index: HashMap<String, usize>,
+}
+
+impl PartRefs {
+    /// Note that `part` was named under `label`: once, however many times it
+    /// was named, with every variant that named it.
+    fn record(&mut self, part: String, label: &'static str) {
+        if let Some(&position) = self.index.get(&part) {
+            let labels = &mut self.parts[position].labels;
+            if !labels.contains(&label) {
+                labels.push(label);
+            }
+            return;
+        }
+        self.index.insert(part.clone(), self.parts.len());
+        self.parts.push(PartRef {
+            part,
+            labels: vec![label],
+        });
+    }
+}
+
+/// The package's styles part: what each style says about itself, read once so a
+/// paragraph's `w:pStyle` resolves to a heading through its `w:basedOn` chain.
+#[derive(Default)]
+struct Styles {
+    /// Style id -> the style's head: its outline level, its name and the style
+    /// it is based on.
+    defs: HashMap<String, StyleDef>,
+}
+
+/// The parts of one `w:style` that name a heading.
+#[derive(Default)]
+struct StyleDef {
+    /// The `w:pPr/w:outlineLvl` the style states, clamped to 0..=9.
+    outline: Option<usize>,
+    /// The `w:name` the style carries.
+    name: Option<String>,
+    /// The `w:basedOn` style id the chain continues through.
+    based_on: Option<String>,
+}
+
+impl Styles {
+    /// Read the styles part the body's relationships name, or the conventional one. A part
+    /// that is missing or will not parse is empty by design: a paragraph then reads as its
+    /// own outline level or style id says, so a package that lost its styles reads as a
+    /// document without headings rather than as one that could not be read.
+    fn load<R: Read + Seek>(rels: &[Relationship], archive: &mut ZipArchive<R>) -> Self {
+        let part = related_part(
+            rels,
+            DOCX_BASE,
+            |kind| kind.ends_with("/styles"),
+            DOCX_STYLES_PART,
+        );
+        read_zip_entry(archive, &part)
+            .bytes()
+            .map_or_else(Self::default, |xml| Self::parse(&xml))
+    }
+
+    /// Parse a styles part: one scan that keeps the style it is inside and
+    /// collects each style as it closes. A part that cannot be read as XML is empty.
+    fn parse(xml: &[u8]) -> Self {
+        let mut styles = Self::default();
+        let mut scan = StyleScan::default();
+        let mut reader = Reader::from_reader(xml);
+        let mut buffer = Vec::new();
+        loop {
+            let Ok(event) = reader.read_event_into(&mut buffer) else {
+                return Self::default();
+            };
+            if let Some(closed) = scan.note(&event) {
+                styles.defs.insert(closed.0, closed.1);
+            }
+            if matches!(event, Event::Eof) {
+                break;
+            }
+            buffer.clear();
+        }
+        styles
+    }
+
+    /// The heading level `style` names: what the style itself states — the
+    /// outline level it carries, its name, its own id — else what the style it is
+    /// based on states, up to [`max_style_chain`]. An id the package does not
+    /// define still names a heading through its own spelling, which is the shape
+    /// the document kit writes (`Heading1`, with no styles part at all).
+    fn level(&self, style: Option<&str>) -> Option<usize> {
+        let mut id = style?;
+        for _ in 0..max_style_chain() {
+            let Some(style) = self.defs.get(id) else {
+                return heading_name_level(id);
+            };
+            if let Some(outline) = style.outline {
+                return outline_heading(outline);
+            }
+            if let Some(level) = style.name.as_deref().and_then(heading_name_level) {
+                return Some(level);
+            }
+            if let Some(level) = heading_name_level(id) {
+                return Some(level);
+            }
+            id = style.based_on.as_deref()?;
+        }
+        None
+    }
+}
+
+/// The state a styles-part scan is inside: the style it opened, its definition
+/// as the part states it, and whether the properties being read are the style's
+/// own (an outline level under a run's properties is no heading).
+#[derive(Default)]
+struct StyleScan {
+    current: Option<(String, StyleDef)>,
+    paragraph_props: bool,
+}
+
+impl StyleScan {
+    /// Note one event of the styles part, returning the style a close completed.
+    fn note(&mut self, event: &Event) -> Option<(String, StyleDef)> {
+        match event {
+            Event::Start(event) => self.element(&Elem::of(event), false),
+            Event::Empty(event) => self.element(&Elem::of(event), true),
+            Event::End(event) => match event.local_name().as_ref() {
+                b"pPr" => {
+                    self.paragraph_props = false;
+                    None
+                }
+                b"style" => self.current.take(),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Note one element: what a style states about itself, and where its own
+    /// properties begin. `Some` when the element is a style that closed itself.
+    fn element(&mut self, elem: &Elem, empty: bool) -> Option<(String, StyleDef)> {
+        match elem.name.as_slice() {
+            b"style" => {
+                // A style whose type is present and is not a paragraph style is
+                // not one a paragraph can name.
+                let paragraph = elem
+                    .attr("type")
+                    .is_none_or(|kind| kind.trim() == "paragraph");
+                self.current = elem
+                    .attr("styleId")
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty() && paragraph)
+                    .map(|id| (id.to_owned(), StyleDef::default()));
+                if empty {
+                    return self.current.take();
+                }
+            }
+            b"pPr" if !empty => self.paragraph_props = self.current.is_some(),
+            // The two statements only count inside the style's own properties.
+            b"outlineLvl" if self.paragraph_props => {
+                if let Some((_, style)) = self.current.as_mut() {
+                    style.outline = outline_level(elem);
+                }
+            }
+            b"name" => {
+                if let Some((_, style)) = self.current.as_mut() {
+                    style.name = style_value(elem);
+                }
+            }
+            b"basedOn" => {
+                if let Some((_, style)) = self.current.as_mut() {
+                    style.based_on = style_value(elem);
+                }
+            }
+            _ => {}
+        }
+        None
+    }
+}
+
+/// The level a `w:outlineLvl` states, clamped to the schema's 0..=9 — where 9 is
+/// body text. A value that is no number states nothing rather than reading as the
+/// first level.
+fn outline_level(elem: &Elem) -> Option<usize> {
+    elem.attr("val")
+        .and_then(|value| value.trim().parse().ok())
+        .map(|value: usize| value.min(9))
+}
+
+/// The heading level an outline value states, or `None` for the schema's
+/// body-text value (9): the paragraph is no heading, whatever its style says.
+fn outline_heading(outline: usize) -> Option<usize> {
+    (outline < 9).then_some(outline + 1)
+}
+
+/// The trimmed, non-empty `w:val` a `w:name`/`w:basedOn` carries.
+fn style_value(elem: &Elem) -> Option<String> {
+    elem.attr("val")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+/// The level a heading name states: `heading` (ASCII-case-insensitive), optional
+/// spaces, then the number 1..=9.
+fn heading_name_level(text: &str) -> Option<usize> {
+    let trimmed = text.trim();
+    let (head, tail) = trimmed.split_at_checked("heading".len())?;
+    if !head.eq_ignore_ascii_case("heading") {
+        return None;
+    }
+    let level = tail.trim_start_matches(' ').parse().ok()?;
+    (1..=9).contains(&level).then_some(level)
+}
+
+/// One open complex field.
+#[derive(Default)]
+struct Field {
+    /// The instruction pieces collected so far.
+    instr: String,
+    /// Whether the instruction has not been reported yet — i.e. the field is
+    /// still between its `begin` and its `separate`, where its content is the
+    /// instruction and not text.
+    pending: bool,
+    /// The text held back while the field is pending, released by
+    /// `Word::close_field` when the field turns out to have no `separate`.
+    held: String,
+}
+
+/// The marker for a field: `[field PAGE]`. Runs split an instruction
+/// mid-token, so its pieces are whitespace-collapsed as it is reported, and
+/// copied only as far as [`max_field_instruction_chars`] allows: the
+/// instruction is document-controlled, so it is never collapsed in full first.
+fn field_marker(instruction: &str) -> String {
+    let mut capped = String::new();
+    let mut chars = 0;
+    for word in instruction.split_whitespace() {
+        // The separator belongs to the word that follows it: a word the cap
+        // leaves no room for is dropped with its separator rather than leaving
+        // a trailing space behind.
+        let separator = usize::from(!capped.is_empty());
+        let room = max_field_instruction_chars().saturating_sub(chars + separator);
+        if room == 0 {
+            break;
+        }
+        if separator == 1 {
+            capped.push(' ');
+            chars += 1;
+        }
+        capped.extend(word.chars().take(room));
+        chars += word.chars().count().min(room);
+    }
+    if capped.is_empty() {
+        mark("docx_field_empty").to_owned()
+    } else {
+        note("docx_field", &[("instruction", &capped)])
+    }
+}
+
+/// The tracked changes a document carries, for its summary line.
+#[derive(Default)]
+struct Revisions {
+    /// One tally per kind of change.
+    tallies: Tallies,
+    /// The `w:author` of each revision, in document order, deduplicated: the
+    /// list and the set share one allocation per author.
+    authors: Vec<Rc<str>>,
+    /// The authors already in [`Self::authors`], so a package with a revision
+    /// per author does not scan them all for each revision it records.
+    seen_authors: HashSet<Rc<str>>,
+}
+
+/// One tally per kind of tracked change.
+#[derive(Clone, Copy, Default)]
+struct Tallies {
+    insertions: usize,
+    deletions: usize,
+    /// The `w:moveTo` elements seen.
+    moved_here: usize,
+    /// The `w:moveFrom` elements seen.
+    moved_away: usize,
+    /// The `w:moveFromRangeStart` elements seen: Word brackets every move with
+    /// one pair of range marks, so this is the move count itself rather than a
+    /// count of the marks inside it.
+    move_ranges: usize,
+    formatting: usize,
+}
+
+impl Tallies {
+    /// The move count: one moved range is one move, whatever marks it carries. A producer
+    /// that brackets a move with no range marks leaves the content marks to count instead,
+    /// and `w:moveTo` decides it where `w:moveFrom` is only the fallback. The tally covers
+    /// the whole document.
+    fn moves(&self) -> usize {
+        // The range marks bracket content the walk renders a marker for. A
+        // package that brackets a range and marks no moved content anywhere has
+        // no move to name — a summary naming one would name a change the text
+        // does not carry.
+        if self.moved_here == 0 && self.moved_away == 0 {
+            return 0;
+        }
+        if self.move_ranges > 0 {
+            self.move_ranges
+        } else if self.moved_here > 0 {
+            self.moved_here
+        } else {
+            self.moved_away
+        }
+    }
+}
+
+/// Where a copy of an `mc:AlternateContent` may have to give its revisions
+/// back: the tallies are values, and the authors are only ever appended, so a
+/// discarded copy costs a checkpoint rather than a copy of the accumulator.
+#[derive(Clone, Copy)]
+struct RevisionsMark {
+    tallies: Tallies,
+    authors: usize,
+}
+
+/// The property-change elements: each holds the properties that applied before
+/// a revision of the thing whose container it sits in. They are named one by
+/// one rather than matched by their `Change` suffix, which also catches
+/// `w:numberingChange` — a list-numbering change, which this reader leaves
+/// alone like the rest of list numbering.
+fn is_property_change(name: &[u8]) -> bool {
+    matches!(
+        name,
+        b"rPrChange"
+            | b"pPrChange"
+            | b"tblPrChange"
+            | b"tblPrExChange"
+            | b"tblGridChange"
+            | b"trPrChange"
+            | b"tcPrChange"
+            | b"sectPrChange"
+    )
+}
+
+impl Revisions {
+    /// Count one element when it is a revision, and remember who made it.
+    fn record(&mut self, elem: &Elem) {
+        match elem.name.as_slice() {
+            b"ins" | b"cellIns" => self.tallies.insertions += 1,
+            b"del" | b"cellDel" => self.tallies.deletions += 1,
+            b"moveTo" => self.tallies.moved_here += 1,
+            b"moveFrom" => self.tallies.moved_away += 1,
+            b"moveFromRangeStart" => self.tallies.move_ranges += 1,
+            b"cellMerge" => self.tallies.formatting += 1,
+            name if is_property_change(name) => self.tallies.formatting += 1,
+            _ => return,
+        }
+        // The set is asked before anything is allocated: a revision repeating an
+        // author costs a lookup, and only a new one is allocated — once, shared
+        // by the list and the set.
+        let Some(author) = elem.attr("author") else {
+            return;
+        };
+        if self.seen_authors.contains(author) {
+            return;
+        }
+        let author: Rc<str> = Rc::from(author);
+        self.seen_authors.insert(Rc::clone(&author));
+        self.authors.push(author);
+    }
+
+    /// A checkpoint a copy of an `mc:AlternateContent` can be rolled back to.
+    fn mark(&self) -> RevisionsMark {
+        RevisionsMark {
+            tallies: self.tallies,
+            authors: self.authors.len(),
+        }
+    }
+
+    /// Undo what was recorded since `mark`: the revisions of a copy the walk
+    /// did not keep are not the document's.
+    fn rollback(&mut self, mark: RevisionsMark) {
+        self.tallies = mark.tallies;
+        for author in self.authors.drain(mark.authors..) {
+            self.seen_authors.remove(&author);
+        }
+    }
+}
+
+/// `[footnote 1]`, `[comment 2 ends]`, `[comment ?]`: the kind, the numbered
+/// reference (or `?` for a reference the part does not define) and a suffix.
+fn note_marker(kind: &str, number: Option<usize>, suffix: &str) -> String {
+    let (key, n) = match suffix {
+        " starts" => (
+            "docx_comment_reference_starts",
+            number.map_or_else(|| "?".to_owned(), |number| number.to_string()),
+        ),
+        " ends" => (
+            "docx_comment_reference_ends",
+            number.map_or_else(|| "?".to_owned(), |number| number.to_string()),
+        ),
+        _ => match number {
+            Some(number) => ("docx_note_reference", number.to_string()),
+            None => ("docx_note_reference_unknown", String::new()),
+        },
+    };
+    note(key, &[("kind", kind), ("n", &n)])
+}
+
+/// `1 row` / `3 rows`.
+fn plural(count: usize, noun: &str) -> String {
+    if count == 1 {
+        format!("{count} {noun}")
+    } else {
+        format!("{count} {noun}s")
+    }
+}
+
+/// Whether a rendered copy produced nothing at all: the walk then reads the copy
+/// beside it instead.
+fn renders_nothing(sink: Option<&Sink>) -> bool {
+    sink.is_none_or(|sink| sink.text.trim().is_empty())
+}
+
+/// A property element's numeric attribute value, `0` when absent or unreadable
+/// and at most `max`: the value is document-controlled, so it never decides how
+/// much the walk allocates.
+fn numeric_attr(elem: &Elem, max: usize) -> usize {
+    elem.attr("val")
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0)
+        .min(max)
+}
+
+/// Extract the readable content and the embedded images of a `.docx`/`.docm`
+/// ZIP package.
+#[must_use]
+pub(crate) fn convert_docx(bytes: &[u8], out_dir: &Path) -> DocOutcome {
+    let Ok(mut archive) = ZipArchive::new(Cursor::new(bytes)) else {
+        return unreadable(Family::Docx);
+    };
+    let Some(body_xml) = read_zip_entry(&mut archive, DOCX_BODY_PART).bytes() else {
+        return unreadable(Family::Docx);
+    };
+    // A package that names no parts conventionally has no headers and no notes,
+    // so an unreadable relationship list costs nothing but those.
+    let rels = read_zip_entry(&mut archive, DOCX_RELS_PART)
+        .bytes()
+        .and_then(|xml| relationships(&xml))
+        .unwrap_or_default();
+
+    let charts = chart::read_charts(&mut archive, DOCX_CHARTS_PREFIX, false);
+    let mut word = Word::new(&rels, &mut archive, charts);
+    let Some(body) = word.body(&body_xml) else {
+        return unreadable(Family::Docx);
+    };
+    // The body's bytes are done with: the peripheral parts are read one at a
+    // time from here, so nothing large stays resident beside them.
+    drop(body_xml);
+    // The peripheral parts are read before the summary is built: a revision in a
+    // header or a footnote is a revision of the document too.
+    let blocks = word.extra_sections(&mut archive);
+
+    let mut sections: Vec<String> = Vec::new();
+    if let Some(summary) = word.revision_summary() {
+        // The summary leads, with a blank line after it.
+        sections.push(format!("{summary}\n"));
+    }
+    let body = body.trim();
+    if !body.is_empty() {
+        sections.push(body.to_owned());
+    }
+    sections.extend(blocks);
+    let text = sections.join("\n").trim().to_owned();
+
+    ensure_out_dir(out_dir);
+
+    let mut unshown = unopened_parts(
+        &mut archive,
+        DOCX_CHARTS_PREFIX,
+        Some(DOCX_DIAGRAMS_PREFIX),
+        DOCX_EMBEDDINGS_PREFIX,
+        None, // a Word package has no chart sheets
+        &word.described,
+    );
+    let mut skipped = SkippedImages::default();
+    let images = write_media_parts(
+        &mut archive,
+        DOCX_MEDIA_PREFIX,
+        out_dir,
+        &mut skipped,
+        &mut unshown,
+    );
+    DocOutcome::text(text, images, skipped.notes(), unshown)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reading::ooxml::test_fixtures::{COLUMN_CHART, DOCX_BODY, zip_fixture};
+
+    /// The namespaces a Word part is written with: the body's own, the
+    /// relationship one, and the two a text box needs.
+    const NAMESPACES: &str = concat!(
+        r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" "#,
+        r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" "#,
+        r#"xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" "#,
+        r#"xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" "#,
+        r#"xmlns:v="urn:schemas-microsoft-com:vml""#,
+    );
+
+    /// A `word/document.xml` part around `body`.
+    fn document(body: &str) -> String {
+        format!("<w:document {NAMESPACES}><w:body>{body}</w:body></w:document>")
+    }
+
+    /// A `word/_rels/document.xml.rels` part around `entries`.
+    fn rels(entries: &str) -> String {
+        format!("<Relationships>{entries}</Relationships>")
+    }
+
+    /// A relationship entry of the usual shape.
+    fn rel(id: &str, kind: &str, target: &str) -> String {
+        let base = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        format!(r#"<Relationship Id="{id}" Type="{base}/{kind}" Target="{target}"/>"#)
+    }
+
+    /// A package with one body and, optionally, other parts.
+    fn package(body: &str, parts: &[(&str, &str)]) -> Vec<u8> {
+        let document = document(body);
+        let mut entries: Vec<(&str, &[u8])> = vec![("word/document.xml", document.as_bytes())];
+        entries.extend(parts.iter().map(|(path, xml)| (*path, xml.as_bytes())));
+        zip_fixture(&entries)
+    }
+
+    /// The text `convert_docx` reads out of `bytes`.
+    fn text_of(bytes: &[u8]) -> String {
+        let dir = tempfile::tempdir().expect("tempdir");
+        match convert_docx(bytes, dir.path()) {
+            DocOutcome::Text { text, .. } => text,
+            _ => panic!("expected a Text outcome for a well-formed docx"),
+        }
+    }
+
+    #[test]
+    fn docx_extracts_paragraphs_and_media() {
+        let bytes = zip_fixture(&[
+            ("word/document.xml", DOCX_BODY),
+            ("word/media/pic.png", b"\x89PNG\r\n\x1a\nfake image bytes"),
+            // A directory entry is not media: skipping it must not produce a
+            // "skipped embedded image media" note (asserted by `notes.is_empty`).
+            ("word/media/", b""),
+        ]);
+        let dir = tempfile::tempdir().expect("tempdir");
+        let DocOutcome::Text {
+            text,
+            images,
+            notes,
+            ..
+        } = convert_docx(&bytes, dir.path())
+        else {
+            panic!("expected Text outcome for a well-formed docx");
+        };
+        assert_eq!(text, "First paragraph\nSecond paragraph");
+        assert_eq!(images, vec![dir.path().join("pic.png")]);
+        assert!(notes.is_empty());
+        assert_eq!(
+            std::fs::read(&images[0]).expect("read written image"),
+            b"\x89PNG\r\n\x1a\nfake image bytes"
+        );
+    }
+
+    /// A media entry a package embeds that this pipeline cannot produce an image
+    /// from is named as what it is, never as an unconvertible image.
+    #[test]
+    fn docx_reports_media_it_cannot_convert() {
+        let bytes = zip_fixture(&[
+            ("word/document.xml", DOCX_BODY),
+            (
+                "word/media/diagram.emf",
+                b"EMF bytes this stack cannot decode",
+            ),
+            (
+                "word/media/vector.wmf",
+                b"WMF bytes this stack cannot decode",
+            ),
+        ]);
+        let dir = tempfile::tempdir().expect("tempdir");
+        let DocOutcome::Text {
+            images,
+            notes,
+            unshown,
+            ..
+        } = convert_docx(&bytes, dir.path())
+        else {
+            panic!("expected Text outcome for a well-formed docx");
+        };
+        assert!(images.is_empty(), "an undecodable entry yields no image");
+        // A metafile is a drawing, not an image this pipeline cannot convert:
+        // the report names what it is rather than what it is not.
+        assert_eq!(unshown.lines(), ["2 embedded drawing(s) not shown"]);
+        assert!(notes.is_empty(), "the report carries the whole loss");
+    }
+
+    /// The parts a reading opens nothing in are named by count: the charts it cannot draw,
+    /// the diagrams whose data parts it does not reach, and the embedded objects. A sibling
+    /// part that is none of them is not counted, and the data workbook a chart keeps beside
+    /// the objects is the chart's own.
+    #[test]
+    fn docx_reports_the_parts_its_reading_does_not_open() {
+        let bytes = zip_fixture(&[
+            ("word/document.xml", DOCX_BODY),
+            ("word/diagrams/data1.xml", b"<dgm:dataModel/>"),
+            ("word/diagrams/layout1.xml", b"<dgm:layoutDef/>"),
+            ("word/embeddings/oleObject1.bin", b"OLE bytes"),
+            (
+                "word/embeddings/Microsoft_Excel_Worksheet1.xlsx",
+                b"chart data workbook",
+            ),
+            ("word/charts/chart1.xml", b"<chart/>"),
+            ("word/charts/chartEx1.xml", b"<chartEx/>"),
+            (
+                "word/charts/_rels/chart1.xml.rels",
+                br#"<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/package" Target="../embeddings/Microsoft_Excel_Worksheet1.xlsx"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/package" Target="../embeddings/Microsoft_Excel_Worksheet9.xlsx"/></Relationships>"#,
+            ),
+        ]);
+        let dir = tempfile::tempdir().expect("tempdir");
+        let DocOutcome::Text { notes, unshown, .. } = convert_docx(&bytes, dir.path()) else {
+            panic!("expected Text outcome for a well-formed docx");
+        };
+        assert_eq!(
+            unshown.lines(),
+            [
+                "2 chart(s) not shown",
+                "1 diagram(s) not shown",
+                "1 embedded object part(s) not shown",
+            ]
+        );
+        assert!(
+            notes.is_empty(),
+            "the report carries the whole loss: {notes:?}"
+        );
+    }
+
+    /// A chart is described where the drawing sits, in the body or in a story the
+    /// package prints beside it; one whose story is dropped, or that sits in a
+    /// merge continuation the reading shows no value of, stays a loss the census names.
+    #[test]
+    fn docx_describes_a_chart_where_it_sits_and_keeps_the_ones_it_cannot() {
+        let body = r#"<w:p><w:r><w:t>Before</w:t></w:r></w:p><w:p><w:drawing><wp:inline><a:graphic><a:graphicData><c:chart r:id="rId1"/></a:graphicData></a:graphic></wp:inline></w:drawing></w:p><w:p><w:r><w:t>After</w:t></w:r></w:p>"#;
+        let document_rels = rels(&rel("rId1", "chart", "charts/chart1.xml"));
+        let body_chart = package(
+            body,
+            &[
+                ("word/_rels/document.xml.rels", &document_rels),
+                ("word/charts/chart1.xml", COLUMN_CHART),
+            ],
+        );
+        let header_body = r#"<w:p><w:r><w:t>Body</w:t></w:r></w:p><w:sectPr><w:headerReference w:type="default" r:id="rId1"/></w:sectPr>"#;
+        let header = r#"<w:hdr><w:p><w:drawing><wp:inline><a:graphic><a:graphicData><c:chart r:id="rId1"/></a:graphicData></a:graphic></wp:inline></w:drawing></w:p></w:hdr>"#;
+        let header_document_rels = rels(&rel("rId1", "header", "header1.xml"));
+        let header_chart_rels = rels(&rel("rId1", "chart", "charts/chart1.xml"));
+        let header_chart = package(
+            header_body,
+            &[
+                ("word/_rels/document.xml.rels", &header_document_rels),
+                ("word/header1.xml", header),
+                ("word/_rels/header1.xml.rels", &header_chart_rels),
+                ("word/charts/chart1.xml", COLUMN_CHART),
+            ],
+        );
+
+        let dropped_body = r#"<w:p><w:r><w:t>Body</w:t></w:r></w:p><w:sectPr><w:headerReference w:type="default" r:id="rId1"/></w:sectPr>"#;
+        // The chart is drawn, then the part nests past what the walk reads.
+        let dropped_header = format!(
+            r#"<w:hdr><w:p><w:drawing><wp:inline><a:graphic><a:graphicData><c:chart r:id="rId1"/></a:graphicData></a:graphic></wp:inline></w:drawing></w:p>{}"#,
+            "<w:p>".repeat(max_element_depth()),
+        );
+        let dropped = package(
+            dropped_body,
+            &[
+                ("word/_rels/document.xml.rels", &header_document_rels),
+                ("word/header1.xml", &dropped_header),
+                ("word/_rels/header1.xml.rels", &header_chart_rels),
+                ("word/charts/chart1.xml", COLUMN_CHART),
+            ],
+        );
+        let merged_body = r#"<w:p><w:r><w:t>Body</w:t></w:r></w:p><w:tbl><w:tblGrid><w:gridCol/></w:tblGrid><w:tr><w:tc><w:tcPr><w:vMerge w:val="restart"/></w:tcPr><w:p><w:r><w:t>Origin</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p><w:drawing><wp:inline><a:graphic><a:graphicData><c:chart r:id="rId1"/></a:graphicData></a:graphic></wp:inline></w:drawing></w:p></w:tc></w:tr></w:tbl>"#;
+        let document_rels = rels(&rel("rId1", "chart", "charts/chart1.xml"));
+        let merged = package(
+            merged_body,
+            &[
+                ("word/_rels/document.xml.rels", &document_rels),
+                ("word/charts/chart1.xml", COLUMN_CHART),
+            ],
+        );
+
+        let cases: Vec<(&str, Vec<u8>, &str, &[&str])> = vec![
+            (
+                "a body chart",
+                body_chart,
+                "Before\n\
+                 Chart (column chart):\n  \
+                 Title: Sales\n  \
+                 Series \"Revenue\": Jan: 10, Feb: 20\n\
+                 After",
+                &[],
+            ),
+            (
+                "a header chart",
+                header_chart,
+                "Body\n\
+                 Header (default):\n  \
+                 Chart (column chart):\n    \
+                 Title: Sales\n    \
+                 Series \"Revenue\": Jan: 10, Feb: 20",
+                &[],
+            ),
+            (
+                "a chart in a story the walk drops",
+                dropped,
+                "Body",
+                &["1 chart(s) not shown"],
+            ),
+            (
+                "a chart in a merge continuation",
+                merged,
+                "Body\nTable 1: 2 rows, 1 column\n  R1: C1: Origin\n  R2: C1 (part of R1C1):",
+                &["1 chart(s) not shown"],
+            ),
+        ];
+        for (label, bytes, expected, expected_unshown) in cases {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let DocOutcome::Text {
+                text,
+                notes,
+                unshown,
+                ..
+            } = convert_docx(&bytes, dir.path())
+            else {
+                panic!("{label}: expected Text outcome for a well-formed docx");
+            };
+            assert_eq!(text, expected, "{label}");
+            assert_eq!(unshown.lines(), expected_unshown, "{label}");
+            if expected_unshown.is_empty() {
+                assert!(
+                    notes.is_empty(),
+                    "{label}: a described chart is no loss: {notes:?}"
+                );
+            }
+        }
+    }
+
+    /// A table is one block: a labelled header, one line per row, one token per
+    /// cell. A `gridSpan` names the columns a cell covers with or without a
+    /// `vMerge`, and a `vMerge` continuation names its origin instead of
+    /// repeating a value stored in it.
+    #[test]
+    fn docx_renders_table_rows_cells_and_merges() {
+        let cases = [
+            (
+                "a spanning start and a vertical continuation",
+                r#"<w:p><w:r><w:t>Before</w:t></w:r></w:p><w:tbl>
+<w:tblGrid><w:gridCol/><w:gridCol/><w:gridCol/></w:tblGrid>
+<w:tr>
+<w:tc><w:tcPr><w:vMerge w:val="restart"/><w:gridSpan w:val="2"/></w:tcPr><w:p><w:r><w:t>Merged</w:t></w:r></w:p></w:tc>
+<w:tc><w:p><w:r><w:t>X</w:t></w:r></w:p></w:tc>
+</w:tr>
+<w:tr>
+<w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc>
+<w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc>
+<w:tc><w:p><w:r><w:t>Y</w:t></w:r></w:p></w:tc>
+</w:tr>
+</w:tbl>"#,
+                "Before\n\
+                 Table 1: 2 rows, 3 columns\n  \
+                 R1: C1 (spans C1-C2): Merged | C3: X\n  \
+                 R2: C1 (part of R1C1): | C2 (part of R1C1): | C3: Y",
+            ),
+            (
+                "a horizontal merge with no vertical one",
+                r#"<w:tbl><w:tblGrid><w:gridCol/><w:gridCol/><w:gridCol/></w:tblGrid>
+<w:tr><w:tc><w:tcPr><w:gridSpan w:val="2"/></w:tcPr><w:p><w:r><w:t>Merged header</w:t></w:r></w:p></w:tc>
+<w:tc><w:p><w:r><w:t>Third</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>"#,
+                "Table 1: 1 row, 3 columns\n  R1: C1 (spans C1-C2): Merged header | C3: Third",
+            ),
+            (
+                "a continuation that stored its own value",
+                r#"<w:tbl><w:tblGrid><w:gridCol/></w:tblGrid>
+<w:tr><w:tc><w:tcPr><w:vMerge w:val="restart"/></w:tcPr><w:p><w:r><w:t>Merged</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p><w:r><w:t>Merged</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>"#,
+                "Table 1: 2 rows, 1 column\n  \
+                 R1: C1: Merged\n  \
+                 R2: C1 (part of R1C1):",
+            ),
+        ];
+        for (label, body, expected) in cases {
+            assert_eq!(text_of(&package(body, &[])), expected, "{label}");
+        }
+    }
+
+    /// The geometry a package asks for is clamped, so a `w:gridSpan` or a
+    /// `w:gridBefore` of four billion columns cannot decide how much the walk
+    /// allocates — and a row's cells add up, so the running column is clamped as
+    /// well: a row of wide cells sizes the merge map no more than one wide cell.
+    #[test]
+    fn docx_bounds_the_geometry_a_row_of_wide_cells_adds_up_to() {
+        let clamped = r#"<w:tbl><w:tblGrid><w:gridCol/></w:tblGrid>
+<w:tr><w:tc><w:tcPr><w:gridSpan w:val="4000000000"/></w:tcPr><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:trPr><w:gridBefore w:val="4000000000"/></w:trPr><w:tc><w:p><w:r><w:t>B</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>"#;
+        let cell = |text: &str| {
+            format!(
+                r#"<w:tc><w:tcPr><w:gridSpan w:val="4000000000"/></w:tcPr>\
+<w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:tc>"#
+            )
+        };
+        let wide_row = format!(
+            "<w:tbl><w:tr>{}{}{}{}</w:tr></w:tbl>",
+            cell("A"),
+            cell("B"),
+            cell("C"),
+            cell("D")
+        );
+        let cases = [
+            (
+                "a four-billion-column span and gridBefore",
+                clamped,
+                "Table 1: 2 rows, 256 columns\n  \
+                 R1: C1 (spans C1-C256): A\n  \
+                 R2: C256: B",
+            ),
+            (
+                "a row of wide cells that add up",
+                wide_row.as_str(),
+                "Table 1: 1 row, 256 columns\n  \
+                 R1: C1 (spans C1-C256): A | C256: B | C256: C | C256: D",
+            ),
+        ];
+        for (label, body, expected) in cases {
+            assert_eq!(text_of(&package(body, &[])), expected, "{label}");
+        }
+    }
+
+    /// A table nested in a cell is numbered after the table that holds it, and
+    /// is folded onto that cell's line: the row-per-line shape has no room for
+    /// a table inside a row.
+    #[test]
+    fn docx_numbers_a_nested_table_after_the_one_that_holds_it() {
+        let body = r"<w:tbl><w:tblGrid><w:gridCol/></w:tblGrid>
+<w:tr><w:tc>
+<w:p><w:r><w:t>outer</w:t></w:r></w:p>
+<w:tbl><w:tblGrid><w:gridCol/></w:tblGrid>
+<w:tr><w:tc><w:p><w:r><w:t>inner</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>
+</w:tc></w:tr>
+</w:tbl>";
+        assert_eq!(
+            text_of(&package(body, &[])),
+            "Table 1: 1 row, 1 column\n  \
+             R1: C1: outer Table 2: 1 row, 1 column   R1: C1: inner"
+        );
+    }
+
+    /// A row's own revision is an annotation on the row line, and it is a
+    /// tracked change like any other: the summary counts it.
+    #[test]
+    fn docx_marks_inserted_and_deleted_rows() {
+        let body = r#"<w:tbl><w:tblGrid><w:gridCol/></w:tblGrid>
+<w:tr><w:trPr><w:ins w:author="Ivan Petrov"/></w:trPr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:trPr><w:del w:author="Anna"/></w:trPr><w:tc><w:p><w:r><w:t>B</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>"#;
+        assert_eq!(
+            text_of(&package(body, &[])),
+            "Unaccepted tracked changes: 1 insertion, 1 deletion \
+             (authors: Ivan Petrov, Anna).\n\n\
+             Table 1: 2 rows, 1 column\n  \
+             R1 (inserted): C1: A\n  \
+             R2 (deleted): C1: B"
+        );
+    }
+
+    /// A table's, a cell's and a row's own revisions are annotations in the fixed
+    /// order and in the place the revised thing shows, and a deleted cell keeps
+    /// its text — that is what the marker is for.
+    #[test]
+    fn docx_annotates_cells_and_a_revised_table() {
+        let cases = [
+            (
+                "a revised table and a revised cell",
+                r#"<w:tbl>
+<w:tblPr><w:tblPrChange w:author="Anna"/></w:tblPr>
+<w:tblGrid><w:gridCol/><w:gridCol/></w:tblGrid>
+<w:tr>
+<w:tc><w:tcPr><w:cellIns/><w:cellDel/><w:cellMerge/></w:tcPr><w:p><w:r><w:t>C</w:t></w:r></w:p></w:tc>
+<w:tc><w:tcPr><w:tcPrChange w:author="Anna"/></w:tcPr><w:p/></w:tc>
+</w:tr>
+</w:tbl>"#,
+                "Unaccepted tracked changes: 1 insertion, 1 deletion, 3 formatting changes \
+                 (authors: Anna).\n\n\
+                 Table 1 (formatting revised): 1 row, 2 columns\n  \
+                 R1: C1 (inserted, deleted, merge revised): C | C2 (formatting revised):",
+            ),
+            (
+                "a row property exception beside the row's own change",
+                r#"<w:tbl><w:tblGrid><w:gridCol/></w:tblGrid>
+<w:tr><w:tblPrEx><w:tblPrExChange w:author="QA"/></w:tblPrEx><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:trPr><w:trPrChange w:author="QA"/></w:trPr><w:tblPrEx><w:tblPrExChange w:author="QA"/></w:tblPrEx><w:tc><w:p><w:r><w:t>B</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>"#,
+                "Unaccepted tracked changes: 3 formatting changes (authors: QA).\n\n\
+                 Table 1: 2 rows, 1 column\n  \
+                 R1 (formatting revised): C1: A\n  \
+                 R2 (formatting revised): C1: B",
+            ),
+            (
+                "a revised grid",
+                r#"<w:tbl><w:tblGrid><w:gridCol/><w:tblGridChange w:author="QA"/></w:tblGrid>
+<w:tr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>"#,
+                "Unaccepted tracked changes: 1 formatting change (authors: QA).\n\n\
+                 Table 1 (formatting revised): 1 row, 1 column\n  R1: C1: A",
+            ),
+        ];
+        for (label, body, expected) in cases {
+            assert_eq!(text_of(&package(body, &[])), expected, "{label}");
+        }
+    }
+
+    /// Every variant named is read and labelled, the part serving two variants
+    /// is read once, and each is numbered only because more than one is
+    /// emitted. A body with no text of its own is not a document with no text:
+    /// what the headers read is the text.
+    #[test]
+    fn docx_reads_header_and_footer_variants_and_a_field() {
+        let body = r#"<w:p><w:r><w:t>Body text</w:t></w:r></w:p><w:sectPr>
+<w:headerReference w:type="default" r:id="rId1"/>
+<w:headerReference w:type="first" r:id="rId2"/>
+<w:headerReference w:type="default" r:id="rId1"/>
+<w:footerReference w:type="even" r:id="rId3"/>
+</w:sectPr>"#;
+        let document_rels = rels(&format!(
+            "{}{}{}",
+            rel("rId1", "header", "header1.xml"),
+            rel("rId2", "header", "header2.xml"),
+            rel("rId3", "footer", "footer1.xml"),
+        ));
+        let header1 = r"<w:hdr><w:p><w:r><w:t>Company</w:t></w:r></w:p></w:hdr>";
+        let header2 = r"<w:hdr><w:p><w:r><w:t>Draft</w:t></w:r></w:p></w:hdr>";
+        let footer = r#"<w:ftr><w:p><w:r><w:t xml:space="preserve">Page </w:t></w:r>\
+<w:r><w:fldSimple w:instr=" PAGE "/></w:r>\
+<w:r><w:t xml:space="preserve"> 5</w:t></w:r></w:p></w:ftr>"#;
+        let variants = package(
+            body,
+            &[
+                ("word/_rels/document.xml.rels", &document_rels),
+                ("word/header1.xml", header1),
+                ("word/header2.xml", header2),
+                ("word/footer1.xml", footer),
+            ],
+        );
+
+        let only_header_body =
+            r#"<w:p/><w:sectPr><w:headerReference w:type="default" r:id="rId1"/></w:sectPr>"#;
+        let only_header = package(
+            only_header_body,
+            &[
+                (
+                    "word/_rels/document.xml.rels",
+                    &rels(&rel("rId1", "header", "header1.xml")),
+                ),
+                (
+                    "word/header1.xml",
+                    r"<w:hdr><w:p><w:r><w:t>Only here</w:t></w:r></w:p></w:hdr>",
+                ),
+            ],
+        );
+
+        let cases: Vec<(&str, Vec<u8>, &str)> = vec![
+            (
+                "every header and footer variant, each read once",
+                variants,
+                "Body text\n\
+                 Header 1 (default):\n  Company\n\
+                 Header 2 (first page):\n  Draft\n\
+                 Footer (even pages):\n  Page [field PAGE] 5",
+            ),
+            (
+                "a body whose only text is in a header",
+                only_header,
+                "Header (default):\n  Only here",
+            ),
+        ];
+        for (label, bytes, expected) in cases {
+            assert_eq!(text_of(&bytes), expected, "{label}");
+        }
+    }
+
+    /// `Table N:` labels count the whole package, so a header's table takes the
+    /// next number instead of repeating the body's.
+    #[test]
+    fn docx_numbers_tables_across_parts() {
+        let body = r#"<w:p><w:r><w:t>Body</w:t></w:r></w:p>
+<w:tbl><w:tblGrid><w:gridCol/></w:tblGrid>
+<w:tr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>
+<w:sectPr><w:headerReference w:type="default" r:id="rId1"/></w:sectPr>"#;
+        let bytes = package(
+            body,
+            &[
+                (
+                    "word/_rels/document.xml.rels",
+                    &rels(&rel("rId1", "header", "header1.xml")),
+                ),
+                (
+                    "word/header1.xml",
+                    r"<w:hdr><w:tbl><w:tblGrid><w:gridCol/></w:tblGrid>
+<w:tr><w:tc><w:p><w:r><w:t>H</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl></w:hdr>",
+                ),
+            ],
+        );
+        assert_eq!(
+            text_of(&bytes),
+            "Body\n\
+             Table 1: 1 row, 1 column\n  R1: C1: A\n\
+             Header (default):\n  Table 2: 1 row, 1 column\n    R1: C1: H"
+        );
+    }
+
+    /// The summary covers the whole package, not only the body — while a part,
+    /// or a definition, that shows nothing shows none of its revisions either:
+    /// it never names a change the text does not carry.
+    #[test]
+    fn docx_summarises_revisions_from_every_part() {
+        let empty_body = r#"<w:p><w:r><w:t>Body</w:t></w:r></w:p>
+<w:sectPr><w:headerReference w:type="default" r:id="rId1"/></w:sectPr>"#;
+        let empty = package(
+            empty_body,
+            &[
+                (
+                    "word/_rels/document.xml.rels",
+                    &rels(&format!(
+                        "{}{}",
+                        rel("rId1", "header", "header1.xml"),
+                        rel("rId2", "footnotes", "footnotes.xml"),
+                    )),
+                ),
+                // A header whose only content is an empty insertion renders
+                // nothing, so it is skipped.
+                (
+                    "word/header1.xml",
+                    r#"<w:hdr><w:p><w:r><w:ins w:author="Anna"/></w:r></w:p></w:hdr>"#,
+                ),
+                // An unreferenced footnote that renders nothing is not shown.
+                (
+                    "word/footnotes.xml",
+                    r#"<w:footnotes><w:footnote w:id="1"><w:p><w:ins w:author="Anna"/></w:p></w:footnote></w:footnotes>"#,
+                ),
+            ],
+        );
+
+        let revised_body = r#"<w:p><w:r><w:t>Body</w:t></w:r><w:r><w:footnoteReference w:id="1"/></w:r></w:p>
+<w:sectPr><w:headerReference w:type="default" r:id="rId1"/></w:sectPr>"#;
+        let revised = package(
+            revised_body,
+            &[
+                (
+                    "word/_rels/document.xml.rels",
+                    &rels(&format!(
+                        "{}{}",
+                        rel("rId1", "header", "header1.xml"),
+                        rel("rId2", "footnotes", "footnotes.xml"),
+                    )),
+                ),
+                (
+                    "word/header1.xml",
+                    r#"<w:hdr><w:p><w:ins w:author="Anna"><w:r><w:t>Draft</w:t></w:r></w:ins></w:p></w:hdr>"#,
+                ),
+                (
+                    "word/footnotes.xml",
+                    r#"<w:footnotes><w:footnote w:id="1"><w:p><w:del w:author="Anna"><w:r><w:delText>gone</w:delText></w:r></w:del></w:p></w:footnote></w:footnotes>"#,
+                ),
+            ],
+        );
+
+        let cases: Vec<(&str, Vec<u8>, &str)> = vec![
+            ("a part and a definition that render nothing", empty, "Body"),
+            (
+                "a revision in a header and in a footnote",
+                revised,
+                "Unaccepted tracked changes: 1 insertion, 1 deletion (authors: Anna).\n\n\
+                 Body[footnote 1]\n\
+                 Header (default):\n  [ins]Draft[/ins]\n\
+                 Footnote 1:\n  [del]gone[/del]",
+            ),
+        ];
+        for (label, bytes, expected) in cases {
+            assert_eq!(text_of(&bytes), expected, "{label}");
+        }
+    }
+
+    /// A note is numbered in Word's display order, its definition is a labelled
+    /// block, a comment's range is not repeated at its point reference, and a
+    /// note part's separator entries are not text.
+    #[test]
+    fn docx_reads_footnotes_endnotes_and_comments() {
+        let body = r#"<w:p>\
+<w:r><w:t xml:space="preserve">Claim </w:t></w:r>\
+<w:r><w:endnoteReference w:id="1"/></w:r>\
+<w:commentRangeStart w:id="2"/>\
+<w:r><w:t>here</w:t></w:r>\
+<w:commentRangeEnd w:id="2"/>\
+<w:r><w:commentReference w:id="2"/></w:r>\
+<w:r><w:footnoteReference w:id="1"/></w:r>\
+<w:r><w:commentReference w:id="7"/></w:r></w:p>"#;
+        let footnotes = r#"<w:footnotes>\
+<w:footnote w:id="-1"><w:p><w:r><w:t>separator</w:t></w:r></w:p></w:footnote>\
+<w:footnote w:type="continuationSeparator" w:id="0"><w:p><w:r><w:t>continued</w:t></w:r></w:p></w:footnote>\
+<w:footnote w:id="1"><w:p><w:r><w:t>see the appendix</w:t></w:r></w:p></w:footnote>\
+</w:footnotes>"#;
+        let endnotes = r#"<w:endnotes>\
+<w:endnote w:id="1"><w:p><w:r><w:t>appendix A</w:t></w:r></w:p></w:endnote>\
+</w:endnotes>"#;
+        let comments = r#"<w:comments>\
+<w:comment w:id="2" w:author="Ivan Petrov"><w:p><w:r><w:t>needs a citation</w:t></w:r></w:p></w:comment>\
+<w:comment w:id="6" w:author="Anna"><w:p><w:r><w:t>orphan</w:t></w:r></w:p></w:comment>\
+</w:comments>"#;
+        let bytes = package(
+            body,
+            &[
+                (
+                    "word/_rels/document.xml.rels",
+                    &rels(&rel("rId5", "footnotes", "notes/footnotes.xml")),
+                ),
+                ("word/notes/footnotes.xml", footnotes),
+                ("word/endnotes.xml", endnotes),
+                ("word/comments.xml", comments),
+            ],
+        );
+        assert_eq!(
+            text_of(&bytes),
+            "Claim [endnote 1][comment 1 starts]here[comment 1 ends][footnote 1][comment ?]\n\
+             Footnote 1:\n  see the appendix\n\
+             Endnote 1:\n  appendix A\n\
+             Comment 1 (Ivan Petrov):\n  needs a citation\n\
+             Comment 2 (Anna, not referenced in the text):\n  orphan"
+        );
+    }
+
+    /// A comment range runs inside one part — after a header or a notes part as
+    /// much as beside another body block — and a referenced definition is
+    /// reported even when it holds nothing: its anchor would otherwise name a
+    /// block that is not there. One nothing references and that holds nothing
+    /// stays out.
+    #[test]
+    fn docx_resets_a_comment_range_between_parts() {
+        let between_body = r#"<w:p><w:commentRangeStart w:id="2"/>\
+<w:r><w:t>body</w:t></w:r>\
+<w:commentRangeEnd w:id="2"/>\
+</w:p>\
+<w:sectPr><w:headerReference w:type="default" r:id="rId1"/></w:sectPr>"#;
+        let between = package(
+            between_body,
+            &[
+                (
+                    "word/_rels/document.xml.rels",
+                    &rels(&format!(
+                        "{}{}",
+                        rel("rId1", "header", "header1.xml"),
+                        rel("rId2", "comments", "comments.xml"),
+                    )),
+                ),
+                (
+                    "word/header1.xml",
+                    r#"<w:hdr><w:p><w:r><w:commentReference w:id="2"/></w:r></w:p></w:hdr>"#,
+                ),
+                (
+                    "word/comments.xml",
+                    r#"<w:comments><w:comment w:id="2" w:author="Ivan Petrov"><w:p><w:r><w:t>note</w:t></w:r></w:p></w:comment></w:comments>"#,
+                ),
+            ],
+        );
+
+        let notes_body = r#"<w:p><w:commentRangeStart w:id="2"/>\
+<w:r><w:t>body</w:t></w:r>\
+<w:r><w:footnoteReference w:id="1"/></w:r></w:p>"#;
+        let before_notes = package(
+            notes_body,
+            &[
+                (
+                    "word/_rels/document.xml.rels",
+                    &rels(&rel("rId5", "footnotes", "footnotes.xml")),
+                ),
+                (
+                    "word/footnotes.xml",
+                    r#"<w:footnotes><w:footnote w:id="1">\
+<w:p><w:r><w:commentReference w:id="2"/></w:r></w:p></w:footnote></w:footnotes>"#,
+                ),
+                (
+                    "word/comments.xml",
+                    r#"<w:comments><w:comment w:id="2" w:author="Ivan Petrov">\
+<w:p><w:r><w:t>note</w:t></w:r></w:p></w:comment></w:comments>"#,
+                ),
+            ],
+        );
+
+        let empty_body = r#"<w:p><w:r><w:t>Text</w:t></w:r>\
+<w:r><w:footnoteReference w:id="1"/></w:r>\
+<w:r><w:footnoteReference w:id="2"/></w:r></w:p>"#;
+        let empty_definition = package(
+            empty_body,
+            &[
+                (
+                    "word/_rels/document.xml.rels",
+                    &rels(&rel("rId5", "footnotes", "footnotes.xml")),
+                ),
+                (
+                    "word/footnotes.xml",
+                    "<w:footnotes>\
+<w:footnote w:id=\"1\"><w:p/></w:footnote>\
+<w:footnote w:id=\"2\"><w:p><w:r><w:t>note</w:t></w:r></w:p></w:footnote>\
+<w:footnote w:id=\"3\"><w:p/></w:footnote>\
+</w:footnotes>",
+                ),
+            ],
+        );
+
+        let cases: Vec<(&str, Vec<u8>, &str)> = vec![
+            (
+                "a range opened in the body and a point in a header",
+                between,
+                "[comment 1 starts]body[comment 1 ends]\n\
+                 Header (default):\n  [comment 1]\n\
+                 Comment 1 (Ivan Petrov):\n  note",
+            ),
+            (
+                "a range opened in the body and a point in a footnote",
+                before_notes,
+                "[comment 1 starts]body[footnote 1]\n\
+                 Footnote 1:\n  [comment 1]\n\
+                 Comment 1 (Ivan Petrov):\n  note",
+            ),
+            (
+                "a referenced definition with no text",
+                empty_definition,
+                "Text[footnote 1][footnote 2]\n\
+                 Footnote 1:\n\
+                 Footnote 2:\n  note",
+            ),
+        ];
+        for (label, bytes, expected) in cases {
+            assert_eq!(text_of(&bytes), expected, "{label}");
+        }
+    }
+
+    /// Every marker the walk raises, and the summary line that tallies them:
+    /// `w:moveFrom`/`w:moveTo` are one move, not two — one moved range is one
+    /// move whatever number of marks it brackets, and a range that brackets no
+    /// moved content is no move the text shows.
+    #[test]
+    fn docx_names_tracked_changes_and_their_authors() {
+        let cases = [
+            (
+                "every marker, with moveFrom and moveTo one move",
+                r#"<w:p>\
+<w:pPr><w:pPrChange w:author="Anna"/></w:pPr>\
+<w:r><w:rPr><w:rPrChange w:author="Ivan Petrov"/></w:rPr><w:t>kept</w:t></w:r>\
+<w:ins w:author="Ivan Petrov"><w:r><w:t xml:space="preserve"> added</w:t></w:r></w:ins>\
+<w:del w:author="Anna"><w:r><w:delText xml:space="preserve"> gone</w:delText></w:r></w:del>\
+<w:moveFrom w:author="Anna"><w:r><w:t xml:space="preserve"> away</w:t></w:r></w:moveFrom>\
+<w:moveTo w:author="Anna"><w:r><w:t xml:space="preserve"> here</w:t></w:r></w:moveTo>\
+<w:ins w:author="Ivan Petrov"/></w:p>"#,
+                "Unaccepted tracked changes: 2 insertions, 1 deletion, 1 move, \
+                 2 formatting changes (authors: Anna, Ivan Petrov).\n\n\
+                 [fmt]kept[ins] added[/ins][del] gone[/del]\
+                 [moved-away] away[/moved-away][moved-here] here[/moved-here][fmt ¶]",
+            ),
+            (
+                "a move bracketed by range marks",
+                r#"<w:p>\
+<w:moveFromRangeStart w:id="1" w:author="Anna" w:name="move1"/>\
+<w:moveFrom w:author="Anna"><w:r><w:t>away</w:t></w:r></w:moveFrom>\
+<w:moveTo w:author="Anna"><w:r><w:t>here</w:t></w:r></w:moveTo>\
+<w:moveToRangeEnd w:id="2"/>\
+<w:moveTo w:author="Anna"><w:r><w:t> and there</w:t></w:r></w:moveTo>\
+</w:p>"#,
+                "Unaccepted tracked changes: 1 move (authors: Anna).\n\n\
+                 [moved-away]away[/moved-away][moved-here]here[/moved-here]\
+                 [moved-here] and there[/moved-here]",
+            ),
+            (
+                "a range that marks no moved content",
+                r#"<w:moveFromRangeStart w:id="1" w:author="Anna" w:name="move1"/>\
+<w:p><w:r><w:t>Plain</w:t></w:r></w:p>\
+<w:moveFromRangeEnd w:id="1"/>"#,
+                "Plain",
+            ),
+        ];
+        for (label, body, expected) in cases {
+            assert_eq!(text_of(&package(body, &[])), expected, "{label}");
+        }
+    }
+
+    /// The paragraph mark's own revision is marked at the paragraph's end, a
+    /// `w:sectPr/w:sectPrChange` is the section's, and the document's own last
+    /// section lives in `w:body/w:sectPr`, where no paragraph is open: its
+    /// revision is marked in the flow rather than only counted.
+    #[test]
+    fn docx_marks_the_paragraph_and_section_marks() {
+        let cases = [
+            (
+                "a paragraph's own mark and a section inside it",
+                r#"<w:p><w:pPr>\
+<w:rPr><w:del w:author="Anna"/></w:rPr>\
+<w:pPrChange w:author="Anna"/>\
+<w:sectPr><w:sectPrChange w:author="Anna"/></w:sectPr>\
+</w:pPr><w:r><w:t>Text</w:t></w:r></w:p>"#,
+                "Unaccepted tracked changes: 1 deletion, 2 formatting changes \
+                 (authors: Anna).\n\n\
+                 Text[del ¶][fmt ¶][fmt section]",
+            ),
+            (
+                "the document's last section",
+                r#"<w:p><w:r><w:t>Body</w:t></w:r></w:p><w:sectPr><w:sectPrChange w:author="Anna"/></w:sectPr>"#,
+                "Unaccepted tracked changes: 1 formatting change (authors: Anna).\n\n\
+                 Body\n[fmt section]",
+            ),
+        ];
+        for (label, body, expected) in cases {
+            assert_eq!(text_of(&package(body, &[])), expected, "{label}");
+        }
+    }
+
+    /// A heading's level comes from the paragraph's own `w:outlineLvl` — where
+    /// the body-text value suppresses the style — or from its style chain, and a
+    /// style id may name a heading even when the package states no styles at all.
+    /// A heading that printed nothing gets no mark, and one whose only content
+    /// is a block is marked on the line that block opens.
+    #[test]
+    fn docx_marks_a_heading_from_its_own_level_or_its_style() {
+        let styles = concat!(
+            r#"<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">"#,
+            r#"<w:style w:type="paragraph" w:styleId="Normal"><w:name w:val="Normal"/></w:style>"#,
+            r#"<w:style w:type="paragraph" w:styleId="H2"><w:name w:val="Heading 2"/></w:style>"#,
+            r#"<w:style w:type="paragraph" w:styleId="Mine"><w:basedOn w:val="H2"/></w:style>"#,
+            r#"<w:style w:type="paragraph" w:styleId="Q"><w:pPr><w:outlineLvl w:val="2"/></w:pPr></w:style>"#,
+            r#"</w:styles>"#,
+        );
+        let styled_body = concat!(
+            // (a) a style id that names a heading on its own.
+            r#"<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>A</w:t></w:r></w:p>"#,
+            // (b) the paragraph's own outline level.
+            r#"<w:p><w:pPr><w:outlineLvl w:val="1"/></w:pPr><w:r><w:t>B</w:t></w:r></w:p>"#,
+            // (c) an ordinary style, and no style at all.
+            r#"<w:p><w:pPr><w:pStyle w:val="Normal"/></w:pPr><w:r><w:t>C</w:t></w:r></w:p>"#,
+            r#"<w:p><w:r><w:t>D</w:t></w:r></w:p>"#,
+            // (d) the body-text outline level overrides the heading style.
+            r#"<w:p><w:pPr><w:pStyle w:val="Heading2"/><w:outlineLvl w:val="9"/></w:pPr>"#,
+            r#"<w:r><w:t>E</w:t></w:r></w:p>"#,
+            // (e) a style whose name is a heading name.
+            r#"<w:p><w:pPr><w:pStyle w:val="H2"/></w:pPr><w:r><w:t>F</w:t></w:r></w:p>"#,
+            // (f) a style based on one that names a heading.
+            r#"<w:p><w:pPr><w:pStyle w:val="Mine"/></w:pPr><w:r><w:t>G</w:t></w:r></w:p>"#,
+            // (g) a style whose own properties carry an outline level.
+            r#"<w:p><w:pPr><w:pStyle w:val="Q"/></w:pPr><w:r><w:t>H</w:t></w:r></w:p>"#,
+            // (h) a style the part does not define and whose id is no heading.
+            r#"<w:p><w:pPr><w:pStyle w:val="Nope"/></w:pPr><w:r><w:t>I</w:t></w:r></w:p>"#,
+        );
+        let with_styles = package(
+            styled_body,
+            &[
+                (
+                    "word/_rels/document.xml.rels",
+                    &rels(&rel("rId9", "styles", "styles.xml")),
+                ),
+                ("word/styles.xml", styles),
+            ],
+        );
+
+        let inline_body = concat!(
+            r#"<w:p><w:r><w:t>before</w:t></w:r></w:p>"#,
+            r#"<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr></w:p>"#,
+            // A leading break opens an empty first line: the mark goes with the
+            // heading's text, not on that empty line.
+            r#"<w:p><w:pPr><w:outlineLvl w:val="0"/></w:pPr><w:r><w:br/><w:t>broken</w:t></w:r></w:p>"#,
+            r#"<w:p><w:pPr><w:outlineLvl w:val="0"/></w:pPr><w:r><mc:AlternateContent>"#,
+            r#"<mc:Choice Requires="wps"><w:drawing><wps:txbx><w:txbxContent>"#,
+            r#"<w:p><w:r><w:t>boxed</w:t></w:r></w:p>"#,
+            r#"</w:txbxContent></wps:txbx></w:drawing></mc:Choice>"#,
+            r#"</mc:AlternateContent></w:r></w:p>"#,
+            r#"<w:p><w:r><w:t>after</w:t></w:r></w:p>"#,
+        );
+        let inline = package(inline_body, &[]);
+
+        let cases: Vec<(&str, Vec<u8>, &str)> = vec![
+            (
+                "a level from the paragraph, its style chain or its style id",
+                with_styles,
+                "[heading 1] A\n\
+                 [heading 2] B\n\
+                 C\n\
+                 D\n\
+                 E\n\
+                 [heading 2] F\n\
+                 [heading 2] G\n\
+                 [heading 3] H\n\
+                 I",
+            ),
+            (
+                "a heading that printed a block or nothing",
+                inline,
+                "before\n[heading 1] broken\n[heading 1] [text box]\n  boxed\nafter",
+            ),
+        ];
+        for (label, bytes, expected) in cases {
+            assert_eq!(text_of(&bytes), expected, "{label}");
+        }
+    }
+
+    /// A link shows the address it points at after its own text, an anchor alone
+    /// reads as a link inside the document, a target the rels do not declare
+    /// leaves the text alone — an anchor beside it included, since `internal`
+    /// would be a claim the link does not make — and a part the link sits in
+    /// resolves through that part's own relationships.
+    #[test]
+    fn docx_shows_a_hyperlink_s_address_with_its_text() {
+        let body = concat!(
+            r#"<w:p><w:hyperlink r:id="rId1"><w:r><w:t>ext</w:t></w:r></w:hyperlink></w:p>"#,
+            r#"<w:p><w:hyperlink w:anchor="top"><w:r><w:t>here</w:t></w:r></w:hyperlink></w:p>"#,
+            r#"<w:p><w:hyperlink r:id="rId9"><w:r><w:t>lost</w:t></w:r></w:hyperlink></w:p>"#,
+            r#"<w:p><w:hyperlink r:id="rId9" w:anchor="top"><w:r><w:t>lost here</w:t></w:r></w:hyperlink></w:p>"#,
+            r#"<w:p><w:hyperlink r:id="rId1" w:anchor="frag"><w:r><w:t>both</w:t></w:r></w:hyperlink></w:p>"#,
+            r#"<w:p><w:hyperlink r:id="rId2"><w:r><w:t>body</w:t></w:r></w:hyperlink></w:p>"#,
+            // A link whose content is a picture alone: the reading prints no
+            // inline picture, so the address is what it can say about the link.
+            r#"<w:p><w:hyperlink r:id="rId1"><w:r><w:drawing/></w:r></w:hyperlink></w:p>"#,
+            // A link whose content is a block: the address opens the line after
+            // the block rather than the block's own inner line.
+            r#"<w:p><w:hyperlink r:id="rId1"><w:r><mc:AlternateContent>"#,
+            r#"<mc:Choice Requires="wps"><w:drawing><wps:txbx><w:txbxContent>"#,
+            r#"<w:p><w:r><w:t>boxed</w:t></w:r></w:p>"#,
+            r#"</w:txbxContent></wps:txbx></w:drawing></mc:Choice>"#,
+            r#"</mc:AlternateContent></w:r></w:hyperlink></w:p>"#,
+            r#"<w:sectPr><w:headerReference w:type="default" r:id="rId3"/></w:sectPr>"#,
+        );
+        let body_rels = rels(&format!(
+            "{}{}{}",
+            rel("rId1", "hyperlink", "https://example.com/a"),
+            rel("rId2", "hyperlink", "https://body.example/b"),
+            rel("rId3", "header", "header1.xml"),
+        ));
+        let header = r#"<w:hdr><w:p><w:hyperlink r:id="rId2"><w:r><w:t>head</w:t></w:r></w:hyperlink></w:p></w:hdr>"#;
+        let header_rels = rels(&rel("rId2", "hyperlink", "https://header.example/c"));
+        let bytes = package(
+            body,
+            &[
+                ("word/_rels/document.xml.rels", &body_rels),
+                ("word/header1.xml", header),
+                ("word/_rels/header1.xml.rels", &header_rels),
+            ],
+        );
+        assert_eq!(
+            text_of(&bytes),
+            "ext (link: https://example.com/a)\n\
+             here (link: internal)\n\
+             lost\n\
+             lost here\n\
+             both (link: https://example.com/a#frag)\n\
+             body (link: https://body.example/b)\n\
+             (link: https://example.com/a)\n\
+             [text box]\n  boxed\n(link: https://example.com/a)\n\
+             Header (default):\n  head (link: https://header.example/c)"
+        );
+    }
+
+    /// A document-controlled address is bounded: the mark never lets a target's
+    /// length decide the shape of the line its text stands on.
+    #[test]
+    fn docx_bounds_a_link_address() {
+        let target = "x".repeat(400);
+        let body =
+            r#"<w:p><w:hyperlink r:id="rId1"><w:r><w:t>long</w:t></w:r></w:hyperlink></w:p>"#;
+        let bytes = package(
+            body,
+            &[(
+                "word/_rels/document.xml.rels",
+                &rels(&rel("rId1", "hyperlink", &target)),
+            )],
+        );
+        let text = text_of(&bytes);
+        let address = text
+            .strip_prefix("long (link: ")
+            .and_then(|rest| rest.strip_suffix(')'))
+            .expect("a link mark");
+        assert_eq!(
+            address,
+            format!("{}…", "x".repeat(max_link_target_chars() - 1))
+        );
+    }
+
+    /// Word writes a text box twice — as an `mc:Choice` and as the
+    /// `mc:Fallback` beside it — and reading both would report it twice, in the
+    /// body and in a header alike.
+    #[test]
+    fn docx_reads_a_word_text_box_once() {
+        let body = r#"<w:p><w:r><mc:AlternateContent>\
+<mc:Choice Requires="wps"><w:drawing><wps:txbx><w:txbxContent>\
+<w:p><w:r><w:t>one</w:t></w:r></w:p><w:p><w:r><w:t>two</w:t></w:r></w:p>\
+</w:txbxContent></wps:txbx></w:drawing></mc:Choice>\
+<mc:Fallback><w:pict><v:textbox><w:txbxContent>\
+<w:p><w:r><w:t>one</w:t></w:r></w:p><w:p><w:r><w:t>two</w:t></w:r></w:p>\
+</w:txbxContent></v:textbox></w:pict></mc:Fallback>\
+</mc:AlternateContent></w:r><w:r><w:t>after</w:t></w:r></w:p>"#;
+
+        let header_body = r#"<w:p><w:r><w:t>Body</w:t></w:r></w:p>
+<w:sectPr><w:headerReference w:type="default" r:id="rId1"/></w:sectPr>"#;
+        let choice = r#"<mc:Choice Requires="wps"><w:drawing><wps:txbx><w:txbxContent>\
+<w:p><w:r><w:t>box</w:t></w:r></w:p></w:txbxContent></wps:txbx></w:drawing></mc:Choice>"#;
+        let fallback = r"<mc:Fallback><w:pict><v:textbox><w:txbxContent>\
+<w:p><w:r><w:t>box</w:t></w:r></w:p></w:txbxContent></v:textbox></w:pict></mc:Fallback>";
+        let header = format!(
+            "<w:hdr><w:p><w:r><mc:AlternateContent>{choice}{fallback}</mc:AlternateContent></w:r></w:p></w:hdr>"
+        );
+        let header_box = package(
+            header_body,
+            &[
+                (
+                    "word/_rels/document.xml.rels",
+                    &rels(&rel("rId1", "header", "header1.xml")),
+                ),
+                ("word/header1.xml", &header),
+            ],
+        );
+
+        let cases: Vec<(&str, Vec<u8>, &str)> = vec![
+            (
+                "a body text box written as a choice and a fallback",
+                package(body, &[]),
+                "[text box]\n  one\n  two\nafter",
+            ),
+            (
+                "a header text box written as a choice and a fallback",
+                header_box,
+                "Body\nHeader (default):\n  [text box]\n    box",
+            ),
+        ];
+        for (label, bytes, expected) in cases {
+            assert_eq!(text_of(&bytes), expected, "{label}");
+        }
+    }
+
+    /// Only the alternate copy that rendered counts: the `mc:Fallback` is
+    /// discarded whether it repeats the choice's revisions or carries them
+    /// alone, a copy that rendered nothing yields to the next one, and a
+    /// fallback speaks only when no choice has content.
+    #[test]
+    fn docx_reads_only_the_alternate_copy_that_rendered() {
+        let repeated_revisions = r#"<w:p><w:r><mc:AlternateContent>\
+<mc:Choice Requires="wps"><w:drawing><wps:txbx><w:txbxContent>\
+<w:p><w:ins w:author="Anna"><w:r><w:t>once</w:t></w:r></w:ins></w:p>\
+</w:txbxContent></wps:txbx></w:drawing></mc:Choice>\
+<mc:Fallback><w:pict><v:textbox><w:txbxContent>\
+<w:p><w:ins w:author="Anna"><w:r><w:t>once</w:t></w:r></w:ins></w:p>\
+</w:txbxContent></v:textbox></w:pict></mc:Fallback>\
+</mc:AlternateContent></w:r></w:p>"#;
+
+        let marker_from_discarded = r#"<w:tbl><w:tblGrid><w:gridCol/></w:tblGrid>
+<w:tr><w:tc><w:p><w:r><mc:AlternateContent>\
+<mc:Choice Requires="wps"><w:drawing><wps:txbx><w:txbxContent>\
+<w:p><w:r><w:t>box</w:t></w:r></w:p></w:txbxContent></wps:txbx></w:drawing></mc:Choice>\
+<mc:Fallback><w:pict><v:textbox><w:txbxContent>\
+<w:p><w:r><w:t>box</w:t></w:r></w:p></w:txbxContent>\
+<w:tblGridChange w:author="QA"/></v:textbox></w:pict></mc:Fallback>\
+</mc:AlternateContent></w:r></w:p></w:tc></w:tr>
+</w:tbl>"#;
+
+        let empty_choice = r#"<w:p><w:r><mc:AlternateContent>\
+<mc:Choice Requires="wps"><w:ins w:author="Anna"/></mc:Choice>\
+<mc:Choice Requires="wpg"><w:drawing><wps:txbx><w:txbxContent>\
+<w:p><w:ins w:author="Anna"><w:r><w:t>once</w:t></w:r></w:ins></w:p>\
+</w:txbxContent></wps:txbx></w:drawing></mc:Choice>\
+</mc:AlternateContent></w:r></w:p>"#;
+
+        let fallback_body = r#"<w:p><mc:AlternateContent>\
+<mc:Choice Requires="wps"><w:drawing/></mc:Choice>\
+<mc:Fallback><w:pict><v:textbox><w:txbxContent><w:p><w:r><w:t>vml</w:t></w:r></w:p>\
+</w:txbxContent></v:textbox></w:pict></mc:Fallback>\
+</mc:AlternateContent></w:p>"#;
+
+        let later_choice = r#"<w:p><mc:AlternateContent>\
+<mc:Choice Requires="wps"><w:drawing/></mc:Choice>\
+<mc:Choice Requires="wpg"><w:drawing><wps:txbx><w:txbxContent>\
+<w:p><w:r><w:t>second</w:t></w:r></w:p></w:txbxContent></wps:txbx></w:drawing></mc:Choice>\
+<mc:Fallback><w:pict><v:textbox><w:txbxContent>\
+<w:p><w:r><w:t>vml</w:t></w:r></w:p></w:txbxContent></v:textbox></w:pict></mc:Fallback>\
+</mc:AlternateContent></w:p>"#;
+
+        let cases = [
+            (
+                "revisions of the copy word writes twice",
+                repeated_revisions,
+                "Unaccepted tracked changes: 1 insertion (authors: Anna).\n\n\
+                 [text box]\n  [ins]once[/ins]",
+            ),
+            (
+                "a discarded copy raises no marker",
+                marker_from_discarded,
+                "Table 1: 1 row, 1 column\n  R1: C1: [text box]   box",
+            ),
+            (
+                "a copy that rendered nothing is not tallied",
+                empty_choice,
+                "Unaccepted tracked changes: 1 insertion (authors: Anna).\n\n\
+                 [text box]\n  [ins]once[/ins]",
+            ),
+            (
+                "a choice that renders nothing leaves the fallback",
+                fallback_body,
+                "[text box]\n  vml",
+            ),
+            (
+                "a later choice that has content",
+                later_choice,
+                "[text box]\n  second",
+            ),
+        ];
+        for (label, body, expected) in cases {
+            assert_eq!(text_of(&package(body, &[])), expected, "{label}");
+        }
+    }
+
+    /// A complex field's instruction is reported at its `separate` — the cached
+    /// result after it is ordinary text — a field that never separates is
+    /// reported at its `end`, and a `w:fldChar begin` a part never closes is
+    /// reported where the part ends, with the text it was holding.
+    #[test]
+    fn docx_reports_field_instructions_and_their_results() {
+        let cases = [
+            (
+                "a field that separates and one that never does",
+                r#"<w:p>\
+<w:r><w:fldChar w:fldCharType="begin"/></w:r>\
+<w:r><w:instrText xml:space="preserve"> PAGE \</w:instrText></w:r>\
+<w:r><w:instrText xml:space="preserve">* MERGEFORMAT </w:instrText></w:r>\
+<w:r><w:fldChar w:fldCharType="separate"/></w:r>\
+<w:r><w:t>7</w:t></w:r>\
+<w:r><w:fldChar w:fldCharType="end"/></w:r>\
+<w:r><w:fldChar w:fldCharType="begin"/></w:r>\
+<w:r><w:instrText>DATE</w:instrText></w:r>\
+<w:r><w:fldChar w:fldCharType="end"/></w:r>\
+</w:p>"#,
+                "[field PAGE \\* MERGEFORMAT]7[field DATE]",
+            ),
+            (
+                "a field a part left open",
+                r#"<w:p><w:r><w:t xml:space="preserve">Before </w:t></w:r>\
+<w:r><w:fldChar w:fldCharType="begin"/></w:r>\
+<w:r><w:instrText>PAGE</w:instrText></w:r>\
+<w:r><w:t>After</w:t></w:r></w:p>"#,
+                "Before \n[field PAGE]After",
+            ),
+        ];
+        for (label, body, expected) in cases {
+            assert_eq!(text_of(&package(body, &[])), expected, "{label}");
+        }
+    }
+
+    /// A field's instruction is reported up to the cap — with no separator left
+    /// dangling when the cap falls between two words.
+    #[test]
+    fn docx_caps_a_field_instruction_without_a_trailing_space() {
+        let instruction = format!("{} bcd", "a".repeat(max_field_instruction_chars() - 1));
+        let body = format!(
+            r#"<w:p><w:r><w:fldSimple w:instr="{instruction}"><w:r><w:t>x</w:t></w:r></w:fldSimple></w:r></w:p>"#
+        );
+        assert_eq!(
+            text_of(&package(&body, &[])),
+            format!("[field {}]x", "a".repeat(max_field_instruction_chars() - 1))
+        );
+    }
+
+    /// A body that cannot be read as XML is the one part whose failure costs
+    /// the whole package.
+    #[test]
+    fn docx_reports_an_unparsable_body_as_unreadable() {
+        let bytes = zip_fixture(&[("word/document.xml", b"<w:document><w:body><w:p></w:body>")]);
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(matches!(
+            convert_docx(&bytes, dir.path()),
+            DocOutcome::Unreadable { .. }
+        ));
+    }
+
+    /// A notes part that is named but will not parse costs only its own blocks,
+    /// and the walk past it still reaches the body's text.
+    #[test]
+    fn docx_skips_a_notes_part_it_cannot_parse() {
+        let body =
+            r#"<w:p><w:r><w:t>Body</w:t></w:r><w:r><w:footnoteReference w:id="1"/></w:r></w:p>"#;
+        let bytes = package(
+            body,
+            &[
+                (
+                    "word/_rels/document.xml.rels",
+                    &rels(&rel("rId5", "footnotes", "footnotes.xml")),
+                ),
+                ("word/footnotes.xml", "<w:footnotes><w:footnote"),
+            ],
+        );
+        assert_eq!(text_of(&bytes), "Body[footnote ?]");
+    }
+
+    /// A package whose body draws eight charts — cached values, table-only values, none at
+    /// all, not a chart, the extended schema, a bubble's sizes, an unreproducible format and
+    /// one past the reading's bounds — so every chart mark the shared list names is a
+    /// spelling a real reading raises.
+    fn charts_package() -> Vec<u8> {
+        let drawing = |id: &str| {
+            format!(
+                r#"<w:p><w:drawing><wp:inline><a:graphic><a:graphicData><c:chart r:id="{id}"/></a:graphicData></a:graphic></wp:inline></w:drawing></w:p>"#
+            )
+        };
+        let charts_body: String = (1..=8).fold(String::new(), |body, id| {
+            format!("{body}{}", drawing(&format!("rId{id}")))
+        });
+        let uncached = concat!(
+            r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea><c:barChart><c:ser>"#,
+            r#"<c:val><c:numRef><c:f>Sheet1!$B$2:$B$3</c:f></c:numRef></c:val>"#,
+            r#"</c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>"#,
+        );
+        let attached = uncached.replace("<c:chart>", r#"<c:externalData r:id="rId9"/><c:chart>"#);
+        let bubble = concat!(
+            r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea><c:bubbleChart><c:ser>"#,
+            r#"<c:val><c:numCache><c:pt idx="0"><c:v>10</c:v></c:pt></c:numCache></c:val>"#,
+            r#"<c:bubbleSize><c:numCache><c:pt idx="0"><c:v>12</c:v></c:pt></c:numCache></c:bubbleSize>"#,
+            r#"</c:ser></c:bubbleChart></c:plotArea></c:chart></c:chartSpace>"#,
+        );
+        let stored = concat!(
+            r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea><c:pieChart><c:ser>"#,
+            r#"<c:val><c:numCache><c:formatCode># ?/?</c:formatCode><c:pt idx="0"><c:v>1.5</c:v></c:pt></c:numCache></c:val>"#,
+            r#"</c:ser></c:pieChart></c:plotArea></c:chart></c:chartSpace>"#,
+        );
+        // Past the reading's bounds: more series, points and texts than it prints.
+        let mut sers = String::new();
+        for series in 0..9 {
+            let mut points = String::new();
+            for point in 0..if series == 0 { 28 } else { 1 } {
+                let _ = write!(points, r#"<c:pt idx="{point}"><c:v>{point}</c:v></c:pt>"#);
+            }
+            let _ = write!(
+                sers,
+                r#"<c:ser><c:tx><c:strRef><c:strCache><c:pt idx="0"><c:v>S{series}</c:v></c:pt></c:strCache></c:strRef></c:tx><c:val><c:numCache>{points}</c:numCache></c:val></c:ser>"#
+            );
+        }
+        let mut axes = String::new();
+        for axis in 0..7 {
+            let _ = write!(
+                axes,
+                r"<c:catAx><c:title><c:tx><c:rich><a:p><a:r><a:t>Axis {axis}</a:t></a:r></a:p></c:rich></c:tx></c:title></c:catAx>"
+            );
+        }
+        let bounded = format!(
+            r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea>{axes}<c:barChart><c:barDir val="col"/>{sers}</c:barChart></c:plotArea></c:chart></c:chartSpace>"#
+        );
+        package(
+            &charts_body,
+            &[
+                (
+                    "word/_rels/document.xml.rels",
+                    &rels(&{
+                        let mut rels = String::new();
+                        for id in 1..=8 {
+                            let _ = write!(
+                                rels,
+                                "{}",
+                                rel(
+                                    &format!("rId{id}"),
+                                    "chart",
+                                    &format!("charts/chart{id}.xml")
+                                )
+                            );
+                        }
+                        rels
+                    }),
+                ),
+                ("word/charts/chart1.xml", COLUMN_CHART),
+                ("word/charts/chart2.xml", &attached),
+                ("word/charts/chart3.xml", uncached),
+                ("word/charts/chart4.xml", "<chart/>"),
+                (
+                    "word/charts/chart5.xml",
+                    r#"<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"><cx:chartData/></cx:chartSpace>"#,
+                ),
+                ("word/charts/chart6.xml", bubble),
+                ("word/charts/chart7.xml", stored),
+                ("word/charts/chart8.xml", &bounded),
+            ],
+        )
+    }
+
+    /// Every mark the shared list names is a spelling this reader really prints:
+    /// `docx_marks` is the one statement the kit's refusals and this reader both read, so an
+    /// entry no reading shows would have the kit name a label that is not there.
+    #[test]
+    fn every_docx_mark_the_shared_list_names_is_a_mark_the_reader_prints() {
+        // A body whose one paragraph carries the run-level and paragraph-mark
+        // revisions, a field, a comment range and a text box, beside two headers
+        // (a part per variant, so both are numbered) and a footnote nothing references.
+        let revised = concat!(
+            r#"<w:p><w:pPr><w:pPrChange w:author="Anna"/>"#,
+            r#"<w:sectPr><w:sectPrChange w:author="Anna"/></w:sectPr></w:pPr>"#,
+            r#"<w:commentRangeStart w:id="2"/>"#,
+            r#"<w:r><w:rPr><w:rPrChange w:author="Anna"/></w:rPr><w:t>kept</w:t></w:r>"#,
+            r#"<w:ins w:author="Anna"><w:r><w:t xml:space="preserve"> added</w:t></w:r></w:ins>"#,
+            r#"<w:del w:author="Anna"><w:r><w:delText xml:space="preserve"> gone</w:delText></w:r></w:del>"#,
+            r#"<w:moveFrom w:author="Anna"><w:r><w:t xml:space="preserve"> away</w:t></w:r></w:moveFrom>"#,
+            r#"<w:moveTo w:author="Anna"><w:r><w:t xml:space="preserve"> here</w:t></w:r></w:moveTo>"#,
+            r#"<w:r><w:fldSimple w:instr="PAGE \* MERGEFORMAT"><w:t>1</w:t></w:fldSimple></w:r>"#,
+            r#"<w:r><w:pict><v:shape><v:textbox><w:txbxContent><w:p><w:r><w:t>boxed</w:t></w:r></w:p></w:txbxContent></v:textbox></v:shape></w:pict></w:r>"#,
+            r#"</w:p>"#,
+            // A heading and an anchor-only link: their marks are entries of the
+            // shared list too.
+            r#"<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Title</w:t></w:r></w:p>"#,
+            r#"<w:p><w:hyperlink w:anchor="top"><w:r><w:t>jump</w:t></w:r></w:hyperlink></w:p>"#,
+            r#"<w:sectPr><w:headerReference w:type="first" r:id="rId1"/><w:headerReference w:type="default" r:id="rId2"/></w:sectPr>"#,
+        );
+        let revised = package(
+            revised,
+            &[
+                (
+                    "word/_rels/document.xml.rels",
+                    &rels(&format!(
+                        "{}{}{}",
+                        rel("rId1", "header", "header1.xml"),
+                        rel("rId2", "header", "header2.xml"),
+                        rel("rId5", "footnotes", "footnotes.xml"),
+                    )),
+                ),
+                (
+                    "word/header1.xml",
+                    r"<w:hdr><w:p><w:r><w:t>FirstHead</w:t></w:r></w:p></w:hdr>",
+                ),
+                (
+                    "word/header2.xml",
+                    r"<w:hdr><w:p><w:r><w:t>DefaultHead</w:t></w:r></w:p></w:hdr>",
+                ),
+                (
+                    "word/footnotes.xml",
+                    r#"<w:footnotes><w:footnote w:id="1"><w:p><w:r><w:t>orphan note</w:t></w:r></w:p></w:footnote></w:footnotes>"#,
+                ),
+                // The conventional comments part, which the body's
+                // `commentRangeStart` is numbered from: `[comment 1 starts]`.
+                (
+                    "word/comments.xml",
+                    r#"<w:comments><w:comment w:id="2" w:author="Ivan Petrov"><w:p><w:r><w:t>needs a citation</w:t></w:r></w:p></w:comment></w:comments>"#,
+                ),
+            ],
+        );
+        // A paragraph whose own mark carries all four paragraph-mark revisions.
+        let paragraph_marks = r#"<w:p><w:pPr><w:rPr><w:ins w:author="Anna"/><w:del w:author="Anna"/><w:moveTo w:author="Anna"/><w:moveFrom w:author="Anna"/></w:rPr></w:pPr><w:r><w:t>P</w:t></w:r></w:p>"#;
+        // A revised table: row 1 spans C2-C4, row 2 has a merge-revised cell, and
+        // row 4 continues a vertical merge that started at R3C2.
+        let tables = concat!(
+            r#"<w:tbl><w:tblPr><w:tblPrChange w:author="Anna"/></w:tblPr>"#,
+            r#"<w:tblGrid><w:gridCol/><w:gridCol/><w:gridCol/><w:gridCol/></w:tblGrid>"#,
+            r#"<w:tr><w:tc><w:p><w:r><w:t>One</w:t></w:r></w:p></w:tc>"#,
+            r#"<w:tc><w:tcPr><w:gridSpan w:val="3"/></w:tcPr><w:p><w:r><w:t>Wide</w:t></w:r></w:p></w:tc></w:tr>"#,
+            r#"<w:tr><w:tc><w:tcPr><w:cellMerge/></w:tcPr><w:p><w:r><w:t>M</w:t></w:r></w:p></w:tc>"#,
+            r#"<w:tc><w:p><w:r><w:t>Two</w:t></w:r></w:p></w:tc>"#,
+            r#"<w:tc><w:p><w:r><w:t>Three</w:t></w:r></w:p></w:tc>"#,
+            r#"<w:tc><w:p><w:r><w:t>Four</w:t></w:r></w:p></w:tc></w:tr>"#,
+            r#"<w:tr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc>"#,
+            r#"<w:tc><w:tcPr><w:vMerge w:val="restart"/></w:tcPr><w:p><w:r><w:t>Origin</w:t></w:r></w:p></w:tc>"#,
+            r#"<w:tc><w:p><w:r><w:t>C</w:t></w:r></w:p></w:tc>"#,
+            r#"<w:tc><w:p><w:r><w:t>D</w:t></w:r></w:p></w:tc></w:tr>"#,
+            r#"<w:tr><w:tc><w:p><w:r><w:t>E</w:t></w:r></w:p></w:tc>"#,
+            r#"<w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc>"#,
+            r#"<w:tc><w:p><w:r><w:t>G</w:t></w:r></w:p></w:tc>"#,
+            r#"<w:tc><w:p><w:r><w:t>H</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"#,
+        );
+
+        let corpus = format!(
+            "{}\n{}\n{}\n{}",
+            text_of(&revised),
+            text_of(&package(paragraph_marks, &[])),
+            text_of(&package(tables, &[])),
+            text_of(&charts_package()),
+        );
+
+        let marks = crate::vocabulary::docx_marks();
+        assert!(!marks.is_empty(), "the shared list of docx marks is empty");
+        for mark in marks {
+            let example = mark.example.as_str();
+            assert!(
+                corpus.contains(example),
+                "the reader never prints {example:?} (entry {})",
+                mark.pattern
+            );
+        }
+    }
+
+    /// The literals of `source` that are shaped like a mark a reading prints: the
+    /// ones it carries a character an ordinary sentence of prose does not — a
+    /// bracket, a parenthesis or the `¶` a paragraph mark states. This is the
+    /// narrowing the scan below rests on, so it is stated once.
+    fn mark_literals(source: &str) -> Vec<String> {
+        let literal = regex::Regex::new(r#""((?:[^"\\]|\\.)*)""#).expect("the literal pattern");
+        literal
+            .captures_iter(source)
+            .map(|found| found[1].to_owned())
+            .filter(|text| text.contains(['[', ']', '(', ')', '¶']))
+            .collect()
+    }
+
+    /// The list's other direction: the Word reader writes no mark-shaped literal of its own.
+    /// Every mark it prints is read from the vocabulary, so a mark-shaped literal left in the
+    /// module is a mark restated in code rather than read from its one home. The test module and
+    /// line comments are left out, and so is [`crate::reading::output`], which states the Excel
+    /// and PowerPoint marks too — its Word names are pinned by
+    /// [`every_docx_mark_the_shared_list_names_is_a_mark_the_reader_prints`].
+    #[test]
+    fn every_docx_mark_the_reader_writes_is_in_the_shared_list() {
+        let code = include_str!("docx.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("the reader's own code precedes its tests")
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let candidates = mark_literals(&code);
+        assert!(
+            candidates.is_empty(),
+            "the reader restates a mark instead of reading it from the vocabulary: {candidates:?}"
+        );
+    }
+}

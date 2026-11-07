@@ -1,6 +1,7 @@
-//! The corpus builders' own test: every document a case hands the engine is generated here, so
-//! each one is proved readable — and readable *as the family it claims* — before a case can be
-//! blamed for what it carries.
+//! The corpus builders' own test: every document a case hands the engine is generated in code, so
+//! a curated set is proved readable — and readable *as the family it claims* — before a case can
+//! be blamed for what it carries. The rest of the corpus is covered by the recorded baseline and
+//! by `tests/coverage.rs`.
 //!
 //! The two builders that exist to be broken ([`build::pdf_truncated`] and
 //! [`build::unsupported_binary`]) are proved broken, and every other one is read through the
@@ -286,20 +287,28 @@ fn a_reading_names_what_it_could_not_read_and_what_it_did_not_show() {
 }
 
 #[test]
-fn the_samples_cover_the_reader_corpus_exactly() {
-    // A document added to the reader corpus without a sample would be recorded in the baseline and
-    // never checked here, so the two lists must name the same documents.
-    let mut sampled: Vec<&str> = SAMPLES.iter().map(|sample| sample.document.name).collect();
-    let mut corpus: Vec<&str> = document_parity::corpus::reader_documents()
+fn the_samples_are_documents_of_the_reader_corpus() {
+    // The sample list states what a curated set of documents must read as, by hand. Every sample
+    // must name a document the corpus really holds — a stale sample would check nothing — and no
+    // document may be sampled twice. The rest of the corpus is covered by the recorded baseline
+    // and by `tests/coverage.rs`, which needs no hand-written expectation.
+    let corpus: std::collections::BTreeSet<&str> = document_parity::corpus::reader_documents()
         .iter()
         .map(|document| document.name)
         .collect();
-    sampled.sort_unstable();
-    corpus.sort_unstable();
-    assert_eq!(
-        sampled, corpus,
-        "the sample list must cover the reader corpus exactly"
-    );
+    let mut sampled = std::collections::BTreeSet::new();
+    for sample in SAMPLES {
+        assert!(
+            corpus.contains(sample.document.name),
+            "{} is sampled but is not in the reader corpus",
+            sample.document.name
+        );
+        assert!(
+            sampled.insert(sample.document.name),
+            "{} is sampled twice",
+            sample.document.name
+        );
+    }
 }
 
 #[test]

@@ -4,12 +4,14 @@
 use document_parity::baseline::Baseline;
 use document_parity::engine::{Reader, Writer};
 use document_parity::harness::Harness;
-use document_parity::reference::{NoOpReader, NoOpWriter, ReferenceReader, ReferenceWriter};
+use document_parity::reference::{
+    CrateReader, NoOpReader, NoOpWriter, ReferenceReader, ReferenceWriter,
+};
 use document_parity::transcript::identity_line;
 use std::path::{Path, PathBuf};
 
 fn main() {
-    let mut engine = "reference".to_string();
+    let mut engine = "crate".to_string();
     let mut baseline_path = Baseline::default_path();
     let mut quiet = false;
     let mut args = std::env::args().skip(1);
@@ -22,9 +24,10 @@ fn main() {
             "--quiet" => quiet = true,
             "--help" | "-h" => {
                 println!(
-                    "usage: parity [--engine reference|noop] [--baseline <path>] [--quiet]\n\
-                     Runs every corpus case and reading, compares them with the recorded baseline, \n\
-                     and checks every declared effect."
+                    "usage: parity [--engine crate|reference|noop] [--baseline <path>] [--quiet]\n\
+                     Runs every corpus case and reading, compares them with the recorded baseline,\n\
+                     and checks every declared effect. The default engine is the crate's reader \
+                     against the reference writer; `reference` is the engine the baseline records."
                 );
                 return;
             }
@@ -52,6 +55,15 @@ fn run(engine: &str, baseline_path: &Path, quiet: bool) -> anyhow::Result<i32> {
     // baseline was recorded from, so only its own gate checks the identity. Any other
     // implementation is compared on its verdicts alone.
     let (harness, require_identity) = match engine {
+        "crate" => (
+            Harness::new_with(|root| {
+                Ok((
+                    Box::new(ReferenceWriter::new(root)?) as Box<dyn Writer>,
+                    Box::new(CrateReader) as Box<dyn Reader>,
+                ))
+            })?,
+            false,
+        ),
         "reference" => (
             Harness::new_with(|root| {
                 Ok((
@@ -70,7 +82,7 @@ fn run(engine: &str, baseline_path: &Path, quiet: bool) -> anyhow::Result<i32> {
             })?,
             false,
         ),
-        other => anyhow::bail!("unknown engine {other:?}: use reference or noop"),
+        other => anyhow::bail!("unknown engine {other:?}: use crate, reference or noop"),
     };
     let run = harness.run();
     let report = run.report(&baseline);

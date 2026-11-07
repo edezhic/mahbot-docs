@@ -11,6 +11,7 @@ use document_parity::corpus;
 use document_parity::transcript::CaseTranscript;
 use serde_json::Value;
 use std::collections::BTreeSet;
+use std::path::Path;
 
 /// The recorded baseline, exactly as it is stored.
 fn baseline_json() -> Value {
@@ -282,4 +283,170 @@ fn every_corpus_operation_and_edit_is_in_the_engines_closed_set() {
 fn sha256(bytes: &[u8]) -> String {
     use sha2::Digest as _;
     format!("{:x}", sha2::Sha256::digest(bytes))
+}
+
+/// The reference reader's sources are copies, never links: this is what makes a change to the
+/// product's sources fail the gate instead of passing unnoticed, and what lets `cargo fmt` here
+/// run without ever touching a file this crate does not own.
+#[test]
+fn the_reference_sources_are_byte_for_byte_the_products() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let product = root
+        .parent()
+        .expect("the harness lives inside the workspace");
+    for relative in [
+        "document.rs",
+        "ooxml.rs",
+        "ooxml/docx.rs",
+        "ooxml/xlsx.rs",
+        "ooxml/chart.rs",
+        "ooxml/numfmt.rs",
+        "legacy.rs",
+        "pdf_marks.rs",
+        "reader_output.rs",
+    ] {
+        let copied = root.join("src/reference_sources").join(relative);
+        let original = product.join("src").join(relative);
+        let copied_bytes = std::fs::read(&copied)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", copied.display()));
+        let original_bytes = std::fs::read(&original)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", original.display()));
+        assert!(
+            copied_bytes == original_bytes,
+            "src/reference_sources/{relative} is not byte-for-byte the product's src/{relative} — \
+             re-copy it deliberately"
+        );
+    }
+}
+
+/// The host's copies of the product's media tables and raster bounds are the product's own values,
+/// not hand-copied numbers that can drift.
+#[test]
+fn the_host_media_tables_and_raster_limits_are_the_products_own() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace = root
+        .parent()
+        .expect("the harness lives inside the workspace");
+    let util = std::fs::read_to_string(workspace.join("product-touchpoints/src/util/mod.rs"))
+        .expect("the product's util module");
+    let media =
+        std::fs::read_to_string(workspace.join("product-touchpoints/src/util/media_target.rs"))
+            .expect("the product's media-target module");
+
+    let host = |values: &[&str]| -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    };
+    assert_eq!(
+        host(contract::host_video_extensions()),
+        contract::string_list(&util, "VIDEO_EXTENSIONS"),
+        "the host's video list is not the product's"
+    );
+    assert_eq!(
+        host(contract::host_image_extensions()),
+        contract::string_list(&util, "IMAGE_EXTENSIONS"),
+        "the host's image list is not the product's"
+    );
+    assert_eq!(
+        contract::host_raster_decode_max_alloc_bytes(),
+        contract::integer(&media, "RASTER_DECODE_MAX_ALLOC_BYTES"),
+        "the host's raster allocation bound is not the product's"
+    );
+    assert_eq!(
+        contract::host_raster_decode_max_dimension_px(),
+        contract::integer(&media, "RASTER_DECODE_MAX_DIMENSION_PX") as u32,
+        "the host's raster dimension bound is not the product's"
+    );
+    // The crate's own media tables are the product's too: a drift there would only surface
+    // indirectly through the corpus.
+    let support = std::fs::read_to_string(workspace.join("document-engine/src/support.rs"))
+        .expect("the crate's support module");
+    assert_eq!(
+        contract::string_list(&support, "VIDEO_EXTENSIONS"),
+        contract::string_list(&util, "VIDEO_EXTENSIONS"),
+        "the crate's video list is not the product's"
+    );
+    assert_eq!(
+        contract::string_list(&support, "IMAGE_EXTENSIONS"),
+        contract::string_list(&util, "IMAGE_EXTENSIONS"),
+        "the crate's image list is not the product's"
+    );
+}
+
+/// The codec versions are pinned in the manifests and recorded in every engine identity. A
+/// dependency bump changes every compared digest, so it must change the identity the reference arm
+/// checks rather than pass as "identity matches".
+#[test]
+fn the_identities_record_the_codec_versions() {
+    use document_parity::engine::Reader as _;
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace = root
+        .parent()
+        .expect("the harness lives inside the workspace");
+    let recorded = env!("PARITY_CODEC_VERSIONS");
+    assert!(!recorded.is_empty(), "the build records the codec versions");
+
+    // The list has one home — `document_parity::codecs`, which the build script includes — so a
+    // codec added there is automatically held to being recorded rather than needing a second copy.
+    for name in document_parity::codecs::CODECS {
+        assert!(
+            recorded
+                .split(';')
+                .any(|entry| entry.starts_with(&format!("{name}="))),
+            "the identity does not record `{name}`"
+        );
+    }
+
+    // The recorded string is the lockfile's own answer, so the identity cannot name a version
+    // other than the one compiled.
+    let lock =
+        std::fs::read_to_string(workspace.join("Cargo.lock")).expect("the workspace lockfile");
+    assert_eq!(
+        recorded,
+        document_parity::codecs::codec_versions(&lock),
+        "the recorded codec versions are not the lockfile's"
+    );
+
+    // Every arm that decodes a compared byte carries the digest: both readers and the writer.
+    let digest = sha256(recorded.as_bytes());
+    let reference = document_parity::reference::ReferenceReader;
+    let crate_reader = document_parity::reference::CrateReader;
+    for identity in [reference.identity(), crate_reader.identity()] {
+        assert_eq!(
+            identity.components.get("codecs"),
+            Some(&digest),
+            "`{}` does not record the codec versions",
+            identity.engine
+        );
+    }
+    let baseline = baseline_json();
+    assert_eq!(
+        baseline["writer"]["components"]["codecs"].as_str(),
+        Some(digest.as_str()),
+        "the recorded writer identity does not record the codec versions"
+    );
+
+    // Every codec in `CODECS` that a manifest names is pinned exactly, so a patch bump is a
+    // deliberate edit rather than a caret range the lock can move under the identity. A codec a
+    // manifest adds must join `CODECS` to be recorded at all; this loop then holds its pin.
+    let manifests: Vec<(&str, String)> = ["document-engine/Cargo.toml", "parity/Cargo.toml"]
+        .into_iter()
+        .map(|manifest| {
+            let text = std::fs::read_to_string(workspace.join(manifest)).expect("a manifest");
+            (manifest, text)
+        })
+        .collect();
+    for codec in document_parity::codecs::CODECS {
+        for (manifest, text) in &manifests {
+            for line in text.lines() {
+                let line = line.trim_start();
+                if line.starts_with(&format!("{codec} = ")) {
+                    assert!(
+                        line.contains("\"="),
+                        "`{manifest}` must pin `{codec}` exactly"
+                    );
+                }
+            }
+        }
+    }
 }

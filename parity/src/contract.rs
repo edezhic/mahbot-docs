@@ -1,6 +1,6 @@
 //! The reference engine's own statement of the data the engine crate owns.
 //!
-//! The reference reader is the product's sources compiled in place (see `src/lib.rs`), and it is
+//! The reference reader is the product's sources copied under `reference_sources/`, and it is
 //! deliberately untouched: its identity is part of the recorded baseline. This module exposes what
 //! it parses and prints, so a test can prove the crate's vocabulary is the same data rather than a
 //! copy that may drift. It is harness code, not part of the reader's identity.
@@ -22,37 +22,42 @@ pub fn reference_font() -> &'static [u8] {
 /// The bounds the reference's document pipeline states — the reader's own and the caller-layer
 /// bounds the product's tool applies above it.
 ///
-/// Every value is read from the source that states it: the reader's modules are compiled in place
-/// and keep their constants private, and the tool-layer sources are copies. Nothing is written
-/// here by hand, so a change in either place is read rather than missed.
+/// Every value is read from the source that states it: the reader's modules are copied under
+/// `reference_sources/` and keep their constants private, and the tool-layer sources are copies.
+/// Nothing is written here by hand, so a change in either place is read rather than missed.
 pub fn reference_reading() -> ReadingLimits {
-    let document = include_str!("document.rs");
+    let document = include_str!("reference_sources/document.rs");
     let read_document = include_str!("../../src/tools/read_document.rs");
     let util = include_str!("../../product-touchpoints/src/util/mod.rs");
+    let media_target = include_str!("../../product-touchpoints/src/util/media_target.rs");
     let rasterize = include_str!("../../product-touchpoints/src/tools/rasterize.rs");
     ReadingLimits {
         head_sniff_bytes: integer(read_document, "HEAD_SNIFF_BYTES") as usize,
         file_max_bytes: integer(util, "FILE_MAX_BYTES"),
         max_pictures: crate::document::MAX_READ_PICTURES,
         text_spill_bytes: integer(util, "TOOL_OUTPUT_BUDGET_BYTES") as usize,
+        text_spill_chars: integer(document, "INLINE_TEXT_MAX_CHARS") as usize,
         min_page_text_chars: integer(document, "MIN_PAGE_TEXT_CHARS") as usize,
         crop_edge_slack: number(document, "CROP_EDGE_SLACK"),
         raster_long_side_px: integer(document, "RASTER_LONG_SIDE_PX") as u32,
         raster_long_side_max_px: integer(rasterize, "MAX_LONG_SIDE_PX") as u32,
         raster_max_scale: number(document, "RASTER_MAX_SCALE") as f32,
         raster_jpeg_quality: integer(document, "RASTER_JPEG_QUALITY") as u8,
+        raster_decode_max_alloc_bytes: integer(media_target, "RASTER_DECODE_MAX_ALLOC_BYTES"),
+        raster_decode_max_dimension_px: integer(media_target, "RASTER_DECODE_MAX_DIMENSION_PX")
+            as u32,
     }
 }
 
 /// The reader and producer caps the reference enforces, read from their sources for the same
 /// reason as [`reference_reading`].
 pub fn reference_limits() -> Limits {
-    let ooxml = include_str!("ooxml.rs");
-    let docx = include_str!("ooxml/docx.rs");
-    let xlsx = include_str!("ooxml/xlsx.rs");
-    let chart = include_str!("ooxml/chart.rs");
-    let numfmt = include_str!("ooxml/numfmt.rs");
-    let pdf_marks = include_str!("pdf_marks.rs");
+    let ooxml = include_str!("reference_sources/ooxml.rs");
+    let docx = include_str!("reference_sources/ooxml/docx.rs");
+    let xlsx = include_str!("reference_sources/ooxml/xlsx.rs");
+    let chart = include_str!("reference_sources/ooxml/chart.rs");
+    let numfmt = include_str!("reference_sources/ooxml/numfmt.rs");
+    let pdf_marks = include_str!("reference_sources/pdf_marks.rs");
     let document_tool = include_str!("../../src/tools/document.rs");
     let kit = include_str!("../../assets/docgen/kit.js");
     Limits {
@@ -165,9 +170,9 @@ pub fn reference_marks() -> Vec<ReferenceMark> {
 /// The reference's modules keep these private, so each is read from the source text; the legacy
 /// reader's notes are inline, so each is asserted present instead of extracted.
 fn note_marks() -> Vec<ReferenceMark> {
-    let pdf_marks = include_str!("pdf_marks.rs");
-    let xlsx = include_str!("ooxml/xlsx.rs");
-    let legacy = include_str!("legacy.rs");
+    let pdf_marks = include_str!("reference_sources/pdf_marks.rs");
+    let xlsx = include_str!("reference_sources/ooxml/xlsx.rs");
+    let legacy = include_str!("reference_sources/legacy.rs");
     let plain = |key, rendered: String| ReferenceMark {
         key,
         rendered,
@@ -273,8 +278,37 @@ fn number(source: &str, name: &str) -> f64 {
 }
 
 /// The integer `source` assigns to the constant `name`.
-fn integer(source: &str, name: &str) -> u64 {
+pub fn integer(source: &str, name: &str) -> u64 {
     number(source, name) as u64
+}
+
+/// The quoted strings of the `NAME: &[&str] = &[ … ];` list `source` declares.
+pub fn string_list(source: &str, name: &str) -> Vec<String> {
+    let after = declaration(source, name);
+    let start = after
+        .find("= &[")
+        .unwrap_or_else(|| panic!("`{name}` in the reference source is not a string list"))
+        + "= &[".len();
+    let end = after[start..]
+        .find("];")
+        .unwrap_or_else(|| panic!("the `{name}` list in the reference source is not closed"));
+    let mut values = Vec::new();
+    let mut quoted = false;
+    let mut current = String::new();
+    for character in after[start..start + end].chars() {
+        match character {
+            '"' => {
+                if quoted {
+                    values.push(std::mem::take(&mut current));
+                }
+                quoted = !quoted;
+            }
+            _ if quoted => current.push(character),
+            _ => {}
+        }
+    }
+    assert!(!quoted, "the `{name}` list has an unterminated string");
+    values
 }
 
 /// Evaluate the arithmetic a constant's declaration uses: decimal literals, `*`, `**` and `<<`.
@@ -350,4 +384,28 @@ pub fn reference_unshown() -> Vec<(&'static str, String)> {
             (key, line)
         })
         .collect()
+}
+
+/// The host's copy of the product's video extensions, so a test can hold it to the product's list.
+#[must_use]
+pub fn host_video_extensions() -> &'static [&'static str] {
+    crate::util::VIDEO_EXTENSIONS
+}
+
+/// The host's copy of the product's image extensions, so a test can hold it to the product's list.
+#[must_use]
+pub fn host_image_extensions() -> &'static [&'static str] {
+    crate::util::IMAGE_EXTENSIONS
+}
+
+/// The host's copy of the product's raster allocation bound.
+#[must_use]
+pub const fn host_raster_decode_max_alloc_bytes() -> u64 {
+    crate::util::media_target::RASTER_DECODE_MAX_ALLOC_BYTES
+}
+
+/// The host's copy of the product's raster dimension bound.
+#[must_use]
+pub const fn host_raster_decode_max_dimension_px() -> u32 {
+    crate::util::media_target::RASTER_DECODE_MAX_DIMENSION_PX
 }

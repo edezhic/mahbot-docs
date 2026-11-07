@@ -34,6 +34,11 @@ const FONT_NAME: &str = "NotoSans-Regular.ttf";
 /// answer is part of what produced a transcript, so a change here is a different writer build.
 const RUNNER: &str = env!("PARITY_WRITER_RUNNER");
 
+/// The codecs the canonical model decodes a produced document with, emitted by `build.rs`. A bump
+/// can change every case verdict without changing a source this workspace holds, so it is part of
+/// the writer's identity as it is the reader's.
+const CODECS: &str = env!("PARITY_CODEC_VERSIONS");
+
 /// The product's containment guards: the kit is self-contained, and bun must not read the
 /// environment's install state or a `.env` file.
 const GUARDS: &[&str] = &["--no-install", "--no-env-file"];
@@ -101,6 +106,7 @@ impl ReferenceWriter {
             ("bun.lock", LOCK),
             ("font", FONT),
             ("runner", RUNNER.as_bytes()),
+            ("codecs", CODECS.as_bytes()),
         ] {
             combined.update(bytes);
             components.insert(name.to_string(), digest(bytes));

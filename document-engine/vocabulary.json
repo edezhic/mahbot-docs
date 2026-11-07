@@ -459,7 +459,10 @@
     "raster_long_side_px": 1600,
     "raster_long_side_max_px": 2048,
     "raster_max_scale": 3.0,
-    "raster_jpeg_quality": 90
+    "raster_jpeg_quality": 90,
+    "text_spill_chars": 5000,
+    "raster_decode_max_alloc_bytes": 268435456,
+    "raster_decode_max_dimension_px": 16384
   },
   "limits": {
     "zip_entry_max_bytes": 67108864,
@@ -487,188 +490,1409 @@
     "split_parts_max": 50
   },
   "marks": {
-    "block_page": "Page {n}:",
-    "block_description": "Description:",
-    "block_annotations": "Annotations:",
-    "block_form_fields": "Form fields:",
-    "block_defined_names": "Defined names:",
-    "block_table": "Table {n}:",
-    "block_table_revised": "Table {n} (formatting revised):",
-    "block_table_summary": "Table {n}: {rows}, {columns}",
-    "block_table_summary_revised": "Table {n} (formatting revised): {rows}, {columns}",
-    "block_table_row": "  R{n}: {cells}",
-    "block_table_row_marks": "  R{n} ({marks}): {cells}",
-    "block_table_cell": "C{n}: {value}",
-    "block_table_cell_marks": "C{n} ({marks}): {value}",
-    "docx_table_row_noun": "row",
-    "docx_table_column_noun": "column",
-    "docx_heading": "[heading {n}] ",
-    "docx_link_prefix": "(link: ",
-    "docx_link": "(link: {address})",
-    "docx_field": "[field {instruction}]",
-    "docx_field_empty": "[field]",
-    "docx_cell_part_of": "(part of R{r}C{c})",
-    "docx_cell_spans": "(spans C{a}-C{b})",
-    "docx_mark_inserted": "inserted",
-    "docx_mark_deleted": "deleted",
-    "docx_mark_merge_revised": "merge revised",
-    "docx_mark_formatting_revised": "formatting revised",
-    "docx_note_reference": "[{kind} {n}]",
-    "docx_note_reference_unknown": "[{kind} ?]",
-    "docx_comment_reference_starts": "[{kind} {n} starts]",
-    "docx_comment_reference_ends": "[{kind} {n} ends]",
-    "docx_not_referenced": "not referenced in the text",
-    "docx_tracked_changes": "Unaccepted tracked changes: {tallies}.",
-    "docx_tracked_changes_authors": "Unaccepted tracked changes: {tallies} (authors: {list}).",
-    "docx_tally_insertion": "insertion",
-    "docx_tally_deletion": "deletion",
-    "docx_tally_move": "move",
-    "docx_tally_formatting": "formatting change",
-    "docx_story_numbered": "{story} {n}",
-    "docx_story_variants": "{story} ({variants}):",
-    "docx_story_numbered_variants": "{story} {n} ({variants}):",
-    "docx_note_block": "{story} {n}:",
-    "docx_note_block_extras": "{story} {n} ({extras}):",
-    "word_header": "Header",
-    "word_footer": "Footer",
-    "word_footnote": "Footnote",
-    "word_endnote": "Endnote",
-    "word_comment": "Comment",
-    "word_headers_and_footers": "Headers and footers",
-    "word_footnotes": "Footnotes",
-    "word_endnotes": "Endnotes",
-    "word_comments": "Comments",
-    "word_variant_default": "default",
-    "word_variant_first_page": "first page",
-    "word_variant_even_pages": "even pages",
-    "xlsx_sheet": "Sheet \"{name}\":",
-    "xlsx_sheet_hidden": "Sheet \"{name}\" (hidden):",
-    "xlsx_sheet_very_hidden": "Sheet \"{name}\" (very hidden):",
-    "xlsx_no_values": "(no values)",
-    "xlsx_chart_sheet": "(chart sheet)",
-    "xlsx_hidden_rows": "(hidden rows: {ranges})",
-    "xlsx_hidden_columns": "(hidden columns: {ranges})",
-    "xlsx_merged": "(merged {range})",
-    "xlsx_in_merged_range": "(in merged range {range})",
-    "xlsx_cell": "{ref}: {value}",
-    "xlsx_cell_stored": "{ref}: {value} (stored number, format not shown)",
-    "xlsx_cell_formula": "{ref}: {value} (={formula})",
-    "xlsx_cell_formula_only": "{ref}: ={formula}",
-    "xlsx_cell_merged": "{ref}: {value} (merged {range})",
-    "xlsx_cell_in_merged_range": "{ref}: {value} (in merged range {range})",
-    "xlsx_cell_link": "{ref}: {value} (link: {target})",
-    "xlsx_link_caption": "{caption} -> {target}",
-    "xlsx_link_line": "{ref}: {display} (link: {target})",
-    "xlsx_link_line_bare": "{ref}: (link: {target})",
-    "xlsx_comment": "{ref} comment ({author}): {text}",
-    "xlsx_comment_no_author": "{ref} comment: {text}",
-    "xlsx_defined_name": "{name}: {ref}",
-    "xlsx_defined_name_local": "{name} (sheet \"{sheet}\"): {ref}",
-    "xlsx_boolean_true": "TRUE",
-    "xlsx_boolean_false": "FALSE",
-    "pptx_slide_hidden": "Slide {n}: (hidden slide)",
-    "pptx_title_line": "(title) {text}",
-    "pptx_comment": "{author}: {text}",
-    "pptx_comment_no_author": "{text}",
-    "chart_header": "Chart:",
-    "chart_header_kind": "Chart ({kind}):",
-    "chart_title": "Title:",
-    "chart_text": "Text:",
-    "chart_label": "Label:",
-    "chart_title_line": "Title: {title}",
-    "chart_text_line": "Text: {text}",
-    "chart_label_line": "Label: {label}",
-    "chart_series_named": "Series \"{name}\":",
-    "chart_series_numbered": "Series {n}:",
-    "chart_series_line": "{label} {points}",
-    "chart_series_point": "{category}: {value}",
-    "chart_series_missing": "{label} {categories} {mark}",
-    "chart_series_excess": ", {count} more value(s)",
-    "chart_size": "(size {size})",
-    "chart_excess": "{count} more {noun}",
-    "chart_noun_text": "text(s)",
-    "chart_noun_series": "series",
-    "chart_noun_value": "value(s)",
-    "chart_unreadable_line": "Chart: {mark}",
-    "chart_kind_grouping_stacked": "stacked ",
-    "chart_kind_grouping_percent": "100% stacked ",
-    "chart_kind_area": "area chart",
-    "chart_kind_area_3d": "3-D area chart",
-    "chart_kind_bar": "bar chart",
-    "chart_kind_column": "column chart",
-    "chart_kind_bar_3d": "3-D bar chart",
-    "chart_kind_column_3d": "3-D column chart",
-    "chart_kind_bubble": "bubble chart",
-    "chart_kind_doughnut": "doughnut chart",
-    "chart_kind_line": "line chart",
-    "chart_kind_line_3d": "3-D line chart",
-    "chart_kind_bar_of_pie": "bar-of-pie chart",
-    "chart_kind_pie_of_pie": "pie-of-pie chart",
-    "chart_kind_pie": "pie chart",
-    "chart_kind_pie_3d": "3-D pie chart",
-    "chart_kind_radar": "radar chart",
-    "chart_kind_scatter": "scatter chart",
-    "chart_kind_stock": "stock chart",
-    "chart_kind_surface": "surface chart",
-    "chart_kind_surface_3d": "3-D surface chart",
-    "pdf_description_entry": "{label}: {value}",
-    "pdf_annotation": "{kind} on page {n}",
-    "pdf_annotation_author": "{kind} ({author}) on page {n}",
-    "pdf_annotation_text": "{line}:",
-    "pdf_annotation_note": "note",
-    "pdf_annotation_free_text": "free text",
-    "pdf_annotation_highlight": "highlight",
-    "pdf_annotation_underline": "underline",
-    "pdf_annotation_squiggly": "squiggly underline",
-    "pdf_annotation_strikeout": "strikeout",
-    "pdf_annotation_ink": "ink",
-    "pdf_annotation_square": "square",
-    "pdf_annotation_circle": "circle",
-    "pdf_annotation_polygon": "polygon",
-    "pdf_annotation_polyline": "polyline",
-    "pdf_annotation_line": "line",
-    "pdf_annotation_caret": "caret",
-    "pdf_annotation_stamp": "stamp",
-    "pdf_annotation_signature": "signature",
-    "pdf_field": "{name} ({label}) on page {n}: {value}",
-    "pdf_field_no_page": "{name} ({label}): {value}",
-    "pdf_field_options": "; options: {list}",
-    "pdf_field_options_truncated": ", …",
-    "pdf_field_not_fillable": "; not fillable",
-    "pdf_checked": "checked",
-    "pdf_not_checked": "not checked",
-    "pdf_checkbox_state": "{value} ({state})",
-    "pdf_radio_value": "{value} ({name})",
-    "number_stored_mark": " (stored number, format not shown)",
-    "reason_password_protected": "password-protected",
-    "reason_too_large": "the file is larger than the engine reads",
-    "reason_could_not_be_parsed": "could not be parsed",
-    "reason_could_not_be_read": "could not be read",
-    "reason_old_office_version": "an old Office version this tool cannot read",
-    "reason_corrupt_or_unreadable": "corrupt or unreadable .{extension}",
-    "reason_corrupt_or_unsupported": "corrupt or unsupported .{extension}",
-    "reason_not_carried_out": "the {operation} operation is not carried out",
-    "unshown_line": "{count} {what} not shown",
-    "unshown_chart": "chart(s)",
-    "unshown_chart_sheet": "chart sheet(s)",
-    "unshown_diagram": "diagram(s)",
-    "unshown_object": "embedded object part(s)",
-    "unshown_drawing": "embedded drawing(s)",
-    "unshown_video": "embedded video(s)",
-    "unshown_audio": "embedded audio(s)",
-    "unshown_media": "embedded media file(s)",
-    "unshown_attachment": "attached file(s)",
-    "unshown_media_annotation": "media annotation(s)",
-    "unshown_page": "page(s)",
-    "pdf_note_no_fillable_fields": "the document has a form, but no field that can be filled",
-    "pdf_note_fields_unreadable": "the document has a form, but its fields could not be read",
-    "xlsx_note_styles": "the workbook's cell formats could not be read, so values are shown as stored",
-    "xlsx_note_rels": "the workbook's relationships could not be read, so its parts are read by their conventional names and one named only there may be missed, leaving its cells showing the value as stored",
-    "xlsx_note_cut": "the workbook part is cut short, so the sheets and names it declares after that point are not read",
-    "xlsx_note_no_sheets": "the workbook declares no sheets",
-    "legacy_note_doc_cut": "the reader stopped early — some of the document's text may be missing",
-    "legacy_note_xls_cut": "the workbook was cut short — later sheets or cells may be missing",
-    "legacy_note_xls_chart_text": "the workbook holds text from its charts (chart titles, series and trendline names, and axis titles), which is not extracted",
-    "legacy_note_ppt_cut": "the reader stopped early — some of the presentation's text may be missing"
+    "block_annotations": {
+      "text": "Annotations:",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "block_defined_names": {
+      "text": "Defined names:",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "block_description": {
+      "text": "Description:",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "block_form_fields": {
+      "text": "Form fields:",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "block_page": {
+      "text": "Page {n}:",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "block_table": {
+      "text": "Table {n}:",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "block_table_cell": {
+      "text": "C{n}: {value}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "block_table_cell_marks": {
+      "text": "C{n} ({marks}): {value}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "block_table_revised": {
+      "text": "Table {n} (formatting revised):",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "block_table_row": {
+      "text": "  R{n}: {cells}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "block_table_row_marks": {
+      "text": "  R{n} ({marks}): {cells}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "block_table_summary": {
+      "text": "Table {n}: {rows}, {columns}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "block_table_summary_revised": {
+      "text": "Table {n} (formatting revised): {rows}, {columns}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_excess": {
+      "text": "{count} more {noun}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_header": {
+      "text": "Chart:",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_header_kind": {
+      "text": "Chart ({kind}):",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_area": {
+      "text": "area chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_area_3d": {
+      "text": "3-D area chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_bar": {
+      "text": "bar chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_bar_3d": {
+      "text": "3-D bar chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_bar_of_pie": {
+      "text": "bar-of-pie chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_bubble": {
+      "text": "bubble chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_column": {
+      "text": "column chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_column_3d": {
+      "text": "3-D column chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_doughnut": {
+      "text": "doughnut chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_grouping_percent": {
+      "text": "100% stacked ",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_grouping_stacked": {
+      "text": "stacked ",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_line": {
+      "text": "line chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_line_3d": {
+      "text": "3-D line chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_pie": {
+      "text": "pie chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_pie_3d": {
+      "text": "3-D pie chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_pie_of_pie": {
+      "text": "pie-of-pie chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_radar": {
+      "text": "radar chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_scatter": {
+      "text": "scatter chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_stock": {
+      "text": "stock chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_surface": {
+      "text": "surface chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_kind_surface_3d": {
+      "text": "3-D surface chart",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_label": {
+      "text": "Label:",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_label_line": {
+      "text": "Label: {label}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_noun_series": {
+      "text": "series",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_noun_text": {
+      "text": "text(s)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_noun_value": {
+      "text": "value(s)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_series_excess": {
+      "text": ", {count} more value(s)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_series_line": {
+      "text": "{label} {points}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_series_missing": {
+      "text": "{label} {categories} {mark}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_series_named": {
+      "text": "Series \"{name}\":",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_series_numbered": {
+      "text": "Series {n}:",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_series_point": {
+      "text": "{category}: {value}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_size": {
+      "text": "(size {size})",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_text": {
+      "text": "Text:",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_text_line": {
+      "text": "Text: {text}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_title": {
+      "text": "Title:",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_title_line": {
+      "text": "Title: {title}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "chart_unreadable_line": {
+      "text": "Chart: {mark}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_cell_part_of": {
+      "text": "(part of R{r}C{c})",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_cell_spans": {
+      "text": "(spans C{a}-C{b})",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_comment_reference_ends": {
+      "text": "[{kind} {n} ends]",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_comment_reference_starts": {
+      "text": "[{kind} {n} starts]",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_field": {
+      "text": "[field {instruction}]",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_field_empty": {
+      "text": "[field]",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_heading": {
+      "text": "[heading {n}] ",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_link": {
+      "text": "(link: {address})",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_link_prefix": {
+      "text": "(link: ",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_mark_deleted": {
+      "text": "deleted",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_mark_formatting_revised": {
+      "text": "formatting revised",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_mark_inserted": {
+      "text": "inserted",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_mark_merge_revised": {
+      "text": "merge revised",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_not_referenced": {
+      "text": "not referenced in the text",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_note_block": {
+      "text": "{story} {n}:",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_note_block_extras": {
+      "text": "{story} {n} ({extras}):",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_note_reference": {
+      "text": "[{kind} {n}]",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_note_reference_unknown": {
+      "text": "[{kind} ?]",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_story_numbered": {
+      "text": "{story} {n}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_story_numbered_variants": {
+      "text": "{story} {n} ({variants}):",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_story_variants": {
+      "text": "{story} ({variants}):",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_table_column_noun": {
+      "text": "column",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_table_row_noun": {
+      "text": "row",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_tally_deletion": {
+      "text": "deletion",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_tally_formatting": {
+      "text": "formatting change",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_tally_insertion": {
+      "text": "insertion",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_tally_move": {
+      "text": "move",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_tracked_changes": {
+      "text": "Unaccepted tracked changes: {tallies}.",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "docx_tracked_changes_authors": {
+      "text": "Unaccepted tracked changes: {tallies} (authors: {list}).",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "legacy_note_doc_cut": {
+      "text": "the reader stopped early — some of the document's text may be missing",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "legacy_note_ppt_cut": {
+      "text": "the reader stopped early — some of the presentation's text may be missing",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "legacy_note_xls_chart_text": {
+      "text": "the workbook holds text from its charts (chart titles, series and trendline names, and axis titles), which is not extracted",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "legacy_note_xls_cut": {
+      "text": "the workbook was cut short — later sheets or cells may be missing",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_page_noun_many": {
+      "text": "pages",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_page_noun_one": {
+      "text": "page",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_page_text_lost": {
+      "text": "the text of {pages} could not be read ({count} of {total} pages)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_page_text_partial": {
+      "text": "the text of {pages} could not be read in full ({count} of {total} pages)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_pdf_annotations_truncated": {
+      "text": "only the first {max} annotations were read",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_pdf_fields_truncated": {
+      "text": "only the first {max} form fields were read",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_pdf_options_truncated": {
+      "text": "only the first {max} options of a form field were listed",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_skipped_failed": {
+      "text": "that could not be extracted",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_skipped_images": {
+      "text": "skipped {count} embedded image(s) {reason}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_skipped_oversized": {
+      "text": "over the image size limit",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_skipped_unsupported": {
+      "text": "in a format this pipeline cannot convert",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_slide_comments_unreadable": {
+      "text": "slide {n} comments could not be read",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_slide_notes_unreadable": {
+      "text": "slide {n} notes could not be read",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_slide_rels_unreadable": {
+      "text": "slide {n} relationships could not be read",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_slide_unreadable": {
+      "text": "slide {n} could not be read",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_xlsx_cells_lost": {
+      "text": "{count} cell(s) left out: the shared string table does not provide their text",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_xlsx_columns_late": {
+      "text": "sheet \"{name}\": {count} column definition(s) left out: the sheet writes them after its data, where they reach no cell of it",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_xlsx_columns_lost": {
+      "text": "sheet \"{name}\": {count} column definition(s) left out: the columns they hide or style are not ones this reader can place",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_xlsx_columns_partial": {
+      "text": "sheet \"{name}\": {count} column definition(s) cover a range whose end this reader cannot place, so only the column each one starts at is hidden or styled",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_xlsx_comment_authors_lost": {
+      "text": "sheet \"{name}\": {count} comment author(s) could not be resolved",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_xlsx_comments_lost": {
+      "text": "sheet \"{name}\": {count} comment(s) left out: the cell they name is not one this reader can resolve",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_xlsx_comments_unreadable": {
+      "text": "sheet \"{name}\": its comments could not be read",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_xlsx_links_lost": {
+      "text": "sheet \"{name}\": {count} link(s) left out: the target or the cell range it names is not one this reader can resolve",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_xlsx_marks_dropped": {
+      "text": "sheet \"{name}\": later merged ranges and links left out: the sheet declares more of them than this reader marks",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_xlsx_merges_lost": {
+      "text": "sheet \"{name}\": {count} merged range(s) left out: the cell range they name is not one this reader can mark",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_xlsx_sheet_rels_unreadable": {
+      "text": "sheet \"{name}\": its relationships could not be read",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_xlsx_sheet_unreadable": {
+      "text": "sheet \"{name}\" could not be read",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "note_xlsx_threaded_comments_unreadable": {
+      "text": "sheet \"{name}\": its threaded comments could not be read",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "number_stored_mark": {
+      "text": " (stored number, format not shown)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_annotation": {
+      "text": "{kind} on page {n}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_annotation_author": {
+      "text": "{kind} ({author}) on page {n}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_annotation_caret": {
+      "text": "caret",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_annotation_circle": {
+      "text": "circle",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_annotation_free_text": {
+      "text": "free text",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_annotation_highlight": {
+      "text": "highlight",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_annotation_ink": {
+      "text": "ink",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_annotation_line": {
+      "text": "line",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_annotation_note": {
+      "text": "note",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_annotation_polygon": {
+      "text": "polygon",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_annotation_polyline": {
+      "text": "polyline",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_annotation_signature": {
+      "text": "signature",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_annotation_square": {
+      "text": "square",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_annotation_squiggly": {
+      "text": "squiggly underline",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_annotation_stamp": {
+      "text": "stamp",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_annotation_strikeout": {
+      "text": "strikeout",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_annotation_text": {
+      "text": "{line}:",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_annotation_underline": {
+      "text": "underline",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_checkbox_state": {
+      "text": "{value} ({state})",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_checked": {
+      "text": "checked",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_description_entry": {
+      "text": "{label}: {value}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_field": {
+      "text": "{name} ({label}) on page {n}: {value}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_field_no_page": {
+      "text": "{name} ({label}): {value}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_field_not_fillable": {
+      "text": "; not fillable",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_field_options": {
+      "text": "; options: {list}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_field_options_truncated": {
+      "text": ", …",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_not_checked": {
+      "text": "not checked",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_note_fields_unreadable": {
+      "text": "the document has a form, but its fields could not be read",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_note_no_fillable_fields": {
+      "text": "the document has a form, but no field that can be filled",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pdf_radio_value": {
+      "text": "{value} ({name})",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pptx_comment": {
+      "text": "{author}: {text}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pptx_comment_no_author": {
+      "text": "{text}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pptx_slide_hidden": {
+      "text": "Slide {n}: (hidden slide)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "pptx_title_line": {
+      "text": "(title) {text}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "reason_corrupt_or_unreadable": {
+      "text": "corrupt or unreadable .{extension}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "reason_corrupt_or_unsupported": {
+      "text": "corrupt or unsupported .{extension}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "reason_could_not_be_parsed": {
+      "text": "could not be parsed",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "reason_could_not_be_read": {
+      "text": "could not be read",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "reason_not_carried_out": {
+      "text": "the {operation} operation is not carried out",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "reason_old_office_version": {
+      "text": "an old Office version this tool cannot read",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "reason_password_protected": {
+      "text": "password-protected",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "unshown_attachment": {
+      "text": "attached file(s)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "unshown_audio": {
+      "text": "embedded audio(s)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "unshown_chart": {
+      "text": "chart(s)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "unshown_chart_sheet": {
+      "text": "chart sheet(s)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "unshown_diagram": {
+      "text": "diagram(s)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "unshown_drawing": {
+      "text": "embedded drawing(s)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "unshown_line": {
+      "text": "{count} {what} not shown",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "unshown_media": {
+      "text": "embedded media file(s)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "unshown_media_annotation": {
+      "text": "media annotation(s)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "unshown_object": {
+      "text": "embedded object part(s)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "unshown_page": {
+      "text": "page(s)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "unshown_video": {
+      "text": "embedded video(s)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "word_comment": {
+      "text": "Comment",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "word_comments": {
+      "text": "Comments",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "word_endnote": {
+      "text": "Endnote",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "word_endnotes": {
+      "text": "Endnotes",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "word_footer": {
+      "text": "Footer",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "word_footnote": {
+      "text": "Footnote",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "word_footnotes": {
+      "text": "Footnotes",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "word_header": {
+      "text": "Header",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "word_headers_and_footers": {
+      "text": "Headers and footers",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "word_variant_default": {
+      "text": "default",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "word_variant_even_pages": {
+      "text": "even pages",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "word_variant_first_page": {
+      "text": "first page",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_boolean_false": {
+      "text": "FALSE",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_boolean_true": {
+      "text": "TRUE",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_cell": {
+      "text": "{ref}: {value}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_cell_formula": {
+      "text": "{ref}: {value} (={formula})",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_cell_formula_only": {
+      "text": "{ref}: ={formula}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_cell_in_merged_range": {
+      "text": "{ref}: {value} (in merged range {range})",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_cell_link": {
+      "text": "{ref}: {value} (link: {target})",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_cell_merged": {
+      "text": "{ref}: {value} (merged {range})",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_cell_stored": {
+      "text": "{ref}: {value} (stored number, format not shown)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_chart_sheet": {
+      "text": "(chart sheet)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_comment": {
+      "text": "{ref} comment ({author}): {text}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_comment_no_author": {
+      "text": "{ref} comment: {text}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_defined_name": {
+      "text": "{name}: {ref}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_defined_name_local": {
+      "text": "{name} (sheet \"{sheet}\"): {ref}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_hidden_columns": {
+      "text": "(hidden columns: {ranges})",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_hidden_rows": {
+      "text": "(hidden rows: {ranges})",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_in_merged_range": {
+      "text": "(in merged range {range})",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_link_caption": {
+      "text": "{caption} -> {target}",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_link_line": {
+      "text": "{ref}: {display} (link: {target})",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_link_line_bare": {
+      "text": "{ref}: (link: {target})",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_merged": {
+      "text": "(merged {range})",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_no_values": {
+      "text": "(no values)",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_note_cut": {
+      "text": "the workbook part is cut short, so the sheets and names it declares after that point are not read",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_note_no_sheets": {
+      "text": "the workbook declares no sheets",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_note_rels": {
+      "text": "the workbook's relationships could not be read, so its parts are read by their conventional names and one named only there may be missed, leaving its cells showing the value as stored",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_note_styles": {
+      "text": "the workbook's cell formats could not be read, so values are shown as stored",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_sheet": {
+      "text": "Sheet \"{name}\":",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_sheet_hidden": {
+      "text": "Sheet \"{name}\" (hidden):",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "xlsx_sheet_very_hidden": {
+      "text": "Sheet \"{name}\" (very hidden):",
+      "printed_by": [
+        "reading"
+      ]
+    }
+  },
+  "derived_marks": {
+    "docx_marks": [
+      "reading",
+      "writing"
+    ],
+    "docx_peripheral_parts": [
+      "reading",
+      "writing"
+    ],
+    "ppt_marks": [
+      "reading",
+      "writing"
+    ],
+    "ppt_slide_labels": [
+      "reading",
+      "writing"
+    ],
+    "pdf_field_kinds": [
+      "reading",
+      "writing"
+    ],
+    "pdf_form_words": [
+      "reading",
+      "writing"
+    ],
+    "pdf_metadata_fields": [
+      "reading",
+      "writing"
+    ]
+  },
+  "enforced": {
+    "head_sniff_bytes": [
+      "caller"
+    ],
+    "file_max_bytes": [
+      "caller"
+    ],
+    "max_pictures": [
+      "caller"
+    ],
+    "text_spill_bytes": [
+      "caller"
+    ],
+    "min_page_text_chars": [
+      "reading"
+    ],
+    "crop_edge_slack": [
+      "reading"
+    ],
+    "raster_long_side_px": [
+      "reading"
+    ],
+    "raster_long_side_max_px": [
+      "caller"
+    ],
+    "raster_max_scale": [
+      "reading"
+    ],
+    "raster_jpeg_quality": [
+      "reading"
+    ],
+    "text_spill_chars": [
+      "caller"
+    ],
+    "raster_decode_max_alloc_bytes": [
+      "reading"
+    ],
+    "raster_decode_max_dimension_px": [
+      "reading"
+    ],
+    "zip_entry_max_bytes": [
+      "reading"
+    ],
+    "xml_element_depth_max": [
+      "reading"
+    ],
+    "docx_table_columns_max": [
+      "reading"
+    ],
+    "docx_style_chain_max": [
+      "reading"
+    ],
+    "docx_field_instruction_chars_max": [
+      "reading"
+    ],
+    "link_target_chars_max": [
+      "reading"
+    ],
+    "xlsx_range_probes_max": [
+      "reading"
+    ],
+    "chart_parts_max": [
+      "reading"
+    ],
+    "chart_series_max": [
+      "reading"
+    ],
+    "chart_points_max": [
+      "reading"
+    ],
+    "chart_texts_max": [
+      "reading"
+    ],
+    "number_format_code_max": [
+      "reading"
+    ],
+    "number_format_placeholders_max": [
+      "reading"
+    ],
+    "number_format_sections_max": [
+      "reading"
+    ],
+    "number_format_sub_second_digits_max": [
+      "reading"
+    ],
+    "pdf_marks_max": [
+      "reading"
+    ],
+    "pdf_fields_max": [
+      "reading"
+    ],
+    "pdf_field_options_max": [
+      "reading"
+    ],
+    "pdf_field_depth_max": [
+      "reading"
+    ],
+    "edit_work_max_bytes": [
+      "writing"
+    ],
+    "merge_inputs_max": [
+      "writing"
+    ],
+    "merge_bytes_max": [
+      "writing"
+    ],
+    "split_parts_max": [
+      "writing"
+    ],
+    "rules": [
+      "writing",
+      "caller"
+    ]
   }
 }

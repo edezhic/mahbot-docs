@@ -277,12 +277,20 @@ dependencies = [
 name = "document-engine"
 version = "0.1.0"
 dependencies = [
+ "document-engine",
+ "flate2",
  "hayro",
+ "image",
  "office_oxide",
+ "pdf-extract",
+ "quick-xml 0.39.4",
  "regex",
  "serde",
  "serde_json",
+ "sha2",
+ "strum",
  "tempfile",
+ "tracing",
  "zip",
 ]
 

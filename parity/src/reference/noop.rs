@@ -5,7 +5,7 @@
 //! and, more importantly, contain none of the change the operation promises. A gate that passes
 //! this engine is not a gate.
 
-use crate::engine::{EngineIdentity, Reader, Reading, Writer, WriterOutcome};
+use crate::engine::{EngineIdentity, Kind, Reader, Reading, Writer, WriterOutcome};
 use serde_json::Value;
 use std::path::Path;
 
@@ -76,5 +76,9 @@ impl Reader for NoOpReader {
             all_page_text_lost: false,
             page_text: false,
         })
+    }
+
+    fn detect(&self, _input: &Path, _file_name: &str) -> anyhow::Result<Kind> {
+        Ok(Kind::Unsupported)
     }
 }

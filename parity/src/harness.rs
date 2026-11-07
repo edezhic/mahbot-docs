@@ -4,7 +4,7 @@
 use crate::baseline::Baseline;
 use crate::canonical::{self, Comparison};
 use crate::corpus::{Case, Document, Expect};
-use crate::engine::{EngineIdentity, Key, Reader, Reading, Writer};
+use crate::engine::{EngineIdentity, Key, Kind, Reader, Reading, Writer};
 use crate::shutdown::panic_message;
 use crate::transcript::{self, CaseTranscript, ReadingTranscript, Status};
 use anyhow::{Context as _, Result, bail};
@@ -49,7 +49,7 @@ impl Harness {
         std::env::temp_dir().join(format!(
             "{ROOT_PREFIX}{}-{:016x}",
             std::process::id(),
-            rand_nonce()
+            nonce()
         ))
     }
 
@@ -311,13 +311,44 @@ impl Harness {
         std::fs::create_dir_all(&out_dir)?;
         let path = directory.join(document.name);
         std::fs::write(&path, (document.build)())?;
+        let detection = self.detect_within(&path, document.name)?;
         let reading = self.read_within(&path, document.name, &out_dir)?;
         let mut transcript = ReadingTranscript {
             document: document.name.to_string(),
             reading,
+            detection: Some(detection),
         };
         normalise_reading(&mut transcript, &self.root);
         Ok(transcript)
+    }
+
+    /// One detection, bounded like a reading: a classifier that never returns costs one reading
+    /// instead of the gate.
+    fn detect_within(&self, path: &Path, file_name: &str) -> Result<Kind> {
+        let reader = Arc::clone(&self.reader);
+        let path = path.to_path_buf();
+        let file_name = file_name.to_string();
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let kind = crate::shutdown::contain_panics(|| reader.detect(&path, &file_name))
+                .unwrap_or_else(|payload| {
+                    Err(anyhow::anyhow!(
+                        "the detector panicked: {}",
+                        panic_message(&*payload)
+                    ))
+                });
+            let _ = sender.send(kind);
+        });
+        match receiver.recv_timeout(self.read_timeout) {
+            Ok(kind) => kind,
+            Err(mpsc::RecvTimeoutError::Timeout) => bail!(
+                "the detector did not finish within {}s",
+                self.read_timeout.as_secs_f64()
+            ),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                bail!("the detector's thread ended without an answer")
+            }
+        }
     }
 
     /// One reading, bounded. The reader runs on a thread of its own so a reader that never returns
@@ -362,12 +393,30 @@ impl Drop for Harness {
 }
 
 /// Validate a root and create it, answering whether this call created it.
+///
+/// A root that already exists is adopted only when it is a real directory: a symlink would make
+/// the harness write outside the root it validated, and a file is not a root at all.
 fn create_root(root: &Path) -> Result<bool> {
     validate_root(root)?;
-    let owned = !root.exists();
-    std::fs::create_dir_all(root)
-        .with_context(|| format!("cannot create the harness root {}", root.display()))?;
-    Ok(owned)
+    match std::fs::symlink_metadata(root) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            bail!("the harness root {} must not be a symlink", root.display())
+        }
+        Ok(metadata) if !metadata.is_dir() => bail!(
+            "the harness root {} exists and is not a directory",
+            root.display()
+        ),
+        Ok(_) => Ok(false),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // Create-new, so a nonce collision fails rather than sharing another harness's root.
+            std::fs::create_dir(root)
+                .with_context(|| format!("cannot create the harness root {}", root.display()))?;
+            Ok(true)
+        }
+        Err(e) => {
+            Err(e).with_context(|| format!("cannot inspect the harness root {}", root.display()))
+        }
+    }
 }
 
 /// Refuse a root the harness may not own: it must be named the way [`Harness::temp_root`] names
@@ -391,8 +440,8 @@ fn validate_root(root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// A nonce for the harness root, so two runs cannot share one directory.
-fn rand_nonce() -> u64 {
+/// A nonce for a directory two runs must not share.
+pub(crate) fn nonce() -> u64 {
     use std::hash::{BuildHasher, Hasher as _};
     let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
     hasher.write_u128(
@@ -744,7 +793,9 @@ fn compare_reading(outcome: &ReadingOutcome, baseline: &Baseline) -> ReadingVerd
     match baseline.readings.get(&outcome.document) {
         None => problems.push("no baseline reading: record the baseline deliberately".to_string()),
         Some(recorded) => {
-            let comparison = compare_transcript(
+            // The reading body and the detection are compared separately, so a disagreement about
+            // what the document is reads as such rather than as a diff somewhere inside a reading.
+            let comparison = compare_reading_body(
                 recorded,
                 outcome.transcript.as_ref(),
                 "the reading produced no transcript",
@@ -755,12 +806,50 @@ fn compare_reading(outcome: &ReadingOutcome, baseline: &Baseline) -> ReadingVerd
                     .into_iter()
                     .map(|line| format!("baseline {line}")),
             );
+            if let Some(actual) = outcome.transcript.as_ref() {
+                match (recorded.detection, actual.detection) {
+                    (Some(expected), Some(actual)) if expected != actual => problems.push(format!(
+                        "detection differs: baseline {expected}, engine {actual}"
+                    )),
+                    (Some(_), None) => {
+                        problems.push("the reading recorded no detection".to_string());
+                    }
+                    (None, _) => problems.push(
+                        "the baseline reading has no detection: record the baseline deliberately"
+                            .to_string(),
+                    ),
+                    _ => {}
+                }
+            }
         }
     }
     ReadingVerdict {
         document: outcome.document.clone(),
         passed: problems.is_empty(),
         problems,
+    }
+}
+
+/// Compare two reading transcripts without their detection, which [`compare_reading`] reports on
+/// its own.
+fn compare_reading_body(
+    recorded: &ReadingTranscript,
+    actual: Option<&ReadingTranscript>,
+    missing: &str,
+) -> Comparison {
+    let Some(actual) = actual else {
+        return undecidable(missing);
+    };
+    match (serde_json::to_value(recorded), serde_json::to_value(actual)) {
+        (Ok(mut expected), Ok(mut got)) => {
+            for value in [&mut expected, &mut got] {
+                if let Some(object) = value.as_object_mut() {
+                    object.remove("detection");
+                }
+            }
+            canonical::compare(&expected, &got)
+        }
+        _ => undecidable("the transcripts could not be serialised for comparison"),
     }
 }
 

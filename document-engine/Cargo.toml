@@ -6,17 +6,32 @@ rust-version = "1.96"
 publish = false
 description = "The MahBot document engine: read documents, produce and edit them, and the vocabulary both halves share"
 
+[features]
+# The generated corpus builders. Off for a normal build: the crate's own tests enable it through
+# the self dev-dependency below, and the parity harness enables it as a consumer.
+test-support = []
+
 [dependencies]
 # Format classification opens a CFB's directory and a ZIP's central directory; no entry is
-# decompressed, so no codec is compiled in. The versions are the product's own.
-hayro = "0.7"
+# decompressed to decide a family. The versions are the product's own, pinned by its lockfile.
+hayro = "=0.7.1"
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
 office_oxide = "=0.1.13"
+pdf-extract = { version = "=0.12.1", default-features = false }
+quick-xml = { version = "=0.39.4", default-features = false }
+regex = "1.13"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-zip = { version = "8", default-features = false }
+sha2 = "0.10"
+strum = { version = "0.27", features = ["derive"] }
+tracing = "0.1"
+zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
-# The vocabulary restatement scan matches numeric and string literals in the crate's own sources.
-regex = "1"
+# A package may depend on itself as a dev-dependency: this is what turns `test-support` on for
+# the integration tests without putting the corpus builders into a normal build.
+document-engine = { path = ".", features = ["test-support"] }
+# A PDF fixture's compressed stream is built with the decoder's own deflate.
+flate2 = "=1.1.10"
 # Tests write into a fresh directory that removes itself, even when an assertion fails.
 tempfile = "3"

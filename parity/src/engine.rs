@@ -13,7 +13,7 @@
 
 // The neutral result shapes, owned by the engine crate.
 pub use document_engine::operation::{Failure, Outcome as WriterOutcome};
-pub use document_engine::reading::{ImageArtifact, Reading};
+pub use document_engine::reading::{ImageArtifact, Kind, Reading};
 // The four document families, shared by the corpus's keys and the engine's own vocabulary.
 pub use document_engine::vocabulary::Family;
 
@@ -114,6 +114,11 @@ pub trait Reader: Send + Sync {
 
     /// Read the document at `input`, named `file_name`, writing extracted images into `out_dir`.
     fn read(&self, input: &Path, file_name: &str, out_dir: &Path) -> anyhow::Result<Reading>;
+
+    /// What the engine's own classifier makes of `input`, named `file_name`: the answer a caller
+    /// routes a read by. It is recorded and compared beside the reading, so two engines that read
+    /// a document the same way but disagree about what it is are told apart.
+    fn detect(&self, input: &Path, file_name: &str) -> anyhow::Result<Kind>;
 }
 
 #[cfg(test)]

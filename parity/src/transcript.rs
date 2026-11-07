@@ -2,7 +2,7 @@
 //! (absolute paths, the run's nonce, timestamps) replaced by a marker. Two runs of one engine must
 //! produce identical transcripts, whatever second they happen to land in.
 
-use crate::engine::{Reading, WriterOutcome};
+use crate::engine::{Kind, Reading, WriterOutcome};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -108,6 +108,10 @@ pub struct ReadingTranscript {
     /// document was given when read, so one field carries both.
     pub document: String,
     pub reading: Reading,
+    /// What the engine's classifier made of the document. An older baseline has no answer, which
+    /// the gate reports rather than passing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detection: Option<Kind>,
 }
 
 /// Replace everything a transcript must not carry. `run_root` is the harness's own temporary root;

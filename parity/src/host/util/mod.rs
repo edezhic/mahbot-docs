@@ -10,8 +10,11 @@ pub(crate) mod test;
 /// Recognized image extensions, matching the product's list.
 pub(crate) const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "heic", "heif"];
 
-const VIDEO_EXTENSIONS: &[&str] = &[
-    "mp4", "m4v", "mov", "webm", "mkv", "avi", "wmv", "flv", "mpeg", "mpg", "3gp", "ogv",
+/// The video containers the product recognises, in the product's own order. A copy, not a
+/// paraphrase: `tests/engine_contract.rs` extracts the product's list and holds this to it.
+pub(crate) const VIDEO_EXTENSIONS: &[&str] = &[
+    "mp4", "m4v", "mov", "mkv", "avi", "webm", "flv", "wmv", "mpg", "mpeg", "ogv", "3gp", "3g2",
+    "vob", "rm", "rmvb", "asf", "f4v", "divx", "m2ts",
 ];
 
 #[must_use]

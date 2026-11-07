@@ -1,28 +1,23 @@
-//! The corpus: every input document is generated in code at run time, by the harness itself, never
-//! by asking the engine under test to create it. No sample or fixture document is committed.
+//! The corpus: every input document is generated in code at run time, never by asking the engine
+//! under test to create it. No sample or fixture document is committed.
 //!
 //! A [`Case`] is one scenario: the documents it needs, the request the engine is given, the
 //! outputs it names, the change it promises ([`Effect`]), and what kind of answer it expects. The
 //! names of the edit sub-operations repeat across families, so a case's key is
 //! (family, operation, sub-operation).
+//!
+//! The builders have one home — `document_engine::test_support` — because the crate's own tests and
+//! this harness read the very same documents. Re-exported here so the rest of the harness keeps
+//! naming them through `corpus`.
 
-pub mod build;
 pub mod cases;
-pub mod documents;
 pub mod effect;
-pub mod legacy_formats;
 
+pub use document_engine::test_support::{Document, build, documents, legacy_formats};
 pub use effect::Effect;
 
 use crate::engine::{Family, Key};
 use serde_json::Value;
-
-/// One generated input document: a name and the code that builds its bytes.
-#[derive(Clone, Copy)]
-pub struct Document {
-    pub name: &'static str,
-    pub build: fn() -> Vec<u8>,
-}
 
 /// What a case expects the engine to answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,5 +64,5 @@ pub fn writer_cases() -> Vec<Case> {
 /// Every document the reader reference is recorded on.
 #[must_use]
 pub fn reader_documents() -> Vec<Document> {
-    documents::reader_documents()
+    document_engine::test_support::reader_documents()
 }

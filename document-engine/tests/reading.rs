@@ -1,77 +1,34 @@
-//! The reading surface, exercised through its public entry points: content-first detection, the
-//! one page-to-picture render, and the answers each failure takes.
+//! The reading surface, exercised through its public entry points: whole-file, content-first
+//! detection; the one page-to-picture render; the pictures a reading writes; and the answers each
+//! failure takes.
 
 use document_engine::reading::{Kind, Reading, RenderError, detect, read, render_page};
-use std::io::Write as _;
+use document_engine::test_support::{Document, build, documents};
+use document_engine::vocabulary::vocabulary;
+use sha2::{Digest as _, Sha256};
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 /// A minimal one-page PDF: a catalog, a page tree and a page drawing a `width` × `height` rectangle.
 fn page_pdf(width: u32, height: u32) -> Vec<u8> {
     let content = format!("0 0 1 rg 0 0 {width} {height} re f");
-    let objects = [
-        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
-        format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] /Contents 4 0 R >>"),
+    let mut pdf = build::PdfObjects::default();
+    let catalog = pdf.reserve();
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let stream = pdf.stream("", content.as_bytes());
+    pdf.set(
+        &page,
         format!(
-            "<< /Length {} >>\nstream\n{content}\nendstream",
-            content.len()
+            "<< /Type /Page /Parent {pages} /MediaBox [0 0 {width} {height}] /Contents {stream} >>"
         ),
-    ];
-    assemble(&objects, "")
-}
-
-/// A PDF with `objects` and `trailer_extra` appended to its trailer.
-fn assemble(objects: &[String], trailer_extra: &str) -> Vec<u8> {
-    let mut pdf = b"%PDF-1.4\n".to_vec();
-    let mut offsets = Vec::new();
-    for (index, object) in objects.iter().enumerate() {
-        offsets.push(pdf.len());
-        pdf.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", index + 1).as_bytes());
-    }
-    let xref = pdf.len();
-    pdf.extend_from_slice(format!("xref\n0 {}\n", objects.len() + 1).as_bytes());
-    pdf.extend_from_slice(b"0000000000 65535 f \n");
-    for offset in offsets {
-        pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
-    }
-    pdf.extend_from_slice(
-        format!(
-            "trailer\n<< /Size {} /Root 1 0 R {trailer_extra} >>\nstartxref\n{xref}\n%%EOF\n",
-            objects.len() + 1
-        )
-        .as_bytes(),
     );
-    pdf
-}
-
-/// A one-page PDF carrying a standard-security-handler `/Encrypt` dictionary whose empty user
-/// password does not authenticate: the file needs a password.
-fn password_pdf() -> Vec<u8> {
-    let content = "0 0 1 rg 0 0 200 100 re f";
-    let objects = [
-        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 4 0 R >>".to_string(),
-        format!(
-            "<< /Length {} >>\nstream\n{content}\nendstream",
-            content.len()
-        ),
-    ];
-    let encrypt = format!(
-        "<< /Filter /Standard /V 1 /R 2 /O <{}> /U <{}> /P -44 >>",
-        "00".repeat(32),
-        "00".repeat(32),
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
     );
-    assemble(
-        &objects,
-        &format!(
-            "/Encrypt {encrypt} /ID [<00112233445566778899aabbccddeeff> <00112233445566778899aabbccddeeff>]"
-        ),
-    )
-}
-
-/// The one-page fixture the reading tests share.
-fn one_page_pdf() -> Vec<u8> {
-    page_pdf(200, 100)
+    pdf.set(&catalog, format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
 }
 
 /// A fresh directory for one test's inputs.
@@ -79,52 +36,261 @@ fn scratch() -> tempfile::TempDir {
     tempfile::TempDir::new().expect("a temporary directory")
 }
 
-/// CFB/OLE container magic — what an old `.doc`/`.xls`/`.ppt` and an encrypted package share.
-const CFB_MAGIC: &[u8] = &[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+/// Write `bytes` into `dir` under `name` and answer the path.
+fn write(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
+    let path = dir.join(name);
+    std::fs::write(&path, bytes).expect("write the input");
+    path
+}
+
+/// Write one corpus document into `dir` under its own name.
+fn document_in(dir: &Path, document: Document) -> PathBuf {
+    write(dir, document.name, &(document.build)())
+}
+
+/// The lowercase hexadecimal digest of `bytes`.
+fn hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
 
 #[test]
-fn detection_is_content_first() {
+fn detection_is_content_first_and_whole_file() {
     let dir = scratch();
-    let cases: &[(&str, &[u8], Kind)] = &[
-        ("renamed.txt", b"%PDF-1.7\n", Kind::Pdf),
-        ("plain.txt", b"just words\n", Kind::PlainText),
-        ("bytes.bin", &[0, 1, 2, 3], Kind::Unsupported),
-        ("empty.md", b"", Kind::PlainText),
+    let dir = dir.path();
+
+    // A real PDF under a name that claims a Word document: the bytes win.
+    let pdf = write(dir, "renamed.docx", &build::pdf_basic());
+    assert_eq!(detect(&pdf, "renamed.docx").expect("detect"), Kind::Pdf);
+
+    // A real workbook under a name that claims a Word document: the package's entries win.
+    let workbook = write(dir, "workbook.docx", &build::claims_docx());
+    assert_eq!(
+        detect(&workbook, "workbook.docx").expect("detect"),
+        Kind::Xlsx
+    );
+
+    // A real Word package under a name that claims a PDF: the entries win over both names.
+    let word = write(dir, "renamed.pdf", &build::renamed_docx());
+    assert_eq!(detect(&word, "renamed.pdf").expect("detect"), Kind::Docx);
+
+    // A ZIP that is no Office package, under a name that claims no family.
+    let archive = write(dir, "archive.zip", &build::plain_archive());
+    assert_eq!(
+        detect(&archive, "archive.zip").expect("detect"),
+        Kind::Unsupported
+    );
+
+    // The same archive under a `.docx` name: the converter's verdict is a corrupt `.docx`.
+    let claimed = write(dir, "archive.docx", &build::plain_archive());
+    assert_eq!(
+        detect(&claimed, "archive.docx").expect("detect"),
+        Kind::Docx
+    );
+
+    // Plain text, binary bytes and an empty file.
+    let plain = write(dir, "plain.txt", b"just words\n");
+    assert_eq!(
+        detect(&plain, "plain.txt").expect("detect"),
+        Kind::PlainText
+    );
+    let binary = write(dir, "bytes.bin", &[0, 1, 2, 3]);
+    assert_eq!(
+        detect(&binary, "bytes.bin").expect("detect"),
+        Kind::Unsupported
+    );
+    let empty = write(dir, "empty.md", b"");
+    assert_eq!(detect(&empty, "empty.md").expect("detect"), Kind::PlainText);
+
+    // The decision is over the whole file: a NUL after a full head of ASCII is not text, even
+    // though a prefix-only peek would have routed it as text.
+    let head = vocabulary().reading.head_sniff_bytes;
+    let mut bytes = vec![b'a'; head];
+    bytes.push(0);
+    bytes.extend_from_slice(b"tail");
+    let hidden = write(dir, "hidden.bin", &bytes);
+    assert_eq!(
+        detect(&hidden, "hidden.bin").expect("detect"),
+        Kind::Unsupported
+    );
+}
+
+#[test]
+fn an_encrypted_package_is_encrypted() {
+    let dir = scratch();
+    let path = write(dir.path(), "secret.docx", &build::encrypted_package());
+    assert_eq!(
+        detect(&path, "secret.docx").expect("detect"),
+        Kind::Encrypted
+    );
+    assert_eq!(
+        read(&path, "secret.docx", dir.path()),
+        Reading::Unreadable {
+            reason: vocabulary()
+                .marks
+                .get("reason_password_protected")
+                .to_string(),
+        }
+    );
+}
+
+#[test]
+fn detection_and_reading_agree_on_the_same_bytes() {
+    let dir = scratch();
+    let cases = [
+        documents::BASIC_PDF,
+        documents::BASIC_DOCX,
+        documents::BASIC_XLSX,
+        documents::BASIC_PPTX,
+        documents::LEGACY_DOC,
+        documents::LEGACY_XLS,
+        documents::LEGACY_PPT,
+        documents::PLAIN_TEXT,
+        documents::BINARY,
+        documents::EMPTY_FILE,
+        documents::PLAIN_ARCHIVE,
+        documents::RENAMED_PDF,
+        documents::CLAIMS_DOCX,
+        documents::PACKAGE_BIN,
+        documents::SECRET_DOCX,
     ];
-    for (name, bytes, expected) in cases {
-        let path = dir.path().join(name);
-        std::fs::write(&path, bytes).expect("write input");
-        assert_eq!(detect(&path, name).expect("detect"), *expected, "{name}");
+    for document in cases {
+        let path = document_in(dir.path(), document);
+        let kind = detect(&path, document.name).expect("detect");
+        let reading = read(&path, document.name, dir.path());
+        match (kind, reading) {
+            (
+                Kind::Pdf
+                | Kind::Docx
+                | Kind::Xlsx
+                | Kind::Pptx
+                | Kind::LegacyDoc
+                | Kind::LegacyXls
+                | Kind::LegacyPpt
+                | Kind::PlainText,
+                Reading::Text { .. },
+            ) => {}
+            (Kind::Unsupported, Reading::Unsupported) => {}
+            (Kind::Encrypted, Reading::Unreadable { reason }) => assert_eq!(
+                reason,
+                vocabulary()
+                    .marks
+                    .get("reason_password_protected")
+                    .to_string(),
+                "{} is encrypted",
+                document.name
+            ),
+            (Kind::Unreadable, Reading::Unreadable { reason }) => assert_eq!(
+                reason,
+                vocabulary()
+                    .marks
+                    .get("reason_could_not_be_read")
+                    .to_string(),
+                "{} could not be read",
+                document.name
+            ),
+            (kind, other) => panic!("{} is {kind:?} but reads as {other:?}", document.name),
+        }
     }
 }
 
 #[test]
-fn a_package_is_read_for_its_own_part_not_its_name() {
+fn no_input_size_bound_applies() {
     let dir = scratch();
-    let path = dir.path().join("claims.docx");
-    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-    zip.start_file("xl/workbook.xml", zip::write::SimpleFileOptions::default())
-        .expect("start part");
-    zip.write_all(b"<workbook/>").expect("write part");
-    std::fs::write(&path, zip.finish().expect("finish zip").into_inner()).expect("write");
-    assert_eq!(detect(&path, "claims.docx").expect("detect"), Kind::Xlsx);
+    let bytes = build::pdf_over_fifty_megabytes();
+    assert!(
+        bytes.len() as u64 > vocabulary().reading.file_max_bytes,
+        "the fixture is over the vocabulary's input bound"
+    );
+    let path = write(dir.path(), "over.pdf", &bytes);
+    assert_eq!(detect(&path, "over.pdf").expect("detect"), Kind::Pdf);
+    match read(&path, "over.pdf", dir.path()) {
+        Reading::Text {
+            text, page_text, ..
+        } => {
+            assert!(page_text, "the page produced text of its own");
+            assert!(
+                text.contains("just over the"),
+                "the page's own text is returned: {text:?}"
+            );
+        }
+        other => panic!("a file over the input bound is still read, got {other:?}"),
+    }
+    let picture =
+        render_page(&path, 1, 100, 1.0).expect("a page over the input bound still renders");
+    assert!(picture.width > 0 && picture.height > 0);
 }
 
 #[test]
-fn a_page_renders_to_its_own_pixels() {
+fn the_page_size_and_scale_are_honoured() {
     let dir = scratch();
-    let path = dir.path().join("page.pdf");
-    std::fs::write(&path, one_page_pdf()).expect("write pdf");
-    let picture = render_page(&path, 1, 100, 1.0).expect("render");
-    assert_eq!((picture.width, picture.height), (100, 50));
-    assert_eq!(picture.rgba.len(), 100 * 50 * 4);
+    let path = write(dir.path(), "wide.pdf", &page_pdf(2_000, 1_000));
+    // The page's own long side is 2000 points. The requested 400 is below 2.0 × 2000, so the
+    // scale is 400 / 2000 = 0.2 and the picture is 400 × 200, exactly.
+    let picture = render_page(&path, 1, 400, 2.0).expect("render");
+    assert_eq!((picture.width, picture.height), (400, 200));
+    assert_eq!(picture.rgba.len(), 400 * 200 * 4);
 }
 
 #[test]
-fn a_page_past_the_end_names_how_many_there_are() {
+fn a_request_above_the_raster_ceiling_is_honoured() {
     let dir = scratch();
-    let path = dir.path().join("page.pdf");
-    std::fs::write(&path, one_page_pdf()).expect("write pdf");
+    let path = write(dir.path(), "wide.pdf", &page_pdf(2_000, 1_000));
+    let ceiling = vocabulary().reading.raster_long_side_max_px;
+    let requested = ceiling + 2_048;
+    let picture = render_page(&path, 1, requested, 3.0).expect("render");
+    assert!(requested > ceiling);
+    assert_eq!(
+        picture.width, requested,
+        "the requested long side is honoured, not clamped to {ceiling}"
+    );
+    // scale = 4096 / 2000 = 2.048; height = floor(1000 × 2.048) = 2048.
+    assert_eq!(picture.height, 2_048);
+}
+
+#[test]
+fn a_degenerate_page_size_is_refused() {
+    let dir = scratch();
+    let path = write(dir.path(), "page.pdf", &page_pdf(200, 100));
+    for (long_side, scale) in [(0, 1.0), (100, 0.0), (100, -1.0), (100, f32::NAN)] {
+        assert_eq!(
+            render_page(&path, 1, long_side, scale),
+            Err(RenderError::InvalidSize),
+            "{long_side}x{scale}"
+        );
+    }
+}
+
+#[test]
+fn a_password_protected_pdf_needs_its_password() {
+    let dir = scratch();
+    let path = write(dir.path(), "secret.pdf", &build::pdf_encrypted());
+    assert_eq!(detect(&path, "secret.pdf").expect("detect"), Kind::Pdf);
+    assert_eq!(
+        render_page(&path, 1, 100, 1.0),
+        Err(RenderError::PasswordProtected)
+    );
+    assert_eq!(
+        read(&path, "secret.pdf", dir.path()),
+        Reading::Unreadable {
+            reason: vocabulary()
+                .marks
+                .get("reason_password_protected")
+                .to_string(),
+        }
+    );
+}
+
+#[test]
+fn bytes_that_are_no_pdf_are_refused() {
+    let dir = scratch();
+    let path = write(dir.path(), "bytes.bin", b"not a pdf");
+    assert_eq!(render_page(&path, 1, 100, 1.0), Err(RenderError::NotPdf));
+}
+
+#[test]
+fn a_page_past_the_end_names_the_count() {
+    let dir = scratch();
+    let path = write(dir.path(), "page.pdf", &page_pdf(200, 100));
     assert_eq!(
         render_page(&path, 2, 100, 1.0),
         Err(RenderError::NoSuchPage { pages: 1 })
@@ -136,104 +302,164 @@ fn a_page_past_the_end_names_how_many_there_are() {
 }
 
 #[test]
-fn a_page_size_is_clamped_to_the_raster_envelope() {
+fn every_picture_is_returned_with_its_digest() {
     let dir = scratch();
-    let path = dir.path().join("wide.pdf");
-    std::fs::write(&path, page_pdf(2_000, 100)).expect("write pdf");
-    let picture = render_page(&path, 1, 100_000, 100.0).expect("render");
-    let max = document_engine::vocabulary::vocabulary()
-        .reading
-        .raster_long_side_max_px;
+    let out = dir.path().join("out");
+    let document = documents::MANY_PICTURES_DOCX;
+    let path = document_in(dir.path(), document);
+    let images = match read(&path, document.name, &out) {
+        Reading::Text { images, .. } => images,
+        other => panic!("a Word document with pictures reads as text, got {other:?}"),
+    };
+    let cap = vocabulary().reading.max_pictures;
     assert!(
-        (2_000..=max).contains(&picture.width),
-        "the long side is clamped to {max}, got {}",
-        picture.width
+        images.len() > cap,
+        "all {} pictures are returned, not the caller's cap of {cap}",
+        images.len()
     );
-}
-
-#[test]
-fn a_degenerate_page_size_is_refused_as_the_callers() {
-    let dir = scratch();
-    let path = dir.path().join("page.pdf");
-    std::fs::write(&path, one_page_pdf()).expect("write pdf");
-    for (long_side, scale) in [(0, 1.0), (100, 0.0), (100, -1.0), (100, f32::NAN)] {
-        assert_eq!(
-            render_page(&path, 1, long_side, scale),
-            Err(RenderError::InvalidSize),
-            "{long_side}x{scale}"
-        );
-    }
-}
-
-#[test]
-fn bytes_that_are_no_pdf_are_refused() {
-    let dir = scratch();
-    let path = dir.path().join("bytes.bin");
-    std::fs::write(&path, b"not a pdf").expect("write");
-    assert_eq!(render_page(&path, 1, 100, 1.0), Err(RenderError::NotPdf));
-}
-
-#[test]
-fn a_malformed_container_is_answered_not_crashed() {
-    let dir = scratch();
-    for (name, magic) in [
-        ("broken.docx", b"PK\x03\x04".as_slice()),
-        ("broken.doc", CFB_MAGIC),
-    ] {
-        let path = dir.path().join(name);
-        let mut bytes = magic.to_vec();
-        bytes.extend_from_slice(&[0xFF; 64]);
-        std::fs::write(&path, &bytes).expect("write");
-        let _kind = detect(&path, name).expect("detection answers");
+    assert_eq!(images.len(), 8, "the fixture holds eight pictures");
+    let mut names = BTreeSet::new();
+    for image in &images {
         assert!(
-            matches!(
-                read(&path, name, dir.path()),
-                Reading::Unreadable { .. } | Reading::Unsupported
-            ),
-            "{name} is answered, not crashed"
+            names.insert(image.name.clone()),
+            "{} is returned twice",
+            image.name
         );
+        let bytes = std::fs::read(out.join(&image.name))
+            .unwrap_or_else(|e| panic!("{} is under the caller's out_dir: {e}", image.name));
+        assert_eq!(image.len, bytes.len() as u64, "{}'s length", image.name);
+        assert_eq!(image.sha256, hex(&bytes), "{}'s digest", image.name);
     }
 }
 
 #[test]
-fn an_encrypted_pdf_needs_its_password() {
+fn a_reading_never_overwrites_the_file_it_reads() {
     let dir = scratch();
-    let path = dir.path().join("secret.pdf");
-    std::fs::write(&path, password_pdf()).expect("write pdf");
+    let document = documents::MANY_PICTURES_DOCX;
+    // The input is named exactly like the first picture the reading produces.
+    let input = write(dir.path(), "image1.png", &(document.build)());
+    let before = std::fs::read(&input).expect("the input");
+    let images = match read(&input, "image1.png", dir.path()) {
+        Reading::Text { images, .. } => images,
+        other => panic!(
+            "a Word package named like its own picture still reads as a document, got {other:?}"
+        ),
+    };
     assert_eq!(
-        render_page(&path, 1, 100, 1.0),
-        Err(RenderError::PasswordProtected)
+        std::fs::read(&input).expect("the input after the reading"),
+        before,
+        "the file being read is unchanged"
+    );
+    assert_eq!(images.len(), 8);
+    assert!(
+        !images.iter().any(|image| image.name == "image1.png"),
+        "the input's own name is not reused"
+    );
+    assert!(
+        images.iter().any(|image| image.name == "image1_2.png"),
+        "the colliding picture is suffixed"
+    );
+    assert!(dir.path().join("image1_2.png").exists());
+    assert!(dir.path().join("image2.png").exists());
+}
+
+#[test]
+fn a_pdf_reading_never_overwrites_its_input_as_an_embedded_image() {
+    let dir = scratch();
+    let document = documents::PICTURE_PDF;
+    // The input is named exactly like the page's first embedded image.
+    let input = write(dir.path(), "page_1_img_0.jpg", &(document.build)());
+    let before = std::fs::read(&input).expect("the input");
+    let images = match read(&input, "page_1_img_0.jpg", dir.path()) {
+        Reading::Text { images, .. } => images,
+        other => panic!("a PDF named like its own image still reads, got {other:?}"),
+    };
+    assert_eq!(
+        std::fs::read(&input).expect("the input after the reading"),
+        before,
+        "the file being read is unchanged"
+    );
+    assert!(
+        images
+            .iter()
+            .any(|image| image.name == "page_1_img_0_2.jpg"),
+        "the colliding image is suffixed: {images:?}"
+    );
+    assert!(dir.path().join("page_1_img_0_2.jpg").exists());
+}
+
+#[test]
+fn a_pdf_reading_never_overwrites_its_input_as_a_page_raster() {
+    let dir = scratch();
+    // A page with no text layer is rasterized.
+    let input = write(dir.path(), "page_1.jpg", &page_pdf(120, 80));
+    let before = std::fs::read(&input).expect("the input");
+    let images = match read(&input, "page_1.jpg", dir.path()) {
+        Reading::Text { images, .. } => images,
+        other => panic!("a PDF named like its own raster still reads, got {other:?}"),
+    };
+    assert_eq!(
+        std::fs::read(&input).expect("the input after the reading"),
+        before,
+        "the file being read is unchanged"
+    );
+    assert!(
+        images.iter().any(|image| image.name == "page_1_2.jpg"),
+        "the colliding raster is suffixed: {images:?}"
+    );
+    assert!(dir.path().join("page_1_2.jpg").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_hard_link_to_the_input_is_not_overwritten() {
+    let dir = scratch();
+    let document = documents::PICTURE_PDF;
+    let input = write(dir.path(), "picture.pdf", &(document.build)());
+    // A second name for the very same file, under the name the reading would write: the inode,
+    // not the path, is what tells the two apart.
+    let link = dir.path().join("page_1_img_0.jpg");
+    std::fs::hard_link(&input, &link).expect("a hard link to the input");
+    let before = std::fs::read(&input).expect("the input");
+    let images = match read(&input, "picture.pdf", dir.path()) {
+        Reading::Text { images, .. } => images,
+        other => panic!("a PDF with a hard-linked image name still reads, got {other:?}"),
+    };
+    assert_eq!(
+        std::fs::read(&input).expect("the input after the reading"),
+        before,
+        "the file being read is unchanged"
+    );
+    assert_eq!(
+        std::fs::read(&link).expect("the link after the reading"),
+        before,
+        "a hard link to the input keeps the input's bytes"
+    );
+    assert!(
+        images
+            .iter()
+            .any(|image| image.name == "page_1_img_0_2.jpg"),
+        "the colliding image is suffixed: {images:?}"
     );
 }
 
 #[test]
-fn the_reading_decides_on_the_whole_file_not_the_head() {
-    // A full head of ASCII bytes and then a NUL: detection's head routes the file as text, while
-    // the reading's whole-byte classification is the reference's and declines it.
-    let head_bytes = document_engine::vocabulary::vocabulary()
-        .reading
-        .head_sniff_bytes;
+fn a_reading_is_the_same_twice() {
     let dir = scratch();
-    let path = dir.path().join("bytes.bin");
-    let mut bytes = vec![b'a'; head_bytes];
-    bytes.push(0);
-    bytes.extend_from_slice(b"tail");
-    std::fs::write(&path, bytes).expect("write");
-    assert_eq!(detect(&path, "bytes.bin").expect("detect"), Kind::PlainText);
-    assert_eq!(read(&path, "bytes.bin", dir.path()), Reading::Unsupported);
-}
-
-#[test]
-fn detection_reads_a_missing_file_as_an_error() {
-    let path = std::env::temp_dir().join("document-engine-does-not-exist-anywhere");
-    assert!(detect(&path, "missing.pdf").is_err());
+    let document = documents::MANY_PICTURES_DOCX;
+    let path = document_in(dir.path(), document);
+    let first = read(&path, document.name, &dir.path().join("first"));
+    let second = read(&path, document.name, &dir.path().join("second"));
+    assert_eq!(
+        first, second,
+        "a reading is a function of the bytes and the name, not the output directory"
+    );
 }
 
 #[test]
 fn plain_text_is_returned_as_it_is() {
     let dir = scratch();
-    let path = dir.path().join("note.txt");
-    std::fs::write(&path, "hello\n").expect("write");
+    let path = write(dir.path(), "note.txt", b"hello\n");
     assert_eq!(
         read(&path, "note.txt", dir.path()),
         Reading::Text {
@@ -250,24 +476,8 @@ fn plain_text_is_returned_as_it_is() {
 #[test]
 fn unsupported_bytes_are_a_reading_the_engine_declines() {
     let dir = scratch();
-    let path = dir.path().join("bytes.bin");
-    std::fs::write(&path, [0u8, 1, 2, 3]).expect("write");
+    let path = write(dir.path(), "bytes.bin", &[0, 1, 2, 3]);
     assert_eq!(read(&path, "bytes.bin", dir.path()), Reading::Unsupported);
-}
-
-#[test]
-fn a_file_that_cannot_be_read_carries_the_vocabularys_reason() {
-    let dir = scratch();
-    let path = dir.path().join("gone.txt");
-    assert_eq!(
-        read(&path, "gone.txt", dir.path()),
-        Reading::Unreadable {
-            reason: document_engine::vocabulary::vocabulary()
-                .marks
-                .get("reason_could_not_be_read")
-                .to_string(),
-        }
-    );
 }
 
 #[test]
@@ -277,7 +487,7 @@ fn a_directory_is_not_a_document() {
     assert_eq!(
         read(dir.path(), "dir", dir.path()),
         Reading::Unreadable {
-            reason: document_engine::vocabulary::vocabulary()
+            reason: vocabulary()
                 .marks
                 .get("reason_could_not_be_read")
                 .to_string(),
@@ -287,236 +497,69 @@ fn a_directory_is_not_a_document() {
 }
 
 #[test]
-fn an_encrypted_package_carries_the_password_reason() {
+fn every_family_answers_its_own_corrupt_verdict() {
     let dir = scratch();
-    let path = dir.path().join("secret.docx");
-    std::fs::write(
-        &path,
-        cfb(&[
-            ("EncryptionInfo", b"info"),
-            ("EncryptedPackage", b"package"),
-        ]),
-    )
-    .expect("write cfb");
-    assert_eq!(
-        read(&path, "secret.docx", dir.path()),
-        Reading::Unreadable {
-            reason: document_engine::vocabulary::vocabulary()
-                .marks
-                .get("reason_password_protected")
-                .to_string(),
-        }
-    );
-}
-
-#[test]
-fn detection_and_reading_agree_on_text_a_head_cut_splits() {
-    // The head ends inside a three-byte character: detection's prefix is not valid UTF-8 only
-    // because the cut falls mid-character, and the whole file is text.
-    let head_bytes = document_engine::vocabulary::vocabulary()
-        .reading
-        .head_sniff_bytes;
-    let text = format!("{}日本", "x".repeat(head_bytes - 2));
-    let head = &text.as_bytes()[..head_bytes];
-    assert!(
-        std::str::from_utf8(head)
-            .expect_err("a cut character")
-            .error_len()
-            .is_none()
-    );
-    let dir = scratch();
-    let path = dir.path().join("words");
-    std::fs::write(&path, &text).expect("write");
-    assert_eq!(detect(&path, "words").expect("detect"), Kind::PlainText);
-    match read(&path, "words", dir.path()) {
-        Reading::Text { text: read, .. } => assert_eq!(read, text),
-        other => panic!("a text file must read as text, got {other:?}"),
-    }
-}
-
-#[test]
-fn a_file_larger_than_the_engine_reads_is_refused() {
-    let dir = scratch();
-    let path = dir.path().join("huge.pdf");
-    let limit = document_engine::vocabulary::vocabulary()
-        .reading
-        .file_max_bytes;
-    std::fs::File::create(&path)
-        .expect("create")
-        .set_len(limit + 1)
-        .expect("grow");
-    assert_eq!(
-        read(&path, "huge.pdf", dir.path()),
-        Reading::Unreadable {
-            reason: document_engine::vocabulary::vocabulary()
-                .marks
-                .get("reason_too_large")
-                .to_string(),
-        }
-    );
-    assert_eq!(render_page(&path, 1, 1, 1.0), Err(RenderError::TooLarge));
-}
-
-#[test]
-fn an_over_limit_container_is_routed_by_its_name() {
-    let dir = scratch();
-    let limit = document_engine::vocabulary::vocabulary()
-        .reading
-        .file_max_bytes;
-    for (name, expected) in [
-        ("huge.docx", Kind::Docx),
-        ("huge.doc", Kind::LegacyDoc),
-        ("huge.bin", Kind::Unsupported),
+    let dir = dir.path();
+    // A package with no central directory is still the family its name claims, and a legacy
+    // container whose stream is not its format is that family's corruption.
+    for (name, build, key) in [
+        (
+            "truncated.docx",
+            build::truncated_docx as fn() -> Vec<u8>,
+            "reason_corrupt_or_unsupported",
+        ),
+        (
+            "truncated.xlsx",
+            build::truncated_xlsx,
+            "reason_corrupt_or_unsupported",
+        ),
+        (
+            "truncated.pptx",
+            build::truncated_pptx,
+            "reason_corrupt_or_unsupported",
+        ),
+        (
+            "legacy-corrupt.doc",
+            build::legacy_doc_corrupt,
+            "reason_corrupt_or_unreadable",
+        ),
+        (
+            "legacy-corrupt.xls",
+            build::legacy_xls_corrupt,
+            "reason_corrupt_or_unreadable",
+        ),
+        (
+            "legacy-corrupt.ppt",
+            build::legacy_ppt_corrupt,
+            "reason_corrupt_or_unreadable",
+        ),
     ] {
-        let path = dir.path().join(name);
-        let mut file = std::fs::File::create(&path).expect("create");
-        file.write_all(CFB_MAGIC).expect("magic");
-        file.set_len(limit + 1).expect("grow");
-        assert_eq!(detect(&path, name).expect("detect"), expected, "{name}");
-    }
-}
-
-const END_OF_CHAIN: u32 = 0xFFFF_FFFE;
-const FAT_SECT: u32 = 0xFFFF_FFFD;
-const FREE_SECT: u32 = 0xFFFF_FFFF;
-const NO_ENTRY: u32 = 0xFFFF_FFFF;
-
-/// A minimal v3 CFB from root-level streams, however many directory entries it takes.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "the fixture's offsets and counts fit the CFB record fields by construction"
-)]
-fn cfb(streams: &[(&str, &[u8])]) -> Vec<u8> {
-    let dir_sectors = (streams.len() + 1).div_ceil(4) as u32;
-    let fat_sector = dir_sectors;
-    let mut starts = Vec::new();
-    let mut runs = Vec::new();
-    let mut next = fat_sector + 1;
-    for (_, data) in streams {
-        let sectors = data.len().div_ceil(512).max(1) as u32;
-        starts.push(next);
-        runs.push(sectors);
-        next += sectors;
-    }
-    let total_sectors = next as usize;
-    let mut file = vec![0u8; 512 * (1 + total_sectors)];
-    file[0..8].copy_from_slice(CFB_MAGIC);
-    file[0x18..0x1A].copy_from_slice(&0x003Eu16.to_le_bytes());
-    file[0x1A..0x1C].copy_from_slice(&3u16.to_le_bytes());
-    file[0x1C..0x1E].copy_from_slice(&0xFFFEu16.to_le_bytes());
-    file[0x1E..0x20].copy_from_slice(&9u16.to_le_bytes());
-    file[0x20..0x22].copy_from_slice(&6u16.to_le_bytes());
-    file[0x2C..0x30].copy_from_slice(&1u32.to_le_bytes());
-    file[0x30..0x34].copy_from_slice(&0u32.to_le_bytes());
-    file[0x38..0x3C].copy_from_slice(&4096u32.to_le_bytes());
-    file[0x3C..0x40].copy_from_slice(&END_OF_CHAIN.to_le_bytes());
-    file[0x44..0x48].copy_from_slice(&END_OF_CHAIN.to_le_bytes());
-    file[0x4C..0x50].copy_from_slice(&fat_sector.to_le_bytes());
-    for i in 1..109 {
-        let off = 0x4C + i * 4;
-        file[off..off + 4].copy_from_slice(&FREE_SECT.to_le_bytes());
-    }
-    let dir = 512;
-    write_entry(
-        &mut file[dir..dir + 128],
-        "Root Entry",
-        5,
-        if streams.is_empty() { NO_ENTRY } else { 1 },
-        END_OF_CHAIN,
-        0,
-    );
-    for (index, (name, data)) in streams.iter().enumerate() {
-        let right = if index + 1 < streams.len() {
-            (index as u32) + 2
-        } else {
-            NO_ENTRY
-        };
-        let at = dir + (index + 1) * 128;
-        write_entry(
-            &mut file[at..at + 128],
-            name,
-            2,
-            NO_ENTRY,
-            starts[index],
-            data.len() as u32,
+        let path = write(dir, name, &build());
+        let extension = name.rsplit('.').next().expect("a name with an extension");
+        assert_eq!(
+            read(&path, name, dir),
+            Reading::Unreadable {
+                reason: vocabulary().marks.format(key, &[("extension", extension)]),
+            },
+            "`{name}` must answer its family's corrupt verdict"
         );
-        file[at + 0x48..at + 0x4C].copy_from_slice(&right.to_le_bytes());
-        let offset = 512 * (starts[index] as usize + 1);
-        file[offset..offset + data.len()].copy_from_slice(data);
     }
-    let fat = 512 * (fat_sector as usize + 1);
-    let mut entries = vec![FREE_SECT; 128];
-    for k in 0..dir_sectors {
-        entries[k as usize] = if k + 1 == dir_sectors {
-            END_OF_CHAIN
-        } else {
-            k + 1
-        };
-    }
-    entries[fat_sector as usize] = FAT_SECT;
-    for (index, &start) in starts.iter().enumerate() {
-        for k in 0..runs[index] {
-            entries[(start + k) as usize] = if k + 1 == runs[index] {
-                END_OF_CHAIN
-            } else {
-                start + k + 1
-            };
+}
+
+#[test]
+fn a_picture_larger_than_sixty_four_megabytes_is_returned_whole() {
+    let dir = scratch();
+    let document = documents::LARGE_IMAGE_PDF;
+    let path = document_in(dir.path(), document);
+    match read(&path, document.name, dir.path()) {
+        Reading::Text { images, .. } => {
+            assert_eq!(images.len(), 1, "the one embedded picture: {images:?}");
+            assert!(
+                images[0].len > 64 * 1024 * 1024,
+                "the picture is recorded by its whole bytes, not a marker: {} bytes",
+                images[0].len
+            );
         }
+        other => panic!("the large picture still reads, got {other:?}"),
     }
-    for (index, value) in entries.iter().enumerate() {
-        file[fat + index * 4..fat + index * 4 + 4].copy_from_slice(&value.to_le_bytes());
-    }
-    file
-}
-
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "the fixture's entry name fits the CFB name-size field by construction"
-)]
-fn write_entry(buf: &mut [u8], name: &str, kind: u8, child: u32, start: u32, size: u32) {
-    for (i, unit) in name.encode_utf16().enumerate() {
-        buf[i * 2..i * 2 + 2].copy_from_slice(&unit.to_le_bytes());
-    }
-    let name_size = ((name.encode_utf16().count() + 1) * 2) as u16;
-    buf[0x40..0x42].copy_from_slice(&name_size.to_le_bytes());
-    buf[0x42] = kind;
-    buf[0x44..0x48].copy_from_slice(&NO_ENTRY.to_le_bytes());
-    buf[0x48..0x4C].copy_from_slice(&NO_ENTRY.to_le_bytes());
-    buf[0x4C..0x50].copy_from_slice(&child.to_le_bytes());
-    buf[0x74..0x78].copy_from_slice(&start.to_le_bytes());
-    buf[0x78..0x7C].copy_from_slice(&size.to_le_bytes());
-}
-
-#[test]
-fn a_compound_file_is_read_for_its_own_streams() {
-    let dir = scratch();
-    let word = dir.path().join("renamed.bin");
-    std::fs::write(&word, cfb(&[("WordDocument", b"word bytes")])).expect("write cfb");
-    assert_eq!(
-        detect(&word, "renamed.bin").expect("detect"),
-        Kind::LegacyDoc
-    );
-
-    let encrypted = dir.path().join("secret.docx");
-    std::fs::write(
-        &encrypted,
-        cfb(&[
-            ("EncryptionInfo", b"info"),
-            ("EncryptedPackage", b"package"),
-            ("WordDocument", b"word bytes"),
-        ]),
-    )
-    .expect("write cfb");
-    assert_eq!(
-        detect(&encrypted, "secret.docx").expect("detect"),
-        Kind::Encrypted
-    );
-}
-
-#[test]
-fn a_compound_file_with_no_family_of_its_own_keeps_its_name() {
-    let dir = scratch();
-    let path = dir.path().join("old.xls");
-    std::fs::write(&path, cfb(&[("Ole", b"nothing")])).expect("write cfb");
-    assert_eq!(detect(&path, "old.xls").expect("detect"), Kind::LegacyXls);
 }

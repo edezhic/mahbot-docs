@@ -2,8 +2,9 @@
 
 The instrument that judges the document engine against the product's own behaviour. It drives two
 references — the current **writer** (the JavaScript document kit) and the current **reader** (the
-product's own Rust reader sources) — and compares what they produce against a recorded baseline by
-a declared canonical model per format.
+product's own Rust reader sources, copied under `src/reference_sources/`) — and compares what they
+produce against a recorded baseline by a declared canonical model per format. The default engine is
+the crate's reader against that reference writer.
 
 Nothing here is part of the product. The product's tool layer — the model-facing description, the
 argument schema, refusal wording, answer rendering, registration — is deliberately absent: the
@@ -14,7 +15,8 @@ point, exactly as the product does underneath its tool.
 
 ```
 cd parity
-cargo run --bin parity            # the gate: compare with the recorded baseline
+cargo run --bin parity            # the gate: the crate's reader against the recorded baseline
+cargo run --bin parity -- --engine reference  # the recorded engine: the product's reader
 cargo test                        # every test, including the gate and the model's self-tests
 cargo run --bin record-baseline   # deliberately re-record the baseline
 ```
@@ -24,12 +26,14 @@ crate the harness depends on. `cargo test -p document-engine` runs the crate's o
 its vocabulary restatement scan) without the harness.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 57 cases and 21 readings — takes about ten seconds; the whole
-test suite, which runs the corpus twice for its determinism check, takes under a minute.
+managed runtime. A full pass — 57 cases and 91 readings — takes about twenty seconds; the whole
+test suite, which runs the corpus twice for its determinism check, takes a couple of minutes.
 
 `parity --engine noop` runs the same corpus against the do-nothing engine. That engine exists only
 to prove the gate rejects it: a case passes only if its transcript matches the baseline **and** its
-declared effect happened, and a no-op satisfies neither.
+declared effect happened, and a no-op satisfies neither. `parity --engine reference` is the
+recorder's engine — the reference writer and the product's own reader — and is the only run that
+also requires the build identity to match the baseline.
 
 ## What is here
 
@@ -38,36 +42,37 @@ declared effect happened, and a no-op satisfies neither.
 | `src/engine.rs` | The boundary: `Writer` and `Reader` traits, `Key`, `EngineIdentity`, and the result shapes, which are the engine crate's own (`WriterOutcome`, `Failure`, `Reading`, `ImageArtifact`, `Family`). Nothing else knows which engine is behind them. |
 | `src/contract.rs` | What the reference reader prints and parses, exposed so a test can prove the engine crate's vocabulary is the same data. |
 | `src/reference/writer.rs` | The current writer: the committed kit bundle and font, embedded and materialized into the harness's temporary directory, run on `bun` through the product's request-and-result contract (`request-<n>.json` in, `result-<n>.json` out, never stdout). |
-| `src/reference/reader.rs` | The current reader: `document::convert_document_file`, the one bounded entry point every product read passes through. |
+| `src/reference/reader.rs` | The current reader: `document::convert_document_file`, the one bounded entry point every product read passes through, plus the product converter's own detection verdict built from its `pub(crate)` primitives. |
+| `src/reference/crate_reader.rs` | The engine crate's reader: `document_engine::reading::{detect, read}`, whose shapes are already the harness's. This is the default reader. |
 | `src/reference/noop.rs` | The negative control. |
+| `src/reference_sources/` | Byte-for-byte copies of the product's reader modules, compiled here. `tests/engine_contract.rs` compares them with `../../src/` and fails when they diverge. |
 | `src/host/` | The minimal host the reader sources need: `rules.json` and its typed views, `contain_panics`, and the handful of `util` helpers the readers call. |
-| `src/corpus/build.rs` | Every input document, generated in code at run time. No fixture is committed. |
-| `src/corpus/legacy_formats.rs` | The `.doc`/`.xls`/`.ppt` corpus documents: CFB containers around hand-built Word, BIFF and PowerPoint streams. |
-| `src/corpus/documents.rs` | The corpus documents, declared once: their names and builders, shared by the cases and the reader reference. |
-| `src/corpus/cases.rs` | Every scenario: the 13 operations, the 37 edit sub-operations, and the failure side. |
-| `src/corpus/effect.rs` | The declared effects and how they are checked. |
+| `src/corpus/` | The writer scenarios (`cases.rs`) and their declared effects (`effect.rs`); the document builders are re-exported from `document_engine::test_support`, their one home. |
 | `src/canonical/` | The canonical model, one module per format, plus the diff. |
 | `src/harness.rs` | Runs a corpus against an engine, compares, and produces verdicts. |
 | `src/baseline.rs` | The recorded reference, with the identity of the engine that produced it. |
 | `src/transcript.rs` | The normalised transcript: no paths, no nonces, no timings. |
-| `tests/engine_contract.rs` | The engine crate's contract, proved from here: its vocabulary is the reference's data, its result shapes carry every recorded field, and its closed operation set holds every corpus operation and edit. |
+| `tests/engine_contract.rs` | The engine crate's contract, proved from here: its vocabulary is the reference's data, its result shapes carry every recorded field, its closed operation set holds every corpus operation and edit, the reference copies are byte-for-byte the product's, and the host's media tables are the product's own. |
+| `tests/coverage.rs` | The corpus's depth: every reading mark is witnessed by a recorded reading or recorded as unproducible with its reason, every per-family failure verdict is witnessed, and every corpus document is in the baseline. |
+| `tests/teeth.rs` | The comparison has teeth: a reading altered in any single compared field — a picture dropped, a note reworded, a report line reordered, a flag flipped — fails it, and so does a detection answer changed for one input. |
 | `baseline/baseline.json` | The recorded reference (about 2.4 MB of canonical documents). |
 | `src/bin/parity.rs`, `src/bin/record-baseline.rs` | The gate and the deliberate recorder. |
 
-The reader sources are **symlinks** to `../../src/`: the reference is literally the code this
-workspace holds, not a copy that can drift. (The `host` beside them is a hand copy of the few
+The reader sources are **copies** under `src/reference_sources/`, byte for byte those of
+`../../src/`. Nothing here is a link, so nothing in this workspace can rewrite the product's
+sources; `tests/engine_contract.rs` reads both sides and fails when a copy diverges, which is what
+makes a change to the product's sources fail the gate instead of passing unnoticed. A deliberate
+re-copy is a small, visible change to this crate. (The `host` beside them is a hand copy of the few
 product helpers the reader calls, and is part of the reader's recorded identity, so a change to it
-is attributable too.) A checkout must preserve symlinks (on Windows, `core.symlinks=true`); the
-alternative — copying the sources — is exactly the drift this avoids.
+is attributable too.)
 
 The product modules' own unit tests are built and run with this crate's: the reference reader's
 136 tests are part of the suite, which is what proves the minimal host faithful. The harness's own
 tests live in `tests/`, with the model's, the harness's and the runner's unit tests beside the code
 they test under `src/`.
 
-**Never run `cargo fmt` here.** It follows the symlinks and rewrites the product's sources.
-`cargo fmt --check` is safe, and a formatting fix belongs in the files this crate owns — run
-`rustfmt` on those, or fix the site by hand.
+`cargo fmt` here can no longer rewrite the product's sources, so it is safe; a formatting fix
+belongs in the files this crate owns.
 
 ## The engine boundary
 
@@ -83,6 +88,7 @@ impl Reader for MyEngine {
     fn read(&self, input: &Path, file_name: &str, out_dir: &Path) -> anyhow::Result<Reading> {
         …
     }
+    fn detect(&self, input: &Path, file_name: &str) -> anyhow::Result<Kind> { … }
 }
 ```
 
@@ -122,15 +128,16 @@ Two conventions let a different engine answer the same corpus:
 The reference reader's font is `assets/docgen/NotoSans-Regular.ttf`, a real copy of the crate's
 `document-engine/assets/NotoSans-Regular.ttf`; `tests/engine_contract.rs` compares their digests.
 
-One gap the port must settle, recorded here so it is not lost: the reading surface has no
-page-count entry point, while the product's rasterize tool needs a PDF's page count before it
-renders, so its "name the page to render" refusal can stand. A caller can learn it today only from
-`RenderError::NoSuchPage { pages }`, by asking for a page that cannot exist; whether the port adds
-an entry point or derives the count another way is its decision.
+The gate compares two answers per document: the reading and the engine's own detection. Detection
+is recorded beside the reading, a difference is a failed reading named `detection differs: …`, and
+a baseline recorded before detection existed is reported rather than passed. The reference's answer
+is the product converter's verdict rebuilt from its `pub(crate)` primitives, so the two classifiers
+are compared without editing a source the product owns. A container whose directory decoder panics
+answers `unreadable`, which is what the converter's own conversion answers for the same bytes.
 
-`detect` has no harness-side parity proof yet: there is no reference classifier adapter to drive,
-so its equivalence to the product's `needs_extraction`/`real_family`/`classify` is established by
-the crate's behavioural tests until a reader adapter lands and the gate can compare the two.
+A picture a reading writes is recorded by the SHA-256 of its whole bytes, whatever its size: a
+size limit here would replace a large picture with a marker and hide a difference the gate exists
+to see.
 
 ## The vocabulary cross-check
 
@@ -165,8 +172,10 @@ What it cannot see, and why:
 
 ## The corpus
 
-Every document is built by `corpus::build` at run time; the harness never asks the engine under
-test to create its own input, and no sample document is committed. Coverage is by behaviour:
+Every document is built at run time by `document_engine::test_support::build`; the harness never
+asks the engine under test to create its own input, and no sample document is committed. The
+builders have one home in `document_engine::test_support`, which the crate's own tests read too, and
+`corpus` re-exports them rather than holding a copy. Coverage is by behaviour:
 
 - `create` for all four output formats;
 - `fill_template` for all three template families;
@@ -178,13 +187,32 @@ test to create its own input, and no sample document is committed. Coverage is b
 - the failure side: requests the engine refuses as the caller's to fix, and one it accepts and
   fails to carry out (a PDF whose `/AcroForm` is not a dictionary).
 
-The reader corpus is the same generated documents plus a truncated PDF, a plain text file,
-unsupported bytes, and one document per legacy family: `.doc`, `.xls` and `.ppt`, each a compound
-file (CFB) container assembled byte by byte in `src/corpus/legacy_formats.rs`, so the reader's
-legacy arm has an end-to-end reference like every other family. Three documents exist for the parts
-of a reading a clean file leaves empty: a PDF whose page text fails part-way (its notes), one whose
-page states no `/MediaBox` (its all-text-lost flag), and a PDF carrying an attached file (its
-unshown report).
+The reader corpus is the same generated documents plus the negative and depth cases:
+
+- one document per family the reader reads, with the features that family has: Word comments,
+  tracked changes, text boxes and charts; workbook charts, comments, defined names, hyperlinks and
+  hidden rows; presentation tables, charts, hidden slides, comments and diagrams; a PDF with
+  annotations, form fields, an attachment, a description and a page that states no `/MediaBox`;
+- the legacy `.doc`, `.xls` and `.ppt` families, each a compound file (CFB) assembled byte by byte
+  in `document_engine::test_support::legacy_formats`, including cut stories, a chart and notes, and
+  a container that is that family by name alone, so its corrupt verdict is witnessed;
+- a document with more than six pictures, one whose text exceeds the spill threshold, one whose
+  embedded picture is larger than 64 MiB, and one just over the size the product documents — the
+  reading has no size gate and records a big picture by its digest, and the corpus exercises both
+  rather than assuming them;
+- the negative side: a truncated package and PDF, an empty file, an empty package, a renamed file,
+  a package under a name claiming another family, a package under a name claiming none, a ZIP that
+  is not an Office package, and an encrypted package;
+- a truncated workbook and presentation and a corrupt legacy workbook and presentation, so every
+  family's corrupt verdict — `.docx`, `.xlsx`, `.pptx`, `.doc`, `.xls` and `.ppt` — is witnessed;
+- a fixed, recorded set of mutations of the corpus (a flipped byte, a truncated head, a renamed
+  part), recorded from the product's reader like every other input, so the crate is compared
+  against what the product makes of those bytes rather than against a guess.
+
+Every reading mark and every per-family failure verdict is witnessed by a recorded reading or
+recorded as unproducible with its reason; `document_engine::test_support::coverage` is the ledger
+and `tests/coverage.rs` checks it against the baseline.
+
 
 ## The canonical model
 
@@ -256,14 +284,21 @@ harness's business.
 `baseline/baseline.json` is recorded from the current engine and kept with its identity: the
 writer's build digest and `bun <version>` (with the bundle, kit, rules, lockfile, font and the
 runner that reads the kit's answer), the reader's source digest and `rustc <version>` (with every
-reader source file's digest, the host modules, the adapter that turns a reading into a transcript,
-the shared `rules.json` and the embedded font the reader rasterises with). A difference is therefore
-attributable to a build, not merely observed. The gate always prints both identities and states
-whether they match; passing means every verdict matches the baseline. Only the reference gate —
-`parity --engine reference`, and the baseline test — treats a differing identity as a failure,
-because there the question is whether the reference engine is still the build the baseline records.
-Any other engine implementation is compared on its verdicts alone; its differing identity is an
-expected fact, shown but not failed.
+copied reader source's digest under `src/reference_sources/`, the host modules, the adapter that
+turns a reading into a transcript, the shared `rules.json` and the embedded font the reader
+rasterises with). Every engine identity also records a `codecs` digest over the resolved versions
+of the JPEG encoder and decoder, the PDF parser, rasterizer and image decoders, the legacy and OOXML
+parsers and the ZIP/deflate layer, read from `Cargo.lock`; every codec a manifest names is pinned
+exactly, and every resolved copy — direct or transitive — is recorded, so a codec bump changes
+the identity rather than silently changing every compared digest. The crate's own
+reader is identified separately, by a digest of every Rust source in `document-engine/src`, its
+`vocabulary.json` and its font. A difference is therefore attributable to a build, not merely
+observed. The gate always prints both identities and states whether they match; passing means every
+verdict matches the baseline. Only the reference gate — `parity --engine reference`, and the
+baseline test — treats a differing identity as a failure, because there the question is whether the
+reference engine is still the build the baseline records. Any other engine implementation, including
+the default crate reader, is compared on its verdicts alone; its differing identity is an expected
+fact, shown but not failed.
 
 Recording is a deliberate act: only `cargo run --bin record-baseline` writes the file, and it
 refuses to record a run in which a case or a reading could not produce a transcript. Running the
@@ -277,7 +312,7 @@ own prose — a refusal's reason, notes, losses, missing values, unsupported fie
 reading's problem — never to what a document says: a date in a paragraph is content, not a
 timestamp of the run. It replaces the harness's own root, the run's own nonce and calendar dates.
 `tests/gate.rs` runs the whole corpus twice and requires the two transcripts to be identical, and
-asserts the serialised text holds no absolute path, date or nonce.
+asserts the serialised text holds no absolute path, the run's own date or its nonce.
 
 The harness writes only inside one temporary directory under the OS temporary area — created by
 `new_with`, or validated when `at` is given one — never the product's storage root: the root must
@@ -288,7 +323,10 @@ The whole run is bounded by a budget, and each half has its own bound inside it:
 its kit under a 120 s timeout, and a reading runs on a thread of its own, with a runtime of its own,
 under one too — so an engine that hangs on every case or every document fails in bounded time
 rather than once per call, and entries the budget does not reach fail with a budget problem rather
-than vanishing from the run. Two limits of that isolation are stated rather than hidden: an
+than vanishing from the run. A read that does not finish within its bound is that reading's own
+problem — a timeout recorded as its outcome — and the rest of the corpus still runs; the recorder
+refuses to bake such a run into the baseline, because a timeout measures the machine rather than the
+bytes. Two limits of that isolation are stated rather than hidden: an
 abandoned reading thread holds one of the product's two document-conversion permits until the
 process ends, so two hung readings make every later reading time out (each still with its own
 verdict), and a thread cannot be killed, so a hung reading's memory is not reclaimed.

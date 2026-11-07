@@ -1,9 +1,8 @@
 //! The legacy binary formats' corpus documents, assembled byte by byte.
 //!
 //! A `.doc`, `.xls` or `.ppt` is a compound file (CFB) container around hand-built Word, BIFF and
-//! PowerPoint streams. The product's own reader tests synthesise them the same way; this module is
-//! the harness's copy, so the legacy arm of the reader has a generated corpus like every other
-//! family and no fixture file is committed.
+//! PowerPoint streams. This module assembles them, so the legacy arm of the reader has a generated
+//! corpus like every other family and no fixture file is committed.
 
 #![expect(
     clippy::cast_possible_truncation,
@@ -19,12 +18,22 @@ const NO_ENTRY: u32 = 0xFFFF_FFFF;
 /// chained through the FAT like every other chain. The root entry declares no stream of its own, so
 /// every stream is read from its regular sectors.
 fn cfb(streams: &[(&str, &[u8])]) -> Vec<u8> {
+    let sized: Vec<(&str, &[u8], u32)> = streams
+        .iter()
+        .map(|(name, data)| (*name, *data, data.len() as u32))
+        .collect();
+    cfb_sized(&sized)
+}
+
+/// [`cfb`] with each stream's directory entry declaring `size` bytes rather than the bytes it
+/// really holds: a stream declared longer than its chain is what a reader reports as cut short.
+fn cfb_sized(streams: &[(&str, &[u8], u32)]) -> Vec<u8> {
     let dir_sectors = (streams.len() + 1).div_ceil(4) as u32;
     let fat_sector = dir_sectors;
     let mut starts = Vec::new();
     let mut runs = Vec::new();
     let mut next = fat_sector + 1;
-    for (_, data) in streams {
+    for (_, data, _) in streams {
         let sectors = data.len().div_ceil(512).max(1) as u32;
         starts.push(next);
         runs.push(sectors);
@@ -61,7 +70,7 @@ fn cfb(streams: &[(&str, &[u8])]) -> Vec<u8> {
         END_OF_CHAIN,
         0,
     );
-    for (index, (name, data)) in streams.iter().enumerate() {
+    for (index, (name, data, size)) in streams.iter().enumerate() {
         let right = if index + 1 < streams.len() {
             (index as u32) + 2
         } else {
@@ -74,7 +83,7 @@ fn cfb(streams: &[(&str, &[u8])]) -> Vec<u8> {
             2,
             NO_ENTRY,
             starts[index],
-            data.len() as u32,
+            *size,
         );
         file[at + 0x48..at + 0x4C].copy_from_slice(&right.to_le_bytes());
         let offset = 512 * (starts[index] as usize + 1);
@@ -121,8 +130,35 @@ fn write_entry(buf: &mut [u8], name: &str, kind: u8, child: u32, start: u32, siz
     buf[0x78..0x7C].copy_from_slice(&size.to_le_bytes());
 }
 
+/// One subdocument story a `.doc` can carry, with its `FibRgLw97` slot in the fixed `[MS-DOC]`
+/// order the reader walks (`text` is slot 0; slot 3 is the ignored macro length).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Story {
+    Footnote,
+    Header,
+    Comment,
+    Endnote,
+}
+
+impl Story {
+    const fn slot(self) -> usize {
+        match self {
+            Self::Footnote => 1,
+            Self::Header => 2,
+            Self::Comment => 4,
+            Self::Endnote => 5,
+        }
+    }
+}
+
 /// A `.doc` whose main text is `body` and whose one footnote is `footnote`.
 pub fn doc(body: &str, footnote: &str) -> Vec<u8> {
+    doc_stories(body, &[(Story::Footnote, footnote)])
+}
+
+/// A `.doc` whose main text is `body` and whose `stories` are its subdocuments, each laid out as
+/// one UTF-16LE piece in the fixed story order.
+pub fn doc_stories(body: &str, stories: &[(Story, &str)]) -> Vec<u8> {
     const TEXT_FC: u32 = 0x400;
     let mut word = vec![0u8; TEXT_FC as usize];
     let mut ccp = [0u32; 8];
@@ -136,14 +172,71 @@ pub fn doc(body: &str, footnote: &str) -> Vec<u8> {
     let (fc, count) = append(&mut word, body);
     ccp[0] = count;
     pieces.push((fc, count));
-    let (fc, count) = append(&mut word, footnote);
-    ccp[1] = count;
-    if count > 0 {
-        pieces.push((fc, count));
+    let mut ordered: Vec<(usize, &str)> = stories
+        .iter()
+        .map(|(story, text)| (story.slot(), *text))
+        .collect();
+    ordered.sort_unstable_by_key(|(slot, _)| *slot);
+    for (slot, text) in ordered {
+        let (fc, count) = append(&mut word, text);
+        ccp[slot] = count;
+        if count > 0 {
+            pieces.push((fc, count));
+        }
     }
     let clx = doc_clx(&pieces);
     word[..1024].copy_from_slice(&doc_fib(&ccp, 0, clx.len() as u32));
     cfb(&[("WordDocument", &word), ("1Table", &clx)])
+}
+
+/// A `.doc` whose `WordDocument` stream declares more bytes than it holds: the reader's piece
+/// table still yields the text, and the loss is named.
+pub fn doc_cut(body: &str) -> Vec<u8> {
+    let whole = doc(body, "");
+    let (word, clx) = cfb_streams(&whole);
+    cfb_sized(&[
+        ("WordDocument", &word, word.len() as u32 + 512),
+        ("1Table", &clx, clx.len() as u32),
+    ])
+}
+
+/// The two streams of a `.doc` this module built: the `WordDocument` stream and its `1Table`.
+fn cfb_streams(package: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    let mut reader = office_oxide::cfb::CfbReader::new(std::io::Cursor::new(package))
+        .expect("a document this module built is a CFB container");
+    let word = reader
+        .open_stream("WordDocument")
+        .expect("the WordDocument stream it wrote");
+    let table = reader
+        .open_stream("1Table")
+        .expect("the 1Table stream it wrote");
+    (word, table)
+}
+
+/// A CFB container holding the two streams a genuinely encrypted OOXML package carries and
+/// nothing readable.
+pub fn encrypted_package() -> Vec<u8> {
+    cfb(&[
+        ("EncryptionInfo", b"encryption info bytes"),
+        ("EncryptedPackage", b"encrypted package bytes"),
+    ])
+}
+
+/// A Word 6.0/95 FIB ([MS-DOC]'s predecessor) with `wIdent` 0xA5DC and no text: the version a
+/// reader may refuse rather than call corrupt.
+pub fn doc_old_version() -> Vec<u8> {
+    let mut word = vec![0u8; 1024];
+    word[0..2].copy_from_slice(&0xA5DCu16.to_le_bytes());
+    word[2..4].copy_from_slice(&0x0065u16.to_le_bytes());
+    cfb(&[("WordDocument", &word), ("1Table", &[])])
+}
+
+/// A CFB whose `WordDocument` stream opens with an identifier no Word version uses: a container
+/// that is a `.doc` by its name alone, which the reader calls corrupt.
+pub fn doc_corrupt() -> Vec<u8> {
+    let mut word = vec![0u8; 1024];
+    word[0..2].copy_from_slice(&0x1234u16.to_le_bytes());
+    cfb(&[("WordDocument", &word), ("1Table", &[])])
 }
 
 /// A Word 97 FIB ([MS-DOC] §2.5.1): `wIdent` 0xA5EC, the 1Table flag, the `ccp*` lengths and the
@@ -189,9 +282,12 @@ const RT_BOUNDSHEET: u16 = 0x0085;
 const RT_SST: u16 = 0x00FC;
 const RT_LABELSST: u16 = 0x00FD;
 const RT_NUMBER: u16 = 0x0203;
+/// One chart series' name, the chart text a legacy reading does not print.
+const RT_SERIESTEXT: u16 = 0x100D;
 
-/// A `.xls` holding one sheet, `Данные`, with A1 the shared string `text` and B2 the number 3.5.
-pub fn xls(text: &str) -> Vec<u8> {
+/// The Workbook stream of a one-sheet `.xls`: cell A1 the shared string `text` and B2 the number
+/// 3.5.
+fn xls_stream(text: &str) -> Vec<u8> {
     let mut stream = bof(0x0005); // globals
     stream.extend(boundsheet("Данные"));
     stream.extend(sst(text));
@@ -200,7 +296,52 @@ pub fn xls(text: &str) -> Vec<u8> {
     stream.extend(labelsst(0, 0));
     stream.extend(number(1, 1, 3.5));
     stream.extend(biff_rec(RT_EOF, &[]));
+    stream
+}
+
+/// A `.xls` holding one sheet, `Данные`, with A1 the shared string `text` and B2 the number 3.5.
+pub fn xls(text: &str) -> Vec<u8> {
+    cfb(&[("Workbook", &xls_stream(text))])
+}
+
+/// A `.xls` whose `Workbook` stream declares more bytes than it holds: the cells it reached are
+/// still read and the loss is named.
+pub fn xls_cut(text: &str) -> Vec<u8> {
+    let stream = xls_stream(text);
+    cfb_sized(&[("Workbook", &stream, stream.len() as u32 + 512)])
+}
+
+/// A CFB container with no `Workbook` stream, named `.xls`: the container is a spreadsheet by its
+/// name alone, so the reader gives that family's corrupt verdict.
+pub fn xls_corrupt() -> Vec<u8> {
+    cfb(&[("Contents", b"not a workbook stream")])
+}
+
+/// A `.xls` whose second sheet is a chart sheet: its substream holds one `SeriesText`, the chart
+/// text the reading does not print.
+pub fn xls_chart_sheet(text: &str) -> Vec<u8> {
+    let mut stream = bof(0x0005); // globals
+    stream.extend(boundsheet("Данные"));
+    stream.extend(boundsheet("Chart1"));
+    stream.extend(sst(text));
+    stream.extend(biff_rec(RT_EOF, &[]));
+    stream.extend(bof(0x0010)); // the sheet's own substream
+    stream.extend(labelsst(0, 0));
+    stream.extend(biff_rec(RT_EOF, &[]));
+    stream.extend(bof(0x0020)); // the chart sheet's own substream
+    stream.extend(series_text("Revenue"));
+    stream.extend(biff_rec(RT_EOF, &[]));
     cfb(&[("Workbook", &stream)])
+}
+
+/// One `SeriesText` record: two reserved bytes, the character count, the flags byte and the
+/// characters — a chart's series name, which a legacy reading does not print.
+fn series_text(text: &str) -> Vec<u8> {
+    let mut data = vec![0u8, 0u8];
+    data.push(text.chars().count() as u8);
+    data.push(0);
+    data.extend_from_slice(text.as_bytes());
+    biff_rec(RT_SERIESTEXT, &data)
 }
 
 fn biff_rec(rec_type: u16, data: &[u8]) -> Vec<u8> {
@@ -279,6 +420,28 @@ const RT_CLIENT_TEXTBOX: u16 = 0xF00D;
 
 /// A `.ppt` holding one slide with `slide` as its title and `notes` as its speaker notes.
 pub fn ppt(slide: &str, notes: &str) -> Vec<u8> {
+    let (stream, user) = ppt_streams(slide, notes);
+    cfb(&[("PowerPoint Document", &stream), ("Current User", &user)])
+}
+
+/// A `.ppt` whose `PowerPoint Document` stream declares more bytes than it holds: the slide's text
+/// is still read and the loss is named.
+pub fn ppt_cut(slide: &str) -> Vec<u8> {
+    let (stream, user) = ppt_streams(slide, "");
+    cfb_sized(&[
+        ("PowerPoint Document", &stream, stream.len() as u32 + 512),
+        ("Current User", &user, user.len() as u32),
+    ])
+}
+
+/// A CFB container with no `PowerPoint Document` stream, named `.ppt`: the container is a
+/// presentation by its name alone, so the reader gives that family's corrupt verdict.
+pub fn ppt_corrupt() -> Vec<u8> {
+    cfb(&[("Contents", b"not a presentation stream")])
+}
+
+/// The "PowerPoint Document" and "Current User" streams of a one-slide deck.
+fn ppt_streams(slide: &str, notes: &str) -> (Vec<u8>, Vec<u8>) {
     const SLIDE_ID: u32 = 256;
     const NOTES_ID: u32 = 257;
     let mut stream = Vec::new();
@@ -321,7 +484,7 @@ pub fn ppt(slide: &str, notes: &str) -> Vec<u8> {
     stream.extend(user_edit_atom(pd_offset, 1));
 
     let user = current_user(edit_offset);
-    cfb(&[("PowerPoint Document", &stream), ("Current User", &user)])
+    (stream, user)
 }
 
 fn atom(rec_type: u16, instance: u16, data: &[u8]) -> Vec<u8> {

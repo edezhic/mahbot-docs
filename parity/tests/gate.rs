@@ -4,7 +4,7 @@
 mod common;
 
 use document_parity::baseline::Baseline;
-use document_parity::engine::{EngineIdentity, Reader, Reading, Writer, WriterOutcome};
+use document_parity::engine::{EngineIdentity, Kind, Reader, Reading, Writer, WriterOutcome};
 use document_parity::harness::{Harness, Run};
 use document_parity::reference::{NoOpReader, NoOpWriter, ReferenceReader, ReferenceWriter};
 use document_parity::transcript::CaseTranscript;
@@ -35,6 +35,10 @@ impl Reader for FailingReader {
 
     fn read(&self, _input: &Path, _file_name: &str, out_dir: &Path) -> anyhow::Result<Reading> {
         anyhow::bail!("the reader refused this document, in {}", out_dir.display())
+    }
+
+    fn detect(&self, _input: &Path, _file_name: &str) -> anyhow::Result<Kind> {
+        Ok(Kind::Unsupported)
     }
 }
 
@@ -75,6 +79,10 @@ impl Reader for PanickingReader {
 
     fn read(&self, _input: &Path, _file_name: &str, _out_dir: &Path) -> anyhow::Result<Reading> {
         panic!("the reader panicked")
+    }
+
+    fn detect(&self, _input: &Path, _file_name: &str) -> anyhow::Result<Kind> {
+        Ok(Kind::Unsupported)
     }
 }
 
@@ -152,6 +160,10 @@ impl Reader for HangingReader {
             all_page_text_lost: false,
             page_text: true,
         })
+    }
+
+    fn detect(&self, _input: &Path, _file_name: &str) -> anyhow::Result<Kind> {
+        Ok(Kind::Unsupported)
     }
 }
 
@@ -338,14 +350,27 @@ fn two_runs_produce_identical_transcripts() {
             "a transcript carries an absolute path: {string:?}"
         );
     }
-    // These check the transcript, not just the engine's prose: a document's own text is compared
-    // as it is, so a corpus document spelling a date, a nonce or a path would legitimately appear
-    // here. None does.
-    let date = regex::Regex::new(r"\d{4}-\d{2}-\d{2}").unwrap();
-    assert!(
-        !date.is_match(&text),
-        "a transcript carries a calendar date"
-    );
+    // The normaliser replaces every date in the engine's own prose; a document's own text is
+    // compared as it is, so a corpus document may legitimately spell a date. Exclude that text and
+    // assert no raw date survives anywhere the engine wrote — which cannot depend on the day the
+    // gate runs, unlike a scan for the run's own date.
+    let mut prose = left.clone();
+    if let Some(readings) = prose.get_mut("readings").and_then(Value::as_object_mut) {
+        for entry in readings.values_mut() {
+            if let Some(text) = entry.pointer_mut("/transcript/reading/text") {
+                *text = Value::Null;
+            }
+        }
+    }
+    let mut prose_strings = Vec::new();
+    common::strings(&prose, &mut prose_strings);
+    let date = regex::Regex::new(r"\b\d{4}-\d{2}-\d{2}\b").unwrap();
+    for string in &prose_strings {
+        assert!(
+            !date.is_match(string),
+            "the engine's prose carries a raw date: {string:?}"
+        );
+    }
     let nonce = regex::Regex::new(r"\b[0-9a-f]{16}\b").unwrap();
     assert!(
         !nonce.is_match(&text),
@@ -898,8 +923,14 @@ fn the_baseline_names_the_engine_and_runtime_that_produced_it() {
          kit's answer"
     );
     assert!(
-        baseline.reader.components.contains_key("src/document.rs")
-            && baseline.reader.components.contains_key("src/ooxml.rs"),
+        baseline
+            .reader
+            .components
+            .contains_key("parity/src/reference_sources/document.rs")
+            && baseline
+                .reader
+                .components
+                .contains_key("parity/src/reference_sources/ooxml.rs"),
         "the reader's build is checkable source by source"
     );
     assert!(baseline.note.contains("deliberate"));
