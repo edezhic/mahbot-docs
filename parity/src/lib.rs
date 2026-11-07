@@ -1,4 +1,5 @@
-//! The parity harness: the instrument that judges every later stage of the document-engine work.
+//! The parity harness: the instrument that judges the document engine against the product's own
+//! behaviour.
 //!
 //! It drives two references — the current writer (the JavaScript kit, through the same
 //! request-and-result contract the product uses) and the current reader (the product's own Rust
@@ -40,6 +41,7 @@ pub(crate) mod util;
 
 pub mod baseline;
 pub mod canonical;
+pub mod contract;
 pub mod corpus;
 pub mod engine;
 pub mod harness;

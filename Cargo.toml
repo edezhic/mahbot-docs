@@ -1,0 +1,5 @@
+[workspace]
+resolver = "2"
+members = ["document-engine", "parity"]
+# The product-touchpoint copies are reference material, not packages of this workspace.
+exclude = ["product-touchpoints"]

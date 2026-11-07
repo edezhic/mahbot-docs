@@ -6,33 +6,20 @@
 //! reimplementation of it. The reader is driven at the one bounded entry point every product read
 //! passes through, and answers in the readers' own vocabulary (text, image files, notes, the
 //! unshown report).
+//!
+//! The result shapes are the engine crate's own: the engine implements them, and the reference
+//! answers in them, so the baseline proves the shape rather than a copy of it. The harness depends
+//! on the engine crate; the crate never depends on the harness.
+
+// The neutral result shapes, owned by the engine crate.
+pub use document_engine::operation::{Failure, Outcome as WriterOutcome};
+pub use document_engine::reading::{ImageArtifact, Reading};
+// The four document families, shared by the corpus's keys and the engine's own vocabulary.
+pub use document_engine::vocabulary::Family;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-
-/// The four document families the corpus is grouped by. It is part of a verdict's key because the
-/// edit sub-operation names repeat across families (`add_image` exists in all three Office ones).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Family {
-    Docx,
-    Xlsx,
-    Pptx,
-    Pdf,
-}
-
-impl Family {
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Docx => "docx",
-            Self::Xlsx => "xlsx",
-            Self::Pptx => "pptx",
-            Self::Pdf => "pdf",
-        }
-    }
-}
 
 /// A verdict's key: one family, one operation, and — for the three Office edit operations — the
 /// sub-operation the scenario exercises.
@@ -90,53 +77,6 @@ pub struct EngineIdentity {
     pub components: BTreeMap<String, String>,
 }
 
-/// How a writer run ended. `Failure` is the engine's own answer: `ok: false` in the result
-/// object, or a result object the engine never wrote (which the product's contract classifies as
-/// `internal`). A run that never started or never finished — a missing runtime, a killed process, a
-/// timeout — is an `Err` from [`Writer::run`], because it says nothing about the request.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WriterOutcome {
-    /// The files the engine says it produced, as paths it echoed back.
-    pub outputs: Vec<PathBuf>,
-    pub missing: Vec<String>,
-    /// `fill_template` only: the distinct placeholders the run compiled or substituted.
-    pub placeholders: Option<usize>,
-    pub unsupported: Vec<String>,
-    pub notes: Vec<String>,
-    /// The subset of `notes` saying part of what the call asked for is not in the produced file.
-    pub losses: Vec<String>,
-    /// Present when the engine refused or failed the request.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub failure: Option<Failure>,
-}
-
-impl WriterOutcome {
-    #[must_use]
-    pub fn produced(outputs: Vec<PathBuf>) -> Self {
-        Self {
-            outputs,
-            missing: Vec::new(),
-            placeholders: None,
-            unsupported: Vec::new(),
-            notes: Vec::new(),
-            losses: Vec::new(),
-            failure: None,
-        }
-    }
-
-    /// The engine's own answer: it declined the request, in `class` and with `reason`.
-    #[must_use]
-    pub fn failed(class: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self {
-            failure: Some(Failure {
-                class: class.into(),
-                reason: reason.into(),
-            }),
-            ..Self::produced(Vec::new())
-        }
-    }
-}
-
 /// The paths a request names as its outputs, in order: `output` for one file, `outputs` for many.
 /// The writer contract has one shape, so every implementation reads it through this.
 #[must_use]
@@ -154,53 +94,6 @@ pub fn request_outputs(request: &serde_json::Value) -> Vec<PathBuf> {
             _ => Vec::new(),
         })
         .collect()
-}
-
-/// A writer's own refusal or failure, as the product's contract classifies it: `usage` when the
-/// caller can fix the request, anything else (reported as `internal`) when the engine could not
-/// complete a request it accepted.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Failure {
-    /// `usage` or `internal`. A run-level failure uses its own token (`timeout`, `io`,
-    /// `terminated`) and is reported through `Err`, never here.
-    pub class: String,
-    /// The engine's reason, verbatim; the transcript normalises the volatile parts.
-    pub reason: String,
-}
-
-impl Failure {
-    #[must_use]
-    pub fn is_usage(&self) -> bool {
-        self.class == "usage"
-    }
-}
-
-/// One file a reading wrote, identified by name and content rather than by bytes: a transcript
-/// carries no document bytes.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ImageArtifact {
-    pub name: String,
-    pub sha256: String,
-    pub len: u64,
-}
-
-/// What a reader answered, in the vocabulary every document reading shares.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "outcome", rename_all = "snake_case")]
-pub enum Reading {
-    Text {
-        text: String,
-        images: Vec<ImageArtifact>,
-        notes: Vec<String>,
-        /// The report's own lines, in its order (`{count} {what} not shown`).
-        unshown: Vec<String>,
-        all_page_text_lost: bool,
-        page_text: bool,
-    },
-    Unreadable {
-        reason: String,
-    },
-    Unsupported,
 }
 
 /// Drives one writer implementation through the product's request-and-result contract.
@@ -221,4 +114,31 @@ pub trait Reader: Send + Sync {
 
     /// Read the document at `input`, named `file_name`, writing extracted images into `out_dir`.
     fn read(&self, input: &Path, file_name: &str, out_dir: &Path) -> anyhow::Result<Reading>;
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_recorded_split_names_fit_the_engines_derivation() {
+        // The engine derives `{base}_part{n}.{ext}` for a split, so the corpus's recorded names
+        // must be that shape; the crate's own tests pin the derivation itself.
+        let mut splits = crate::corpus::writer_cases()
+            .into_iter()
+            .filter(|case| case.operation == "pdf_split")
+            .peekable();
+        assert!(splits.peek().is_some(), "the corpus has a split case");
+        for case in splits {
+            let (base, extension) = case.outputs[0].rsplit_once("_part1.").unwrap_or_else(|| {
+                panic!("{}: {:?} fit no split derivation", case.key(), case.outputs)
+            });
+            for (index, name) in case.outputs.iter().enumerate() {
+                assert_eq!(
+                    *name,
+                    format!("{base}_part{}.{extension}", index + 1),
+                    "{}",
+                    case.key()
+                );
+            }
+        }
+    }
 }

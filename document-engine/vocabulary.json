@@ -1,0 +1,674 @@
+{
+  "rules": {
+    "heading_levels": [
+      1,
+      2,
+      3
+    ],
+    "scalar_kinds": [
+      "string",
+      "number",
+      "boolean"
+    ],
+    "image_extensions": [
+      "png",
+      "jpg",
+      "jpeg",
+      "webp"
+    ],
+    "table_columns_max": 63,
+    "dimension_points": {
+      "min": 0,
+      "max": 20000,
+      "min_exclusive": true
+    },
+    "text_size_points": {
+      "min": 0.5,
+      "max": 819,
+      "min_exclusive": false
+    },
+    "paragraph_alignments": [
+      [
+        "left",
+        "left"
+      ],
+      [
+        "center",
+        "center"
+      ],
+      [
+        "right",
+        "right"
+      ],
+      [
+        "justify",
+        "both"
+      ]
+    ],
+    "paragraph_lists": [
+      [
+        "bullet",
+        "bullet"
+      ],
+      [
+        "number",
+        "decimal"
+      ]
+    ],
+    "paragraph_indent_points": {
+      "min": -2000,
+      "max": 2000,
+      "min_exclusive": false
+    },
+    "paragraph_spacing_points": {
+      "min": 0,
+      "max": 2000,
+      "min_exclusive": false
+    },
+    "paragraph_line_points": {
+      "min": 0.05,
+      "max": 2000,
+      "min_exclusive": false
+    },
+    "paragraph_style_max": 64,
+    "slide_text_size_points": {
+      "min": 1,
+      "max": 4000,
+      "min_exclusive": false
+    },
+    "cell_font_points": {
+      "min": 1,
+      "max": 409,
+      "min_exclusive": false
+    },
+    "column_width_chars": {
+      "min": 0,
+      "max": 255,
+      "min_exclusive": false
+    },
+    "row_height_points": {
+      "min": 0,
+      "max": 409,
+      "min_exclusive": false
+    },
+    "pdf_point_abs_max": 20000,
+    "pdf_page_fraction": {
+      "min": 0,
+      "max": 1,
+      "min_exclusive": false
+    },
+    "pdf_fraction_slack": 1e-09,
+    "pdf_opacity": {
+      "min": 0,
+      "max": 1,
+      "min_exclusive": true
+    },
+    "note_page_ranges_max": 8,
+    "pdf_field_kinds": {
+      "text": "text",
+      "checkbox": "checkbox",
+      "radio": "radio",
+      "choice": "choice"
+    },
+    "pdf_form_words": {
+      "fields": "Form fields",
+      "no_value": "(no value)",
+      "not_fillable": "not fillable",
+      "unnamed": "unnamed field"
+    },
+    "pdf_date_format": "YYYY-MM-DD or YYYY-MM-DDTHH:MM[:SS], with an optional Z or ±HH:MM offset (no offset means UTC)",
+    "pdf_metadata_fields": [
+      {
+        "key": "title",
+        "name": "Title",
+        "description": "The document's title.",
+        "date": false
+      },
+      {
+        "key": "author",
+        "name": "Author",
+        "description": "The document's author.",
+        "date": false
+      },
+      {
+        "key": "subject",
+        "name": "Subject",
+        "description": "The document's subject.",
+        "date": false
+      },
+      {
+        "key": "keywords",
+        "name": "Keywords",
+        "description": "The document's keywords, as one text.",
+        "date": false
+      },
+      {
+        "key": "creator",
+        "name": "Creator",
+        "description": "The application that made the content.",
+        "date": false
+      },
+      {
+        "key": "producer",
+        "name": "Producer",
+        "description": "The application that wrote the file.",
+        "date": false
+      },
+      {
+        "key": "created",
+        "name": "CreationDate",
+        "description": "Creation date.",
+        "date": true
+      },
+      {
+        "key": "modified",
+        "name": "ModDate",
+        "description": "Modification date.",
+        "date": true
+      }
+    ],
+    "color_digits": 6,
+    "slide_alignments": [
+      [
+        "left",
+        "l"
+      ],
+      [
+        "center",
+        "ctr"
+      ],
+      [
+        "right",
+        "r"
+      ],
+      [
+        "justify",
+        "just"
+      ]
+    ],
+    "cell_alignments": [
+      "general",
+      "left",
+      "center",
+      "right",
+      "justify",
+      "distributed",
+      "centerContinuous"
+    ],
+    "cell_verticals": [
+      "top",
+      "center",
+      "bottom",
+      "justify",
+      "distributed"
+    ],
+    "cell_border_sides": [
+      "top",
+      "bottom",
+      "left",
+      "right"
+    ],
+    "degrees_step": 90,
+    "sheet_name_max": 31,
+    "sheet_name_forbidden": "[]:*?/\\",
+    "slide_position_fraction": {
+      "min": 0,
+      "max": 1,
+      "min_exclusive": false
+    },
+    "slide_size_fraction": {
+      "min": 0,
+      "max": 1,
+      "min_exclusive": true
+    },
+    "pptx_default_size": {
+      "width_emu": 9144000,
+      "height_emu": 5143500
+    },
+    "pptx_sizes": [
+      {
+        "name": "widescreen",
+        "width_emu": 12192000,
+        "height_emu": 6858000
+      },
+      {
+        "name": "standard",
+        "width_emu": 9144000,
+        "height_emu": 6858000
+      },
+      {
+        "name": "portrait",
+        "width_emu": 6858000,
+        "height_emu": 9144000
+      }
+    ],
+    "ppt_marks": {
+      "title": "(title)",
+      "hidden_slide": "(hidden slide)",
+      "diagram_text": "(diagram text)",
+      "diagram_text_lost": "(diagram text could not be read)",
+      "no_text": "(no text)"
+    },
+    "ppt_slide_labels": {
+      "slide": "Slide {n}:",
+      "notes": "Slide {n} notes:",
+      "comments": "Slide {n} comments:"
+    },
+    "docx_peripheral_parts": [
+      {
+        "kind": "header",
+        "rel": "/header",
+        "phrase": "a header"
+      },
+      {
+        "kind": "footer",
+        "rel": "/footer",
+        "phrase": "a footer"
+      },
+      {
+        "kind": "footnote",
+        "rel": "/footnotes",
+        "phrase": "a footnote",
+        "part": "word/footnotes.xml"
+      },
+      {
+        "kind": "endnote",
+        "rel": "/endnotes",
+        "phrase": "an endnote",
+        "part": "word/endnotes.xml"
+      },
+      {
+        "kind": "comment",
+        "rel": "/comments",
+        "phrase": "a comment",
+        "part": "word/comments.xml"
+      }
+    ],
+    "docx_marks": [
+      {
+        "pattern": "\\[text box\\]",
+        "example": "[text box]"
+      },
+      {
+        "pattern": "\\[ins\\]",
+        "example": "[ins]"
+      },
+      {
+        "pattern": "\\[/ins\\]",
+        "example": "[/ins]"
+      },
+      {
+        "pattern": "\\[del\\]",
+        "example": "[del]"
+      },
+      {
+        "pattern": "\\[/del\\]",
+        "example": "[/del]"
+      },
+      {
+        "pattern": "\\[moved-here\\]",
+        "example": "[moved-here]"
+      },
+      {
+        "pattern": "\\[/moved-here\\]",
+        "example": "[/moved-here]"
+      },
+      {
+        "pattern": "\\[moved-away\\]",
+        "example": "[moved-away]"
+      },
+      {
+        "pattern": "\\[/moved-away\\]",
+        "example": "[/moved-away]"
+      },
+      {
+        "pattern": "\\[ins ¶\\]",
+        "example": "[ins ¶]"
+      },
+      {
+        "pattern": "\\[del ¶\\]",
+        "example": "[del ¶]"
+      },
+      {
+        "pattern": "\\[moved-here ¶\\]",
+        "example": "[moved-here ¶]"
+      },
+      {
+        "pattern": "\\[moved-away ¶\\]",
+        "example": "[moved-away ¶]"
+      },
+      {
+        "pattern": "\\[fmt\\]",
+        "example": "[fmt]"
+      },
+      {
+        "pattern": "\\[fmt ¶\\]",
+        "example": "[fmt ¶]"
+      },
+      {
+        "pattern": "\\[fmt section\\]",
+        "example": "[fmt section]"
+      },
+      {
+        "pattern": "\\[heading \\d\\]",
+        "example": "[heading 1]"
+      },
+      {
+        "pattern": "\\[field[^\\]]*\\]",
+        "example": "[field PAGE \\* MERGEFORMAT]"
+      },
+      {
+        "pattern": "\\[(?:footnote|endnote|comment) (?:\\d+|\\?)(?: starts| ends)?\\]",
+        "example": "[comment 1 starts]"
+      },
+      {
+        "pattern": "Table \\d+(?: \\(formatting revised\\))?:",
+        "example": "Table 1 (formatting revised):"
+      },
+      {
+        "pattern": "(?:R\\d+|C\\d+)(?: \\([^)]*\\))?:",
+        "example": "C2:"
+      },
+      {
+        "pattern": "\\(spans C\\d+-C\\d+\\)",
+        "example": "(spans C2-C4)"
+      },
+      {
+        "pattern": "\\(part of R\\d+C\\d+\\)",
+        "example": "(part of R3C2)"
+      },
+      {
+        "pattern": "\\((?:inserted|deleted|merge revised|formatting revised)\\)",
+        "example": "(merge revised)"
+      },
+      {
+        "pattern": "\\(link: .*\\)",
+        "example": "(link: internal)"
+      },
+      {
+        "pattern": "(?:Footnote|Endnote|Comment) \\d+(?: \\([^)]*\\))?:",
+        "example": "Footnote 1 (not referenced in the text):"
+      },
+      {
+        "pattern": "(?:Header|Footer)(?: \\d+)? \\([^)]*\\):",
+        "example": "Header 1 (first page):"
+      },
+      {
+        "pattern": "Unaccepted tracked changes:",
+        "example": "Unaccepted tracked changes: 1 insertion"
+      },
+      {
+        "pattern": "\\(authors: [^)]*\\)",
+        "example": "(authors: Anna)"
+      },
+      {
+        "pattern": "Chart \\([^)]*\\):",
+        "example": "Chart (column chart):"
+      },
+      {
+        "pattern": "Series (?:\\d+|\"[^\"]*\"):",
+        "example": "Series \"Revenue\":"
+      },
+      {
+        "pattern": "\\(no values in the chart part\\)",
+        "example": "(no values in the chart part)"
+      },
+      {
+        "pattern": "\\(values only in the attached table\\)",
+        "example": "(values only in the attached table)"
+      },
+      {
+        "pattern": "\\(the chart part could not be read\\)",
+        "example": "(the chart part could not be read)"
+      },
+      {
+        "pattern": "\\(an extended chart kind[^)]*\\)",
+        "example": "(an extended chart kind, not read)"
+      },
+      {
+        "pattern": "\\(size [^)]*\\)",
+        "example": "(size 12)"
+      },
+      {
+        "pattern": "\\(stored number, format not shown\\)",
+        "example": "(stored number, format not shown)"
+      },
+      {
+        "pattern": "\\d+ more (?:series|value\\(s\\)|text\\(s\\))",
+        "example": "3 more value(s)"
+      }
+    ],
+    "edit_text_max": 20000,
+    "edits_max": 200,
+    "bullets_max": 100,
+    "paragraph_level_max": 8,
+    "sheet_row_max": 1048576,
+    "sheet_column_max": 16384,
+    "number_format_max": 200,
+    "font_name_max": 31,
+    "format_cells_max": 10000,
+    "max_pages_per_request": 10000
+  },
+  "reading": {
+    "head_sniff_bytes": 16,
+    "file_max_bytes": 52428800,
+    "max_pictures": 6,
+    "text_spill_bytes": 5000,
+    "min_page_text_chars": 16,
+    "crop_edge_slack": 0.5,
+    "raster_long_side_px": 1600,
+    "raster_long_side_max_px": 2048,
+    "raster_max_scale": 3.0,
+    "raster_jpeg_quality": 90
+  },
+  "limits": {
+    "zip_entry_max_bytes": 67108864,
+    "xml_element_depth_max": 128,
+    "docx_table_columns_max": 256,
+    "docx_style_chain_max": 10,
+    "docx_field_instruction_chars_max": 80,
+    "link_target_chars_max": 300,
+    "xlsx_range_probes_max": 16777216,
+    "chart_parts_max": 64,
+    "chart_series_max": 8,
+    "chart_points_max": 25,
+    "chart_texts_max": 6,
+    "number_format_code_max": 255,
+    "number_format_placeholders_max": 30,
+    "number_format_sections_max": 4,
+    "number_format_sub_second_digits_max": 9,
+    "pdf_marks_max": 1000,
+    "pdf_fields_max": 1000,
+    "pdf_field_options_max": 100,
+    "pdf_field_depth_max": 32,
+    "edit_work_max_bytes": 4294967296,
+    "merge_inputs_max": 50,
+    "merge_bytes_max": 209715200,
+    "split_parts_max": 50
+  },
+  "marks": {
+    "block_page": "Page {n}:",
+    "block_description": "Description:",
+    "block_annotations": "Annotations:",
+    "block_form_fields": "Form fields:",
+    "block_defined_names": "Defined names:",
+    "block_table": "Table {n}:",
+    "block_table_revised": "Table {n} (formatting revised):",
+    "block_table_summary": "Table {n}: {rows}, {columns}",
+    "block_table_summary_revised": "Table {n} (formatting revised): {rows}, {columns}",
+    "block_table_row": "  R{n}: {cells}",
+    "block_table_row_marks": "  R{n} ({marks}): {cells}",
+    "block_table_cell": "C{n}: {value}",
+    "block_table_cell_marks": "C{n} ({marks}): {value}",
+    "docx_table_row_noun": "row",
+    "docx_table_column_noun": "column",
+    "docx_heading": "[heading {n}] ",
+    "docx_link_prefix": "(link: ",
+    "docx_link": "(link: {address})",
+    "docx_field": "[field {instruction}]",
+    "docx_field_empty": "[field]",
+    "docx_cell_part_of": "(part of R{r}C{c})",
+    "docx_cell_spans": "(spans C{a}-C{b})",
+    "docx_mark_inserted": "inserted",
+    "docx_mark_deleted": "deleted",
+    "docx_mark_merge_revised": "merge revised",
+    "docx_mark_formatting_revised": "formatting revised",
+    "docx_note_reference": "[{kind} {n}]",
+    "docx_note_reference_unknown": "[{kind} ?]",
+    "docx_comment_reference_starts": "[{kind} {n} starts]",
+    "docx_comment_reference_ends": "[{kind} {n} ends]",
+    "docx_not_referenced": "not referenced in the text",
+    "docx_tracked_changes": "Unaccepted tracked changes: {tallies}.",
+    "docx_tracked_changes_authors": "Unaccepted tracked changes: {tallies} (authors: {list}).",
+    "docx_tally_insertion": "insertion",
+    "docx_tally_deletion": "deletion",
+    "docx_tally_move": "move",
+    "docx_tally_formatting": "formatting change",
+    "docx_story_numbered": "{story} {n}",
+    "docx_story_variants": "{story} ({variants}):",
+    "docx_story_numbered_variants": "{story} {n} ({variants}):",
+    "docx_note_block": "{story} {n}:",
+    "docx_note_block_extras": "{story} {n} ({extras}):",
+    "word_header": "Header",
+    "word_footer": "Footer",
+    "word_footnote": "Footnote",
+    "word_endnote": "Endnote",
+    "word_comment": "Comment",
+    "word_headers_and_footers": "Headers and footers",
+    "word_footnotes": "Footnotes",
+    "word_endnotes": "Endnotes",
+    "word_comments": "Comments",
+    "word_variant_default": "default",
+    "word_variant_first_page": "first page",
+    "word_variant_even_pages": "even pages",
+    "xlsx_sheet": "Sheet \"{name}\":",
+    "xlsx_sheet_hidden": "Sheet \"{name}\" (hidden):",
+    "xlsx_sheet_very_hidden": "Sheet \"{name}\" (very hidden):",
+    "xlsx_no_values": "(no values)",
+    "xlsx_chart_sheet": "(chart sheet)",
+    "xlsx_hidden_rows": "(hidden rows: {ranges})",
+    "xlsx_hidden_columns": "(hidden columns: {ranges})",
+    "xlsx_merged": "(merged {range})",
+    "xlsx_in_merged_range": "(in merged range {range})",
+    "xlsx_cell": "{ref}: {value}",
+    "xlsx_cell_stored": "{ref}: {value} (stored number, format not shown)",
+    "xlsx_cell_formula": "{ref}: {value} (={formula})",
+    "xlsx_cell_formula_only": "{ref}: ={formula}",
+    "xlsx_cell_merged": "{ref}: {value} (merged {range})",
+    "xlsx_cell_in_merged_range": "{ref}: {value} (in merged range {range})",
+    "xlsx_cell_link": "{ref}: {value} (link: {target})",
+    "xlsx_link_caption": "{caption} -> {target}",
+    "xlsx_link_line": "{ref}: {display} (link: {target})",
+    "xlsx_link_line_bare": "{ref}: (link: {target})",
+    "xlsx_comment": "{ref} comment ({author}): {text}",
+    "xlsx_comment_no_author": "{ref} comment: {text}",
+    "xlsx_defined_name": "{name}: {ref}",
+    "xlsx_defined_name_local": "{name} (sheet \"{sheet}\"): {ref}",
+    "xlsx_boolean_true": "TRUE",
+    "xlsx_boolean_false": "FALSE",
+    "pptx_slide_hidden": "Slide {n}: (hidden slide)",
+    "pptx_title_line": "(title) {text}",
+    "pptx_comment": "{author}: {text}",
+    "pptx_comment_no_author": "{text}",
+    "chart_header": "Chart:",
+    "chart_header_kind": "Chart ({kind}):",
+    "chart_title": "Title:",
+    "chart_text": "Text:",
+    "chart_label": "Label:",
+    "chart_title_line": "Title: {title}",
+    "chart_text_line": "Text: {text}",
+    "chart_label_line": "Label: {label}",
+    "chart_series_named": "Series \"{name}\":",
+    "chart_series_numbered": "Series {n}:",
+    "chart_series_line": "{label} {points}",
+    "chart_series_point": "{category}: {value}",
+    "chart_series_missing": "{label} {categories} {mark}",
+    "chart_series_excess": ", {count} more value(s)",
+    "chart_size": "(size {size})",
+    "chart_excess": "{count} more {noun}",
+    "chart_noun_text": "text(s)",
+    "chart_noun_series": "series",
+    "chart_noun_value": "value(s)",
+    "chart_unreadable_line": "Chart: {mark}",
+    "chart_kind_grouping_stacked": "stacked ",
+    "chart_kind_grouping_percent": "100% stacked ",
+    "chart_kind_area": "area chart",
+    "chart_kind_area_3d": "3-D area chart",
+    "chart_kind_bar": "bar chart",
+    "chart_kind_column": "column chart",
+    "chart_kind_bar_3d": "3-D bar chart",
+    "chart_kind_column_3d": "3-D column chart",
+    "chart_kind_bubble": "bubble chart",
+    "chart_kind_doughnut": "doughnut chart",
+    "chart_kind_line": "line chart",
+    "chart_kind_line_3d": "3-D line chart",
+    "chart_kind_bar_of_pie": "bar-of-pie chart",
+    "chart_kind_pie_of_pie": "pie-of-pie chart",
+    "chart_kind_pie": "pie chart",
+    "chart_kind_pie_3d": "3-D pie chart",
+    "chart_kind_radar": "radar chart",
+    "chart_kind_scatter": "scatter chart",
+    "chart_kind_stock": "stock chart",
+    "chart_kind_surface": "surface chart",
+    "chart_kind_surface_3d": "3-D surface chart",
+    "pdf_description_entry": "{label}: {value}",
+    "pdf_annotation": "{kind} on page {n}",
+    "pdf_annotation_author": "{kind} ({author}) on page {n}",
+    "pdf_annotation_text": "{line}:",
+    "pdf_annotation_note": "note",
+    "pdf_annotation_free_text": "free text",
+    "pdf_annotation_highlight": "highlight",
+    "pdf_annotation_underline": "underline",
+    "pdf_annotation_squiggly": "squiggly underline",
+    "pdf_annotation_strikeout": "strikeout",
+    "pdf_annotation_ink": "ink",
+    "pdf_annotation_square": "square",
+    "pdf_annotation_circle": "circle",
+    "pdf_annotation_polygon": "polygon",
+    "pdf_annotation_polyline": "polyline",
+    "pdf_annotation_line": "line",
+    "pdf_annotation_caret": "caret",
+    "pdf_annotation_stamp": "stamp",
+    "pdf_annotation_signature": "signature",
+    "pdf_field": "{name} ({label}) on page {n}: {value}",
+    "pdf_field_no_page": "{name} ({label}): {value}",
+    "pdf_field_options": "; options: {list}",
+    "pdf_field_options_truncated": ", …",
+    "pdf_field_not_fillable": "; not fillable",
+    "pdf_checked": "checked",
+    "pdf_not_checked": "not checked",
+    "pdf_checkbox_state": "{value} ({state})",
+    "pdf_radio_value": "{value} ({name})",
+    "number_stored_mark": " (stored number, format not shown)",
+    "reason_password_protected": "password-protected",
+    "reason_too_large": "the file is larger than the engine reads",
+    "reason_could_not_be_parsed": "could not be parsed",
+    "reason_could_not_be_read": "could not be read",
+    "reason_old_office_version": "an old Office version this tool cannot read",
+    "reason_corrupt_or_unreadable": "corrupt or unreadable .{extension}",
+    "reason_corrupt_or_unsupported": "corrupt or unsupported .{extension}",
+    "reason_not_carried_out": "the {operation} operation is not carried out",
+    "unshown_line": "{count} {what} not shown",
+    "unshown_chart": "chart(s)",
+    "unshown_chart_sheet": "chart sheet(s)",
+    "unshown_diagram": "diagram(s)",
+    "unshown_object": "embedded object part(s)",
+    "unshown_drawing": "embedded drawing(s)",
+    "unshown_video": "embedded video(s)",
+    "unshown_audio": "embedded audio(s)",
+    "unshown_media": "embedded media file(s)",
+    "unshown_attachment": "attached file(s)",
+    "unshown_media_annotation": "media annotation(s)",
+    "unshown_page": "page(s)",
+    "pdf_note_no_fillable_fields": "the document has a form, but no field that can be filled",
+    "pdf_note_fields_unreadable": "the document has a form, but its fields could not be read",
+    "xlsx_note_styles": "the workbook's cell formats could not be read, so values are shown as stored",
+    "xlsx_note_rels": "the workbook's relationships could not be read, so its parts are read by their conventional names and one named only there may be missed, leaving its cells showing the value as stored",
+    "xlsx_note_cut": "the workbook part is cut short, so the sheets and names it declares after that point are not read",
+    "xlsx_note_no_sheets": "the workbook declares no sheets",
+    "legacy_note_doc_cut": "the reader stopped early — some of the document's text may be missing",
+    "legacy_note_xls_cut": "the workbook was cut short — later sheets or cells may be missing",
+    "legacy_note_xls_chart_text": "the workbook holds text from its charts (chart titles, series and trendline names, and axis titles), which is not extracted",
+    "legacy_note_ppt_cut": "the reader stopped early — some of the presentation's text may be missing"
+  }
+}

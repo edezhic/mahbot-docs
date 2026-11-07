@@ -1,9 +1,9 @@
 # The document-engine parity harness
 
-The instrument that judges every later stage of the document-engine work. It drives two references
-— the current **writer** (the JavaScript document kit) and the current **reader** (the product's
-own Rust reader sources) — and compares what they produce against a recorded baseline by a
-declared canonical model per format.
+The instrument that judges the document engine against the product's own behaviour. It drives two
+references — the current **writer** (the JavaScript document kit) and the current **reader** (the
+product's own Rust reader sources) — and compares what they produce against a recorded baseline by
+a declared canonical model per format.
 
 Nothing here is part of the product. The product's tool layer — the model-facing description, the
 argument schema, refusal wording, answer rendering, registration — is deliberately absent: the
@@ -19,6 +19,10 @@ cargo test                        # every test, including the gate and the model
 cargo run --bin record-baseline   # deliberately re-record the baseline
 ```
 
+The workspace at the root holds two packages: this harness and `../document-engine`, the engine
+crate the harness depends on. `cargo test -p document-engine` runs the crate's own suite (including
+its vocabulary restatement scan) without the harness.
+
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
 managed runtime. A full pass — 57 cases and 21 readings — takes about ten seconds; the whole
 test suite, which runs the corpus twice for its determinism check, takes under a minute.
@@ -31,7 +35,8 @@ declared effect happened, and a no-op satisfies neither.
 
 | Path | What it is |
 |---|---|
-| `src/engine.rs` | The boundary: `Writer` and `Reader` traits, `Family`, `Key`, `EngineIdentity`, `WriterOutcome`, `Reading`. Nothing else knows which engine is behind them. |
+| `src/engine.rs` | The boundary: `Writer` and `Reader` traits, `Key`, `EngineIdentity`, and the result shapes, which are the engine crate's own (`WriterOutcome`, `Failure`, `Reading`, `ImageArtifact`, `Family`). Nothing else knows which engine is behind them. |
+| `src/contract.rs` | What the reference reader prints and parses, exposed so a test can prove the engine crate's vocabulary is the same data. |
 | `src/reference/writer.rs` | The current writer: the committed kit bundle and font, embedded and materialized into the harness's temporary directory, run on `bun` through the product's request-and-result contract (`request-<n>.json` in, `result-<n>.json` out, never stdout). |
 | `src/reference/reader.rs` | The current reader: `document::convert_document_file`, the one bounded entry point every product read passes through. |
 | `src/reference/noop.rs` | The negative control. |
@@ -45,6 +50,7 @@ declared effect happened, and a no-op satisfies neither.
 | `src/harness.rs` | Runs a corpus against an engine, compares, and produces verdicts. |
 | `src/baseline.rs` | The recorded reference, with the identity of the engine that produced it. |
 | `src/transcript.rs` | The normalised transcript: no paths, no nonces, no timings. |
+| `tests/engine_contract.rs` | The engine crate's contract, proved from here: its vocabulary is the reference's data, its result shapes carry every recorded field, and its closed operation set holds every corpus operation and edit. |
 | `baseline/baseline.json` | The recorded reference (about 2.4 MB of canonical documents). |
 | `src/bin/parity.rs`, `src/bin/record-baseline.rs` | The gate and the deliberate recorder. |
 
@@ -86,6 +92,76 @@ already resolved to absolute paths inside the harness's temporary directory. The
 with a path, the name the document was given, and a directory for extracted images, and must be
 `Send + Sync`: each reading runs on a thread of its own under a timeout, so one that never returns
 costs one reading rather than the gate.
+
+`WriterOutcome`, `Failure`, `Reading`, `ImageArtifact` and `Family` are not defined here: they are
+the `document-engine` crate's own shapes, re-exported so the reference answers in them and the
+baseline proves them. The harness depends on the crate; the crate never depends on the harness.
+`src/contract.rs` exposes what the reference reader prints and parses, and
+`tests/engine_contract.rs` proves the crate's vocabulary is the same data. A change to one of those
+shapes is caught by `tests/engine_contract.rs`, which reads the recorded baseline, rather than by a
+build identity: the identities hash the sources the reference compiles, and these shapes live in
+the crate.
+
+Two conventions let a different engine answer the same corpus:
+
+- **A refusal is the engine's own.** The transcript carries the class (`usage` for the caller's to
+  fix, `internal` otherwise) and the reason the engine gave, and the gate compares both;
+  `Expect::Refused` additionally requires the reason to mention the case's own fragment. What the
+  product prints *around* a refusal — its `usage:` prefix and hint — never enters the transcript,
+  so it is not the harness's to reproduce.
+- **The engine names its outputs, and the corpus records those names.** The crate's `execute` is
+  given a destination (a directory and a base name) and derives `{base}.{ext}`, or
+  `{base}_part{n}.{ext}` for a split — the same rule the product's tool applies. Every corpus
+  output is named that way; the split case's base is `basic`, taken from its own `outputs`
+  (`$out/basic_part1.pdf`, …). An adapter implementing `Writer::run` turns the kit request's output
+  path into the crate's `Destination`: that directory, and the path's file stem as the base — for a
+  split, the first output's stem before `_part1`. The engine's names are then the recorded ones,
+  and transcripts compare by file name with no positional remapping. A unit test checks that the
+  recorded split names fit that rule; the adapter derives the base itself.
+
+The reference reader's font is `assets/docgen/NotoSans-Regular.ttf`, a real copy of the crate's
+`document-engine/assets/NotoSans-Regular.ttf`; `tests/engine_contract.rs` compares their digests.
+
+One gap the port must settle, recorded here so it is not lost: the reading surface has no
+page-count entry point, while the product's rasterize tool needs a PDF's page count before it
+renders, so its "name the page to render" refusal can stand. A caller can learn it today only from
+`RenderError::NoSuchPage { pages }`, by asking for a page that cannot exist; whether the port adds
+an entry point or derives the count another way is its decision.
+
+`detect` has no harness-side parity proof yet: there is no reference classifier adapter to drive,
+so its equivalence to the product's `needs_extraction`/`real_family`/`classify` is established by
+the crate's behavioural tests until a reader adapter lands and the gate can compare the two.
+
+## The vocabulary cross-check
+
+`src/contract.rs` exposes what the reference prints and parses, and `tests/engine_contract.rs`
+proves the crate's `vocabulary.json` is the same data: the `rules` section against the reference's
+`rules.json`, every mark `reader_output.rs` exports, the fixed note sentences the reference prints,
+the unshown report, the font by digest, and every `reading` and `limits` bound against
+`reference_reading`/`reference_limits`.
+
+Every value is read from where the reference states it: `reader_output.rs` constants where they are
+public, the source text of the reader's own modules where they are private, and the tool-layer
+sources (`src/tools/`, `product-touchpoints/src/util/`, the kit's `EDIT_WORK_MAX`) for the bounds
+above the reader. The one exception is the legacy reader's four note sentences: they are inline in
+the reference's code rather than named constants, so the harness states them and asserts each is
+present in the reference source verbatim; a reworded reference fails that assertion instead of
+being read. Everywhere else a change in a source is read, not missed.
+
+What it cannot see, and why:
+
+- the comparison runs one way: every mark the reference prints must be in the vocabulary. A mark
+  the vocabulary adds with no reference producer (an engine reason) is not compared. The fixed note
+  sentences are the one closed class checked both ways, because a note the vocabulary adds alone
+  would be prose the engine never prints;
+- the marks `reader_output.rs` exports, plus the fixed note sentences, are compared; every other
+  mark the vocabulary states is not. They are not all templates: some are fixed, valueless marks
+  the reference does print (`block_description`, `docx_mark_inserted`, `xlsx_boolean_true`). A
+  change to the reference's wording there would not fail this check; the recorded baseline proves
+  those marks when the reading itself is ported and compared;
+- a note is read from the reference's source text, so the check proves the sentence is the
+  reference's own, not that the reference prints it in that situation. The baseline is what proves
+  the situation, once the reading is ported.
 
 ## The corpus
 
@@ -203,9 +279,10 @@ timestamp of the run. It replaces the harness's own root, the run's own nonce an
 `tests/gate.rs` runs the whole corpus twice and requires the two transcripts to be identical, and
 asserts the serialised text holds no absolute path, date or nonce.
 
-The harness writes only inside one temporary directory it creates and removes, never the product's
-storage root: the root must be named `document-parity-…` and lie under the OS temporary directory,
-or the harness refuses it, and a root the harness did not create is never removed.
+The harness writes only inside one temporary directory under the OS temporary area — created by
+`new_with`, or validated when `at` is given one — never the product's storage root: the root must
+be named `document-parity-…` and lie under the OS temporary directory, or the harness refuses it,
+and a root the harness did not create is never removed.
 
 The whole run is bounded by a budget, and each half has its own bound inside it: a writer case runs
 its kit under a 120 s timeout, and a reading runs on a thread of its own, with a runtime of its own,

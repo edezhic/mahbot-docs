@@ -274,10 +274,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "document-engine"
+version = "0.1.0"
+dependencies = [
+ "hayro",
+ "office_oxide",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "zip",
+]
+
+[[package]]
 name = "document-parity"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "document-engine",
  "flate2",
  "hayro",
  "hayro-cmap",

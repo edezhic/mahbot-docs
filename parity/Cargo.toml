@@ -22,6 +22,7 @@ flate2 = "1.1"
 tempfile = "3"
 
 [dependencies]
+document-engine = { path = "../document-engine" }
 anyhow = "1.0"
 hayro = "0.7"
 hayro-cmap = "0.1"

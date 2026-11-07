@@ -1,6 +1,6 @@
 {
   "note": "Recorded from the reference engine by `cargo run --bin record-baseline`. The harness never rewrites this file: recording is a deliberate act.",
-  "recorded_at_unix": 1793988706,
+  "recorded_at_unix": 1794014354,
   "writer": {
     "engine": "reference-writer",
     "build": "1fc44a2162cd751942a258dffdeaaa7ebd44f217af747e9141be98783a4faa50",
@@ -12111,7 +12111,7 @@
     "pdf/pdf_split": {
       "status": "produced",
       "outputs": {
-        "part1.pdf": {
+        "basic_part1.pdf": {
           "attachments": [],
           "form": {
             "fields": []
@@ -12145,7 +12145,7 @@
             }
           ]
         },
-        "part2.pdf": {
+        "basic_part2.pdf": {
           "attachments": [],
           "form": {
             "fields": []

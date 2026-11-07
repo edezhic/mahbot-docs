@@ -1026,25 +1026,25 @@ fn pdf_cases() -> Vec<Case> {
                 "op": "pdf_split",
                 "input": "$in/basic.pdf",
                 "groups": [[1], [2]],
-                "outputs": ["$out/part1.pdf", "$out/part2.pdf"],
+                "outputs": ["$out/basic_part1.pdf", "$out/basic_part2.pdf"],
             }),
-            vec!["part1.pdf", "part2.pdf"],
+            vec!["basic_part1.pdf", "basic_part2.pdf"],
             vec![
                 Effect::PageCount {
-                    output: Some("part1.pdf"),
+                    output: Some("basic_part1.pdf"),
                     count: 1,
                 },
                 Effect::PageText {
-                    output: Some("part1.pdf"),
+                    output: Some("basic_part1.pdf"),
                     page: 0,
                     text: "Page one text",
                 },
                 Effect::PageCount {
-                    output: Some("part2.pdf"),
+                    output: Some("basic_part2.pdf"),
                     count: 1,
                 },
                 Effect::PageText {
-                    output: Some("part2.pdf"),
+                    output: Some("basic_part2.pdf"),
                     page: 0,
                     text: "Page two text",
                 },

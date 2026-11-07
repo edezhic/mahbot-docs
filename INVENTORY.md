@@ -2,7 +2,8 @@
 
 This folder holds everything in the MahBot product that deals with documents: the
 JavaScript document kit, the Rust document readers, the Rust↔JavaScript glue, the
-prompts, and reference copies of the shared product files that carry document code.
+prompts, and reference copies of the shared product files that carry document code. It also
+holds the new `document-engine` crate and the `parity` harness that judges it.
 
 Copied from `/Users/egordezic/Desktop/mahbot` on 2026-11-06. The product repository
 was not modified.
@@ -19,7 +20,7 @@ was not modified.
 | `bun.lock` | Dependency lock; part of the provenance hash. |
 | `build.sh` | The only way to rebuild the bundle: bun install + bun build + sha256 header. |
 | `document-kit.js` | Generated bundle: 161 089 lines / 6 177 130 bytes, committed to git, embedded into the binary with `include_bytes!`. |
-| `NotoSans-Regular.ttf` | 569 208 bytes, the PDF font. Also used by the rasterizer as a fallback. |
+| `NotoSans-Regular.ttf` | 569 208 bytes, the PDF font. Also used by the rasterizer as a fallback. A real copy of `document-engine/assets/NotoSans-Regular.ttf`; the harness compares the two by digest, so the kit and the engine draw with one face. |
 | `NotoSans-LICENSE.txt` | Font licence. |
 
 ### `src/` — Rust side of document handling
@@ -71,6 +72,26 @@ current reader (the reader sources in `src/`, compiled in place behind a minimal
 corpus generated in code, compares each run with a recorded baseline by a declared canonical model
 per format, and checks each scenario's declared effect. See `parity/README.md` for the model, the
 engine boundary, the baseline and how to run it. Nothing in the product was changed to build it.
+
+## `document-engine/` — the document engine crate (new work, not copied from the product)
+
+The crate the product will depend on instead of its own document modules. It owns three things and
+nothing of the tool interface: reading (`detect`, `read`, `render_page`), operations (one
+`execute` call for the thirteen operations, returning the neutral outcome the harness speaks), and
+the vocabulary (`vocabulary.json` plus the embedded font; a mark the `rules` section states is read
+from there at load time, never copied). The harness depends on it; it depends on
+nothing in this workspace. `document-engine/VOCABULARY.md` states the vocabulary's boundary and the
+restatement scan's blind spots.
+
+The reader's and the operations' implementations land in later stages; the surface, the outcome
+shape, the operation set, the artifact naming and the vocabulary are final. `read` already answers
+plain text, unsupported bytes, encrypted packages, oversized files and unreadable files; the
+document arms it has no decoder for answer `Reading::Unreadable` until then.
+
+`assets/docgen/NotoSans-Regular.ttf` is a real copy of `document-engine/assets/NotoSans-Regular.ttf`
+(the harness compares their digests), so the kit, the reference reader and the crate draw with one
+face on a checkout that does not preserve symlinks. The four kit sources are unchanged, so the
+committed bundle's provenance hash still holds.
 
 ## Two traps when moving this code
 

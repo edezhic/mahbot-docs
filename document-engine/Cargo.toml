@@ -1,0 +1,22 @@
+[package]
+name = "document-engine"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+publish = false
+description = "The MahBot document engine: read documents, produce and edit them, and the vocabulary both halves share"
+
+[dependencies]
+# Format classification opens a CFB's directory and a ZIP's central directory; no entry is
+# decompressed, so no codec is compiled in. The versions are the product's own.
+hayro = "0.7"
+office_oxide = "=0.1.13"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+zip = { version = "8", default-features = false }
+
+[dev-dependencies]
+# The vocabulary restatement scan matches numeric and string literals in the crate's own sources.
+regex = "1"
+# Tests write into a fresh directory that removes itself, even when an assertion fails.
+tempfile = "3"
