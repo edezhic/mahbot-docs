@@ -264,6 +264,30 @@ const FORMAT_NAMES: &[(&str, &[(&str, &str)])] = &[
             ("text", "the `text` name a presentation comment resolves"),
         ],
     ),
+    (
+        "src/writing/xlsx/mod.rs",
+        &[
+            (
+                "row",
+                "the SpreadsheetML `<row>` element's own name, format knowledge rather than the printed noun",
+            ),
+            (
+                "column",
+                "the `column` axis a shift and a `format_cells` target name, the format's own word rather than a printed noun",
+            ),
+            (
+                "underline",
+                "the `underline` property a format names, the format's own key rather than a printed word",
+            ),
+        ],
+    ),
+    (
+        "src/writing/xlsx/shift.rs",
+        &[(
+            "selection",
+            "the `<selection>` element's own name a pane shift matches, format knowledge rather than a printed word",
+        )],
+    ),
 ];
 
 /// The marks the scan looks for in `path`: every mark the crate could print, less the format names
@@ -290,6 +314,11 @@ fn marks_for(path: &Path) -> Vec<String> {
 /// a cheap heuristic; the guarantee that a bound the reading enforces is read from the vocabulary is
 /// [`every_bound_the_reading_enforces_is_read_from_the_vocabulary`].
 const SPEC_CONSTANTS: &[(&str, f64, &str)] = &[
+    (
+        "src/writing/xml.rs",
+        16.0,
+        "the radix of a hexadecimal character reference in XML text",
+    ),
     (
         "src/operation.rs",
         3.0,
@@ -419,6 +448,43 @@ const SPEC_CONSTANTS: &[(&str, f64, &str)] = &[
         "src/vocabulary.rs",
         4.0,
         "the four families in `Family::ALL`",
+    ),
+    (
+        "src/writing/xlsx/mod.rs",
+        3.0,
+        "a regular-expression capture-group index (the third group), not a bound",
+    ),
+    (
+        "src/writing/xlsx/shift.rs",
+        3.0,
+        "a regular-expression capture-group index (the third group), not a bound",
+    ),
+    (
+        "src/writing/xlsx/shift.rs",
+        4.0,
+        "a regular-expression capture-group index (the fourth group), not a bound",
+    ),
+    (
+        "src/writing/xlsx/shift.rs",
+        6.0,
+        "a regular-expression capture-group index (the sixth group), not a bound",
+    ),
+    (
+        "src/writing/xlsx/sheets.rs",
+        4.0,
+        "a big-endian word's four bytes, the unit an image format's offsets are counted in",
+    ),
+    (
+        "src/writing/xlsx/sheets.rs",
+        8.0,
+        "the eight bytes of two big-endian words, the unit an image format's offsets are counted in",
+    ),
+    (
+        "src/writing/xlsx/sheets.rs",
+        3.0,
+        "an image format's own arithmetic: a VP8 key frame's three-byte frame tag and the three \
+         bytes of start code the sides follow, the three four-byte words a RIFF header holds, and a \
+         regular-expression capture-group index (the third group)",
     ),
 ];
 

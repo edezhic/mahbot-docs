@@ -62,6 +62,15 @@ pub fn png() -> Vec<u8> {
     bytes
 }
 
+/// A file named as a PNG whose bytes are not one: the format's signature and nothing a decoder can
+/// read, so an edit that places it refuses rather than embedding bytes no reader can open.
+#[must_use]
+pub fn broken_png() -> Vec<u8> {
+    let mut bytes = png();
+    bytes.truncate(12);
+    bytes
+}
+
 /// A valid small JPEG of the same picture, so a case can exercise the one embedded format the
 /// reader passes through instead of re-encoding.
 #[must_use]
@@ -1327,6 +1336,511 @@ fn xlsx_package_around(
         .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
         .collect();
     package(&entries)
+}
+
+// ── xlsx: the edit corpus ───────────────────────────────────────────────────────────────────
+
+/// The workbook every `xlsx_edit` behaviour case runs on: three sheets (one hidden), a defined
+/// name of each scope, a drawing with a picture, a chart, a table and a pivot, and every geometry
+/// a shift moves.
+const XLSX_EDIT_WORKBOOK: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+    r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" "#,
+    r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+    r#"<workbookPr/>"#,
+    r#"<bookViews><workbookView activeTab="1" firstSheet="1"/></bookViews>"#,
+    r#"<sheets>"#,
+    r#"<sheet name="First" sheetId="1" r:id="rId1"/>"#,
+    r#"<sheet name="Second" sheetId="2" state="hidden" r:id="rId2"/>"#,
+    r#"<sheet name="Third" sheetId="3" r:id="rId3"/>"#,
+    r#"</sheets>"#,
+    r#"<definedNames>"#,
+    r#"<definedName name="Rate">First!$B$1</definedName>"#,
+    r#"<definedName name="Local" localSheetId="1">Second!$A$1</definedName>"#,
+    r#"<definedName name="ThirdName" localSheetId="2">Third!$A$1</definedName>"#,
+    r#"</definedNames>"#,
+    r#"</workbook>"#,
+);
+
+/// The first worksheet: a merged title, a merged data pair, a formula with a cached value, a
+/// qualified formula, a picture anchor target, and one element of every block an edit rewrites.
+const XLSX_EDIT_SHEET_ONE: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+    r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" "#,
+    r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+    r#"<dimension ref="A1:C12"/>"#,
+    r#"<cols><col min="1" max="1" width="12" customWidth="1"/>"#,
+    r#"<col min="3" max="3" width="8" customWidth="1"/></cols>"#,
+    r#"<sheetData>"#,
+    r#"<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>"#,
+    r#"<row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>1</v></c></row>"#,
+    r#"<row r="3"><c r="A3" t="s"><v>3</v></c><c r="B3"><v>2</v></c></row>"#,
+    r#"<row r="4"><c r="B4"><f>SUM(B2:B3)</f><v>3</v></c></row>"#,
+    r#"<row r="5"><c r="A5" t="s"><v>4</v></c><c r="B5" t="s"><v>5</v></c></row>"#,
+    r#"<row r="6"><c r="C6"><f>First!B2*2</f><v>2</v></c></row>"#,
+    r#"<row r="10"><c r="C10" t="s"><v>6</v></c></row>"#,
+    r#"</sheetData>"#,
+    r#"<mergeCells count="2"><mergeCell ref="A1:B1"/><mergeCell ref="A5:B5"/></mergeCells>"#,
+    r#"<conditionalFormatting sqref="B2:B3">"#,
+    r#"<cfRule type="cellIs" operator="greaterThan" priority="1" dxfId="0">"#,
+    r#"<formula>B2&gt;0</formula></cfRule></conditionalFormatting>"#,
+    r#"<dataValidations count="1">"#,
+    r#"<dataValidation type="whole" sqref="A2:A3"><formula1>1</formula1></dataValidation>"#,
+    r#"</dataValidations>"#,
+    r#"<hyperlinks><hyperlink ref="A2" location="First!A1" display="Jump"/></hyperlinks>"#,
+    r#"<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>"#,
+    r#"<rowBreaks count="1" manualBreakCount="1"><brk id="4" max="16383" man="1"/></rowBreaks>"#,
+    r#"<drawing r:id="rId1"/>"#,
+    r#"<tableParts count="1"><tablePart r:id="rId2"/></tableParts>"#,
+    r#"</worksheet>"#,
+);
+
+/// The second worksheet: one cell, so a case can tell the sheets apart by name.
+const XLSX_EDIT_SHEET_TWO: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+    r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#,
+    r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Other</t></is></c></row></sheetData>"#,
+    r#"</worksheet>"#,
+);
+
+/// The third worksheet: one cell, so a defined name scoped to it has a sheet to name.
+const XLSX_EDIT_SHEET_THREE: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+    r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#,
+    r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Third</t></is></c></row></sheetData>"#,
+    r#"</worksheet>"#,
+);
+
+/// The shared-string table the first sheet's cells index into.
+const XLSX_EDIT_SHARED_STRINGS: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+    r#"<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="7" uniqueCount="7">"#,
+    r#"<si><t>Title</t></si>"#,
+    r#"<si><t>extra</t></si>"#,
+    r#"<si><t>Alpha</t></si>"#,
+    r#"<si><t>Beta</t></si>"#,
+    r#"<si><t>Merged</t></si>"#,
+    r#"<si><t>covered</t></si>"#,
+    r#"<si><t>Picture</t></si>"#,
+    r#"</sst>"#,
+);
+
+/// The drawing the first sheet already declares: one picture anchored from `C10` to `E12`, the
+/// shape a picture added beside it must extend rather than replace.
+const XLSX_EDIT_DRAWING: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+    r#"<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" "#,
+    r#"xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" "#,
+    r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+    r#"<xdr:twoCellAnchor>"#,
+    r#"<xdr:from><xdr:col>2</xdr:col><xdr:colOff>0</xdr:colOff>"#,
+    r#"<xdr:row>9</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"#,
+    r#"<xdr:to><xdr:col>4</xdr:col><xdr:colOff>0</xdr:colOff>"#,
+    r#"<xdr:row>11</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>"#,
+    r#"<xdr:pic>"#,
+    r#"<xdr:nvPicPr><xdr:cNvPr id="2" name="Picture 1"/>"#,
+    r#"<xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>"#,
+    r#"<xdr:blipFill><a:blip r:embed="rId1"/>"#,
+    r#"<a:stretch><a:fillRect/></a:stretch></xdr:blipFill>"#,
+    r#"<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="457200"/></a:xfrm>"#,
+    r#"<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>"#,
+    r#"</xdr:pic>"#,
+    r#"<xdr:clientData/>"#,
+    r#"</xdr:twoCellAnchor>"#,
+    r#"</xdr:wsDr>"#,
+);
+
+/// A minimal bar chart whose series names the first sheet by its formulas, so a rename or a
+/// delete of that sheet leaves a chart series naming the old name.
+const XLSX_EDIT_CHART: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+    r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" "#,
+    r#"xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" "#,
+    r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+    r#"<c:chart><c:plotArea><c:barChart>"#,
+    r#"<c:barDir val="col"/>"#,
+    r#"<c:ser><c:idx val="0"/>"#,
+    r#"<c:tx><c:strRef><c:f>First!$A$2:$A$3</c:f></c:strRef></c:tx>"#,
+    r#"<c:val><c:numRef><c:f>First!$B$2:$B$3</c:f></c:numRef></c:val>"#,
+    r#"</c:ser></c:barChart></c:plotArea></c:chart>"#,
+    r#"</c:chartSpace>"#,
+);
+
+/// The table the first sheet declares over its data rows.
+const XLSX_EDIT_TABLE: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+    r#"<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" "#,
+    r#"id="1" name="Table1" displayName="Table1" ref="A2:B3">"#,
+    r#"<autoFilter ref="A2:B3"/>"#,
+    r#"<tableColumns count="2">"#,
+    r#"<tableColumn id="1" name="Alpha"/><tableColumn id="2" name="Value"/>"#,
+    r#"</tableColumns></table>"#,
+);
+
+/// A pivot table part: present under the name the kit's content-changed note keys on.
+const XLSX_EDIT_PIVOT_TABLE: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+    r#"<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" "#,
+    r#"name="PivotTable1" cacheId="1"/>"#,
+);
+
+/// The pivot cache definition the pivot names.
+const XLSX_EDIT_PIVOT_CACHE: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+    r#"<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" "#,
+    r#"recordCount="0"/>"#,
+);
+
+/// The pivot cache records: empty, so the package states the part and no value.
+const XLSX_EDIT_PIVOT_RECORDS: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+    r#"<pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0"/>"#,
+);
+
+/// The content types every edit workbook declares: the workbook, its sheets and every part the
+/// chart, table and pivot read.
+fn xlsx_edit_content_types(workbook_type: &str, media: &[(&str, &str)]) -> String {
+    let overrides = [
+        ("/xl/worksheets/sheet1.xml", XLSX_WORKSHEET_TYPE),
+        ("/xl/worksheets/sheet2.xml", XLSX_WORKSHEET_TYPE),
+        ("/xl/worksheets/sheet3.xml", XLSX_WORKSHEET_TYPE),
+        ("/xl/styles.xml", XLSX_STYLES_TYPE),
+        ("/xl/sharedStrings.xml", XLSX_SHARED_TYPE),
+        ("/xl/drawings/drawing1.xml", XLSX_DRAWING_TYPE),
+        ("/xl/charts/chart1.xml", XLSX_CHART_TYPE),
+        (
+            "/xl/tables/table1.xml",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml",
+        ),
+        (
+            "/xl/pivotTables/pivotTable1.xml",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml",
+        ),
+        (
+            "/xl/pivotCache/pivotCacheDefinition1.xml",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml",
+        ),
+        (
+            "/xl/pivotCache/pivotCacheRecords1.xml",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheRecords+xml",
+        ),
+    ];
+    let mut content_types = xlsx_content_types(&overrides).replace(XLSX_MAIN_TYPE, workbook_type);
+    let mut defaults = String::new();
+    for (extension, content_type) in media {
+        defaults.push_str(&format!(
+            r#"<Default Extension="{extension}" ContentType="{content_type}"/>"#
+        ));
+    }
+    content_types = content_types.replace(
+        r#"<Default Extension="xml" ContentType="application/xml"/>"#,
+        &format!(r#"<Default Extension="xml" ContentType="application/xml"/>{defaults}"#),
+    );
+    content_types
+}
+
+/// The edit workbook with `content_types` and whatever `extra` parts the caller adds: three sheets
+/// (one hidden), a drawing with a picture, a chart, a table, a pivot, styles and shared strings.
+fn xlsx_edit_package(content_types: &str, extra: &[(&'static str, &[u8])]) -> Vec<u8> {
+    let workbook_rels = xlsx_rels(&[
+        ("rId1", "worksheet", "worksheets/sheet1.xml"),
+        ("rId2", "worksheet", "worksheets/sheet2.xml"),
+        ("rId3", "worksheet", "worksheets/sheet3.xml"),
+        ("rId4", "sharedStrings", "sharedStrings.xml"),
+        ("rId5", "styles", "styles.xml"),
+    ]);
+    let sheet_rels = xlsx_rels(&[
+        ("rId1", "drawing", "../drawings/drawing1.xml"),
+        ("rId2", "table", "../tables/table1.xml"),
+    ]);
+    let drawing_rels = xlsx_rels(&[
+        ("rId1", "image", "../media/image1.png"),
+        ("rId2", "chart", "../charts/chart1.xml"),
+    ]);
+    let image = png();
+    let mut parts: Vec<(&str, &[u8])> = vec![
+        ("xl/worksheets/sheet1.xml", XLSX_EDIT_SHEET_ONE.as_bytes()),
+        ("xl/worksheets/sheet2.xml", XLSX_EDIT_SHEET_TWO.as_bytes()),
+        ("xl/worksheets/sheet3.xml", XLSX_EDIT_SHEET_THREE.as_bytes()),
+        ("xl/worksheets/_rels/sheet1.xml.rels", sheet_rels.as_bytes()),
+        ("xl/drawings/drawing1.xml", XLSX_EDIT_DRAWING.as_bytes()),
+        (
+            "xl/drawings/_rels/drawing1.xml.rels",
+            drawing_rels.as_bytes(),
+        ),
+        ("xl/media/image1.png", &image),
+        ("xl/charts/chart1.xml", XLSX_EDIT_CHART.as_bytes()),
+        ("xl/tables/table1.xml", XLSX_EDIT_TABLE.as_bytes()),
+        (
+            "xl/pivotTables/pivotTable1.xml",
+            XLSX_EDIT_PIVOT_TABLE.as_bytes(),
+        ),
+        (
+            "xl/pivotCache/pivotCacheDefinition1.xml",
+            XLSX_EDIT_PIVOT_CACHE.as_bytes(),
+        ),
+        (
+            "xl/pivotCache/pivotCacheRecords1.xml",
+            XLSX_EDIT_PIVOT_RECORDS.as_bytes(),
+        ),
+        ("xl/styles.xml", XLSX_STYLES.as_bytes()),
+        ("xl/sharedStrings.xml", XLSX_EDIT_SHARED_STRINGS.as_bytes()),
+    ];
+    parts.extend_from_slice(extra);
+    xlsx_package_around(XLSX_EDIT_WORKBOOK, &workbook_rels, content_types, &parts)
+}
+
+/// The workbook every workbook-edit behaviour case runs on.
+#[must_use]
+pub fn xlsx_edit() -> Vec<u8> {
+    xlsx_edit_package(
+        &xlsx_edit_content_types(XLSX_MAIN_TYPE, &[("png", "image/png")]),
+        &[],
+    )
+}
+
+/// The edit workbook plus a macro project and a signature part, so an edit must keep both and the
+/// macro-enabled content type.
+#[must_use]
+pub fn xlsx_macro() -> Vec<u8> {
+    let content_types = xlsx_edit_content_types(
+        "application/vnd.ms-excel.sheet.macroEnabled.main+xml",
+        &[
+            ("png", "image/png"),
+            ("bin", "application/vnd.ms-office.vbaProject"),
+        ],
+    )
+    .replace(
+        "</Types>",
+        concat!(
+            r#"<Override PartName="/_xmlsignatures/sig1.xml" "#,
+            r#"ContentType="application/vnd.openxmlformats-package.digital-signature-xmlsignature+xml"/>"#,
+            "</Types>",
+        ),
+    );
+    let signature = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo/></Signature>"#,
+    );
+    xlsx_edit_package(
+        &content_types,
+        &[
+            ("xl/vbaProject.bin", &[0x00, 0x01, 0x02, 0x03, 0xff]),
+            ("_xmlsignatures/sig1.xml", signature.as_bytes()),
+        ],
+    )
+}
+
+/// A workbook of the given sheets, each `(name, hidden, the text its A1 cell holds)`, one
+/// worksheet part per sheet, every part well formed.
+fn xlsx_sheets(sheets: &[(&str, bool, &str)]) -> Vec<u8> {
+    let mut workbook = String::from(concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" "#,
+        r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+        r#"<sheets>"#,
+    ));
+    let mut rels: Vec<(String, String)> = Vec::new();
+    let mut overrides: Vec<(String, &str)> = Vec::new();
+    let mut parts: Vec<(String, Vec<u8>)> = Vec::new();
+    for (index, (name, hidden, text)) in sheets.iter().enumerate() {
+        let number = index + 1;
+        let state = if *hidden { r#" state="hidden""# } else { "" };
+        workbook.push_str(&format!(
+            r#"<sheet name="{name}" sheetId="{number}"{state} r:id="rId{number}"/>"#
+        ));
+        rels.push((
+            format!("rId{number}"),
+            format!("worksheets/sheet{number}.xml"),
+        ));
+        overrides.push((
+            format!("/xl/worksheets/sheet{number}.xml"),
+            XLSX_WORKSHEET_TYPE,
+        ));
+        let sheet = format!(
+            concat!(
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+                r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#,
+                r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>{}</t></is></c></row></sheetData>"#,
+                r#"</worksheet>"#,
+            ),
+            text,
+        );
+        parts.push((
+            format!("xl/worksheets/sheet{number}.xml"),
+            sheet.into_bytes(),
+        ));
+    }
+    workbook.push_str("</sheets></workbook>");
+    let rel_entries: Vec<(&str, &str, &str)> = rels
+        .iter()
+        .map(|(id, target)| (id.as_str(), "worksheet", target.as_str()))
+        .collect();
+    let workbook_rels = xlsx_rels(&rel_entries);
+    let content_type_entries: Vec<(&str, &str)> = overrides
+        .iter()
+        .map(|(part, kind)| (part.as_str(), *kind))
+        .collect();
+    let content_types = xlsx_content_types(&content_type_entries);
+    let part_entries: Vec<(&str, &[u8])> = parts
+        .iter()
+        .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+        .collect();
+    xlsx_package_around(&workbook, &workbook_rels, &content_types, &part_entries)
+}
+
+/// A workbook with one visible sheet and one cell: the only-sheet refusal.
+#[must_use]
+pub fn xlsx_only_sheet() -> Vec<u8> {
+    xlsx_sheets(&[("Only", false, "Only")])
+}
+
+/// A workbook with one visible sheet beside a hidden one: deleting the visible one is refused.
+#[must_use]
+pub fn xlsx_one_visible() -> Vec<u8> {
+    xlsx_sheets(&[("First", false, "First"), ("Second", true, "Second")])
+}
+
+/// A workbook whose two sheets are both hidden: deleting one is allowed.
+#[must_use]
+pub fn xlsx_all_hidden() -> Vec<u8> {
+    xlsx_sheets(&[("HiddenOne", true, "One"), ("HiddenTwo", true, "Two")])
+}
+
+/// A one-sheet workbook whose sheet carries `block` where its `<mergeCells>` element goes.
+fn xlsx_with_merge_block(block: &str) -> Vec<u8> {
+    let workbook = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" "#,
+        r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+        r#"<sheets><sheet name="First" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+    );
+    let workbook_rels = xlsx_rels(&[("rId1", "worksheet", "worksheets/sheet1.xml")]);
+    let content_types = xlsx_content_types(&[("/xl/worksheets/sheet1.xml", XLSX_WORKSHEET_TYPE)]);
+    let sheet = format!(
+        concat!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+            r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#,
+            r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>One</t></is></c></row></sheetData>"#,
+            r#"{block}"#,
+            r#"</worksheet>"#,
+        ),
+        block = block,
+    );
+    xlsx_package_around(
+        workbook,
+        &workbook_rels,
+        &content_types,
+        &[("xl/worksheets/sheet1.xml", sheet.as_bytes())],
+    )
+}
+
+/// A workbook whose `<mergeCells>` is opened and never closed: the kit's merge read refuses it.
+#[must_use]
+pub fn xlsx_broken_merges() -> Vec<u8> {
+    xlsx_with_merge_block(r#"<mergeCells count="1"><mergeCell ref="A1:B1"/>"#)
+}
+
+/// A workbook whose first sheet holds a merge ref no reader can place: a merge into it is refused.
+#[must_use]
+pub fn xlsx_bad_merge_ref() -> Vec<u8> {
+    xlsx_with_merge_block(r#"<mergeCells count="1"><mergeCell ref="zzz"/></mergeCells>"#)
+}
+
+/// A workbook whose first sheet opens a `<mergeCell>` and never closes it.
+#[must_use]
+pub fn xlsx_unclosed_merge_cell() -> Vec<u8> {
+    xlsx_with_merge_block(r#"<mergeCells count="1"><mergeCell ref="A1:B1"</mergeCells>"#)
+}
+
+/// The basic workbook without one part: what an edit that reaches that part meets as missing.
+///
+/// Built by re-packaging the basic workbook rather than by repeating its parts, so the two can
+/// never drift apart.
+#[must_use]
+fn xlsx_without_part(missing: &str) -> Vec<u8> {
+    let mut archive = zip::ZipArchive::new(Cursor::new(xlsx_basic())).expect("a package");
+    let mut parts: Vec<(String, Vec<u8>)> = Vec::new();
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).expect("a part");
+        let name = entry.name().to_string();
+        if name == missing {
+            continue;
+        }
+        let mut body = Vec::new();
+        std::io::Read::read_to_end(&mut entry, &mut body).expect("a part's bytes");
+        parts.push((name, body));
+    }
+    let borrowed: Vec<(&str, &[u8])> = parts
+        .iter()
+        .map(|(name, body)| (name.as_str(), body.as_slice()))
+        .collect();
+    package(&borrowed)
+}
+
+/// A package that declares content types and holds no document, workbook or presentation part, so
+/// its family cannot be proved from its content.
+#[must_use]
+pub fn xlsx_no_family() -> Vec<u8> {
+    let content_types = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">"#,
+        r#"<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"#,
+        r#"<Default Extension="xml" ContentType="application/xml"/>"#,
+        r#"</Types>"#,
+    );
+    let root_rels = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#,
+    );
+    package(&[
+        ("[Content_Types].xml", content_types.as_bytes()),
+        ("_rels/.rels", root_rels.as_bytes()),
+    ])
+}
+
+/// The basic workbook without its `[Content_Types].xml`: a package an edit that rewrites the
+/// content types cannot complete, and one no reader can classify.
+#[must_use]
+pub fn xlsx_no_content_types() -> Vec<u8> {
+    xlsx_without_part("[Content_Types].xml")
+}
+
+/// A workbook whose first row holds a self-closing empty cell carrying a style, followed by a cell
+/// with text: reading the self-closing cell as the start of the next element would swallow it.
+#[must_use]
+pub fn xlsx_self_closing() -> Vec<u8> {
+    let workbook = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" "#,
+        r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+        r#"<sheets><sheet name="First" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+    );
+    let workbook_rels = xlsx_rels(&[
+        ("rId1", "worksheet", "worksheets/sheet1.xml"),
+        ("rId2", "styles", "styles.xml"),
+    ]);
+    let content_types = xlsx_content_types(&[
+        ("/xl/worksheets/sheet1.xml", XLSX_WORKSHEET_TYPE),
+        ("/xl/styles.xml", XLSX_STYLES_TYPE),
+    ]);
+    let sheet = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#,
+        r#"<sheetData>"#,
+        r#"<row r="1"><c r="A1" s="1"/><c r="B1" t="inlineStr"><is><t>Keep</t></is></c></row>"#,
+        r#"<row r="2"><c r="A2" t="inlineStr"><is><t>Second</t></is></c></row>"#,
+        r#"</sheetData></worksheet>"#,
+    );
+    xlsx_package_around(
+        workbook,
+        &workbook_rels,
+        &content_types,
+        &[
+            ("xl/worksheets/sheet1.xml", sheet.as_bytes()),
+            ("xl/styles.xml", XLSX_STYLES.as_bytes()),
+        ],
+    )
 }
 
 /// The styles part a workbook with dates and an unreproducible format needs: one builtin date

@@ -17,6 +17,9 @@
 
 use strum::{EnumCount, EnumIter, IntoEnumIterator};
 
+/// The column letters of a cell address, the one implementation both halves spell one through.
+pub(crate) use crate::support::column_letters;
+
 /// `header` then one indented line per entry — every reader builds its blocks from this.
 pub(crate) fn text_lines(header: &str, lines: &[String]) -> String {
     let indented = lines
@@ -45,22 +48,6 @@ pub(crate) fn labeled_block(label: &str, text: &str) -> String {
 /// The lines of `text`, as [`text_lines`] takes them.
 pub(crate) fn lines_of(text: &str) -> Vec<String> {
     text.lines().map(str::to_owned).collect()
-}
-
-/// The spreadsheet column letters for a zero-based column index (`0` is `A`).
-/// Every reader that writes a cell address writes it through this.
-pub(crate) fn column_letters(mut index: u32) -> String {
-    let mut letters: Vec<char> = Vec::new();
-    loop {
-        let digit = u32::from(b'A') + index % 26;
-        letters.push(char::from_u32(digit).unwrap_or('A'));
-        if index < 26 {
-            break;
-        }
-        index = index / 26 - 1;
-    }
-    letters.reverse();
-    letters.into_iter().collect()
 }
 
 /// The zero-based column index of a cell reference (`"B12"` -> `1`), or `None` when it does

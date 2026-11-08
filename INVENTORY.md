@@ -76,10 +76,10 @@ product's own reader or the crate's, over a corpus generated in code, compares e
 recorded baseline by a declared canonical model per format, and checks each scenario's declared
 effect. The product's reader sources are byte-for-byte copies under `parity/src/reference_sources/`,
 so nothing in this workspace can rewrite the product's sources and a divergence fails the gate. The
-default engine is the crate's reader against the reference writer; `--engine reference` is the
-recorder. Detection is recorded and compared beside every reading. See `parity/README.md` for the
-model, the engine boundary, the baseline and how to run it. Nothing in the product was changed to
-build it.
+default engine, `--engine crate`, pairs the crate's own writer and reader; `--engine reference` is
+the recorder — the reference kit's writer and the product's own reader. Detection is recorded and
+compared beside every reading. See `parity/README.md` for the model, the engine boundary, the
+baseline and how to run it. Nothing in the product was changed to build it.
 
 ## `document-engine/` — the document engine crate (new work, not copied from the product)
 
@@ -94,8 +94,18 @@ The reading half has landed: whole-file content-first detection, every family th
 (PDF, Word, Excel, PowerPoint and the legacy binary formats), the pictures, notes and unshown report,
 and the flags that tell a document with no text layer from one that could not be read. It applies
 no input-size bound and clamps no page size or scale a caller asked for; it never overwrites the
-file it reads. The writing half's implementation lands in a later stage; its surface, the outcome
-shape, the operation set and the artifact naming are final.
+file it reads.
+
+The writing half has started: `src/writing/` opens a package, changes the parts an edit names and
+writes it back, carrying every part the edit does not name through with the content it had, and
+`xlsx_edit` — the workbook edit, all fourteen sub-operations — is carried out end to end. `mod.rs`
+holds the `Editor`, `package.rs` the archive, `xml.rs` the string surgery, `opc.rs` the packaging
+conventions every family's edit shares, and `xlsx/` the workbook port. The other twelve operations
+answer with the vocabulary's `reason_not_carried_out` until their port lands. Every sentence the
+engine prints — an edit's refusals, notes and losses, the request surface's own shape refusals, a
+page-render refusal and the panic fallback — is a vocabulary mark (`edit_*`, `surface_*`,
+`render_*`, `engine_failed`), not a sentence in code, and `src/test_support/coverage.rs` records
+every writing mark as witnessed by a corpus case or as unreached with its reason.
 
 The document builders live in the crate's `test_support`, the one home shared by the crate's tests
 and the harness. `tests/standalone.rs` builds and tests the crate in a temporary copy with no

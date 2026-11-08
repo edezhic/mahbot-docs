@@ -2,8 +2,9 @@
 //! whole-file classifier and the one bounded reading. Its result shapes are already the harness's,
 //! so no adaptation happens between them; only the identity is the harness's to build.
 //!
-//! This is the harness's default reader: the writer half still runs the reference kit, so a
-//! difference in a reading is the crate's against the product's own answer.
+//! This is the harness's default reader, paired with [`super::CrateWriter`] by the `crate`
+//! engine: a difference in a reading is the crate's against the product's own answer, and a
+//! difference in a case is the crate's writer against the baseline.
 
 use crate::engine::{EngineIdentity, Kind, Reader, Reading};
 use std::path::Path;

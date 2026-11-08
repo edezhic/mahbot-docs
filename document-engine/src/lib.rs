@@ -9,17 +9,23 @@
 //! - [`operation`]: one call carries out one of the thirteen operations and answers with the
 //!   outcome and the files it wrote. The request is the operation's name, its values as data, and
 //!   the caller's destination; the engine appends the extension, derives the names when one call
-//!   produces several files, and never overwrites.
+//!   produces several files, and never overwrites. An edit is carried out by the writing half part
+//!   by part: every part the edit does not name is carried into the produced file with the content
+//!   it had, so a chart, a comment, a macro or a media file the caller never mentioned survives.
+//!   The workbook edit is the first operation the writing half carries out; the other twelve answer
+//!   with the vocabulary's `reason_not_carried_out` until their port lands.
 //! - [`vocabulary`]: every reading bound the engine enforces, every mark it prints, who enforces
 //!   and who prints each one, the enumerations it shares between reading and producing, and the
 //!   embedded font the producing half draws with — one file, embedded at build time, read from
 //!   there rather than restated in code.
 //!
 //! What the crate deliberately does not own is the tool interface: the model-facing description,
-//! the argument schema, the wording of refusals as a user sees them, answer formatting,
-//! registration, the sanitising of caller-supplied names, the reserving of unique output names, the
-//! cap on how many pictures a conversation attaches, the spilling of text too long to inline, and
-//! the sentences composed around a reading. Those are the caller's.
+//! the argument schema, the answer rendered around a result and its phrasing, registration, the
+//! sanitising of caller-supplied names, the reserving of unique output names, the cap on how many
+//! pictures a conversation attaches, and the spilling of text too long to inline. What it does own
+//! is the engine's own refusals, notes and losses — an operation's and a reading's alike — and
+//! every one of those sentences is read from [`vocabulary`], so a caller renders them as they stand
+//! rather than rewording them.
 //!
 //! The engine is synchronous and contains its own panics: a malformed document must not take the
 //! process down. Containment relies on unwinding panics, so a caller that builds with
@@ -48,6 +54,7 @@ pub mod operation;
 pub mod reading;
 mod support;
 pub mod vocabulary;
+mod writing;
 
 /// The generated corpus documents, shared by the crate's tests and the parity harness.
 #[cfg(any(test, feature = "test-support"))]

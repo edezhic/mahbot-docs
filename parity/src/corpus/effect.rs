@@ -17,6 +17,8 @@ pub enum Scalar {
     Text(&'static str),
     Number(f64),
     Bool(bool),
+    /// A formula's text, without its leading `=`.
+    Formula(&'static str),
 }
 
 impl std::fmt::Display for Scalar {
@@ -25,6 +27,7 @@ impl std::fmt::Display for Scalar {
             Self::Text(text) => write!(f, "{text:?}"),
             Self::Number(number) => write!(f, "{number}"),
             Self::Bool(value) => write!(f, "{value}"),
+            Self::Formula(text) => write!(f, "Formula({text:?})"),
         }
     }
 }
@@ -114,6 +117,40 @@ pub enum Effect {
         cell: &'static str,
         property: &'static str,
         on: bool,
+    },
+    /// A cell's number format: the format code the styles part states for the cell's own `s`
+    /// index.
+    NumberFormat {
+        output: Option<&'static str>,
+        sheet: &'static str,
+        cell: &'static str,
+        code: &'static str,
+    },
+    /// A column's width, in characters, as the sheet's `<cols>` states it.
+    ColumnWidth {
+        output: Option<&'static str>,
+        sheet: &'static str,
+        column: &'static str,
+        width: f64,
+    },
+    /// A row's height, in points, as the row states it.
+    RowHeight {
+        output: Option<&'static str>,
+        sheet: &'static str,
+        row: u32,
+        height: f64,
+    },
+    /// A part is present (or absent) in the package.
+    PartPresent {
+        output: Option<&'static str>,
+        part: &'static str,
+        present: bool,
+    },
+    /// The workbook's defined names, in order, as the reading names them: `Rate` for a global name
+    /// and `Local (sheet "Second")` for a sheet-scoped one.
+    DefinedNames {
+        output: Option<&'static str>,
+        names: &'static [&'static str],
     },
     /// The presentation's slide count.
     SlideCount {
@@ -327,6 +364,7 @@ impl Effect {
                     }
                     (CellValue::Text(actual), Scalar::Text(want)) => actual == want,
                     (CellValue::Bool(actual), Scalar::Bool(want)) => actual == &want,
+                    (CellValue::Formula(actual), Scalar::Formula(want)) => actual == want,
                     _ => false,
                 };
                 expect(matches, || {
@@ -366,6 +404,52 @@ impl Effect {
                 let found = cell_property(value, sheet, cell, property)?;
                 expect(found == on, || {
                     format!("{property} on {sheet}!{cell} is {found}, expected {on}")
+                })
+            }
+            Self::NumberFormat {
+                sheet, cell, code, ..
+            } => {
+                let found = number_format(value, sheet, cell)?;
+                expect(found == code, || {
+                    format!("{sheet}!{cell} is formatted {found:?}, expected {code:?}")
+                })
+            }
+            Self::ColumnWidth {
+                sheet,
+                column,
+                width,
+                ..
+            } => {
+                let found = column_width(value, sheet, column)?;
+                expect((found - width).abs() < 1e-9, || {
+                    format!("{sheet}'s column {column} is {found} wide, expected {width}")
+                })
+            }
+            Self::RowHeight {
+                sheet, row, height, ..
+            } => {
+                let found = row_height(value, sheet, row)?;
+                expect((found - height).abs() < 1e-9, || {
+                    format!("{sheet}'s row {row} is {found} high, expected {height}")
+                })
+            }
+            Self::PartPresent { part, present, .. } => {
+                let found = value
+                    .get("parts")
+                    .and_then(|parts| parts.get(part))
+                    .is_some();
+                expect(found == present, || {
+                    if present {
+                        format!("the package has no part {part:?}")
+                    } else {
+                        format!("the package still holds {part:?}")
+                    }
+                })
+            }
+            Self::DefinedNames { names, .. } => {
+                let found = defined_names(value)?;
+                expect(found == names, || {
+                    format!("defined names are {found:?}, expected {names:?}")
                 })
             }
             Self::SlideCount { count, .. } => {
@@ -544,6 +628,11 @@ impl Effect {
             | Self::CellAbsent { output, .. }
             | Self::Merged { output, .. }
             | Self::CellFormat { output, .. }
+            | Self::NumberFormat { output, .. }
+            | Self::ColumnWidth { output, .. }
+            | Self::RowHeight { output, .. }
+            | Self::PartPresent { output, .. }
+            | Self::DefinedNames { output, .. }
             | Self::SlideCount { output, .. }
             | Self::SlideText { output, .. }
             | Self::NotesText { output, .. }
@@ -616,6 +705,22 @@ impl Effect {
                 "{property} {} on {sheet}!{cell}",
                 if on { "set" } else { "unset" }
             ),
+            Self::NumberFormat {
+                sheet, cell, code, ..
+            } => format!("{sheet}!{cell} formatted {code:?}"),
+            Self::ColumnWidth {
+                sheet,
+                column,
+                width,
+                ..
+            } => format!("{sheet} column {column} width {width}"),
+            Self::RowHeight {
+                sheet, row, height, ..
+            } => format!("{sheet} row {row} height {height}"),
+            Self::PartPresent { part, present, .. } => {
+                format!("part {part} {}", if present { "present" } else { "absent" })
+            }
+            Self::DefinedNames { names, .. } => format!("defined names {names:?}"),
             Self::SlideCount { count, .. } => format!("{count} slide(s)"),
             Self::SlideText {
                 slide,
@@ -954,6 +1059,7 @@ enum CellValue {
     Text(String),
     Number(f64),
     Bool(bool),
+    Formula(String),
     Empty,
 }
 
@@ -973,6 +1079,11 @@ fn cell_value(value: &Value, sheet: &str, reference: &str) -> Result<CellValue, 
         return Ok(CellValue::Empty);
     };
     let kind = attribute(cell, "t").unwrap_or("n");
+    // A formula cell is never empty and never read as its cached value: the `<f>` child is what
+    // the cell states, and a shared formula's `ref` is irrelevant to its own text.
+    if let Some(formula) = elements(cell, "f").into_iter().next() {
+        return Ok(CellValue::Formula(element_text(formula)));
+    }
     let raw = elements(cell, "v")
         .into_iter()
         .next()
@@ -1035,6 +1146,103 @@ fn cell_property(
             attribute(element, "val") != Some("0") && attribute(element, "val") != Some("false")
         })
     }))
+}
+
+/// A cell's number format code, resolved through the workbook's styles: `s` → `cellXfs`/`xf` →
+/// `numFmtId` → `numFmts`/`numFmt@formatCode`.
+fn number_format(value: &Value, sheet: &str, reference: &str) -> Result<String, String> {
+    let part = sheet_part(value, sheet)?;
+    let tree = part_tree(value, &part)?;
+    let cell = elements(tree, "c")
+        .into_iter()
+        .find(|cell| attribute(cell, "r") == Some(reference))
+        .ok_or_else(|| format!("{sheet}!{reference} holds no cell"))?;
+    let index = attribute(cell, "s")
+        .and_then(|index| index.parse::<usize>().ok())
+        .unwrap_or(0);
+    let styles = part_tree(value, "xl/styles.xml")?;
+    let cell_xfs = elements(styles, "cellXfs")
+        .into_iter()
+        .next()
+        .ok_or_else(|| "the workbook has no cell formats".to_string())?;
+    let xf = elements(cell_xfs, "xf")
+        .into_iter()
+        .nth(index)
+        .ok_or_else(|| format!("the workbook has no cell format {index}"))?;
+    let id = attribute(xf, "numFmtId")
+        .and_then(|id| id.parse::<u32>().ok())
+        .unwrap_or(0);
+    let code = elements(styles, "numFmts")
+        .into_iter()
+        .next()
+        .and_then(|formats| {
+            elements(formats, "numFmt").into_iter().find_map(|entry| {
+                let entry_id = attribute(entry, "numFmtId").and_then(|id| id.parse::<u32>().ok());
+                (entry_id == Some(id))
+                    .then(|| attribute(entry, "formatCode").map(str::to_string))
+                    .flatten()
+            })
+        });
+    code.ok_or_else(|| format!("the styles part states no number format {id}"))
+}
+
+/// A column's width, from the `<col>` whose `min`/`max` covers the column (1-based).
+fn column_width(value: &Value, sheet: &str, column: &str) -> Result<f64, String> {
+    let part = sheet_part(value, sheet)?;
+    let tree = part_tree(value, &part)?;
+    let index = crate::reader_output::column_index(column)
+        .map(|index| u64::from(index) + 1)
+        .ok_or_else(|| format!("{column:?} is not a column"))?;
+    let col = elements(tree, "col")
+        .into_iter()
+        .find(|col| {
+            let min = attribute(col, "min")
+                .and_then(|min| min.parse::<u64>().ok())
+                .unwrap_or(0);
+            let max = attribute(col, "max")
+                .and_then(|max| max.parse::<u64>().ok())
+                .unwrap_or(0);
+            min <= index && index <= max
+        })
+        .ok_or_else(|| format!("{sheet} has no column definition covering {column}"))?;
+    attribute(col, "width")
+        .and_then(|width| width.parse::<f64>().ok())
+        .ok_or_else(|| format!("{sheet}'s column {column} states no width"))
+}
+
+/// A row's height, from the `<row r="N">` element's `ht`.
+fn row_height(value: &Value, sheet: &str, row: u32) -> Result<f64, String> {
+    let part = sheet_part(value, sheet)?;
+    let tree = part_tree(value, &part)?;
+    let number = row.to_string();
+    let found = elements(tree, "row")
+        .into_iter()
+        .find(|entry| attribute(entry, "r") == Some(number.as_str()))
+        .ok_or_else(|| format!("{sheet} has no row {row}"))?;
+    attribute(found, "ht")
+        .and_then(|height| height.parse::<f64>().ok())
+        .ok_or_else(|| format!("{sheet}'s row {row} states no height"))
+}
+
+/// The workbook's defined names, in order, naming a sheet-scoped one with its sheet.
+fn defined_names(value: &Value) -> Result<Vec<String>, String> {
+    let workbook = part_tree(value, "xl/workbook.xml")?;
+    let sheets = sheet_parts(value)?;
+    let mut names = Vec::new();
+    let Some(block) = elements(workbook, "definedNames").into_iter().next() else {
+        return Ok(names);
+    };
+    for entry in elements(block, "definedName") {
+        let name = attribute(entry, "name").unwrap_or_default();
+        match attribute(entry, "localSheetId").and_then(|index| index.parse::<usize>().ok()) {
+            Some(index) => {
+                let sheet = sheets.get(index).map(|(name, _)| name.as_str());
+                names.push(format!("{name} (sheet {:?})", sheet.unwrap_or_default()));
+            }
+            None => names.push(name.to_string()),
+        }
+    }
+    Ok(names)
 }
 
 /// The package's media parts, by canonical name.
@@ -1106,4 +1314,220 @@ fn form_field(value: &Value, name: &str) -> Result<String, String> {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::Family;
+    use serde_json::json;
+    use std::collections::BTreeMap;
+
+    /// The canonical value of a generated workbook.
+    fn canonical(bytes: &[u8]) -> Value {
+        crate::canonical::ooxml::canonical(Family::Xlsx, bytes).expect("a canonical workbook")
+    }
+
+    fn check(effect: &Effect, value: &Value) -> EffectCheck {
+        let mut outputs = BTreeMap::new();
+        outputs.insert("edited.xlsx".to_string(), value.clone());
+        effect.check(&outputs, "edited.xlsx")
+    }
+
+    fn edited() -> Value {
+        canonical(&crate::corpus::build::xlsx_edit())
+    }
+
+    fn rich() -> Value {
+        canonical(&crate::corpus::build::xlsx_rich())
+    }
+
+    /// `value` with `name` set on the `<row r="N">` of `sheet`.
+    fn with_row_attribute(
+        mut value: Value,
+        sheet: &str,
+        row: u32,
+        name: &str,
+        held: &str,
+    ) -> Value {
+        fn walk(node: &mut Value, row: &str, name: &str, held: &str) -> bool {
+            let is_row = node.get("name").and_then(Value::as_str) == Some("row")
+                && node
+                    .get("attrs")
+                    .and_then(|attrs| attrs.get("r"))
+                    .and_then(Value::as_str)
+                    == Some(row);
+            if is_row {
+                node["attrs"][name] = json!(held);
+                return true;
+            }
+            if let Some(children) = node.get_mut("children").and_then(Value::as_array_mut) {
+                for child in children {
+                    if walk(child, row, name, held) {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+        let part = sheet_part(&value, sheet).expect("a sheet part");
+        let tree = value
+            .get_mut("parts")
+            .and_then(|parts| parts.get_mut(&part))
+            .and_then(|part| part.get_mut("tree"))
+            .expect("a sheet tree");
+        assert!(walk(tree, &row.to_string(), name, held), "no row {row}");
+        value
+    }
+
+    #[test]
+    fn a_formula_cell_holds_its_own_text_and_is_never_empty() {
+        let value = edited();
+        let formula = Effect::Cell {
+            output: None,
+            sheet: "First",
+            cell: "B4",
+            value: Scalar::Formula("SUM(B2:B3)"),
+        };
+        assert!(
+            check(&formula, &value).passed,
+            "{:?}",
+            check(&formula, &value)
+        );
+        let absent = Effect::CellAbsent {
+            output: None,
+            sheet: "First",
+            cell: "B4",
+        };
+        assert!(
+            !check(&absent, &value).passed,
+            "a formula cell is not empty"
+        );
+        let text = Effect::Cell {
+            output: None,
+            sheet: "First",
+            cell: "B4",
+            value: Scalar::Text("SUM(B2:B3)"),
+        };
+        assert!(!check(&text, &value).passed, "a formula is not its text");
+    }
+
+    #[test]
+    fn a_number_format_is_read_through_the_styles_part_and_an_unknown_id_is_named() {
+        let value = rich();
+        let held = Effect::NumberFormat {
+            output: None,
+            sheet: "Data",
+            cell: "F2",
+            code: "# ?/?",
+        };
+        assert!(check(&held, &value).passed, "{:?}", check(&held, &value));
+        let wrong = Effect::NumberFormat {
+            output: None,
+            sheet: "Data",
+            cell: "F2",
+            code: "0.00",
+        };
+        assert!(!check(&wrong, &value).passed);
+        // `A2` states `s="1"`, whose `numFmtId` is the builtin date format 14 with no `<numFmt>`
+        // entry: the detail must name the id rather than guess a code.
+        let unknown = Effect::NumberFormat {
+            output: None,
+            sheet: "Data",
+            cell: "A2",
+            code: "0.00",
+        };
+        let failed = check(&unknown, &value);
+        assert!(!failed.passed);
+        assert!(failed.detail.contains("14"), "{}", failed.detail);
+    }
+
+    #[test]
+    fn a_column_width_is_read_from_the_covering_column_definition() {
+        let value = edited();
+        let held = Effect::ColumnWidth {
+            output: None,
+            sheet: "First",
+            column: "A",
+            width: 12.0,
+        };
+        assert!(check(&held, &value).passed, "{:?}", check(&held, &value));
+        let wrong = Effect::ColumnWidth {
+            output: None,
+            sheet: "First",
+            column: "A",
+            width: 13.0,
+        };
+        assert!(!check(&wrong, &value).passed);
+        let uncovered = Effect::ColumnWidth {
+            output: None,
+            sheet: "First",
+            column: "B",
+            width: 20.0,
+        };
+        assert!(!check(&uncovered, &value).passed);
+    }
+
+    #[test]
+    fn a_row_height_is_read_from_the_row_element() {
+        let value = edited();
+        let absent = Effect::RowHeight {
+            output: None,
+            sheet: "First",
+            row: 2,
+            height: 30.0,
+        };
+        assert!(!check(&absent, &value).passed, "row 2 states no height");
+        let held = with_row_attribute(value, "First", 2, "ht", "30");
+        assert!(check(&absent, &held).passed, "{:?}", check(&absent, &held));
+        let wrong = Effect::RowHeight {
+            output: None,
+            sheet: "First",
+            row: 2,
+            height: 31.0,
+        };
+        assert!(!check(&wrong, &held).passed);
+    }
+
+    #[test]
+    fn a_part_presence_effect_sees_the_package_parts() {
+        let value = edited();
+        let chart = Effect::PartPresent {
+            output: None,
+            part: "xl/charts/chart1.xml",
+            present: true,
+        };
+        assert!(check(&chart, &value).passed);
+        let gone = Effect::PartPresent {
+            output: None,
+            part: "xl/charts/chart1.xml",
+            present: false,
+        };
+        assert!(!check(&gone, &value).passed);
+        let missing = Effect::PartPresent {
+            output: None,
+            part: "xl/worksheets/sheet9.xml",
+            present: false,
+        };
+        assert!(check(&missing, &value).passed);
+    }
+
+    #[test]
+    fn defined_names_are_named_globally_or_with_their_sheet() {
+        let value = edited();
+        let held = Effect::DefinedNames {
+            output: None,
+            names: &[
+                "Rate",
+                "Local (sheet \"Second\")",
+                "ThirdName (sheet \"Third\")",
+            ],
+        };
+        assert!(check(&held, &value).passed, "{:?}", check(&held, &value));
+        let wrong = Effect::DefinedNames {
+            output: None,
+            names: &["Rate", "Local", "ThirdName"],
+        };
+        assert!(!check(&wrong, &value).passed);
+    }
 }

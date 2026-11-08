@@ -105,6 +105,37 @@ fn every_case_key_is_unique() {
 }
 
 #[test]
+fn a_refusal_template_keeps_the_product_words() {
+    // A template whose `{}` is the whole sentence would accept any non-empty reason: the product's
+    // own words must survive around the variable, and a sentence that is wholly a library's is
+    // `Reason::third_party`, which only an internal failure may state.
+    for case in writer_cases() {
+        let reason = match case.expect {
+            Expect::Refused(reason) | Expect::Failed(reason) if reason.variable => reason,
+            _ => continue,
+        };
+        if reason.is_third_party() {
+            assert!(
+                matches!(case.expect, Expect::Failed(_)),
+                "{}: only an internal failure may state a wholly third-party reason",
+                case.key()
+            );
+            continue;
+        }
+        assert!(
+            !reason
+                .text
+                .split("{}")
+                .collect::<String>()
+                .trim()
+                .is_empty(),
+            "{}: a reason template must keep the product's own words",
+            case.key()
+        );
+    }
+}
+
+#[test]
 fn the_corpus_covers_exactly_the_thirteen_operations() {
     let found: BTreeSet<&str> = writer_cases().iter().map(|case| case.operation).collect();
     let expected: BTreeSet<&str> = OPERATIONS.iter().copied().collect();

@@ -15,7 +15,8 @@
 //! This surface validates the request's shape: the operation name, the edit names, the format the
 //! output extension comes from, the split's groups (whose count names the parts and is bounded by
 //! the vocabulary's split cap), and the destination. A value's own range is the operation
-//! implementation's business and is refused there.
+//! implementation's business and is refused there. Its own refusals are the vocabulary's
+//! `surface_*` marks, so the engine prints one sentence per refusal however many places enforce it.
 //!
 //! The operations, and the values each takes (the producer's own names; a path is a value):
 //!
@@ -35,6 +36,11 @@
 //!
 //! An edit is one object in `edits` whose `op` is one of its family's sub-operations; a path a
 //! sub-operation takes (an `add_image`'s `image`) travels inside that object.
+//!
+//! Which operations are carried out is the writing half's business, not this surface's:
+//! `xlsx_edit` is, and every other operation answers with the vocabulary's
+//! `reason_not_carried_out` until its port lands. The surface's own checks run first either way,
+//! so a request refused here is refused before any package is opened.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -132,6 +138,22 @@ impl Failure {
     pub fn is_usage(&self) -> bool {
         self.class == USAGE
     }
+
+    /// A failure the caller can fix: the request names something the engine cannot accept.
+    pub(crate) fn usage(reason: impl Into<String>) -> Self {
+        Self {
+            class: USAGE.to_string(),
+            reason: reason.into(),
+        }
+    }
+
+    /// A failure the engine could not complete after accepting the request.
+    pub(crate) fn internal(reason: impl Into<String>) -> Self {
+        Self {
+            class: INTERNAL.to_string(),
+            reason: reason.into(),
+        }
+    }
 }
 
 /// Carry out one operation.
@@ -145,15 +167,16 @@ impl Failure {
 #[must_use]
 pub fn execute(request: &Request) -> Outcome {
     crate::contained::contain_panics(|| dispatch(request))
-        .unwrap_or_else(|_| Outcome::failed(INTERNAL, crate::contained::ENGINE_FAILED))
+        .unwrap_or_else(|_| Outcome::failed(INTERNAL, crate::contained::engine_failed()))
 }
 
 /// The one dispatch, with the panic boundary already around it.
 fn dispatch(request: &Request) -> Outcome {
+    let marks = &crate::vocabulary::vocabulary().marks;
     let Some(operation) = Operation::parse(&request.operation) else {
         return Outcome::failed(
             USAGE,
-            format!("unknown operation \"{}\"", request.operation),
+            marks.format("surface_unknown_operation", &[("name", &request.operation)]),
         );
     };
     if let Err(reason) = validate(request, operation) {
@@ -176,8 +199,17 @@ fn dispatch(request: &Request) -> Outcome {
     {
         return Outcome::failed(
             USAGE,
-            format!("the destination already holds {}", existing.display()),
+            marks.format(
+                "surface_output_taken",
+                &[("path", &existing.display().to_string())],
+            ),
         );
+    }
+    // The one operation the writing half carries out so far. The edit opens the package, proves
+    // its family from the content, and writes a copy of it; the destination is still the engine's
+    // to name, and the write is create-new.
+    if operation == Operation::XlsxEdit {
+        return crate::writing::edit_operation(request, &outputs[0]);
     }
     Outcome::failed(
         INTERNAL,
@@ -198,24 +230,21 @@ fn check_destination(destination: &Destination) -> Result<(), String> {
     // A trailing separator is resolved by the kernel before `lstat`, so `link/` would name the
     // link's target; the normalised spelling keeps the link itself visible to the check.
     let directory = destination.directory.components().as_path();
+    let shown = directory.display().to_string();
+    let marks = &crate::vocabulary::vocabulary().marks;
     match std::fs::symlink_metadata(directory) {
-        Ok(metadata) if metadata.is_symlink() => Err(format!(
-            "the destination {} is a symlink: document output needs a real directory",
-            directory.display()
-        )),
+        Ok(metadata) if metadata.is_symlink() => {
+            Err(marks.format("surface_destination_symlink", &[("directory", &shown)]))
+        }
         Ok(metadata) if metadata.is_dir() => Ok(()),
-        Ok(_) => Err(format!(
-            "the destination {} is not a directory",
-            directory.display()
+        Ok(_) => Err(marks.format(
+            "surface_destination_not_directory",
+            &[("directory", &shown)],
         )),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(format!(
-            "the destination directory {} does not exist",
-            directory.display()
-        )),
-        Err(_) => Err(format!(
-            "the destination directory {} could not be read",
-            directory.display()
-        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Err(marks.format("surface_destination_missing", &[("directory", &shown)]))
+        }
+        Err(_) => Err(marks.format("surface_destination_unreadable", &[("directory", &shown)])),
     }
 }
 
@@ -338,7 +367,7 @@ const PPTX_EDITS: &[&str] = &[
 ];
 
 /// One family's edit vocabulary.
-fn edit_names(family: Family) -> &'static [&'static str] {
+pub(crate) fn edit_names(family: Family) -> &'static [&'static str] {
     match family {
         Family::Docx => DOCX_EDITS,
         Family::Xlsx => XLSX_EDITS,
@@ -353,11 +382,10 @@ const TEMPLATE_FORMATS: [Family; 3] = [Family::Docx, Family::Xlsx, Family::Pptx]
 
 /// Refuse a request the operation cannot accept before anything is written.
 fn validate(request: &Request, operation: Operation) -> Result<(), String> {
+    let marks = &crate::vocabulary::vocabulary().marks;
     for reserved in ["output", "outputs"] {
         if request.values.contains_key(reserved) {
-            return Err(format!(
-                "the request carries \"{reserved}\": the destination names the outputs"
-            ));
+            return Err(marks.format("surface_reserved_output", &[("name", reserved)]));
         }
     }
     if let Some(family) = operation.edit_family() {
@@ -373,13 +401,11 @@ fn validate(request: &Request, operation: Operation) -> Result<(), String> {
         Operation::PdfSplit => {
             let groups = split_groups(request)?;
             if groups.is_empty() {
-                return Err("the pdf_split operation needs at least one group".to_string());
+                return Err(marks.get("surface_groups_empty").to_string());
             }
             let max = crate::vocabulary::vocabulary().limits.split_parts_max;
             if groups.len() > max {
-                return Err(format!(
-                    "the pdf_split operation takes at most {max} groups"
-                ));
+                return Err(marks.format("surface_groups_too_many", &[("max", &max.to_string())]));
             }
         }
         _ => {}
@@ -389,37 +415,41 @@ fn validate(request: &Request, operation: Operation) -> Result<(), String> {
 
 /// The family a `format` value names, when the operation accepts it.
 fn format_family(request: &Request, accepted: &[Family]) -> Result<Family, String> {
+    let marks = &crate::vocabulary::vocabulary().marks;
     let word = request
         .values
         .get("format")
         .and_then(Value::as_str)
-        .ok_or("the operation needs a \"format\"")?;
+        .ok_or_else(|| marks.get("surface_format_missing"))?;
     accepted
         .iter()
         .copied()
         .find(|family| family.as_str() == word)
-        .ok_or_else(|| format!("unknown format \"{word}\""))
+        .ok_or_else(|| marks.format("surface_unknown_format", &[("format", word)]))
 }
 
 /// Every edit names a sub-operation this family has.
 fn validate_edits(request: &Request, family: Family) -> Result<(), String> {
+    let marks = &crate::vocabulary::vocabulary().marks;
     let edits = request
         .values
         .get("edits")
         .and_then(Value::as_array)
-        .ok_or_else(|| {
-            format!(
-                "the {}_edit operation needs an \"edits\" array",
-                family.as_str()
+        .ok_or_else(|| marks.format("surface_edits_missing", &[("family", family.as_str())]))?;
+    for (index, edit) in edits.iter().enumerate() {
+        let name = edit.get("op").and_then(Value::as_str).ok_or_else(|| {
+            marks.format(
+                "surface_edit_unnamed",
+                &[("index", &(index + 1).to_string())],
             )
         })?;
-    for (index, edit) in edits.iter().enumerate() {
-        let name = edit
-            .get("op")
-            .and_then(Value::as_str)
-            .ok_or_else(|| format!("edit {} names no operation", index + 1))?;
         if !edit_names(family).contains(&name) {
-            return Err(format!("unknown {} edit \"{name}\"", family.as_str()));
+            // The kit's own sentence for an edit name it does not know, so a request either
+            // implementation refuses reads the same.
+            return Err(marks.format(
+                "surface_unknown_edit",
+                &[("family", family.as_str()), ("name", name)],
+            ));
         }
     }
     Ok(())
@@ -432,7 +462,12 @@ fn split_groups(request: &Request) -> Result<&[Value], String> {
         .get("groups")
         .and_then(Value::as_array)
         .map(Vec::as_slice)
-        .ok_or_else(|| "the pdf_split operation needs a \"groups\" array".to_string())
+        .ok_or_else(|| {
+            crate::vocabulary::vocabulary()
+                .marks
+                .get("surface_groups_missing")
+                .to_string()
+        })
 }
 
 /// The files a request will produce, named from the caller's directory and base name.
@@ -467,8 +502,13 @@ fn output_extension(request: &Request, operation: Operation) -> Result<String, S
     }
 }
 
-/// The extension a copy of an input is written with: the input's own when its name is one of the
-/// family's spellings (a `.docm` copy stays one, macros and all), the family's name otherwise.
+/// The extension a copy of an input is written with.
+///
+/// The family is the one the operation proves from the input's *content*, never from its name: a
+/// wrong-family input is refused before anything is written, so the extension is chosen only for a
+/// package that really is this family. The input's own extension is kept only when it is one of
+/// that family's spellings, which is what keeps a `.xlsm` copy macro-enabled while a workbook named
+/// `.bin` is written as `.xlsx`.
 fn copy_extension(input: Option<&Value>, family: Family) -> String {
     let named = input
         .and_then(Value::as_str)
@@ -494,7 +534,9 @@ fn checked_base(base: &str) -> Result<String, String> {
         {
             Ok(base.to_string())
         }
-        _ => Err(format!("\"{base}\" is not one file-name component")),
+        _ => Err(crate::vocabulary::vocabulary()
+            .marks
+            .format("surface_base_not_a_name", &[("base", base)])),
     }
 }
 
@@ -627,7 +669,7 @@ mod tests {
             // The reason's wording is part of the contract, so it is pinned here.
             assert_eq!(
                 failure.reason,
-                format!("unknown {family} edit \"rewrite_everything\"")
+                format!("unknown {family} edit: \"rewrite_everything\"")
             );
         }
     }
@@ -733,6 +775,18 @@ mod tests {
             "xlsx"
         );
         assert_eq!(copy_extension(None, Family::Pptx), "pptx");
+        assert_eq!(
+            copy_extension(Some(&json!("report.bin")), Family::Docx),
+            "docx"
+        );
+        assert_eq!(
+            copy_extension(Some(&json!("sheet.xls")), Family::Xlsx),
+            "xlsx"
+        );
+        assert_eq!(
+            copy_extension(Some(&json!("sheet.xlsm")), Family::Xlsx),
+            "xlsm"
+        );
     }
 
     #[test]

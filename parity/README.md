@@ -4,7 +4,7 @@ The instrument that judges the document engine against the product's own behavio
 references — the current **writer** (the JavaScript document kit) and the current **reader** (the
 product's own Rust reader sources, copied under `src/reference_sources/`) — and compares what they
 produce against a recorded baseline by a declared canonical model per format. The default engine is
-the crate's reader against that reference writer.
+the crate's own writer and reader.
 
 Nothing here is part of the product. The product's tool layer — the model-facing description, the
 argument schema, refusal wording, answer rendering, registration — is deliberately absent: the
@@ -15,8 +15,8 @@ point, exactly as the product does underneath its tool.
 
 ```
 cd parity
-cargo run --bin parity            # the gate: the crate's reader against the recorded baseline
-cargo run --bin parity -- --engine reference  # the recorded engine: the product's reader
+cargo run --bin parity            # the gate: the crate's writer and reader against the baseline
+cargo run --bin parity -- --engine reference  # the recorded engine: the product's own reader
 cargo test                        # every test, including the gate and the model's self-tests
 cargo run --bin record-baseline   # deliberately re-record the baseline
 ```
@@ -26,14 +26,16 @@ crate the harness depends on. `cargo test -p document-engine` runs the crate's o
 its vocabulary restatement scan) without the harness.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 57 cases and 91 readings — takes about twenty seconds; the whole
+managed runtime. A full pass — 120 cases and 91 readings — takes about a minute; the whole
 test suite, which runs the corpus twice for its determinism check, takes a couple of minutes.
 
 `parity --engine noop` runs the same corpus against the do-nothing engine. That engine exists only
 to prove the gate rejects it: a case passes only if its transcript matches the baseline **and** its
 declared effect happened, and a no-op satisfies neither. `parity --engine reference` is the
 recorder's engine — the reference writer and the product's own reader — and is the only run that
-also requires the build identity to match the baseline.
+also requires the build identity to match the baseline. `parity --engine crate` (the default) pairs
+the engine crate's own writer and reader; an operation the crate's writer has not landed yet is
+shown as `SKIP`, not failed, and a run that judged no case at all is not a pass.
 
 ## What is here
 
@@ -44,18 +46,19 @@ also requires the build identity to match the baseline.
 | `src/reference/writer.rs` | The current writer: the committed kit bundle and font, embedded and materialized into the harness's temporary directory, run on `bun` through the product's request-and-result contract (`request-<n>.json` in, `result-<n>.json` out, never stdout). |
 | `src/reference/reader.rs` | The current reader: `document::convert_document_file`, the one bounded entry point every product read passes through, plus the product converter's own detection verdict built from its `pub(crate)` primitives. |
 | `src/reference/crate_reader.rs` | The engine crate's reader: `document_engine::reading::{detect, read}`, whose shapes are already the harness's. This is the default reader. |
+| `src/reference/crate_writer.rs` | The engine crate's writer: `document_engine::operation::execute`, bridged from the kit's request shape to the crate's `Request`/`Destination`. The crate's writer implements only the operations `src/corpus/ledger.rs` records, so the rest are unjudged rather than failed. |
 | `src/reference/noop.rs` | The negative control. |
 | `src/reference_sources/` | Byte-for-byte copies of the product's reader modules, compiled here. `tests/engine_contract.rs` compares them with `../../src/` and fails when they diverge. |
 | `src/host/` | The minimal host the reader sources need: `rules.json` and its typed views, `contain_panics`, and the handful of `util` helpers the readers call. |
-| `src/corpus/` | The writer scenarios (`cases.rs`) and their declared effects (`effect.rs`); the document builders are re-exported from `document_engine::test_support`, their one home. |
+| `src/corpus/` | The writer scenarios (`cases.rs`) and their declared effects (`effect.rs`); `ledger.rs` states which operations the crate's writer covers; the document builders are re-exported from `document_engine::test_support`, their one home. |
 | `src/canonical/` | The canonical model, one module per format, plus the diff. |
 | `src/harness.rs` | Runs a corpus against an engine, compares, and produces verdicts. |
 | `src/baseline.rs` | The recorded reference, with the identity of the engine that produced it. |
 | `src/transcript.rs` | The normalised transcript: no paths, no nonces, no timings. |
 | `tests/engine_contract.rs` | The engine crate's contract, proved from here: its vocabulary is the reference's data, its result shapes carry every recorded field, its closed operation set holds every corpus operation and edit, the reference copies are byte-for-byte the product's, and the host's media tables are the product's own. |
-| `tests/coverage.rs` | The corpus's depth: every reading mark is witnessed by a recorded reading or recorded as unproducible with its reason, every per-family failure verdict is witnessed, and every corpus document is in the baseline. |
-| `tests/teeth.rs` | The comparison has teeth: a reading altered in any single compared field — a picture dropped, a note reworded, a report line reordered, a flag flipped — fails it, and so does a detection answer changed for one input. |
-| `baseline/baseline.json` | The recorded reference (about 2.4 MB of canonical documents). |
+| `tests/coverage.rs` | The corpus's depth: every reading mark is witnessed by a recorded reading or recorded as unproducible with its reason, every mark only the writing half prints is witnessed by a recorded case's answer or recorded unreached with its reason, neither ledger's "not produced" side names a mark a recorded answer really prints, every per-family failure verdict is witnessed, and every corpus document is in the baseline. |
+| `tests/teeth.rs` | The comparison has teeth: a reading or a produced case altered in any single compared field — a picture dropped, a note or a loss reworded, an output renamed, a produced file's content changed, a status flipped — fails it, and so does a detection answer changed for one input. |
+| `baseline/baseline.json` | The recorded reference (about 4 MB of canonical documents). |
 | `src/bin/parity.rs`, `src/bin/record-baseline.rs` | The gate and the deliberate recorder. |
 
 The reader sources are **copies** under `src/reference_sources/`, byte for byte those of
@@ -82,6 +85,8 @@ A different engine is a new pair of `impl`s, not a change to the corpus, the mod
 impl Writer for MyEngine {
     fn identity(&self) -> EngineIdentity { … }
     fn run(&self, request: &serde_json::Value, scratch: &Path) -> anyhow::Result<WriterOutcome> { … }
+    // Optional: false means the corpus's cases for that operation are unjudged, not failed.
+    fn covers(&self, key: &Key) -> bool { … }
 }
 impl Reader for MyEngine {
     fn identity(&self) -> EngineIdentity { … }
@@ -95,9 +100,16 @@ impl Reader for MyEngine {
 The request the writer receives is the product's own: the same keys the tool builds
 (`src/tools/document.rs` is the reference for the shapes), with `$in/<name>` and `$out/<name>`
 already resolved to absolute paths inside the harness's temporary directory. The reader is called
-with a path, the name the document was given, and a directory for extracted images, and must be
-`Send + Sync`: each reading runs on a thread of its own under a timeout, so one that never returns
-costs one reading rather than the gate.
+with a path, the name the document was given, and a directory for extracted images. The writer and
+the reader are both `Send + Sync` and each runs on a thread of its own under a timeout, so one that
+never returns costs one case or one reading rather than the gate.
+
+An engine need not implement the whole corpus. `Writer::covers` answers whether the engine carries
+out the operation a case exercises; a case it does not is *unjudged*: the run still produces its
+outcome, so the baseline's entry is not stale, and the verdict says `SKIP <key> — <why>` rather
+than failing a comparison the engine never entered. The crate's ledger (`src/corpus/ledger.rs`)
+names the operations its writer implements today. A run that judged no case at all is not a pass —
+the report says `no writer case was judged: the engine implements none of the corpus's operations`.
 
 `WriterOutcome`, `Failure`, `Reading`, `ImageArtifact` and `Family` are not defined here: they are
 the `document-engine` crate's own shapes, re-exported so the reference answers in them and the
@@ -112,9 +124,12 @@ Two conventions let a different engine answer the same corpus:
 
 - **A refusal is the engine's own.** The transcript carries the class (`usage` for the caller's to
   fix, `internal` otherwise) and the reason the engine gave, and the gate compares both;
-  `Expect::Refused` additionally requires the reason to mention the case's own fragment. What the
-  product prints *around* a refusal — its `usage:` prefix and hint — never enters the transcript,
-  so it is not the harness's to reproduce.
+  `Expect::Refused(Reason::contains(…))` additionally requires the reason to mention the case's own
+  fragment. A reason that is partly a third-party library's is declared as
+  `Reason::template("… {} …")`: the engine's own words must frame a non-empty variable, and the
+  transcript records the variable as `{{variable}}`, so a different library message does not fail a
+  case the engine answered correctly. What the product prints *around* a refusal — its `usage:`
+  prefix and hint — never enters the transcript, so it is not the harness's to reproduce.
 - **The engine names its outputs, and the corpus records those names.** The crate's `execute` is
   given a destination (a directory and a base name) and derives `{base}.{ext}`, or
   `{base}_part{n}.{ext}` for a split — the same rule the product's tool applies. Every corpus
@@ -182,6 +197,28 @@ builders have one home in `document_engine::test_support`, which the crate's own
 - every `docx_edit` sub-operation (9), every `xlsx_edit` sub-operation (14) and every `pptx_edit`
   sub-operation (14), each with the precondition it needs — a second sheet to move, a merged range
   to unmerge, a picture to place, a paragraph to remove that is not the last one;
+- the workbook edit in depth, since it is the action the crate's writer carries out: one case per
+  sub-operation against a plain workbook, and a case with its own identifier for each behaviour the
+  action promises — a merge that keeps the content it covers and each way a merge is refused, the
+  only-sheet and last-visible-sheet refusals beside a hidden sheet removed while everything left is
+  hidden, the parts a deleted sheet leaves behind and the sheet-scoped names it drops, what a move
+  remaps, the dangling references named after a rename and a removal, the count of formulas left
+  behind when a row or a column shifts, a number, a boolean and a formula written into a cell, a
+  number format beside a value, a cell range as a format target, a column and a row as targets
+  carrying a width and a height, a column-wide range refused, the edit-count, text-length and
+  format-target bounds — the text bound with a multi-byte value, so counting characters rather
+  than bytes is what the case tells apart — a macro-enabled input whose copy keeps its extension, a
+  signed package, and the chart and pivot notes a content change raises. The sheet-part readers are
+  exercised over a self-closing empty cell and a self-closing row: a cell write, a column shift and
+  two inserts in one call each keep the element beside the empty one, and an insert undone by a
+  delete leaves the sheet as it was. Three refusals name the input itself — another family's
+  package, a package with no family part, and one with no `[Content_Types].xml`, met by a
+  part-adding edit, by a duplicate sheet name and by a formatting edit, since the styles path asks
+  for the content-type list before it declares a styles part. Its inputs are
+  generated for the purpose: a workbook holding charts, a pivot cache, defined names (global and
+  sheet-scoped), an existing picture and its drawing, merges over content, conditional formats, a
+  data validation, hyperlinks, a page break and a table; a macro-enabled copy of it with a
+  signature part; and the small workbooks each sheet refusal and each self-closing case needs;
 - the eight PDF actions, with form filling over every field kind a form can hold and flattening
   both on and off;
 - the failure side: requests the engine refuses as the caller's to fix, and one it accepts and
@@ -210,8 +247,12 @@ The reader corpus is the same generated documents plus the negative and depth ca
   against what the product makes of those bytes rather than against a guess.
 
 Every reading mark and every per-family failure verdict is witnessed by a recorded reading or
-recorded as unproducible with its reason; `document_engine::test_support::coverage` is the ledger
-and `tests/coverage.rs` checks it against the baseline.
+recorded as unproducible with its reason, and every mark only the writing half prints is witnessed
+by a recorded case's answer or recorded unreached with its reason;
+`document_engine::test_support::coverage` is the ledger and `tests/coverage.rs` checks both against
+the baseline, in both directions: a mark recorded as not produced must not be one a recorded answer
+prints. A writing mark both halves print (a Word mark, a chart kind) is witnessed by the
+reading ledger, which reads the same vocabulary entry.
 
 
 ## The canonical model
@@ -271,15 +312,36 @@ Matching the baseline is not enough: an operation implemented as a no-op could m
 recorded from a no-op. Every produced case declares what it is supposed to change — text present
 or absent, a table cell, a formatting property, a sheet-name list, a merged range, a slide count and
 its titles, a page's rotation or box, a form field's value, a flattened form — and the gate checks
-it against the canonical model. `tests/gate.rs` proves the rule with the no-op engine.
+it against the canonical model. The workbook's effects can also assert a cell's formula text, its
+number format (resolved through the styles part), a column's width, a row's height, the presence or
+absence of a part, and the workbook's defined names in order; a formula cell is never mistaken for
+an empty one, so `CellAbsent` cannot pass over a formula a call failed to remove.
+`tests/gate.rs` proves the rule with the no-op engine.
+
+## The arm's own two checks
+
+Two promises a comparison of documents cannot see are checked by the harness around every writer
+case, and each is a verdict problem rather than an abort:
+
+- **the input is unchanged**: every file in the case's `in/` directory is read before the engine
+  runs and compared byte for byte after it, so an engine that edits its input in place fails the
+  case by name;
+- **a refused call created nothing**: when the answer is a refusal or a failure, the case's output
+  directory must be empty, so an engine that leaves a half-written file behind fails the case by
+  name. A produced call may of course write.
 
 ## Verdicts and the baseline
 
-A verdict is keyed by `(family, operation, sub-operation)` and says pass or fail; a failure lists
-what differed, in terms a person can act on, bounded and without dumping two documents. Refusals are
+A verdict is keyed by `(family, operation, sub-operation)`, plus a case identifier when several
+cases share one, and says pass, fail or unjudged; a failure lists what differed, in terms a person
+can act on, bounded and without dumping two documents. An unjudged case is one the engine's
+`covers` says it does not implement: it is reported as `SKIP <key> — <why>`, counted apart, and
+never read as a pass — a run that judged no case at all fails with
+`no writer case was judged: the engine implements none of the corpus's operations`. Refusals are
 compared by the class the engine reports (`usage` for the caller's to fix, `internal` otherwise) and
 by the reason, with volatile parts normalised; the sentence the product prints around it is not the
-harness's business.
+harness's business. A reason declared as a template records a third-party library's message as
+`{{variable}}`, so a different message inside the same engine words is the same reason.
 
 `baseline/baseline.json` is recorded from the current engine and kept with its identity: the
 writer's build digest and `bun <version>` (with the bundle, kit, rules, lockfile, font and the
@@ -297,8 +359,8 @@ observed. The gate always prints both identities and states whether they match; 
 verdict matches the baseline. Only the reference gate — `parity --engine reference`, and the
 baseline test — treats a differing identity as a failure, because there the question is whether the
 reference engine is still the build the baseline records. Any other engine implementation, including
-the default crate reader, is compared on its verdicts alone; its differing identity is an expected
-fact, shown but not failed.
+the default crate writer and reader, is compared on its verdicts alone; its differing identity is
+an expected fact, shown but not failed.
 
 Recording is a deliberate act: only `cargo run --bin record-baseline` writes the file, and it
 refuses to record a run in which a case or a reading could not produce a transcript. Running the
@@ -319,17 +381,19 @@ The harness writes only inside one temporary directory under the OS temporary ar
 be named `document-parity-…` and lie under the OS temporary directory, or the harness refuses it,
 and a root the harness did not create is never removed.
 
-The whole run is bounded by a budget, and each half has its own bound inside it: a writer case runs
-its kit under a 120 s timeout, and a reading runs on a thread of its own, with a runtime of its own,
-under one too — so an engine that hangs on every case or every document fails in bounded time
-rather than once per call, and entries the budget does not reach fail with a budget problem rather
-than vanishing from the run. A read that does not finish within its bound is that reading's own
+The whole run is bounded by a budget, and each half has its own bound inside it: a writer case and a
+reading each run on a thread of their own, the writer under a 120 s timeout and the reading under
+one too — so an engine that hangs on every case or every document fails in bounded time rather than
+once per call, and entries the budget does not reach fail with a budget problem rather than
+vanishing from the run. A case or reading that does not finish within its bound is that entry's own
 problem — a timeout recorded as its outcome — and the rest of the corpus still runs; the recorder
 refuses to bake such a run into the baseline, because a timeout measures the machine rather than the
-bytes. Two limits of that isolation are stated rather than hidden: an
-abandoned reading thread holds one of the product's two document-conversion permits until the
-process ends, so two hung readings make every later reading time out (each still with its own
-verdict), and a thread cannot be killed, so a hung reading's memory is not reclaimed.
+bytes. An in-process writer cannot be interrupted: an abandoned writer thread may keep writing into
+that case's directory after the verdict is decided, which is why the run does not wait and why the
+directory is per case, so no later case reads it. Two limits of that isolation are stated rather
+than hidden: an abandoned reading thread holds one of the product's two document-conversion permits
+until the process ends, so two hung readings make every later reading time out (each still with its
+own verdict), and a thread cannot be killed, so a hung reading's memory is not reclaimed.
 
 The writer engine runs with the kit's own directory under that root as its working directory —
 never a workspace — with `--no-install` and `--no-env-file`, the same guards the product passes.

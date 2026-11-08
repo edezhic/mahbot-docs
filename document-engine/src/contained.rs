@@ -17,7 +17,10 @@ static HOOK: Once = Once::new();
 
 /// The reason the engine gives when its own code panics: a defect in the engine, never a document
 /// condition.
-pub(crate) const ENGINE_FAILED: &str = "the document engine failed unexpectedly";
+#[must_use]
+pub(crate) fn engine_failed() -> &'static str {
+    crate::vocabulary::vocabulary().marks.get("engine_failed")
+}
 
 /// Install the filtering hook once per process: a panic raised inside a contained region prints
 /// nothing, while every other thread's panic prints as usual.

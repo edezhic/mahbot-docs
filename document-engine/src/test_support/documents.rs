@@ -152,6 +152,69 @@ pub const RANGE_BUDGET_XLSX: Document = Document {
     build: build::xlsx_range_budget,
 };
 
+/// The workbook every `xlsx_edit` behaviour case runs on: three sheets (one hidden), a defined
+/// name of each scope, a drawing, a chart, a table, a pivot and every geometry an edit moves.
+/// These are edit inputs, not reading documents: the reading baseline must not move.
+pub const XLSX_EDIT: Document = Document {
+    name: "edit.xlsx",
+    build: build::xlsx_edit,
+};
+
+/// The edit workbook plus a macro project and a signature part.
+pub const XLSX_MACRO: Document = Document {
+    name: "edit.xlsm",
+    build: build::xlsx_macro,
+};
+
+/// A workbook with one visible sheet and one cell.
+pub const XLSX_ONLY_SHEET: Document = Document {
+    name: "only.xlsx",
+    build: build::xlsx_only_sheet,
+};
+
+/// A workbook with one visible sheet beside a hidden one.
+pub const XLSX_ONE_VISIBLE: Document = Document {
+    name: "visible.xlsx",
+    build: build::xlsx_one_visible,
+};
+
+/// A workbook whose two sheets are both hidden.
+pub const XLSX_ALL_HIDDEN: Document = Document {
+    name: "hidden.xlsx",
+    build: build::xlsx_all_hidden,
+};
+
+/// A workbook whose `<mergeCells>` is opened and never closed.
+pub const XLSX_BROKEN_MERGES: Document = Document {
+    name: "broken-merges.xlsx",
+    build: build::xlsx_broken_merges,
+};
+/// A workbook whose first sheet holds a merge ref no reader can place.
+pub const XLSX_BAD_MERGE_REF: Document = Document {
+    name: "bad-merge.xlsx",
+    build: build::xlsx_bad_merge_ref,
+};
+/// A workbook whose first sheet opens a `<mergeCell>` and never closes it.
+pub const XLSX_UNCLOSED_MERGE_CELL: Document = Document {
+    name: "unclosed-merge.xlsx",
+    build: build::xlsx_unclosed_merge_cell,
+};
+/// A package that declares content types and holds no family part.
+pub const XLSX_NO_FAMILY: Document = Document {
+    name: "no-family.xlsx",
+    build: build::xlsx_no_family,
+};
+/// The basic workbook without its `[Content_Types].xml`.
+pub const XLSX_NO_CONTENT_TYPES: Document = Document {
+    name: "no-types.xlsx",
+    build: build::xlsx_no_content_types,
+};
+/// A workbook whose first row holds a self-closing styled cell beside a cell with text.
+pub const XLSX_SELF_CLOSING: Document = Document {
+    name: "self-closing.xlsx",
+    build: build::xlsx_self_closing,
+};
+
 /// The deck: three slides with a title and a body each, and speaker notes on the first.
 pub const BASIC_PPTX: Document = Document {
     name: "basic.pptx",
@@ -491,6 +554,11 @@ pub const PICTURE_PNG: Document = Document {
 pub const PICTURE_JPEG: Document = Document {
     name: "picture.jpg",
     build: build::jpeg,
+};
+/// A picture whose name claims PNG and whose bytes are not one: the placement path's refusal.
+pub const PICTURE_BROKEN_PNG: Document = Document {
+    name: "broken.png",
+    build: build::broken_png,
 };
 
 /// Every document the reader reference is recorded on, in the order it is recorded: the original

@@ -14,7 +14,7 @@ copy carries its licence beside it (`NotoSans-LICENSE.txt`).
 | `reading` | The bounds and constants of the reading surface: the prefix a caller peeks, the input size a caller caps, the pictures a caller delivers and the text a caller spills, the page-text floor, the crop-box slack, the raster envelope (target, quality, scale ceiling) and the raster decode envelope applied to an embedded image. |
 | `limits` | The reader and producer caps: the ZIP entry, XML depth, Word table/style/field/link, Excel range-probe, chart, number-format, PDF mark/field, edit-work and multi-file bounds. |
 | `marks` | The fixed words, labels, templates and note fragments a reading or an operation prints, by key, each with the producers that print it. `{name}` placeholders are replaced with `Marks::format`. A mark the `rules` section already states (a Word tracked-change or chart spelling, a peripheral part's kind, a PDF form word) is not repeated here: `src/vocabulary.rs` reads it from `rules` under its key. A note with no values ("the workbook declares no sheets") is a fixed sentence and lives here; one that interpolates values is composed at the reporting site from this section's fragments and marks. |
-| `derived_marks` | The `rules` sections whose values are printed marks (chart spellings, slide labels, PDF form words and field kinds, metadata keys, Word marks and peripheral parts), each naming the producers that print them. They live in `rules` because the kit needs them as request vocabulary; this section says they are marks too. |
+| `derived_marks` | The `rules` sections whose values are printed marks (chart spellings, slide labels, PDF form words and field kinds, metadata keys, Word marks and peripheral parts), each naming the producers that print them today — the reading only, until a writing port prints one. They live in `rules` because the kit needs them as request vocabulary; this section says they are marks too. |
 | `enforced` | Who enforces each entry of `reading` and `limits`: `reading`, `writing` or `caller`. An entry may name more than one, because one number can be enforced in more than one place. `rules` stands for the whole rules section, which is request vocabulary rather than a bound. |
 
 The four families are not in the file: `Family::ALL` is their one home, and every operation and
@@ -22,7 +22,20 @@ result names them through `Family::as_str`.
 
 One mark is interim: `reason_not_carried_out` is the engine's answer for a recognised operation it
 does not carry out. It is stated here rather than in code, and the operation's own reason replaces
-it once the dispatch carries the operation out.
+it once the dispatch carries the operation out. The writing half carries `xlsx_edit` out today, so
+that mark is the answer for the other twelve operations only.
+
+The writing half's marks have their own namespaces: every sentence an edit prints is an `edit_*`
+mark and every sentence the request surface prints before an operation runs is a `surface_*` mark,
+so neither can collide with a reading's `xlsx_*`/`docx_*`/`render_*` mark in the one flat map — the
+reading's `render_*` namespace is its page-render refusals. The one sentence both halves print is
+`engine_failed`, the panic fallback. `edit_open_unreadable` names the input by its base name in
+`{name}` and quotes the container library's own text in `{message}`; `edit_wrong_family` composes
+its advice from `edit_wrong_family_hint`, the way the reading composes a note from its fragments.
+Every other `edit_*` and `surface_*` mark is a fixed sentence or interpolates the values its own
+placeholders name. A sentence an edit prints that a case cannot reach is recorded in
+`test_support/coverage.rs`'s writing ledger — one entry per reason, naming every mark that reason
+covers — exactly as a reading mark no generated document can carry is recorded there.
 
 A bound is stated once, in this file, and read by the code that enforces it; a bound whose consumer
 has not landed yet is stated ahead of it, so a caller and the engine agree on one number from the
@@ -54,14 +67,25 @@ Two spill numbers are deliberately separate because they bound different things:
 is the read caller's budget for its whole composed answer, in bytes, and `text_spill_chars` is the
 inbound caller's cap on the extracted text it inlines, in characters. Neither is the reading's.
 
-`Marks::printed(Producer::Reading)` enumerates exactly the marks the reading prints, and
-`printed_by` says which producers print a mark — so a mark both halves print says so.
+`Marks::printed(Producer::Reading)` enumerates exactly the marks the reading prints,
+`Marks::printed(Producer::Writing)` the marks only the writing half prints (a mark both halves print
+— a Word mark, a chart kind — says so in `printed_by` and is witnessed by the reading ledger), and
+`printed_by` says which producers print a mark.
+
+The two ledgers in `src/test_support/coverage.rs` are the corpus's own account of that: every mark
+a reading prints is witnessed by a recorded reading or recorded unproducible with its reason, and
+every mark only the writing half prints is witnessed by a recorded case's answer or recorded
+unreached with its reason. `parity/tests/coverage.rs` checks both against the recorded baseline, in
+both directions — a mark recorded as not produced must not be one a recorded answer prints — so a
+mark added without a witness is a failing test rather than an invisible gap.
 
 ## What is deliberately not here
 
-- **Product prose.** The model-facing description, the argument schema, the wording of refusals as
-  a user sees them and answer formatting belong to the caller, not the engine. `rules` carries a
-  few such strings because it is the kit's file; they are not the engine's business.
+- **Product prose.** The model-facing description, the argument schema, the answer rendered around
+  a result and its phrasing belong to the caller, not the engine. What the engine prints itself —
+  a refusal's reason, a note, a loss — comes from this file, so a caller renders those sentences as
+  they stand rather than rewording them. `rules` carries a few product-facing strings because it is
+  the kit's file; they are not the engine's business.
 - **A sentence the reading composes.** A note that interpolates values ("slide 3 could not be
   read") is composed at the reporting site from this file's fragments and marks, not stated whole.
   A note with no values is a fixed sentence and is in `marks`, so a restatement of it in code fails

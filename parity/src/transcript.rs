@@ -209,6 +209,32 @@ fn date_at(chars: &[char], start: usize) -> Option<usize> {
     None
 }
 
+/// The marker a template's variable span becomes, so a recorded reason carries the engine's own
+/// words and the fact that a third-party message was present without carrying the message itself.
+pub const VARIABLE: &str = "{{variable}}";
+
+/// A reason with the third-party text a template marks replaced by [`VARIABLE`], so the recorded
+/// value carries the engine's own words and the fact that a variable was present.
+///
+/// `template` is the expectation's `{}` template, when it has one. A template that does not match
+/// — the engine's own words differ, or the variable is empty — leaves the reason unchanged, which
+/// then differs from the baseline and fails the case.
+#[must_use]
+pub fn normalise_reason(template: Option<&str>, reason: &str) -> String {
+    template
+        .and_then(|template| marked(template, reason))
+        .unwrap_or_else(|| reason.to_string())
+}
+
+/// `reason` with the span `template`'s `{}` covers replaced by [`VARIABLE`], or `None` when the
+/// template states no span, `reason` does not frame one, or the variable is empty.
+#[must_use]
+pub fn marked(template: &str, reason: &str) -> Option<String> {
+    let (prefix, suffix) = template.split_once("{}")?;
+    let middle = reason.strip_prefix(prefix)?.strip_suffix(suffix)?;
+    (!middle.is_empty()).then(|| format!("{prefix}{VARIABLE}{suffix}"))
+}
+
 /// The transcript's canonical serialisation: sorted keys, two-space indent, one trailing newline.
 pub fn to_json<T: Serialize>(value: &T) -> anyhow::Result<String> {
     let mut text = serde_json::to_string_pretty(value)?;
@@ -225,4 +251,59 @@ pub fn identity_line(identity: &crate::engine::EngineIdentity) -> String {
         .map(|runtime| format!(" on {runtime}"))
         .unwrap_or_default();
     format!("{} build {}{runtime}", identity.engine, identity.build)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_template_keeps_the_engines_words_and_marks_the_variable() {
+        assert_eq!(
+            normalise_reason(
+                Some("the form's field is not a dictionary: {}"),
+                "the form's field is not a dictionary: PDFDict is not a dictionary"
+            ),
+            "the form's field is not a dictionary: {{variable}}"
+        );
+    }
+
+    #[test]
+    fn a_template_that_does_not_match_leaves_the_reason_alone() {
+        // The engine's own words differ, so this is not the recorded reason and must fail.
+        assert_eq!(
+            normalise_reason(Some("the engine says {}"), "another engine says hello"),
+            "another engine says hello"
+        );
+        // The suffix is missing as well.
+        assert_eq!(
+            normalise_reason(Some("the engine says {} now"), "the engine says hello"),
+            "the engine says hello"
+        );
+    }
+
+    #[test]
+    fn a_template_with_an_empty_variable_leaves_the_reason_alone() {
+        assert_eq!(
+            normalise_reason(Some("the engine says {} now"), "the engine says  now"),
+            "the engine says  now"
+        );
+    }
+
+    #[test]
+    fn a_template_of_the_variable_alone_requires_a_non_empty_reason() {
+        assert_eq!(
+            normalise_reason(Some("{}"), "PDFDict is not a dictionary"),
+            "{{variable}}"
+        );
+        assert_eq!(normalise_reason(Some("{}"), ""), "");
+    }
+
+    #[test]
+    fn a_reason_without_a_template_is_returned_unchanged() {
+        assert_eq!(
+            normalise_reason(None, "the engine's own words"),
+            "the engine's own words"
+        );
+    }
 }

@@ -1,0 +1,223 @@
+//! Reading and writing a whole OPC package.
+//!
+//! A package is read into the exact parts it holds, in the archive's own order, and written back
+//! in that same order with a fresh DEFLATE stream. The raw archive bytes are not identical — every
+//! part is re-compressed — but the content of every part is, which is what an edit promises for the
+//! parts it does not name.
+//!
+//! A folder entry is not a part: neither the format nor a reader looks one up by name, and the
+//! editor's part list skips it. Every entry is bounded by
+//! [`zip_entry_max_bytes`](crate::vocabulary::Limits::zip_entry_max_bytes), read one byte past the
+//! bound so an entry exactly at the limit is accepted whole and a larger one is refused rather than
+//! silently truncated.
+
+use std::collections::HashSet;
+use std::io::{Cursor, Read, Write};
+
+use crate::reading::ooxml::{DOCX_BODY_PART, PPT_PRESENTATION_PART, WORKBOOK_PART};
+use crate::vocabulary::{Family, vocabulary};
+
+/// The part every OPC package declares its content types in. A package without one cannot state
+/// the type of a part it adds, so an edit refuses it rather than writing an undeclared part.
+pub(super) const CONTENT_TYPES: &str = "[Content_Types].xml";
+
+/// Read every part of `bytes` in archive order, bounded by the vocabulary's entry limit.
+///
+/// # Errors
+///
+/// The archive cannot be opened, an entry cannot be read, or an entry is larger than one part may
+/// be. The message is the container library's own, or the bound's sentence.
+pub(super) fn read_package(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
+    read_package_with_limit(bytes, vocabulary().limits.zip_entry_max_bytes)
+}
+
+/// [`read_package`] with an explicit bound, so a test can exercise the bound without a 64 MiB part.
+fn read_package_with_limit(bytes: &[u8], limit: u64) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let mut archive =
+        zip::ZipArchive::new(Cursor::new(bytes)).map_err(|error| error.to_string())?;
+    let mut parts = Vec::with_capacity(archive.len());
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
+        if entry.is_dir() {
+            continue;
+        }
+        let name = entry.name().to_string();
+        if entry.size() > limit {
+            return Err(too_large(&name, limit));
+        }
+        let mut content = Vec::new();
+        entry
+            .by_ref()
+            .take(limit.saturating_add(1))
+            .read_to_end(&mut content)
+            .map_err(|error| error.to_string())?;
+        if u64::try_from(content.len()).unwrap_or(u64::MAX) > limit {
+            return Err(too_large(&name, limit));
+        }
+        parts.push((name, content));
+    }
+    Ok(parts)
+}
+
+/// The refusal a part past the entry bound is named by.
+fn too_large(name: &str, limit: u64) -> String {
+    vocabulary().marks.format(
+        "edit_part_too_large",
+        &[("name", name), ("limit", &limit.to_string())],
+    )
+}
+
+/// Write `parts` back as one package, in the order given, every part DEFLATEd.
+///
+/// # Errors
+///
+/// A part name is stated twice, or the archive cannot be written.
+pub(super) fn write_package(parts: &[(String, Vec<u8>)]) -> Result<Vec<u8>, String> {
+    let mut seen = HashSet::with_capacity(parts.len());
+    let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    for (name, bytes) in parts {
+        if !seen.insert(name.as_str()) {
+            return Err(vocabulary()
+                .marks
+                .format("edit_part_duplicate", &[("name", name)]));
+        }
+        writer
+            .start_file(name.as_str(), options)
+            .map_err(|error| error.to_string())?;
+        writer.write_all(bytes).map_err(|error| error.to_string())?;
+    }
+    writer
+        .finish()
+        .map_err(|error| error.to_string())
+        .map(Cursor::into_inner)
+}
+
+/// Whether the package holds a part under `name`.
+#[must_use]
+pub(super) fn part_exists(parts: &[(String, Vec<u8>)], name: &str) -> bool {
+    parts.iter().any(|(part, _)| part == name)
+}
+
+/// The family the package's own parts declare, whatever its name says, or `None` when it holds
+/// none of the three family parts — a plain ZIP, or a package built on another convention.
+#[must_use]
+pub(super) fn package_family(parts: &[(String, Vec<u8>)]) -> Option<Family> {
+    if part_exists(parts, DOCX_BODY_PART) {
+        Some(Family::Docx)
+    } else if part_exists(parts, WORKBOOK_PART) {
+        Some(Family::Xlsx)
+    } else if part_exists(parts, PPT_PRESENTATION_PART) {
+        Some(Family::Pptx)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::build;
+
+    /// Whether `[Content_Types].xml` declares `part` through an `<Override>`, the one declaration
+    /// OPC gives a part. The comparison folds case, as the kit's own lookup does.
+    fn content_types_has_part(parts: &[(String, Vec<u8>)], part: &str) -> bool {
+        let Some((_, bytes)) = parts.iter().find(|(name, _)| name == CONTENT_TYPES) else {
+            return false;
+        };
+        let xml = String::from_utf8_lossy(bytes);
+        let wanted = format!("/{part}");
+        xml.split('<').any(|tag| {
+            let Some(rest) = tag.strip_prefix("Override") else {
+                return false;
+            };
+            if !rest.starts_with(|character: char| {
+                character.is_whitespace() || matches!(character, '/' | '>')
+            }) {
+                return false;
+            }
+            super::super::xml::attribute_value(tag, "PartName")
+                .is_some_and(|value| value.eq_ignore_ascii_case(&wanted))
+        })
+    }
+
+    #[test]
+    fn a_package_round_trips_every_part_in_archive_order() {
+        let original = build::xlsx_basic();
+        let parts = read_package(&original).expect("a workbook");
+        let names: Vec<&str> = parts.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "[Content_Types].xml",
+                "_rels/.rels",
+                "xl/workbook.xml",
+                "xl/_rels/workbook.xml.rels",
+                "xl/worksheets/sheet1.xml",
+                "xl/worksheets/sheet2.xml",
+                "xl/styles.xml",
+                "xl/sharedStrings.xml",
+            ]
+        );
+        let rebuilt = write_package(&parts).expect("a written package");
+        assert_eq!(
+            read_package(&rebuilt).expect("the rebuilt package"),
+            parts,
+            "every part's content survives the round trip"
+        );
+    }
+
+    #[test]
+    fn a_folder_entry_is_not_a_part() {
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        writer
+            .start_file("folder/", options)
+            .expect("a folder entry");
+        writer.start_file("a.xml", options).expect("a part");
+        writer.write_all(b"<a/>").expect("a part's bytes");
+        let bytes = writer.finish().expect("a package").into_inner();
+        let parts = read_package(&bytes).expect("a package");
+        assert_eq!(parts, vec![("a.xml".to_string(), b"<a/>".to_vec())]);
+    }
+
+    #[test]
+    fn a_part_past_the_entry_bound_is_refused() {
+        let bytes = build::xlsx_basic();
+        let failure = read_package_with_limit(&bytes, 4).expect_err("a bound");
+        assert!(failure.contains("larger than"), "{failure}");
+    }
+
+    #[test]
+    fn a_part_name_stated_twice_is_refused() {
+        let parts = vec![
+            ("a.xml".to_string(), b"<a/>".to_vec()),
+            ("a.xml".to_string(), b"<b/>".to_vec()),
+        ];
+        let failure = write_package(&parts).expect_err("a duplicate");
+        assert!(failure.contains("twice"), "{failure}");
+    }
+
+    #[test]
+    fn the_family_is_read_from_the_parts_and_not_the_name() {
+        let workbook = read_package(&build::xlsx_basic()).expect("a workbook");
+        assert_eq!(package_family(&workbook), Some(Family::Xlsx));
+        let document = read_package(&build::docx_basic()).expect("a document");
+        assert_eq!(package_family(&document), Some(Family::Docx));
+        let presentation = read_package(&build::pptx_basic()).expect("a presentation");
+        assert_eq!(package_family(&presentation), Some(Family::Pptx));
+        assert_eq!(
+            package_family(&[("[Content_Types].xml".to_string(), Vec::new())]),
+            None
+        );
+    }
+
+    #[test]
+    fn the_content_types_declare_a_part_the_package_holds() {
+        let parts = read_package(&build::xlsx_basic()).expect("a workbook");
+        assert!(part_exists(&parts, CONTENT_TYPES));
+        assert!(content_types_has_part(&parts, "xl/workbook.xml"));
+        assert!(!content_types_has_part(&parts, "xl/missing.xml"));
+    }
+}

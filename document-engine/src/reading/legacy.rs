@@ -300,12 +300,7 @@ fn sheet_lines(sheet: &Sheet) -> Vec<String> {
             if display.is_empty() {
                 continue;
             }
-            // A BIFF8 sheet has at most 256 columns, so this never exceeds `u32`; a grid that
-            // did would be corrupt rather than worth a panic.
-            let Ok(column) = u32::try_from(col) else {
-                continue;
-            };
-            let address = format!("{}{}", column_letters(column), row + 1);
+            let address = format!("{}{}", column_letters(col), row + 1);
             lines.push(note("xlsx_cell", &[("ref", &address), ("value", &display)]));
         }
     }

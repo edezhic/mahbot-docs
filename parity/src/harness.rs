@@ -1,14 +1,26 @@
 //! The gate: run every case against one engine, compare each transcript with the recorded
 //! baseline, and check each case's declared effect. A case passes only when both hold.
+//!
+//! An engine need not implement the whole corpus. A case whose operation the writer's
+//! [`Writer::covers`] refuses is *unjudged*: it still produces a [`CaseOutcome`] — so the
+//! baseline's entry is not stale merely because this engine cannot answer it — and its verdict
+//! says why instead of failing a comparison the engine never entered. A run that judged nothing
+//! is not a pass: the gate exists to judge, and a report with no judged case says so.
+//!
+//! A writer case runs on a thread of its own under [`WRITE_TIMEOUT`]. An in-process writer cannot
+//! be interrupted: the abandoned thread may keep writing into that case's directory after the
+//! timeout. That is why the verdict is decided at the timeout and the run does not wait — the
+//! directory is per case, and a later case never reads it.
 
 use crate::baseline::Baseline;
 use crate::canonical::{self, Comparison};
-use crate::corpus::{Case, Document, Expect};
+use crate::corpus::{Case, Document, Expect, Reason};
 use crate::engine::{EngineIdentity, Key, Kind, Reader, Reading, Writer};
 use crate::shutdown::panic_message;
 use crate::transcript::{self, CaseTranscript, ReadingTranscript, Status};
 use anyhow::{Context as _, Result, bail};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -20,9 +32,18 @@ use std::time::{Duration, Instant};
 /// did not reach fails with a budget problem.
 const RUN_BUDGET: Duration = Duration::from_secs(600);
 
+/// How long one writer case may take before it is one failed case. An in-process writer cannot be
+/// interrupted, so the thread is abandoned rather than killed; the verdict is already decided.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// How long one reading may take before it is one failed reading, matching the writer's own run
 /// timeout: a reader that never returns must not hold the gate open.
 const READ_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The problem a report states when it judged no case at all: an engine that implements none of
+/// the corpus's operations has proved nothing, however many transcripts it produced.
+pub const NO_CASE_JUDGED: &str =
+    "no writer case was judged: the engine implements none of the corpus's operations";
 
 /// The largest produced file the harness reads into memory to canonicalise. An engine's outputs
 /// are small; a bigger file is a case failure with a message, not an exhaustion of the run.
@@ -34,9 +55,10 @@ const ROOT_PREFIX: &str = "document-parity-";
 /// A harness owns one temporary root, and nothing outside it is ever written.
 pub struct Harness {
     root: PathBuf,
-    writer: Box<dyn Writer>,
+    writer: Arc<dyn Writer>,
     reader: Arc<dyn Reader>,
     budget: Duration,
+    write_timeout: Duration,
     read_timeout: Duration,
     /// Whether this harness created the root, and may therefore remove it.
     owned: bool,
@@ -86,9 +108,10 @@ impl Harness {
     fn new(root: PathBuf, writer: Box<dyn Writer>, reader: Box<dyn Reader>, owned: bool) -> Self {
         Self {
             root,
-            writer,
+            writer: Arc::from(writer),
             reader: Arc::from(reader),
             budget: RUN_BUDGET,
+            write_timeout: WRITE_TIMEOUT,
             read_timeout: READ_TIMEOUT,
             owned,
         }
@@ -98,6 +121,13 @@ impl Harness {
     #[must_use]
     pub fn with_budget(mut self, budget: Duration) -> Self {
         self.budget = budget;
+        self
+    }
+
+    /// A harness whose single writer case is bounded by `timeout` rather than [`WRITE_TIMEOUT`].
+    #[must_use]
+    pub fn with_write_timeout(mut self, timeout: Duration) -> Self {
+        self.write_timeout = timeout;
         self
     }
 
@@ -119,8 +149,14 @@ impl Harness {
         let outcomes = cases
             .iter()
             .map(|case| {
-                if self.spent(started) {
-                    CaseOutcome::problem(case.key(), self.over_budget())
+                let key = case.key();
+                // A case the writer does not cover is not run at all: it is unjudged rather than
+                // failed, and the budget is not spent on an answer the engine cannot give.
+                if !self.writer.covers(&key) {
+                    let why = unjudged_reason(&key);
+                    CaseOutcome::unjudged(key, why)
+                } else if self.spent(started) {
+                    CaseOutcome::problem(key, self.over_budget())
                 } else {
                     self.run_case(case)
                 }
@@ -212,26 +248,47 @@ impl Harness {
                 );
             }
         };
-        // A panicking engine is one failed case, not a failed run: one failure must not hide every
-        // other verdict.
-        let outcome = match crate::shutdown::contain_panics(|| self.writer.run(&request, &scratch))
-        {
-            Ok(Ok(outcome)) => outcome,
-            // A run that never reached a result says nothing about the request: it is a harness
-            // or engine failure, and the verdict must not read as a difference.
-            Ok(Err(e)) => {
+        // The bytes the engine was given, recorded before it sees them: an engine that rewrites
+        // its input has changed something the case did not ask it to touch.
+        let inputs = match snapshot_inputs(&input_dir) {
+            Ok(inputs) => inputs,
+            Err(e) => {
                 return CaseOutcome::problem(
                     key,
-                    format!("the engine did not complete the run: {e:#}"),
-                );
-            }
-            Err(payload) => {
-                return CaseOutcome::problem(
-                    key,
-                    format!("the engine panicked: {}", panic_message(&*payload)),
+                    format!("cannot record the case's inputs: {e:#}"),
                 );
             }
         };
+        // The engine runs on a thread of its own under a timeout. A panicking engine is one failed
+        // case, not a failed run: one failure must not hide every other verdict.
+        let mut problems = Vec::new();
+        let outcome = match self.run_writer(request, scratch) {
+            WriterAnswer::Answered(Ok(outcome)) => outcome,
+            // A run that never reached a result says nothing about the request: it is a harness
+            // or engine failure, and the verdict must not read as a difference.
+            WriterAnswer::Answered(Err(e)) => {
+                problems.push(format!("the engine did not complete the run: {e:#}"));
+                check_inputs(&inputs, &input_dir, &mut problems);
+                return CaseOutcome::problem(key, problems.join("; "));
+            }
+            WriterAnswer::Panicked(message) => {
+                problems.push(format!("the engine panicked: {message}"));
+                check_inputs(&inputs, &input_dir, &mut problems);
+                return CaseOutcome::problem(key, problems.join("; "));
+            }
+            // A writer that never returns cannot be interrupted: its thread is left behind and may
+            // keep writing into this case's directory, so the verdict is decided now and the run
+            // does not wait. The directory is per case, so a later case never reads it.
+            WriterAnswer::TimedOut => {
+                problems.push(format!(
+                    "the engine did not finish within {}s; its inputs and outputs are not checked, \
+                     because its thread may still be writing",
+                    self.write_timeout.as_secs_f64()
+                ));
+                return CaseOutcome::problem(key, problems.join("; "));
+            }
+        };
+        check_inputs(&inputs, &input_dir, &mut problems);
         let family = case.family;
         // The harness reads only what the engine wrote inside this case's own output directory:
         // a path an engine echoes from anywhere else is recorded as such, never opened.
@@ -265,14 +322,42 @@ impl Harness {
         }) {
             Ok(transcript) => transcript,
             Err(e) => {
-                return CaseOutcome::problem(key, format!("cannot canonicalise an output: {e:#}"));
+                problems.push(format!("cannot canonicalise an output: {e:#}"));
+                return CaseOutcome::problem(key, problems.join("; "));
             }
         };
+        // A refused or failed call has no business writing: a file it left in the output directory
+        // is a promise it did not keep.
+        if transcript.status != Status::Produced
+            && let Some(name) = left_behind(&output_dir)
+        {
+            problems.push(format!("a refused call left {name} behind"));
+        }
+        // The variable a reason template marks is replaced before the baseline comparison, so the
+        // recorder and the gate normalise a third-party message identically.
+        if let Some(reason) = &mut transcript.reason {
+            *reason = transcript::normalise_reason(case.expect.reason_template(), reason);
+        }
         normalise_transcript(&mut transcript, &self.root);
         CaseOutcome {
             key,
             transcript: Some(transcript),
-            problem: None,
+            problem: (!problems.is_empty()).then(|| problems.join("; ")),
+            judgement: Judgement::Judged,
+        }
+    }
+
+    /// One writer run, bounded by [`WRITE_TIMEOUT`].
+    fn run_writer(&self, request: Value, scratch: PathBuf) -> WriterAnswer {
+        let writer = Arc::clone(&self.writer);
+        match bounded("engine", self.write_timeout, move || {
+            writer.run(&request, &scratch)
+        }) {
+            Ok(Ok(outcome)) => WriterAnswer::Answered(Ok(outcome)),
+            Ok(Err(e)) => WriterAnswer::Answered(Err(e)),
+            Err(Unanswered::Panicked { message, .. }) => WriterAnswer::Panicked(message),
+            Err(Unanswered::TimedOut { .. }) => WriterAnswer::TimedOut,
+            Err(problem) => WriterAnswer::Answered(Err(anyhow::anyhow!("{problem}"))),
         }
     }
 
@@ -328,59 +413,22 @@ impl Harness {
         let reader = Arc::clone(&self.reader);
         let path = path.to_path_buf();
         let file_name = file_name.to_string();
-        let (sender, receiver) = mpsc::channel();
-        std::thread::spawn(move || {
-            let kind = crate::shutdown::contain_panics(|| reader.detect(&path, &file_name))
-                .unwrap_or_else(|payload| {
-                    Err(anyhow::anyhow!(
-                        "the detector panicked: {}",
-                        panic_message(&*payload)
-                    ))
-                });
-            let _ = sender.send(kind);
-        });
-        match receiver.recv_timeout(self.read_timeout) {
-            Ok(kind) => kind,
-            Err(mpsc::RecvTimeoutError::Timeout) => bail!(
-                "the detector did not finish within {}s",
-                self.read_timeout.as_secs_f64()
-            ),
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                bail!("the detector's thread ended without an answer")
-            }
-        }
+        bounded("detector", self.read_timeout, move || {
+            reader.detect(&path, &file_name)
+        })
+        .map_err(|problem| anyhow::anyhow!("{problem}"))?
     }
 
-    /// One reading, bounded. The reader runs on a thread of its own so a reader that never returns
-    /// costs one reading instead of the gate; a thread cannot be killed, so a hung one is left
-    /// behind rather than waited for. A panicking reader answers with its own message.
+    /// One reading, bounded: a reader that never returns costs one reading instead of the gate.
     fn read_within(&self, path: &Path, file_name: &str, out_dir: &Path) -> Result<Reading> {
         let reader = Arc::clone(&self.reader);
         let path = path.to_path_buf();
         let file_name = file_name.to_string();
         let out_dir = out_dir.to_path_buf();
-        let (sender, receiver) = mpsc::channel();
-        std::thread::spawn(move || {
-            let reading =
-                crate::shutdown::contain_panics(|| reader.read(&path, &file_name, &out_dir))
-                    .unwrap_or_else(|payload| {
-                        Err(anyhow::anyhow!(
-                            "the reader panicked: {}",
-                            panic_message(&*payload)
-                        ))
-                    });
-            let _ = sender.send(reading);
-        });
-        match receiver.recv_timeout(self.read_timeout) {
-            Ok(reading) => reading,
-            Err(mpsc::RecvTimeoutError::Timeout) => bail!(
-                "the reader did not finish within {}s",
-                self.read_timeout.as_secs_f64()
-            ),
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                bail!("the reader's thread ended without an answer")
-            }
-        }
+        bounded("reader", self.read_timeout, move || {
+            reader.read(&path, &file_name, &out_dir)
+        })
+        .map_err(|problem| anyhow::anyhow!("{problem}"))?
     }
 }
 
@@ -389,6 +437,59 @@ impl Drop for Harness {
         if self.owned {
             let _ = std::fs::remove_dir_all(&self.root);
         }
+    }
+}
+
+/// Why a bounded call produced no answer.
+enum Unanswered {
+    /// The call outran its bound. Its thread is left behind: a thread cannot be killed.
+    TimedOut {
+        what: &'static str,
+        timeout: Duration,
+    },
+    /// The call panicked, with the message the panic carried.
+    Panicked { what: &'static str, message: String },
+    /// The call's thread ended without sending an answer.
+    Lost { what: &'static str },
+}
+
+impl std::fmt::Display for Unanswered {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TimedOut { what, timeout } => write!(
+                formatter,
+                "the {what} did not finish within {}s",
+                timeout.as_secs_f64()
+            ),
+            Self::Panicked { what, message } => write!(formatter, "the {what} panicked: {message}"),
+            Self::Lost { what } => {
+                write!(formatter, "the {what}'s thread ended without an answer")
+            }
+        }
+    }
+}
+
+/// Run `work` on a thread of its own and wait at most `timeout` for its answer, so a call that
+/// never returns costs one case or one reading rather than the run. A thread cannot be killed, so
+/// a call that overruns is abandoned rather than stopped; `what` names the caller in the message.
+fn bounded<T: Send + 'static>(
+    what: &'static str,
+    timeout: Duration,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, Unanswered> {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let answer =
+            crate::shutdown::contain_panics(work).map_err(|payload| Unanswered::Panicked {
+                what,
+                message: panic_message(&*payload),
+            });
+        let _ = sender.send(answer);
+    });
+    match receiver.recv_timeout(timeout) {
+        Ok(answer) => answer,
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(Unanswered::TimedOut { what, timeout }),
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err(Unanswered::Lost { what }),
     }
 }
 
@@ -477,6 +578,70 @@ fn substitute(value: &mut Value, input: &Path, output: &Path) {
     }
 }
 
+/// The bytes of every file in a case's `in/` directory, by name.
+fn snapshot_inputs(directory: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
+    let mut inputs = BTreeMap::new();
+    for entry in std::fs::read_dir(directory)
+        .with_context(|| format!("cannot list {}", directory.display()))?
+    {
+        let entry = entry.with_context(|| format!("cannot read {}", directory.display()))?;
+        if entry.file_type()?.is_file() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            inputs.insert(name, std::fs::read(entry.path())?);
+        }
+    }
+    Ok(inputs)
+}
+
+/// Add a problem when the engine changed, removed or added a file in the case's `in/` directory.
+fn check_inputs(
+    snapshot: &BTreeMap<String, Vec<u8>>,
+    directory: &Path,
+    problems: &mut Vec<String>,
+) {
+    match changed_input(snapshot, directory) {
+        Ok(Some(name)) => problems.push(format!("the engine changed its input {name}")),
+        Ok(None) => {}
+        Err(e) => problems.push(format!(
+            "cannot verify the case's inputs are unchanged: {e:#}"
+        )),
+    }
+}
+
+/// The first input that differs from `snapshot`, or `None` when every file is as it was.
+fn changed_input(snapshot: &BTreeMap<String, Vec<u8>>, directory: &Path) -> Result<Option<String>> {
+    let mut current = BTreeMap::new();
+    for entry in std::fs::read_dir(directory)
+        .with_context(|| format!("cannot list {}", directory.display()))?
+    {
+        let entry = entry.with_context(|| format!("cannot read {}", directory.display()))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !entry.file_type()?.is_file() {
+            // A directory or link the engine added is a change like any other.
+            return Ok(Some(name));
+        }
+        current.insert(name, std::fs::read(entry.path())?);
+    }
+    for (name, bytes) in snapshot {
+        if current.get(name) != Some(bytes) {
+            return Ok(Some(name.clone()));
+        }
+    }
+    Ok(current
+        .keys()
+        .find(|name| !snapshot.contains_key(*name))
+        .cloned())
+}
+
+/// The first entry in a case's `out/` directory, if the engine left one.
+fn left_behind(directory: &Path) -> Option<String> {
+    std::fs::read_dir(directory)
+        .ok()?
+        .flatten()
+        .next()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+}
+
 /// Normalise the engine's own prose, and only its prose: the reason it gave and the notes, losses,
 /// missing values and unsupported fields it wrote. The documents themselves are compared exactly
 /// as they are — a date in a paragraph is content, not a timestamp of the run.
@@ -510,11 +675,22 @@ fn normalise_reading(transcript: &mut ReadingTranscript, root: &Path) {
     }
 }
 
+/// Whether a case was judged against the baseline, or why it could not be.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Judgement {
+    /// The engine implements the operation, so its transcript is compared.
+    Judged,
+    /// The engine does not implement the operation. One sentence says so; the case is neither
+    /// passed nor failed on content.
+    Unjudged(String),
+}
+
 /// One case's run: its transcript, or why there is none.
 pub struct CaseOutcome {
     pub key: Key,
     pub transcript: Option<CaseTranscript>,
     pub problem: Option<String>,
+    pub judgement: Judgement,
 }
 
 impl CaseOutcome {
@@ -523,8 +699,33 @@ impl CaseOutcome {
             key,
             transcript: None,
             problem: Some(problem),
+            judgement: Judgement::Judged,
         }
     }
+
+    fn unjudged(key: Key, why: String) -> Self {
+        Self {
+            key,
+            transcript: None,
+            problem: None,
+            judgement: Judgement::Unjudged(why),
+        }
+    }
+}
+
+/// Why a case the writer does not cover is not judged.
+fn unjudged_reason(key: &Key) -> String {
+    match &key.sub_operation {
+        Some(sub) => format!("the engine does not implement {}/{sub}", key.operation),
+        None => format!("the engine does not implement {}", key.operation),
+    }
+}
+
+/// One writer run's answer, kept apart so a timeout is not mistaken for an engine error.
+enum WriterAnswer {
+    Answered(Result<crate::engine::WriterOutcome>),
+    Panicked(String),
+    TimedOut,
 }
 
 /// One reading's run: its transcript, or why there is none.
@@ -555,9 +756,21 @@ pub struct Run {
 /// The gate's answer for one case.
 pub struct Verdict {
     pub key: Key,
-    pub passed: bool,
+    /// Whether the case was judged at all. An unjudged verdict is not a pass on content: it is
+    /// counted separately and never makes the report read as a pass on its own.
+    pub judgement: Judgement,
     /// Every reason the case failed, in terms a person can act on.
     pub problems: Vec<String>,
+}
+
+impl Verdict {
+    /// Whether this verdict is a pass: the case was judged and nothing was wrong with it. An
+    /// unjudged case is not a pass, whatever its problem list holds, so no aggregate can count a
+    /// skip as one.
+    #[must_use]
+    pub fn passed(&self) -> bool {
+        matches!(self.judgement, Judgement::Judged) && self.problems.is_empty()
+    }
 }
 
 /// The gate's answer for one reading.
@@ -591,15 +804,39 @@ impl Report {
         self.writer == self.recorded_writer && self.reader == self.recorded_reader
     }
 
-    /// The shared verdict aggregate: every verdict and every reading matches the baseline, and the
-    /// corpus still holds every baseline entry. The engine's identity is deliberately not part of
-    /// it — being pointed at another implementation is what the harness is for.
+    /// The shared verdict aggregate: every judged verdict and every reading matches the baseline,
+    /// the corpus still holds every baseline entry, and at least one case was judged. A run that
+    /// judged nothing has not shown anything, however many transcripts it produced. An unjudged
+    /// case is neither a pass nor a failure, so it is left out rather than counted either way.
+    ///
+    /// The engine's identity is deliberately not part of it — being pointed at another
+    /// implementation is what the harness is for.
     #[must_use]
     pub fn passed(&self) -> bool {
         self.stale.is_empty()
             && self.stale_readings.is_empty()
-            && self.verdicts.iter().all(|verdict| verdict.passed)
+            && self.judged() > 0
+            && self
+                .verdicts
+                .iter()
+                .filter(|verdict| matches!(verdict.judgement, Judgement::Judged))
+                .all(Verdict::passed)
             && self.readings.iter().all(|reading| reading.passed)
+    }
+
+    /// How many cases were judged against the baseline.
+    #[must_use]
+    pub fn judged(&self) -> usize {
+        self.verdicts
+            .iter()
+            .filter(|verdict| matches!(verdict.judgement, Judgement::Judged))
+            .count()
+    }
+
+    /// How many cases the engine does not implement, and so were not judged.
+    #[must_use]
+    pub fn unjudged(&self) -> usize {
+        self.verdicts.len() - self.judged()
     }
 
     /// The reference gate's answer: [`Report::passed`], and that the engine is the build the
@@ -624,6 +861,9 @@ impl Run {
         for reading in &self.readings {
             readings.push(compare_reading(reading, baseline));
         }
+        // Staleness is a fact about the corpus, not about what this engine can judge: every case
+        // produced an outcome, judged or not, so an entry the corpus still holds is never stale
+        // merely because the engine cannot answer it.
         let mut stale: Vec<String> = baseline
             .cases
             .keys()
@@ -661,6 +901,15 @@ impl Run {
     }
 
     fn verdict(&self, outcome: &CaseOutcome, case: Option<&Case>, baseline: &Baseline) -> Verdict {
+        // An unjudged case has no transcript and no baseline to compare: saying so is the whole
+        // verdict, and it must not read as a failure of an engine that never answered.
+        if let Judgement::Unjudged(why) = &outcome.judgement {
+            return Verdict {
+                key: outcome.key.clone(),
+                judgement: Judgement::Unjudged(why.clone()),
+                problems: Vec::new(),
+            };
+        }
         let mut problems = Vec::new();
         if let Some(problem) = &outcome.problem {
             problems.push(problem.clone());
@@ -704,7 +953,7 @@ impl Run {
         }
         Verdict {
             key: outcome.key.clone(),
-            passed: problems.is_empty(),
+            judgement: Judgement::Judged,
             problems,
         }
     }
@@ -751,17 +1000,17 @@ fn check_expectation(expect: &Expect, transcript: &CaseTranscript) -> Vec<String
                 )]
             }
         }
-        Expect::Refused { reason_contains } => refusal(
+        Expect::Refused(reason) => refusal(
             &transcript.status,
             transcript.reason.as_deref(),
             Status::Refused,
-            reason_contains,
+            reason,
         ),
-        Expect::Failed { reason_contains } => refusal(
+        Expect::Failed(reason) => refusal(
             &transcript.status,
             transcript.reason.as_deref(),
             Status::Failed,
-            reason_contains,
+            reason,
         ),
     }
 }
@@ -770,19 +1019,39 @@ fn refusal(
     status: &Status,
     reason: Option<&str>,
     expected: Status,
-    reason_contains: &str,
+    expect: &Reason,
 ) -> Vec<String> {
     let mut problems = Vec::new();
     if *status != expected {
         problems.push(format!("expected {:?}, got {:?}", expected, status));
     }
-    let reason = reason.unwrap_or_default();
-    if !reason.contains(reason_contains) {
-        problems.push(format!(
-            "the reason does not mention {reason_contains:?}: {reason:?}"
-        ));
+    if let Some(problem) = reason_problem(expect, reason.unwrap_or_default()) {
+        problems.push(problem);
     }
     problems
+}
+
+/// What the engine's reason must say. A template's own words must frame a non-empty variable; a
+/// fragment must be present. The transcript has already replaced the variable with
+/// [`crate::transcript::VARIABLE`], so a matching reason is exactly the template's own words
+/// around the marker — one comparison, the same one the recorder made.
+fn reason_problem(expect: &Reason, reason: &str) -> Option<String> {
+    if expect.variable {
+        if transcript::marked(expect.text, reason).as_deref() == Some(reason) {
+            return None;
+        }
+        Some(format!(
+            "the reason does not state {:?} with a non-empty variable: {reason:?}",
+            expect.text
+        ))
+    } else if reason.contains(expect.text) {
+        None
+    } else {
+        Some(format!(
+            "the reason does not mention {:?}: {reason:?}",
+            expect.text
+        ))
+    }
 }
 
 fn compare_reading(outcome: &ReadingOutcome, baseline: &Baseline) -> ReadingVerdict {
@@ -866,6 +1135,7 @@ mod tests {
             family: Family::Docx,
             operation: "create",
             sub_operation: None,
+            id: None,
             documents: vec![Document {
                 name: "boom.docx",
                 build: || -> Vec<u8> { panic!("the builder panicked") },
@@ -902,5 +1172,30 @@ mod tests {
         });
         let problem = outcome.problem.expect("a problem");
         assert!(problem.contains("panicked"), "{problem}");
+    }
+
+    #[test]
+    fn a_template_reason_accepts_another_library_message_and_rejects_other_words() {
+        let expect = Reason::template("the form's field is {}");
+        let recorded =
+            transcript::normalise_reason(Some(expect.text), "the form's field is PDFDict");
+        assert_eq!(recorded, "the form's field is {{variable}}");
+        assert!(
+            reason_problem(&expect, &recorded).is_none(),
+            "{recorded:?} matches its template"
+        );
+        // A different third-party message sits in the same span, so it is the same reason.
+        let other_message =
+            transcript::normalise_reason(Some(expect.text), "the form's field is PDFBoolean");
+        assert_eq!(other_message, recorded);
+        assert!(reason_problem(&expect, &other_message).is_none());
+        // The engine's own words differing is a different reason.
+        let other_words = transcript::normalise_reason(Some(expect.text), "something else");
+        assert_eq!(other_words, "something else");
+        assert!(reason_problem(&expect, &other_words).is_some());
+        // So is a missing variable.
+        let empty = transcript::normalise_reason(Some(expect.text), "the form's field is ");
+        assert_eq!(empty, "the form's field is ");
+        assert!(reason_problem(&expect, &empty).is_some());
     }
 }

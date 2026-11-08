@@ -1605,7 +1605,7 @@ fn collect_link(
 /// link mark — and made one line ([`one_line`]), since it heads the cell's own line.
 fn cell_reference(event: &BytesStart<'_>, row: u32, next_column: &mut u32) -> String {
     let Some(reference) = attr(event, b"r") else {
-        let reference = format!("{}{}", column_letters(*next_column), row);
+        let reference = format!("{}{}", column_letters(*next_column as usize), row);
         *next_column = next_column.saturating_add(1);
         return reference;
     };
@@ -1864,7 +1864,7 @@ fn render_lines(
             &[(
                 "ranges",
                 &compress(hidden_columns, ':', |column| {
-                    column_letters(column.saturating_sub(1))
+                    column_letters(column.saturating_sub(1) as usize)
                 }),
             )],
         ));

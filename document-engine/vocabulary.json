@@ -1390,6 +1390,48 @@
         "reading"
       ]
     },
+    "render_unreadable": {
+      "text": "the file could not be read",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "render_not_pdf": {
+      "text": "its bytes do not form a PDF this engine can read",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "render_password_protected": {
+      "text": "it is password-protected",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "render_no_such_page": {
+      "text": "it has no such page (it has {pages})",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "render_no_pixels": {
+      "text": "the page produced no pixels",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "render_failed": {
+      "text": "the page could not be rendered",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "render_invalid_size": {
+      "text": "the requested page size is not a positive, finite number",
+      "printed_by": [
+        "reading"
+      ]
+    },
     "reason_corrupt_or_unreadable": {
       "text": "corrupt or unreadable .{extension}",
       "printed_by": [
@@ -1749,36 +1791,966 @@
       "printed_by": [
         "reading"
       ]
+    },
+    "edit_open_unreadable": {
+      "text": "{name} is not a readable .{kind} package: {message}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_no_content_types": {
+      "text": "cannot edit {name}: it has no [Content_Types].xml part",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_no_family_part": {
+      "text": "cannot edit {name}: it holds no document, workbook or presentation part, so it is not a .{family} package",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_signature_note": {
+      "text": "[the input carries a digital signature, which was carried through unchanged — the file changed, so the signature no longer matches it]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_work_over_budget": {
+      "text": "the edits rewrite about {megabytes} MB of the document's parts, more than one call applies (limit {limit_megabytes} MB) — hint: split the edits into several calls",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_list_too_many": {
+      "text": "a call may carry at most {max} edits, got: {count}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_text_not_text": {
+      "text": "{what} must be text",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_text_too_long": {
+      "text": "{what} must be at most {max} characters",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_repeat_address": {
+      "text": "{address} would be stated twice in the sheet part — two elements claiming one address is a part a reader offers to repair, so this edit was refused rather than written",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_row_address": {
+      "text": "the row {number}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_cell_address": {
+      "text": "the cell {reference}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_input_missing": {
+      "text": "the {operation} operation needs an \"input\"",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_write_failed": {
+      "text": "the edited package could not be written: {message}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_element_unclosed": {
+      "text": "{what} holds <{name}> opened and never closed, so a second <{name}> cannot be written beside it",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_part_too_large": {
+      "text": "the part {name} is larger than the {limit} bytes one part may hold",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_part_duplicate": {
+      "text": "the package states the part {name} twice",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_span_between": {
+      "text": "between {min} and {max}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_span_above": {
+      "text": "greater than {min} and at most {max}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_chart_note": {
+      "text": "[the workbook's charts were copied unchanged — nothing recomputes them, so a chart that reads the changed cells keeps the values it had]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pivot_note": {
+      "text": "[the workbook's pivot tables were copied unchanged — nothing recomputes them, so a pivot that reads the changed cells keeps the values it had]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_absent_value": {
+      "text": "undefined",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_styles_root": {
+      "text": "the workbook's styles part cannot be written into: its <styleSheet> root is missing or never closed",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_styles_no_root_to_write": {
+      "text": "there is no <styleSheet> root to write a <{name}> block into",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_styles_no_entry_element": {
+      "text": "STYLE_BLOCKS states no entry element for the {block} block",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_styles_no_relationship": {
+      "text": "cannot edit {name}: the workbook's relationships cannot name a styles part, so the formatting would sit in a part no reader reads",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_number_format_too_long": {
+      "text": "a number format must be at most {max} characters, got: {length}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_relationships_unreadable": {
+      "text": "the relationships of {part} are not readable",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_content_types_no_close": {
+      "text": "[Content_Types].xml has no <Types> close to hold a part's content type",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_name_text": {
+      "text": "{where}: a sheet name must be text, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_name_length": {
+      "text": "{where}: a sheet name must be 1 to {max} characters, got: {name}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_name_forbidden": {
+      "text": "{where}: a sheet name must not contain any of {forbidden}, got: {name}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_missing": {
+      "text": "there is no sheet named {name}: this workbook has {sheets}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_none": {
+      "text": "no sheets",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_is_chart": {
+      "text": "the sheet {name} is a chart sheet, and this tool edits worksheets only",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_not_worksheet": {
+      "text": "the sheet {name} is not a worksheet, and this tool edits worksheets only",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_part_missing": {
+      "text": "the sheet {name} names the part {part}, which the package does not have",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_no_part": {
+      "text": "the sheet {name} has no worksheet part: the workbook's relationships do not name one and the package has no {part}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_exists": {
+      "text": "a sheet named {name} already exists — hint: pick a name no sheet uses, ignoring case",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_address_shape": {
+      "text": "{what} must be an A1 address like B7, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_address_row": {
+      "text": "{what} {value}: the row must be between 1 and {max}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_address_column": {
+      "text": "{what} {value}: the column must be between A and {last}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_row_number": {
+      "text": "row must be a whole number between 1 and {max}, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_column_letters": {
+      "text": "column must be column letters between A and {last}, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_value_kind": {
+      "text": "{what} must be text, a number or a boolean",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_formula_shape": {
+      "text": "cell {reference}: an object value must be {\"formula\": \"SUM(A1:A2)\"}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_set_cell_no_value": {
+      "text": "set_cell needs a value — hint: use the format_cells op to change only a cell's formatting",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_cell_not_in_sheet": {
+      "text": "the cell {cell} is not in sheet {sheet}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_no_rows_insert": {
+      "text": "sheet {sheet} has no rows to insert into",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_no_rows": {
+      "text": "sheet {sheet} has no rows",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_row_past_range": {
+      "text": "row {row} is past the sheet's used range (1-{max})",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_last_row": {
+      "text": "sheet {sheet} reaches the last row ({max}), so an insert would push a row past the sheet's grid",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_no_columns_insert": {
+      "text": "sheet {sheet} has no columns to insert into",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_no_columns": {
+      "text": "sheet {sheet} has no columns",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_column_past_range": {
+      "text": "column {column} is past the sheet's used range (A-{last})",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_last_column": {
+      "text": "sheet {sheet} reaches the last column ({last}), so an insert would push a column past the sheet's grid",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_stale_note": {
+      "text": "[the shift left {kinds} pointing at the old cells — they were not rewritten]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_shift_range_gone": {
+      "text": "[the deleted {kind} covered the whole {what}, {range}, which is gone with it]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_range_conditional_format": {
+      "text": "conditional format's range",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_range_data_validation": {
+      "text": "data validation's range",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_range_protected": {
+      "text": "protected range",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_range_ignored_error": {
+      "text": "ignored error",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_range_selection": {
+      "text": "selection",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_range_extended_conditional_format": {
+      "text": "extended conditional format's range",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_range_extended_data_validation": {
+      "text": "extended data validation's range",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_kind_formulas": {
+      "text": "the workbook's formulas",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_kind_rule_formulas": {
+      "text": "the sheets' conditional-format and data-validation formulas",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_kind_defined_names": {
+      "text": "the workbook's defined names",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_kind_chart_series": {
+      "text": "the charts' series",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_kind_links": {
+      "text": "the sheets' links",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_kind_table_ranges": {
+      "text": "the sheet's table ranges",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_kind_comments": {
+      "text": "the sheet's comments",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_kind_comment_shapes": {
+      "text": "the sheet's comment shapes",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_kind_drawing_anchors": {
+      "text": "the sheet's drawing anchors",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_kind_other_sheets": {
+      "text": "the other sheets' formulas naming this sheet",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_rows_unclosed": {
+      "text": "the sheet part holds a <row> opened and never closed, so its rows cannot be read",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_cells_unclosed": {
+      "text": "the sheet part holds a <c> opened and never closed, so its cells cannot be read",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_rows_not_ordered": {
+      "text": "{where} are not in address order and one of them states no address of its own, so reordering them would move what it holds",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_rows_outside": {
+      "text": "the sheet part states a <row> outside its <sheetData>, or a second <sheetData>: a worksheet holds its rows in one body, which this tool does not edit around",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_worksheet_order": {
+      "text": "<{name}> has no place in this kit's worksheet order, so nothing was written",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_worksheet_no_close": {
+      "text": "the sheet part has no </worksheet> to write a <{name}> into",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_format_target_missing": {
+      "text": "a format_cells edit needs one of range, column or row",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_format_target_many": {
+      "text": "a format_cells edit names more than one target ({targets}), but takes exactly one",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_range_shape": {
+      "text": "range must be an A1 address or an A1:B2 range, got: {range}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_range_cap": {
+      "text": "the range {label} covers {cells} cells, more than the {max} one format may name",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_merge_one_cell": {
+      "text": "the range {label} covers one cell, and a merge needs at least two — hint: name a range like A1:B2",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_border_object": {
+      "text": "border must be an object naming sides ({sides}), got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_border_empty": {
+      "text": "border must name at least one side ({sides})",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_border_side": {
+      "text": "border has no side {side} — hint: use {sides}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_border_boolean": {
+      "text": "border.{side} must be true or false",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_font_empty": {
+      "text": "font must not be empty",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_font_too_long": {
+      "text": "font must be at most {max} characters, got: {length}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_size_span": {
+      "text": "size must be {bounds} points, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_toggle_boolean": {
+      "text": "{toggle} must be true or false",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_color_digits": {
+      "text": "color must be {digits} hex digits, with an optional leading \"#\", got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_align_value": {
+      "text": "align must be {values}, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_vertical_value": {
+      "text": "vertical must be {values}, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_wrap_boolean": {
+      "text": "wrap must be true or false",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_number_format_empty": {
+      "text": "number_format must not be empty",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_format_no_property": {
+      "text": "a format_cells range target names no property — hint: name at least one of font, size, bold, italic, underline, strike, color, fill, border, align, vertical, wrap or number_format",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_format_no_width": {
+      "text": "a format_cells column target names no width_chars — hint: name width_chars",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_width_span": {
+      "text": "width_chars must be {bounds} characters, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_format_no_height": {
+      "text": "a format_cells row target names no height_points — hint: name height_points",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_height_span": {
+      "text": "height_points must be {bounds} points, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_merge_unclosed_block": {
+      "text": "the sheet part holds <mergeCells> opened and never closed, so its merges cannot be read",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_merge_unclosed_cell": {
+      "text": "the sheet part holds a <mergeCell> opened and never closed, so its merges cannot be read",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_merge_already": {
+      "text": "sheet {sheet} already has {label} merged — hint: unmerge {ref} first, or name a range that is not merged",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_merge_overlaps": {
+      "text": "the range {label} overlaps {ref}, which sheet {sheet} already has merged — hint: unmerge {ref} first",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_merge_unreadable": {
+      "text": "sheet {sheet} holds a merge this kit cannot read, so a merge into it was refused rather than written over it",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_unmerge_not_merge": {
+      "text": "the range {label} is not a merge in sheet {sheet}: it has {refs}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_merge_none": {
+      "text": "none",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_list_missing": {
+      "text": "the workbook has no sheet list to add a sheet to",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_only_sheet": {
+      "text": "sheet {sheet} is the workbook's only sheet, and a workbook keeps at least one",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_only_visible_sheet": {
+      "text": "sheet {sheet} is the workbook's only visible sheet, and a workbook keeps at least one",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_scoped_names_gone": {
+      "text": "[the workbook's sheet-scoped names for {sheet} went with the sheet]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_gone": {
+      "text": "[the sheet {sheet} is gone, but {kinds} still name it — those references were not rewritten]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_sheet_renamed": {
+      "text": "[the sheet {sheet} is now {next}, but {kinds} still name {sheet} — those references were not rewritten]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_move_no_position": {
+      "text": "no position {to}: this workbook has {count} sheet{s}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_move_same_position": {
+      "text": "sheet {sheet} is already at position {to} — moving it there would change nothing",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_move_no_close": {
+      "text": "the workbook's sheet list has no close to place the moved sheet before",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_image_extension": {
+      "text": "only PNG, JPEG or WebP images can be embedded, got: {name}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_image_unreadable": {
+      "text": "cannot read {name} — the file is not readable",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_image_not_whole": {
+      "text": "cannot embed {name} as a {label} image: the file's bytes are not a whole {label} image",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_image_label_png": {
+      "text": "PNG",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_image_label_jpeg": {
+      "text": "JPEG",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_image_label_webp": {
+      "text": "WebP",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_image_side_span": {
+      "text": "an image's width and height must be {bounds} points, got: {side}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_image_implied_span": {
+      "text": "an image's {side} implied by its {other} must be {bounds} points, got: {points}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_image_no_drawing": {
+      "text": "sheet {sheet} names a drawing part this kit cannot find, so the picture was not added",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_drawing_no_close": {
+      "text": "the drawing part {part} has no </xdr:wsDr> to place a picture in",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_wrong_family_hint": {
+      "text": "use {family}_edit to edit it",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_wrong_family": {
+      "text": "the {noun} is really a .{family} package, not the .{expected} one its name says — hint: {hint}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_formula_note": {
+      "text": "[the sheet's {count} {phrase} while {moved} moved — check the references]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_formula_phrase_one": {
+      "text": "formula was left as it is",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_formula_phrase_many": {
+      "text": "formulas were left as they are",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_formula_subject_one": {
+      "text": "a cell it names",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_formula_subject_many": {
+      "text": "cells they name",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_format_widened": {
+      "text": "[the range {range} was widened to {widened}: {merge}]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_format_widened_one": {
+      "text": "those cells are one merged cell",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_format_widened_many": {
+      "text": "those cells are covered by {count} merged cells",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_unknown_operation": {
+      "text": "unknown operation \"{name}\"",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_output_taken": {
+      "text": "the destination already holds {path}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_destination_symlink": {
+      "text": "the destination {directory} is a symlink: document output needs a real directory",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_destination_not_directory": {
+      "text": "the destination {directory} is not a directory",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_destination_missing": {
+      "text": "the destination directory {directory} does not exist",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_destination_unreadable": {
+      "text": "the destination directory {directory} could not be read",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_reserved_output": {
+      "text": "the request carries \"{name}\": the destination names the outputs",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_format_missing": {
+      "text": "the operation needs a \"format\"",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_unknown_format": {
+      "text": "unknown format \"{format}\"",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_edits_missing": {
+      "text": "the {family}_edit operation needs an \"edits\" array",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_edit_unnamed": {
+      "text": "edit {index} names no operation",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_unknown_edit": {
+      "text": "unknown {family} edit: \"{name}\"",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_groups_missing": {
+      "text": "the pdf_split operation needs a \"groups\" array",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_groups_empty": {
+      "text": "the pdf_split operation needs at least one group",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_groups_too_many": {
+      "text": "the pdf_split operation takes at most {max} groups",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_base_not_a_name": {
+      "text": "\"{base}\" is not one file-name component",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "engine_failed": {
+      "text": "the document engine failed unexpectedly",
+      "printed_by": [
+        "reading",
+        "writing"
+      ]
     }
   },
   "derived_marks": {
     "docx_marks": [
-      "reading",
-      "writing"
+      "reading"
     ],
     "docx_peripheral_parts": [
-      "reading",
-      "writing"
+      "reading"
     ],
     "ppt_marks": [
-      "reading",
-      "writing"
+      "reading"
     ],
     "ppt_slide_labels": [
-      "reading",
-      "writing"
+      "reading"
     ],
     "pdf_field_kinds": [
-      "reading",
-      "writing"
+      "reading"
     ],
     "pdf_form_words": [
-      "reading",
-      "writing"
+      "reading"
     ],
     "pdf_metadata_fields": [
-      "reading",
-      "writing"
+      "reading"
     ]
   },
   "enforced": {

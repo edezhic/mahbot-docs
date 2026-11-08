@@ -8,11 +8,13 @@
 
 use super::documents::{
     BASIC_DOCX, BASIC_PDF, BASIC_PPTX, BASIC_XLSX, BROKEN_FORM_PDF, FORM_PDF, MERGE_A_PDF,
-    MERGE_B_PDF, PICTURE_JPEG, PICTURE_PDF, PICTURE_PNG, TEMPLATE_DOCX, TEMPLATE_PPTX,
-    TEMPLATE_XLSX, TRUNCATED_PDF,
+    MERGE_B_PDF, PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_PDF, PICTURE_PNG, TEMPLATE_DOCX,
+    TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF, TRUNCATED_XLSX, XLSX_ALL_HIDDEN,
+    XLSX_BAD_MERGE_REF, XLSX_BROKEN_MERGES, XLSX_EDIT, XLSX_MACRO, XLSX_NO_CONTENT_TYPES,
+    XLSX_NO_FAMILY, XLSX_ONE_VISIBLE, XLSX_ONLY_SHEET, XLSX_SELF_CLOSING, XLSX_UNCLOSED_MERGE_CELL,
 };
 use super::effect::{BoxKind, Scalar, Scope};
-use super::{Case, Document, Effect, Expect};
+use super::{Case, Document, Effect, Expect, Reason};
 use crate::engine::Family;
 use serde_json::{Value, json};
 
@@ -32,6 +34,7 @@ fn produced(
         family,
         operation,
         sub_operation,
+        id: None,
         documents,
         request,
         outputs,
@@ -55,6 +58,7 @@ fn declined(
         family,
         operation,
         sub_operation,
+        id: None,
         documents,
         request,
         outputs,
@@ -525,6 +529,11 @@ fn docx_edit_cases() -> Vec<Case> {
 
 // ── xlsx_edit ─────────────────────────────────────────────────────────────────────────────────
 
+/// A value with more digits than `0.00` shows, so the stored number and its format are told
+/// apart; the digits are the case's own, not a mathematical constant.
+#[expect(clippy::approx_constant)]
+const XLSX_EDIT_NUMBER: f64 = 3.14159;
+
 /// One workbook edit against `basic.xlsx` and whatever else the request names, written to
 /// `$out/edited.xlsx`.
 fn xlsx_edit(sub_operation: &'static str, edits: Value, effects: Vec<Effect>) -> Case {
@@ -542,6 +551,63 @@ fn xlsx_edit(sub_operation: &'static str, edits: Value, effects: Vec<Effect>) ->
         vec!["edited.xlsx"],
         effects,
     )
+}
+
+/// One workbook edit against `document`, named by `id` because its sub-operation already has a
+/// case, and written to `$out/edited.xlsx` (or `.xlsm` for a macro-enabled input).
+fn workbook_edit(
+    sub_operation: &'static str,
+    id: &'static str,
+    document: Document,
+    edits: Value,
+    effects: Vec<Effect>,
+) -> Case {
+    let output = if document.name.ends_with(".xlsm") {
+        "edited.xlsm"
+    } else {
+        "edited.xlsx"
+    };
+    produced(
+        Family::Xlsx,
+        "xlsx_edit",
+        Some(sub_operation),
+        inputs(sub_operation, document),
+        json!({
+            "op": "xlsx_edit",
+            "input": format!("$in/{}", document.name),
+            "edits": edits,
+            "output": format!("$out/{output}"),
+        }),
+        vec![output],
+        effects,
+    )
+    .named(id)
+}
+
+/// One refused workbook edit: the request a `workbook_edit` would carry, with the reason the
+/// engine must give.
+fn workbook_refusal(
+    sub_operation: &'static str,
+    id: &'static str,
+    document: Document,
+    edits: Value,
+    reason: Reason,
+) -> Case {
+    declined(
+        Family::Xlsx,
+        "xlsx_edit",
+        Some(sub_operation),
+        inputs(sub_operation, document),
+        json!({
+            "op": "xlsx_edit",
+            "input": format!("$in/{}", document.name),
+            "edits": edits,
+            "output": "$out/edited.xlsx",
+        }),
+        vec!["edited.xlsx"],
+        Expect::Refused(reason),
+    )
+    .named(id)
 }
 
 fn xlsx_edit_cases() -> Vec<Case> {
@@ -729,6 +795,944 @@ fn xlsx_edit_cases() -> Vec<Case> {
                 output: None,
                 count: 1,
             }],
+        ),
+        // ── the deeper workbook surface ───────────────────────────────────────────────────────
+        workbook_edit(
+            "set_cell",
+            "number",
+            XLSX_EDIT,
+            json!([{ "op": "set_cell", "sheet": "First", "cell": "B4", "value": 42 }]),
+            vec![Effect::Cell {
+                output: None,
+                sheet: "First",
+                cell: "B4",
+                value: Scalar::Number(42.0),
+            }],
+        ),
+        workbook_edit(
+            "set_cell",
+            "boolean",
+            XLSX_EDIT,
+            json!([{ "op": "set_cell", "sheet": "First", "cell": "C6", "value": true }]),
+            vec![Effect::Cell {
+                output: None,
+                sheet: "First",
+                cell: "C6",
+                value: Scalar::Bool(true),
+            }],
+        ),
+        workbook_edit(
+            "set_cell",
+            "formula",
+            XLSX_EDIT,
+            json!([{
+                "op": "set_cell",
+                "sheet": "First",
+                "cell": "D2",
+                "value": { "formula": "SUM(B2:B3)" },
+            }]),
+            vec![Effect::Cell {
+                output: None,
+                sheet: "First",
+                cell: "D2",
+                value: Scalar::Formula("SUM(B2:B3)"),
+            }],
+        ),
+        workbook_edit(
+            "set_cell",
+            "number_format",
+            XLSX_EDIT,
+            json!([{
+                "op": "set_cell",
+                "sheet": "First",
+                "cell": "B5",
+                "value": XLSX_EDIT_NUMBER,
+                "number_format": "0.00",
+            }]),
+            vec![
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "B5",
+                    value: Scalar::Number(XLSX_EDIT_NUMBER),
+                },
+                Effect::NumberFormat {
+                    output: None,
+                    sheet: "First",
+                    cell: "B5",
+                    code: "0.00",
+                },
+            ],
+        ),
+        workbook_edit(
+            "set_cell",
+            "chart_and_pivot_notes",
+            XLSX_EDIT,
+            json!([{ "op": "set_cell", "sheet": "First", "cell": "A1", "value": "Changed" }]),
+            vec![Effect::Cell {
+                output: None,
+                sheet: "First",
+                cell: "A1",
+                value: Scalar::Text("Changed"),
+            }],
+        ),
+        workbook_edit(
+            "clear_cell",
+            "formula",
+            XLSX_EDIT,
+            json!([{ "op": "clear_cell", "sheet": "First", "cell": "B4" }]),
+            vec![Effect::CellAbsent {
+                output: None,
+                sheet: "First",
+                cell: "B4",
+            }],
+        ),
+        workbook_edit(
+            "format_cells",
+            "number_format",
+            XLSX_EDIT,
+            json!([{
+                "op": "format_cells",
+                "sheet": "First",
+                "range": "A2:B3",
+                "number_format": "0.00",
+            }]),
+            vec![
+                Effect::NumberFormat {
+                    output: None,
+                    sheet: "First",
+                    cell: "A2",
+                    code: "0.00",
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "A2",
+                    value: Scalar::Text("Alpha"),
+                },
+            ],
+        ),
+        workbook_edit(
+            "format_cells",
+            "column",
+            XLSX_EDIT,
+            json!([{
+                "op": "format_cells",
+                "sheet": "First",
+                "column": "B",
+                "width_chars": 20,
+            }]),
+            vec![Effect::ColumnWidth {
+                output: None,
+                sheet: "First",
+                column: "B",
+                width: 20.0,
+            }],
+        ),
+        workbook_edit(
+            "format_cells",
+            "row",
+            XLSX_EDIT,
+            json!([{
+                "op": "format_cells",
+                "sheet": "First",
+                "row": 2,
+                "height_points": 30,
+            }]),
+            vec![Effect::RowHeight {
+                output: None,
+                sheet: "First",
+                row: 2,
+                height: 30.0,
+            }],
+        ),
+        workbook_refusal(
+            "format_cells",
+            "column_range",
+            XLSX_EDIT,
+            json!([{
+                "op": "format_cells",
+                "sheet": "First",
+                "range": "A:C",
+                "bold": true,
+            }]),
+            // `A:C` splits into two ends, and `A` is not an A1 address, so the refusal is the
+            // address sentence rather than the range-shape one.
+            Reason::contains("must be an A1 address"),
+        ),
+        workbook_refusal(
+            "format_cells",
+            "too_many_cells",
+            XLSX_EDIT,
+            json!([{
+                "op": "format_cells",
+                "sheet": "First",
+                "range": "A1:BZ1000",
+                "bold": true,
+            }]),
+            Reason::contains("more than"),
+        ),
+        // A column shift over a self-closing empty cell: reading it as the start of the next
+        // element would empty the row instead of moving what follows the deleted column.
+        workbook_edit(
+            "delete_column",
+            "self_closing_cell",
+            XLSX_SELF_CLOSING,
+            json!([{ "op": "delete_column", "sheet": "First", "column": "A" }]),
+            vec![
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "A1",
+                    value: Scalar::Text("Keep"),
+                },
+                Effect::CellAbsent {
+                    output: None,
+                    sheet: "First",
+                    cell: "A2",
+                },
+            ],
+        ),
+        // Two inserts in one call: the second must see the empty row the first wrote, not read it
+        // as the start of the row beside it.
+        workbook_edit(
+            "insert_row",
+            "two_in_one_call",
+            XLSX_EDIT,
+            json!([
+                { "op": "insert_row", "sheet": "First", "row": 2 },
+                { "op": "insert_row", "sheet": "First", "row": 2 },
+            ]),
+            vec![
+                Effect::CellAbsent {
+                    output: None,
+                    sheet: "First",
+                    cell: "A2",
+                },
+                Effect::CellAbsent {
+                    output: None,
+                    sheet: "First",
+                    cell: "A3",
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "A4",
+                    value: Scalar::Text("Alpha"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "A5",
+                    value: Scalar::Text("Beta"),
+                },
+            ],
+        ),
+        // An insert undone by a delete: the sheet is what it was, first row included.
+        workbook_edit(
+            "insert_row",
+            "then_delete",
+            XLSX_EDIT,
+            json!([
+                { "op": "insert_row", "sheet": "First", "row": 1 },
+                { "op": "delete_row", "sheet": "First", "row": 1 },
+            ]),
+            vec![
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "A1",
+                    value: Scalar::Text("Title"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "A2",
+                    value: Scalar::Text("Alpha"),
+                },
+            ],
+        ),
+        workbook_edit(
+            "insert_row",
+            "formula_left",
+            XLSX_EDIT,
+            json!([{ "op": "insert_row", "sheet": "First", "row": 3 }]),
+            vec![
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "A4",
+                    value: Scalar::Text("Beta"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "B5",
+                    value: Scalar::Formula("SUM(B2:B3)"),
+                },
+                Effect::CellAbsent {
+                    output: None,
+                    sheet: "First",
+                    cell: "A3",
+                },
+            ],
+        ),
+        workbook_edit(
+            "insert_row",
+            "merge_moved",
+            XLSX_EDIT,
+            json!([{ "op": "insert_row", "sheet": "First", "row": 5 }]),
+            vec![
+                Effect::Merged {
+                    output: None,
+                    sheet: "First",
+                    range: "A6:B6",
+                    present: true,
+                },
+                Effect::Merged {
+                    output: None,
+                    sheet: "First",
+                    range: "A5:B5",
+                    present: false,
+                },
+            ],
+        ),
+        workbook_edit(
+            "insert_row",
+            "stale_references",
+            XLSX_EDIT,
+            json!([{ "op": "insert_row", "sheet": "First", "row": 3 }]),
+            vec![
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "B5",
+                    value: Scalar::Formula("SUM(B2:B3)"),
+                },
+                Effect::Merged {
+                    output: None,
+                    sheet: "First",
+                    range: "A6:B6",
+                    present: true,
+                },
+            ],
+        ),
+        workbook_edit(
+            "delete_row",
+            "formula_left",
+            XLSX_EDIT,
+            json!([{ "op": "delete_row", "sheet": "First", "row": 2 }]),
+            vec![
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "A2",
+                    value: Scalar::Text("Beta"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "B3",
+                    value: Scalar::Formula("SUM(B2:B3)"),
+                },
+            ],
+        ),
+        workbook_edit(
+            "insert_column",
+            "merge_moved",
+            XLSX_EDIT,
+            json!([{ "op": "insert_column", "sheet": "First", "column": "B" }]),
+            vec![
+                Effect::Merged {
+                    output: None,
+                    sheet: "First",
+                    range: "A5:C5",
+                    present: true,
+                },
+                Effect::Merged {
+                    output: None,
+                    sheet: "First",
+                    range: "A5:B5",
+                    present: false,
+                },
+            ],
+        ),
+        workbook_edit(
+            "delete_column",
+            "formula_left",
+            XLSX_EDIT,
+            json!([{ "op": "delete_column", "sheet": "First", "column": "A" }]),
+            vec![
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "A2",
+                    value: Scalar::Number(1.0),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "A4",
+                    value: Scalar::Formula("SUM(B2:B3)"),
+                },
+            ],
+        ),
+        workbook_edit(
+            "merge_cells",
+            "keeps_content",
+            XLSX_EDIT,
+            json!([{ "op": "merge_cells", "sheet": "First", "range": "A2:B2" }]),
+            vec![
+                Effect::Merged {
+                    output: None,
+                    sheet: "First",
+                    range: "A2:B2",
+                    present: true,
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "A2",
+                    value: Scalar::Text("Alpha"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "B2",
+                    value: Scalar::Number(1.0),
+                },
+            ],
+        ),
+        workbook_refusal(
+            "merge_cells",
+            "overlap",
+            XLSX_EDIT,
+            json!([{ "op": "merge_cells", "sheet": "First", "range": "A5:B6" }]),
+            Reason::contains("overlaps A5:B5"),
+        ),
+        workbook_refusal(
+            "merge_cells",
+            "single_cell",
+            XLSX_EDIT,
+            json!([{ "op": "merge_cells", "sheet": "First", "range": "A9" }]),
+            Reason::contains("needs at least two"),
+        ),
+        workbook_refusal(
+            "merge_cells",
+            "repeat",
+            XLSX_EDIT,
+            json!([
+                { "op": "merge_cells", "sheet": "First", "range": "A9:B9" },
+                { "op": "merge_cells", "sheet": "First", "range": "A9:B9" },
+            ]),
+            Reason::contains("already has"),
+        ),
+        workbook_refusal(
+            "merge_cells",
+            "unreadable",
+            XLSX_BROKEN_MERGES,
+            json!([{ "op": "merge_cells", "sheet": "First", "range": "A1:B1" }]),
+            Reason::contains("<mergeCells> opened and never closed"),
+        ),
+        workbook_refusal(
+            "merge_cells",
+            "unreadable_ref",
+            XLSX_BAD_MERGE_REF,
+            json!([{ "op": "merge_cells", "sheet": "First", "range": "A1:B1" }]),
+            Reason::contains("holds a merge this kit cannot read"),
+        ),
+        workbook_refusal(
+            "merge_cells",
+            "unclosed_cell",
+            XLSX_UNCLOSED_MERGE_CELL,
+            json!([{ "op": "merge_cells", "sheet": "First", "range": "A1:B1" }]),
+            Reason::contains("<mergeCell> opened and never closed"),
+        ),
+        workbook_refusal(
+            "unmerge_cells",
+            "not_merged",
+            XLSX_EDIT,
+            json!([{ "op": "unmerge_cells", "sheet": "First", "range": "C7:D7" }]),
+            Reason::contains("is not a merge"),
+        ),
+        workbook_edit(
+            "rename_sheet",
+            "dangling_references",
+            XLSX_EDIT,
+            json!([{ "op": "rename_sheet", "sheet": "First", "name": "Start" }]),
+            vec![
+                Effect::SheetNames {
+                    output: None,
+                    names: &["Start", "Second", "Third"],
+                },
+                // The rename rewrites no reference: the cell formula, the chart's series and the
+                // links still spell the name the sheet no longer has, and the answer names them.
+                Effect::Cell {
+                    output: None,
+                    sheet: "Start",
+                    cell: "C6",
+                    value: Scalar::Formula("First!B2*2"),
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("xl/charts/chart1.xml"),
+                    text: "First!$B$2:$B$3",
+                    present: true,
+                },
+            ],
+        ),
+        workbook_edit(
+            "delete_sheet",
+            "parts_and_names",
+            XLSX_EDIT,
+            json!([{ "op": "delete_sheet", "sheet": "First" }]),
+            vec![
+                Effect::SheetNames {
+                    output: None,
+                    names: &["Second", "Third"],
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "xl/worksheets/sheet1.xml",
+                    present: false,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "xl/drawings/drawing1.xml",
+                    present: true,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "xl/charts/chart1.xml",
+                    present: true,
+                },
+                // The global name survives a sheet delete, and both scoped names move down with
+                // the sheets they name: `Local` is scoped to `Second`, not to the deleted
+                // `First`, so it stays with its sheet.
+                Effect::DefinedNames {
+                    output: None,
+                    names: &[
+                        "Rate",
+                        "Local (sheet \"Second\")",
+                        "ThirdName (sheet \"Third\")",
+                    ],
+                },
+            ],
+        ),
+        workbook_refusal(
+            "delete_sheet",
+            "only_sheet",
+            XLSX_ONLY_SHEET,
+            json!([{ "op": "delete_sheet", "sheet": "Only" }]),
+            Reason::contains("only sheet"),
+        ),
+        // Deleting the sheet a scoped name belongs to drops that name and says so, while the
+        // scoped name of another sheet survives and its own scope moves down with it.
+        workbook_edit(
+            "delete_sheet",
+            "drops_scoped_names",
+            XLSX_EDIT,
+            json!([{ "op": "delete_sheet", "sheet": "Second" }]),
+            vec![
+                Effect::SheetNames {
+                    output: None,
+                    names: &["First", "Third"],
+                },
+                Effect::DefinedNames {
+                    output: None,
+                    names: &["Rate", "ThirdName (sheet \"Third\")"],
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "xl/worksheets/sheet2.xml",
+                    present: false,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "xl/worksheets/sheet3.xml",
+                    present: true,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "xl/drawings/drawing1.xml",
+                    present: true,
+                },
+            ],
+        ),
+        workbook_refusal(
+            "delete_sheet",
+            "last_visible",
+            XLSX_ONE_VISIBLE,
+            json!([{ "op": "delete_sheet", "sheet": "First" }]),
+            Reason::contains("only visible sheet"),
+        ),
+        workbook_edit(
+            "delete_sheet",
+            "hidden_while_all_hidden",
+            XLSX_ALL_HIDDEN,
+            json!([{ "op": "delete_sheet", "sheet": "HiddenOne" }]),
+            vec![Effect::SheetNames {
+                output: None,
+                names: &["HiddenTwo"],
+            }],
+        ),
+        workbook_edit(
+            "move_sheet",
+            "remaps",
+            XLSX_EDIT,
+            json!([{ "op": "move_sheet", "sheet": "Second", "to": 1 }]),
+            vec![
+                Effect::SheetNames {
+                    output: None,
+                    names: &["Second", "First", "Third"],
+                },
+                Effect::DefinedNames {
+                    output: None,
+                    names: &[
+                        "Rate",
+                        "Local (sheet \"Second\")",
+                        "ThirdName (sheet \"Third\")",
+                    ],
+                },
+                // A move rewrites the sheet list, never a part name: the moved sheet keeps the
+                // worksheet part it had.
+                Effect::PartPresent {
+                    output: None,
+                    part: "xl/worksheets/sheet2.xml",
+                    present: true,
+                },
+            ],
+        ),
+        workbook_refusal(
+            "move_sheet",
+            "same_position",
+            XLSX_EDIT,
+            json!([{ "op": "move_sheet", "sheet": "Second", "to": 2 }]),
+            Reason::contains("already at position"),
+        ),
+        workbook_edit(
+            "add_image",
+            "existing_drawing",
+            XLSX_EDIT,
+            json!([{
+                "op": "add_image",
+                "sheet": "First",
+                "cell": "E12",
+                "image": "$in/picture.png",
+                "width": 80,
+                "height": 40,
+            }]),
+            vec![Effect::ImageParts {
+                output: None,
+                count: 2,
+            }],
+        ),
+        workbook_edit(
+            "add_sheet",
+            "named",
+            XLSX_EDIT,
+            json!([{ "op": "add_sheet", "name": "Fourth" }]),
+            vec![Effect::SheetNames {
+                output: None,
+                names: &["First", "Second", "Third", "Fourth"],
+            }],
+        ),
+        workbook_edit(
+            "set_cell",
+            "macro_keeps_extension",
+            XLSX_MACRO,
+            json!([{ "op": "set_cell", "sheet": "First", "cell": "B4", "value": 7 }]),
+            vec![Effect::Cell {
+                output: None,
+                sheet: "First",
+                cell: "B4",
+                value: Scalar::Number(7.0),
+            }],
+        ),
+        workbook_refusal(
+            "set_cell",
+            "truncated_input",
+            TRUNCATED_XLSX,
+            json!([{ "op": "set_cell", "sheet": "First", "cell": "A1", "value": 1 }]),
+            // The kit's own sentence frames the ZIP library's message: the words are the
+            // product's, the tail is whatever the library said, and the recorded value marks that
+            // tail as a variable so another implementation's library may word it differently.
+            Reason::template("truncated.xlsx is not a readable .xlsx package: {}"),
+        ),
+        // Every bound is counted in characters, the way the reference counts it: 7 000 three-byte
+        // characters are 7 000 by that count and 21 000 in bytes, so a byte-counting port would
+        // answer `got: 21000` where the reference says `got: 7000`.
+        workbook_refusal(
+            "set_cell",
+            "text_counted_in_characters",
+            BASIC_XLSX,
+            json!([{
+                "op": "set_cell",
+                "sheet": "First",
+                "cell": "B2",
+                "value": 1,
+                "number_format": "\u{6f22}".repeat(7000),
+            }]),
+            Reason::contains("a number format must be at most 200 characters, got: 7000"),
+        ),
+        // The edit-text bound is 20 000 characters and the font-name bound 31: 7 000 three-byte
+        // characters pass the first and fail the second by the reference's count, so the sentence
+        // names the font bound, while a byte-counting port would refuse at the first bound with
+        // the text sentence instead.
+        workbook_refusal(
+            "format_cells",
+            "text_counted_in_characters",
+            BASIC_XLSX,
+            json!([{
+                "op": "format_cells",
+                "sheet": "First",
+                "range": "B2",
+                "font": "\u{6f22}".repeat(7000),
+            }]),
+            Reason::contains("at most 31 characters, got: 7000"),
+        ),
+        // A self-closing empty cell beside one with text: a reader that lets the first swallow the
+        // second deletes `B1` when it writes `A1`.
+        workbook_edit(
+            "set_cell",
+            "self_closing_cell",
+            XLSX_SELF_CLOSING,
+            json!([{ "op": "set_cell", "sheet": "First", "cell": "A1", "value": "Set" }]),
+            vec![
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "A1",
+                    value: Scalar::Text("Set"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "B1",
+                    value: Scalar::Text("Keep"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "A2",
+                    value: Scalar::Text("Second"),
+                },
+            ],
+        ),
+        workbook_refusal(
+            "set_cell",
+            "too_many_edits",
+            XLSX_EDIT,
+            Value::Array(
+                (0..201)
+                    .map(|index| {
+                        json!({
+                            "op": "set_cell",
+                            "sheet": "First",
+                            "cell": "A1",
+                            "value": index,
+                        })
+                    })
+                    .collect(),
+            ),
+            Reason::contains("at most"),
+        ),
+        // The value path does not count characters; the number-format path does, and it is the
+        // one `edit_text_max` bounds before anything is reserved.
+        workbook_refusal(
+            "set_cell",
+            "text_too_long",
+            XLSX_EDIT,
+            json!([{
+                "op": "set_cell",
+                "sheet": "First",
+                "cell": "D1",
+                "value": 1,
+                "number_format": "x".repeat(20_001),
+            }]),
+            Reason::contains("20000"),
+        ),
+        // A request naming a sheet the workbook does not have.
+        workbook_refusal(
+            "set_cell",
+            "missing_sheet",
+            XLSX_EDIT,
+            json!([{ "op": "set_cell", "sheet": "Nope", "cell": "A1", "value": 1 }]),
+            Reason::contains("there is no sheet named"),
+        ),
+        // A `set_cell` with no value: changing only the formatting is `format_cells`.
+        workbook_refusal(
+            "set_cell",
+            "no_value",
+            XLSX_EDIT,
+            json!([{ "op": "set_cell", "sheet": "First", "cell": "A1" }]),
+            Reason::contains("set_cell needs a value"),
+        ),
+        // An object value that is not exactly a formula.
+        workbook_refusal(
+            "set_cell",
+            "formula_shape",
+            XLSX_EDIT,
+            json!([{
+                "op": "set_cell",
+                "sheet": "First",
+                "cell": "A1",
+                "value": { "formula": "A1", "bold": true },
+            }]),
+            Reason::contains("an object value must be"),
+        ),
+        // A format naming two targets, one target too many.
+        workbook_refusal(
+            "format_cells",
+            "two_targets",
+            XLSX_EDIT,
+            json!([{
+                "op": "format_cells",
+                "sheet": "First",
+                "range": "A2:B2",
+                "column": "B",
+                "bold": true,
+            }]),
+            Reason::contains("names more than one target"),
+        ),
+        // A range target with nothing to apply.
+        workbook_refusal(
+            "format_cells",
+            "no_property",
+            XLSX_EDIT,
+            json!([{ "op": "format_cells", "sheet": "First", "range": "A2:B2" }]),
+            Reason::contains("names no property"),
+        ),
+        // A column target with no width, and one whose width is outside the rule.
+        workbook_refusal(
+            "format_cells",
+            "column_no_width",
+            XLSX_EDIT,
+            json!([{ "op": "format_cells", "sheet": "First", "column": "B" }]),
+            Reason::contains("names no width_chars"),
+        ),
+        workbook_refusal(
+            "format_cells",
+            "width_span",
+            XLSX_EDIT,
+            json!([{ "op": "format_cells", "sheet": "First", "column": "B", "width_chars": 300 }]),
+            Reason::contains("width_chars must be"),
+        ),
+        // A row target with no height.
+        workbook_refusal(
+            "format_cells",
+            "row_no_height",
+            XLSX_EDIT,
+            json!([{ "op": "format_cells", "sheet": "First", "row": 2 }]),
+            Reason::contains("names no height_points"),
+        ),
+        // A name another sheet already holds, and a position past the sheet list.
+        workbook_refusal(
+            "add_sheet",
+            "exists",
+            XLSX_EDIT,
+            json!([{ "op": "add_sheet", "name": "First" }]),
+            Reason::contains("already exists"),
+        ),
+        workbook_refusal(
+            "move_sheet",
+            "no_position",
+            XLSX_EDIT,
+            json!([{ "op": "move_sheet", "sheet": "First", "to": 9 }]),
+            Reason::contains("no position"),
+        ),
+        // An insert past the sheet's used range, and an unmerge on a sheet with no merges at all.
+        workbook_refusal(
+            "insert_row",
+            "past_range",
+            XLSX_EDIT,
+            json!([{ "op": "insert_row", "sheet": "First", "row": 500 }]),
+            Reason::contains("past the sheet's used range"),
+        ),
+        workbook_refusal(
+            "unmerge_cells",
+            "none",
+            XLSX_ONLY_SHEET,
+            json!([{ "op": "unmerge_cells", "sheet": "Only", "range": "A1:B1" }]),
+            Reason::contains("it has none"),
+        ),
+        // A picture whose name claims PNG and whose bytes are not one.
+        declined(
+            Family::Xlsx,
+            "xlsx_edit",
+            Some("add_image"),
+            vec![XLSX_EDIT, PICTURE_BROKEN_PNG],
+            json!({
+                "op": "xlsx_edit",
+                "input": "$in/edit.xlsx",
+                "edits": [{
+                    "op": "add_image",
+                    "sheet": "First",
+                    "cell": "E12",
+                    "image": "$in/broken.png",
+                    "width": 80,
+                    "height": 40,
+                }],
+                "output": "$out/edited.xlsx",
+            }),
+            vec!["edited.xlsx"],
+            Expect::Refused(Reason::contains("are not a whole PNG image")),
+        )
+        .named("broken_picture"),
+        // The input is another family's package, though its name says nothing about it.
+        workbook_refusal(
+            "set_cell",
+            "wrong_family",
+            BASIC_DOCX,
+            json!([{ "op": "set_cell", "sheet": "First", "cell": "A1", "value": 1 }]),
+            Reason::contains(
+                "the input is really a .docx package, not the .xlsx one its name says \
+                 — hint: use docx_edit to edit it",
+            ),
+        ),
+        // A package that declares content types and no family part at all.
+        workbook_refusal(
+            "set_cell",
+            "no_family_part",
+            XLSX_NO_FAMILY,
+            json!([{ "op": "set_cell", "sheet": "First", "cell": "A1", "value": 1 }]),
+            Reason::contains(
+                "cannot edit no-family.xlsx: it holds no document, workbook or presentation \
+                 part, so it is not a .xlsx package",
+            ),
+        ),
+        // A package with no `[Content_Types].xml`, met by an edit that must declare a part in it.
+        workbook_refusal(
+            "add_sheet",
+            "no_content_types",
+            XLSX_NO_CONTENT_TYPES,
+            json!([{ "op": "add_sheet", "name": "Third" }]),
+            Reason::contains("cannot edit no-types.xlsx: it has no [Content_Types].xml part"),
+        ),
+        // The same package, met by a name the workbook already uses: the duplicate is refused
+        // before the missing part is ever looked for, so the name is the sentence printed.
+        workbook_refusal(
+            "add_sheet",
+            "duplicate_name_without_content_types",
+            XLSX_NO_CONTENT_TYPES,
+            json!([{ "op": "add_sheet", "name": "First" }]),
+            Reason::contains("a sheet named \"First\" already exists"),
+        ),
+        // The same package, met by formatting rather than by a part being added: the styles path
+        // asks for the content-type list before it declares the styles part, even one the
+        // workbook already holds.
+        workbook_refusal(
+            "set_cell",
+            "number_format_without_content_types",
+            XLSX_NO_CONTENT_TYPES,
+            json!([{
+                "op": "set_cell",
+                "sheet": "First",
+                "cell": "A1",
+                "value": 1,
+                "number_format": "0.00",
+            }]),
+            Reason::contains("cannot edit no-types.xlsx: it has no [Content_Types].xml part"),
         ),
     ]
 }
@@ -1278,9 +2282,7 @@ fn failure_cases() -> Vec<Case> {
                 "output": "$out/edited.docx",
             }),
             vec!["edited.docx"],
-            Expect::Refused {
-                reason_contains: "is not in the document's body",
-            },
+            Expect::Refused(Reason::contains("is not in the document's body")),
         ),
         // A rotation the writer cannot take, refused in the request's own terms.
         declined(
@@ -1296,9 +2298,7 @@ fn failure_cases() -> Vec<Case> {
                 "output": "$out/rotated.pdf",
             }),
             vec!["rotated.pdf"],
-            Expect::Refused {
-                reason_contains: "must be a multiple of 90",
-            },
+            Expect::Refused(Reason::contains("must be a multiple of 90")),
         ),
         // A file that is a PDF by its magic bytes alone: the kit names it rather than letting the
         // library's own text surface.
@@ -1315,9 +2315,7 @@ fn failure_cases() -> Vec<Case> {
                 "output": "$out/rotated.pdf",
             }),
             vec!["rotated.pdf"],
-            Expect::Refused {
-                reason_contains: "do not form a PDF this tool can read",
-            },
+            Expect::Refused(Reason::contains("do not form a PDF this tool can read")),
         ),
         // A request the engine accepts and cannot carry out: the catalog names an `/AcroForm` that
         // is not a dictionary, which the PDF library refuses.
@@ -1334,9 +2332,9 @@ fn failure_cases() -> Vec<Case> {
                 "output": "$out/filled.pdf",
             }),
             vec!["filled.pdf"],
-            Expect::Failed {
-                reason_contains: "PDFDict",
-            },
+            // The sentence is pdf-lib's alone, so the case asserts the failure's class and that
+            // nothing was written, not the library's wording.
+            Expect::Failed(Reason::third_party()),
         ),
     ]
 }

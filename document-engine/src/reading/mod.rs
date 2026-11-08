@@ -175,17 +175,18 @@ pub enum RenderError {
 
 impl std::fmt::Display for RenderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let marks = &crate::vocabulary::vocabulary().marks;
         match self {
-            Self::Io => f.write_str("the file could not be read"),
-            Self::NotPdf => f.write_str("its bytes do not form a PDF this engine can read"),
-            Self::PasswordProtected => f.write_str("it is password-protected"),
-            Self::NoSuchPage { pages } => write!(f, "it has no such page (it has {pages})"),
-            Self::NoPixels => f.write_str("the page produced no pixels"),
-            Self::RenderFailed => f.write_str("the page could not be rendered"),
-            Self::Internal => f.write_str(crate::contained::ENGINE_FAILED),
-            Self::InvalidSize => {
-                f.write_str("the requested page size is not a positive, finite number")
+            Self::Io => f.write_str(marks.get("render_unreadable")),
+            Self::NotPdf => f.write_str(marks.get("render_not_pdf")),
+            Self::PasswordProtected => f.write_str(marks.get("render_password_protected")),
+            Self::NoSuchPage { pages } => {
+                f.write_str(&marks.format("render_no_such_page", &[("pages", &pages.to_string())]))
             }
+            Self::NoPixels => f.write_str(marks.get("render_no_pixels")),
+            Self::RenderFailed => f.write_str(marks.get("render_failed")),
+            Self::Internal => f.write_str(crate::contained::engine_failed()),
+            Self::InvalidSize => f.write_str(marks.get("render_invalid_size")),
         }
     }
 }
@@ -206,7 +207,7 @@ pub fn detect(path: &Path, file_name: &str) -> std::io::Result<Kind> {
         let bytes = read_whole(path)?;
         Ok(crate::detect::classify(&bytes, file_name))
     })
-    .unwrap_or_else(|_| Err(std::io::Error::other(crate::contained::ENGINE_FAILED)))
+    .unwrap_or_else(|_| Err(std::io::Error::other(crate::contained::engine_failed())))
 }
 
 /// Read the document at `path`, named `file_name`, writing its pictures into `out_dir`.

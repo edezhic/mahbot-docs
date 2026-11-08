@@ -4,8 +4,10 @@
 mod common;
 
 use document_parity::baseline::Baseline;
-use document_parity::engine::{EngineIdentity, Kind, Reader, Reading, Writer, WriterOutcome};
-use document_parity::harness::{Harness, Run};
+use document_parity::engine::{
+    EngineIdentity, Family, Key, Kind, Reader, Reading, Writer, WriterOutcome,
+};
+use document_parity::harness::{CaseOutcome, Harness, Judgement, Run};
 use document_parity::reference::{NoOpReader, NoOpWriter, ReferenceReader, ReferenceWriter};
 use document_parity::transcript::CaseTranscript;
 use serde_json::{Value, json};
@@ -116,6 +118,83 @@ impl Writer for SlowWriter {
     fn run(&self, _request: &Value, _scratch: &Path) -> anyhow::Result<WriterOutcome> {
         std::thread::sleep(Duration::from_millis(30));
         Ok(WriterOutcome::produced(Vec::new()))
+    }
+}
+
+/// A writer that implements no operation: every case is unjudged, so the run judges nothing.
+struct UncoveringWriter;
+
+impl Writer for UncoveringWriter {
+    fn identity(&self) -> EngineIdentity {
+        identity("uncovering-writer")
+    }
+
+    fn run(&self, _request: &Value, _scratch: &Path) -> anyhow::Result<WriterOutcome> {
+        Ok(WriterOutcome::failed(
+            "usage",
+            "no operation is implemented",
+        ))
+    }
+
+    fn covers(&self, _key: &Key) -> bool {
+        false
+    }
+}
+
+/// A writer whose first case never answers: a timeout costs that case, not the run.
+#[derive(Default)]
+struct HangingWriter {
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+impl Writer for HangingWriter {
+    fn identity(&self) -> EngineIdentity {
+        identity("hanging-writer")
+    }
+
+    fn run(&self, _request: &Value, _scratch: &Path) -> anyhow::Result<WriterOutcome> {
+        if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 1 {
+            std::thread::sleep(Duration::from_secs(5));
+        }
+        Ok(WriterOutcome::produced(Vec::new()))
+    }
+}
+
+/// A writer that rewrites the input it was given: a change the case never asked for.
+struct RewritingWriter;
+
+impl Writer for RewritingWriter {
+    fn identity(&self) -> EngineIdentity {
+        identity("rewriting-writer")
+    }
+
+    fn run(&self, request: &Value, _scratch: &Path) -> anyhow::Result<WriterOutcome> {
+        use std::io::Write as _;
+        if let Some(path) = request.get("input").and_then(Value::as_str) {
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(path)?
+                .write_all(b"rewritten")?;
+        }
+        Ok(WriterOutcome::produced(Vec::new()))
+    }
+}
+
+/// A writer that refuses every request and leaves a file in the output directory anyway.
+struct LitteringWriter;
+
+impl Writer for LitteringWriter {
+    fn identity(&self) -> EngineIdentity {
+        identity("littering-writer")
+    }
+
+    fn run(&self, request: &Value, _scratch: &Path) -> anyhow::Result<WriterOutcome> {
+        if let Some(output) = document_parity::engine::request_outputs(request).first()
+            && let Some(directory) = output.parent()
+        {
+            std::fs::write(directory.join("litter.txt"), b"left behind")?;
+        }
+        Ok(WriterOutcome::failed("usage", "refused"))
     }
 }
 
@@ -236,7 +315,7 @@ fn the_reference_engine_matches_the_recorded_baseline() {
     let report = run.report(&baseline);
     if !report.passes_reference_gate() {
         let mut report_lines = Vec::new();
-        for verdict in report.verdicts.iter().filter(|verdict| !verdict.passed) {
+        for verdict in report.verdicts.iter().filter(|verdict| !verdict.passed()) {
             report_lines.push(format!("{}: {}", verdict.key, verdict.problems.join("; ")));
         }
         for reading in report.readings.iter().filter(|reading| !reading.passed) {
@@ -256,7 +335,7 @@ fn the_reference_engine_matches_the_recorded_baseline() {
             report
                 .verdicts
                 .iter()
-                .filter(|verdict| !verdict.passed)
+                .filter(|verdict| !verdict.passed())
                 .count(),
             report
                 .readings
@@ -296,7 +375,7 @@ fn a_no_op_engine_fails_every_verdict() {
     let passed: Vec<String> = report
         .verdicts
         .iter()
-        .filter(|verdict| verdict.passed)
+        .filter(|verdict| verdict.passed())
         .map(|verdict| verdict.key.slug())
         .collect();
     assert!(
@@ -322,6 +401,11 @@ fn a_no_op_engine_fails_every_verdict() {
             .iter()
             .any(|problem| problem.starts_with("effect not met:"))),
         "the effect check itself must reject a no-op"
+    );
+    assert!(report.judged() > 0, "the no-op engine's cases are judged");
+    assert!(
+        !report.passed(),
+        "a do-nothing engine must not read as a pass"
     );
 }
 
@@ -511,6 +595,13 @@ fn engine_prose_dates_are_normalised() {
     for outcome in &run.outcomes {
         let transcript = outcome.transcript.as_ref().expect("a transcript");
         let reason = transcript.reason.as_deref().expect("the refusal's reason");
+        // A reason a template's variable spans is normalised to the marker, so the library's
+        // message — date and all — is deliberately not visible there. A template whose own words
+        // this fake writer does not print leaves the reason unnormalised, and the date rule below
+        // still applies to it.
+        if reason == document_parity::transcript::VARIABLE {
+            continue;
+        }
         assert!(
             !reason.contains("2020-01-01"),
             "a date in the engine's prose is normalised: {reason}"
@@ -747,7 +838,7 @@ fn a_stale_baseline_reading_is_reported() {
         "the orphaned reading is reported"
     );
     assert!(
-        report.verdicts.iter().all(|verdict| verdict.passed)
+        report.verdicts.iter().all(|verdict| verdict.passed())
             && report.readings.iter().all(|reading| reading.passed),
         "everything the corpus holds still matches"
     );
@@ -934,4 +1025,165 @@ fn the_baseline_names_the_engine_and_runtime_that_produced_it() {
         "the reader's build is checkable source by source"
     );
     assert!(baseline.note.contains("deliberate"));
+}
+
+#[test]
+fn a_writer_that_implements_nothing_judges_nothing() {
+    // The reference reader matches the baseline, so the only reason this run is not a pass is
+    // that the writer judged no case at all.
+    let harness = Harness::at(
+        Harness::temp_root(),
+        Box::new(UncoveringWriter),
+        Box::new(ReferenceReader),
+    )
+    .expect("a harness root");
+    let run = harness.run();
+    let report =
+        run.report(&Baseline::load(&Baseline::default_path()).expect("the baseline is recorded"));
+    assert_eq!(report.judged(), 0, "nothing was judged");
+    assert_eq!(
+        report.unjudged(),
+        report.verdicts.len(),
+        "every verdict is unjudged"
+    );
+    assert!(
+        report
+            .verdicts
+            .iter()
+            .all(|verdict| matches!(verdict.judgement, Judgement::Unjudged(_))),
+        "every verdict says why it was not judged"
+    );
+    assert!(
+        report.readings.iter().all(|reading| reading.passed),
+        "the readings are the reference's, so only the empty writer is at issue"
+    );
+    assert!(
+        !report.passed(),
+        "a run that judged nothing must not read as a pass"
+    );
+}
+
+#[test]
+fn a_hung_writer_costs_one_case_and_the_run_continues() {
+    let started = std::time::Instant::now();
+    let harness = Harness::at(
+        Harness::temp_root(),
+        Box::new(HangingWriter::default()),
+        Box::new(NoOpReader),
+    )
+    .expect("a harness root")
+    // Well under the hung writer's own wait, and far enough above a case's real cost that CPU
+    // contention cannot make a case that answers at once look like the one that hung.
+    .with_write_timeout(Duration::from_secs(2));
+    let run = harness.run();
+    // The assertion is that the run does not wait for the hung writer, not a tight timing check:
+    // the run drives every corpus case, so CPU contention can stretch it well past a few seconds.
+    assert!(
+        started.elapsed() < Duration::from_secs(30),
+        "the run waited for the hung writer"
+    );
+    assert_eq!(
+        run.outcomes.len(),
+        document_parity::corpus::writer_cases().len(),
+        "every case still has an outcome"
+    );
+    let timed_out: Vec<usize> = run
+        .outcomes
+        .iter()
+        .enumerate()
+        .filter(|(_, outcome)| {
+            outcome
+                .problem
+                .as_deref()
+                .is_some_and(|problem| problem.contains("did not finish within"))
+        })
+        .map(|(index, _)| index)
+        .collect();
+    assert_eq!(timed_out, vec![0], "exactly the first case timed out");
+    assert!(
+        run.outcomes[1].transcript.is_some(),
+        "the next case still ran: {:?}",
+        run.outcomes[1].problem
+    );
+}
+
+#[test]
+fn an_engine_that_rewrites_its_input_fails_the_case_naming_it() {
+    let harness = Harness::at(
+        Harness::temp_root(),
+        Box::new(RewritingWriter),
+        Box::new(NoOpReader),
+    )
+    .expect("a harness root");
+    let run = harness.run();
+    let report =
+        run.report(&Baseline::load(&Baseline::default_path()).expect("the baseline is recorded"));
+    let verdict = report
+        .verdicts
+        .iter()
+        .find(|verdict| verdict.key.slug() == "docx/docx_edit/replace_text")
+        .expect("the case is in the corpus");
+    assert!(
+        verdict
+            .problems
+            .iter()
+            .any(|problem| problem == "the engine changed its input basic.docx"),
+        "the changed input is named: {:?}",
+        verdict.problems
+    );
+}
+
+#[test]
+fn an_engine_that_refuses_and_leaves_a_file_behind_fails_the_case_naming_it() {
+    let harness = Harness::at(
+        Harness::temp_root(),
+        Box::new(LitteringWriter),
+        Box::new(NoOpReader),
+    )
+    .expect("a harness root");
+    let run = harness.run();
+    let report =
+        run.report(&Baseline::load(&Baseline::default_path()).expect("the baseline is recorded"));
+    assert!(
+        report.verdicts.iter().any(|verdict| verdict
+            .problems
+            .iter()
+            .any(|problem| problem == "a refused call left litter.txt behind")),
+        "a file a refused call left is named"
+    );
+}
+
+#[test]
+fn a_discriminated_key_has_its_own_slug_and_both_appear_in_a_report() {
+    let plain = Key::new(Family::Xlsx, "xlsx_edit", Some("merge_cells"));
+    let overlap = Key::named(Family::Xlsx, "xlsx_edit", Some("merge_cells"), "overlap");
+    let adjacent = Key::named(Family::Xlsx, "xlsx_edit", Some("merge_cells"), "adjacent");
+    assert_eq!(plain.slug(), "xlsx/xlsx_edit/merge_cells");
+    assert_eq!(overlap.slug(), "xlsx/xlsx_edit/merge_cells@overlap");
+    assert_ne!(overlap.slug(), adjacent.slug());
+
+    // Two cases that share one sub-operation but carry different identifiers are two entries, not
+    // one: the key alone would have collided.
+    let outcome = |key: Key| CaseOutcome {
+        key,
+        transcript: None,
+        problem: None,
+        judgement: Judgement::Judged,
+    };
+    let run = Run {
+        writer: EngineIdentity::default(),
+        reader: EngineIdentity::default(),
+        outcomes: vec![outcome(overlap), outcome(adjacent)],
+        readings: Vec::new(),
+    };
+    let baseline = Baseline::load(&Baseline::default_path()).expect("the baseline is recorded");
+    let report = run.report(&baseline);
+    let slugs: Vec<String> = report
+        .verdicts
+        .iter()
+        .map(|verdict| verdict.key.slug())
+        .collect();
+    assert!(slugs.contains(&"xlsx/xlsx_edit/merge_cells@overlap".to_string()));
+    assert!(slugs.contains(&"xlsx/xlsx_edit/merge_cells@adjacent".to_string()));
+    assert_eq!(slugs.len(), 2);
 }

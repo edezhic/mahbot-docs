@@ -573,16 +573,29 @@ pub struct DocxPeripheralPart {
     pub part: Option<String>,
 }
 
+/// One numeric range a rule states: the low end it may exclude and the high end it reaches. It is
+/// `Copy`, so a rule view hands out a `&'static Span` and a caller that needs its own may copy it.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Span {
+    /// The low end.
+    pub min: f64,
+    /// The high end, which a value may reach.
+    pub max: f64,
+    /// Whether a value must exceed `min` rather than reach it.
+    pub min_exclusive: bool,
+}
+
 /// A typed view of one `rules` entry, parsed once.
 macro_rules! rule_view {
-    ($name:ident, $ty:ty, $key:literal, $doc:literal) => {
+    ($vis:vis $name:ident, $ty:ty, $key:literal, $doc:literal) => {
         #[doc = $doc]
         ///
         /// # Panics
         ///
         /// The embedded rules do not state it: a defect in this crate, never caller input.
         #[must_use]
-        pub fn $name() -> &'static $ty {
+        $vis fn $name() -> &'static $ty {
             static VIEW: OnceLock<$ty> = OnceLock::new();
             VIEW.get_or_init(|| {
                 serde_json::from_value(rules()[$key].clone()).expect(concat!(
@@ -596,28 +609,138 @@ macro_rules! rule_view {
 }
 
 rule_view!(
-    ppt_marks,
+    pub ppt_marks,
     PptMarks,
     "ppt_marks",
     "The marks a presentation's reading prints."
 );
 rule_view!(
-    ppt_slide_labels,
+    pub ppt_slide_labels,
     PptSlideLabels,
     "ppt_slide_labels",
     "The labels a presentation's reading prints."
 );
 rule_view!(
-    pdf_field_kinds,
+    pub pdf_field_kinds,
     PdfFieldKinds,
     "pdf_field_kinds",
     "The word a form list prints for each field kind."
 );
 rule_view!(
-    pdf_form_words,
+    pub pdf_form_words,
     PdfFormWords,
     "pdf_form_words",
     "The words a form list prints around a field."
+);
+
+// The workbook edits' rules: the bounds and lists `writing/xlsx` validates a request against.
+rule_view!(
+    pub(crate) edits_max,
+    u64,
+    "edits_max",
+    "The most edits one call may carry."
+);
+rule_view!(
+    pub(crate) edit_text_max,
+    u64,
+    "edit_text_max",
+    "The longest text one edit may name."
+);
+rule_view!(
+    pub(crate) format_cells_max,
+    u64,
+    "format_cells_max",
+    "The most cells one `format_cells` target may cover."
+);
+rule_view!(
+    pub(crate) number_format_max,
+    u64,
+    "number_format_max",
+    "The longest number-format code an edit may write."
+);
+rule_view!(
+    pub(crate) font_name_max,
+    u64,
+    "font_name_max",
+    "The longest font name a format may name."
+);
+rule_view!(
+    pub(crate) color_digits,
+    u64,
+    "color_digits",
+    "The number of hex digits a colour is written with."
+);
+rule_view!(
+    pub(crate) sheet_name_max,
+    u64,
+    "sheet_name_max",
+    "The longest sheet name a workbook accepts."
+);
+rule_view!(
+    pub(crate) sheet_row_max,
+    u64,
+    "sheet_row_max",
+    "The most rows a sheet holds."
+);
+rule_view!(
+    pub(crate) sheet_column_max,
+    u64,
+    "sheet_column_max",
+    "The most columns a sheet holds."
+);
+rule_view!(
+    pub(crate) sheet_name_forbidden,
+    String,
+    "sheet_name_forbidden",
+    "The characters a sheet name may not hold."
+);
+rule_view!(
+    pub(crate) image_extensions,
+    Vec<String>,
+    "image_extensions",
+    "The extensions a picture may be embedded under."
+);
+rule_view!(
+    pub(crate) cell_border_sides,
+    Vec<String>,
+    "cell_border_sides",
+    "The sides a cell border names."
+);
+rule_view!(
+    pub(crate) cell_alignments,
+    Vec<String>,
+    "cell_alignments",
+    "The horizontal alignments a cell format names."
+);
+rule_view!(
+    pub(crate) cell_verticals,
+    Vec<String>,
+    "cell_verticals",
+    "The vertical alignments a cell format names."
+);
+rule_view!(
+    pub(crate) cell_font_points,
+    Span,
+    "cell_font_points",
+    "The point sizes a font may be set to."
+);
+rule_view!(
+    pub(crate) column_width_chars,
+    Span,
+    "column_width_chars",
+    "The widths a column may be set to."
+);
+rule_view!(
+    pub(crate) row_height_points,
+    Span,
+    "row_height_points",
+    "The heights a row may be set to."
+);
+rule_view!(
+    pub(crate) dimension_points,
+    Span,
+    "dimension_points",
+    "The sizes a placed picture may be given."
 );
 
 /// The metadata fields a PDF's description names, in the rules' order.

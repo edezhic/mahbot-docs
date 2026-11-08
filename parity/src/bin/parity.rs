@@ -3,9 +3,9 @@
 
 use document_parity::baseline::Baseline;
 use document_parity::engine::{Reader, Writer};
-use document_parity::harness::Harness;
+use document_parity::harness::{Harness, Judgement, NO_CASE_JUDGED};
 use document_parity::reference::{
-    CrateReader, NoOpReader, NoOpWriter, ReferenceReader, ReferenceWriter,
+    CrateReader, CrateWriter, NoOpReader, NoOpWriter, ReferenceReader, ReferenceWriter,
 };
 use document_parity::transcript::identity_line;
 use std::path::{Path, PathBuf};
@@ -26,8 +26,9 @@ fn main() {
                 println!(
                     "usage: parity [--engine crate|reference|noop] [--baseline <path>] [--quiet]\n\
                      Runs every corpus case and reading, compares them with the recorded baseline,\n\
-                     and checks every declared effect. The default engine is the crate's reader \
-                     against the reference writer; `reference` is the engine the baseline records."
+                     and checks every declared effect. `crate` pairs the engine crate's own writer\n\
+                     and reader; `reference` is the engine the baseline records; `noop` is the\n\
+                     negative control."
                 );
                 return;
             }
@@ -56,9 +57,9 @@ fn run(engine: &str, baseline_path: &Path, quiet: bool) -> anyhow::Result<i32> {
     // implementation is compared on its verdicts alone.
     let (harness, require_identity) = match engine {
         "crate" => (
-            Harness::new_with(|root| {
+            Harness::new_with(|_| {
                 Ok((
-                    Box::new(ReferenceWriter::new(root)?) as Box<dyn Writer>,
+                    Box::new(CrateWriter) as Box<dyn Writer>,
                     Box::new(CrateReader) as Box<dyn Reader>,
                 ))
             })?,
@@ -99,7 +100,11 @@ fn run(engine: &str, baseline_path: &Path, quiet: bool) -> anyhow::Result<i32> {
         println!("{label} the baseline was recorded from a different reader build");
     }
     for verdict in &report.verdicts {
-        if verdict.passed {
+        if let Judgement::Unjudged(why) = &verdict.judgement {
+            println!("SKIP {} — {why}", verdict.key);
+            continue;
+        }
+        if verdict.passed() {
             if !quiet {
                 println!("PASS {}", verdict.key);
             }
@@ -128,10 +133,16 @@ fn run(engine: &str, baseline_path: &Path, quiet: bool) -> anyhow::Result<i32> {
     for stale in &report.stale_readings {
         println!("FAIL stale baseline reading {stale}: the corpus no longer holds it");
     }
-    let passed = report
+    if report.judged() == 0 {
+        println!("FAIL {NO_CASE_JUDGED}");
+    }
+    let judged = report.judged();
+    let unjudged = report.unjudged();
+    let failed = report
         .verdicts
         .iter()
-        .filter(|verdict| verdict.passed)
+        .filter(|verdict| matches!(verdict.judgement, Judgement::Judged))
+        .filter(|verdict| !verdict.passed())
         .count();
     let readings = report
         .readings
@@ -139,11 +150,12 @@ fn run(engine: &str, baseline_path: &Path, quiet: bool) -> anyhow::Result<i32> {
         .filter(|reading| reading.passed)
         .count();
     println!(
-        "\n{} verdicts ({} passed, {} failed); {} readings ({} passed, {} failed); {} stale; \
-         identity {}",
+        "\n{} verdicts ({} judged, {} unjudged, {} failed); {} readings ({} passed, {} failed); \
+         {} stale; identity {}",
         report.verdicts.len(),
-        passed,
-        report.verdicts.len() - passed,
+        judged,
+        unjudged,
+        failed,
         report.readings.len(),
         readings,
         report.readings.len() - readings,

@@ -29,6 +29,10 @@ pub struct Key {
     pub operation: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sub_operation: Option<String>,
+    /// The case's own identifier, present when several cases share one
+    /// (family, operation, sub-operation) — the key alone would collide.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case: Option<String>,
 }
 
 impl Key {
@@ -38,15 +42,33 @@ impl Key {
             family,
             operation: operation.to_string(),
             sub_operation: sub_operation.map(str::to_string),
+            case: None,
         }
     }
 
-    /// The key as one path-like string, and as the case directory's name.
+    /// A key that also names the case within its (family, operation, sub-operation).
+    #[must_use]
+    pub fn named(family: Family, operation: &str, sub_operation: Option<&str>, case: &str) -> Self {
+        Self {
+            family,
+            operation: operation.to_string(),
+            sub_operation: sub_operation.map(str::to_string),
+            case: Some(case.to_string()),
+        }
+    }
+
+    /// The key as one path-like string, and as the case directory's name. A case discriminator is
+    /// appended last, so every key without one keeps the slug its baseline entry was recorded
+    /// under.
     #[must_use]
     pub fn slug(&self) -> String {
-        match &self.sub_operation {
+        let slug = match &self.sub_operation {
             Some(sub) => format!("{}/{}/{}", self.family.as_str(), self.operation, sub),
             None => format!("{}/{}", self.family.as_str(), self.operation),
+        };
+        match &self.case {
+            Some(case) => format!("{slug}@{case}"),
+            None => slug,
         }
     }
 }
@@ -97,12 +119,22 @@ pub fn request_outputs(request: &serde_json::Value) -> Vec<PathBuf> {
 }
 
 /// Drives one writer implementation through the product's request-and-result contract.
-pub trait Writer {
+///
+/// `Send + Sync` because each case runs on a thread of its own under a timeout, so a writer that
+/// never returns is one failed case rather than a hung gate.
+pub trait Writer: Send + Sync {
     fn identity(&self) -> EngineIdentity;
 
     /// Run one request. `scratch` is a directory the harness owns and the engine may use for its
     /// own transient files; the request already names the absolute input and output paths.
     fn run(&self, request: &serde_json::Value, scratch: &Path) -> anyhow::Result<WriterOutcome>;
+
+    /// Whether this engine implements the operation a case exercises. An engine that does not is
+    /// not judged on that case: the verdict says so instead of failing it. The reference implements
+    /// the closed set; the crate's writer implements the operations it has landed.
+    fn covers(&self, _key: &Key) -> bool {
+        true
+    }
 }
 
 /// Drives one reader implementation at the bounded entry point a product read passes through.
@@ -123,6 +155,19 @@ pub trait Reader: Send + Sync {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn a_case_discriminator_is_appended_to_the_slug() {
+        let plain = Key::new(Family::Xlsx, "xlsx_edit", Some("merge_cells"));
+        let named = Key::named(Family::Xlsx, "xlsx_edit", Some("merge_cells"), "overlap");
+        assert_eq!(plain.slug(), "xlsx/xlsx_edit/merge_cells");
+        assert_eq!(named.slug(), "xlsx/xlsx_edit/merge_cells@overlap");
+        assert_ne!(plain.slug(), named.slug());
+        // Display is the slug, so a report names the case the same way a baseline does.
+        assert_eq!(named.to_string(), named.slug());
+    }
+
     #[test]
     fn the_recorded_split_names_fit_the_engines_derivation() {
         // The engine derives `{base}_part{n}.{ext}` for a split, so the corpus's recorded names

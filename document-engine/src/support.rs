@@ -26,6 +26,22 @@ pub(crate) fn is_video_extension(path: &std::path::Path) -> bool {
     has_extension(path, VIDEO_EXTENSIONS)
 }
 
+/// The spreadsheet column letters for a zero-based column index (`0` is `A`). Every cell address,
+/// read or written, spells its column through this.
+pub(crate) fn column_letters(mut index: usize) -> String {
+    let mut letters: Vec<char> = Vec::new();
+    loop {
+        let digit = b'A' + u8::try_from(index % 26).unwrap_or(0);
+        letters.push(char::from(digit));
+        if index < 26 {
+            break;
+        }
+        index = index / 26 - 1;
+    }
+    letters.reverse();
+    letters.into_iter().collect()
+}
+
 /// Whether a media part's name is a picture's.
 pub(crate) fn is_image_extension(path: &std::path::Path) -> bool {
     has_extension(path, IMAGE_EXTENSIONS)

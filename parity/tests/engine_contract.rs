@@ -4,7 +4,8 @@
 //! exercises.
 
 use document_engine::operation::{Destination, Failure, Outcome, Request, execute};
-use document_engine::{reading, vocabulary};
+use document_engine::reading;
+use document_engine::vocabulary;
 use document_parity::baseline::Baseline;
 use document_parity::contract;
 use document_parity::corpus;
@@ -247,16 +248,19 @@ fn every_corpus_operation_and_edit_is_in_the_engines_closed_set() {
         // Recognition, not execution: an operation the engine does not know answers that its name
         // is unknown, and an edit sub-operation it does not know answers the same about the edit.
         // Every other answer — a refusal of an unresolved value included, such as `unknown
-        // format` — means the name is in the closed set, which is what this test pins. The check
-        // is only as good as those two sentences: the crate's own tests pin their exact wording,
-        // so a rewording fails there.
+        // format` — means the name is in the closed set, which is what this test pins. The two
+        // sentences are read from the vocabulary the engine prints from, so the check tracks the
+        // engine's wording instead of restating it and a rewording cannot make it vacuous.
         if let Some(failure) = outcome.failure {
             let family = case.operation.strip_suffix("_edit").unwrap_or_default();
-            let unknown_edit = case
-                .sub_operation
-                .map(|sub| format!("unknown {family} edit \"{sub}\""));
+            let marks = &vocabulary::vocabulary().marks;
+            let unknown_operation =
+                marks.format("surface_unknown_operation", &[("name", case.operation)]);
+            let unknown_edit = case.sub_operation.map(|sub| {
+                marks.format("surface_unknown_edit", &[("family", family), ("name", sub)])
+            });
             assert!(
-                failure.reason != format!("unknown operation \"{}\"", case.operation)
+                failure.reason != unknown_operation
                     && unknown_edit.as_deref() != Some(failure.reason.as_str()),
                 "{} is not recognised: {}",
                 case.key(),

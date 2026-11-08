@@ -1,14 +1,15 @@
-//! The comparison has teeth: a reading altered in any single compared field fails it, and so does
-//! a detection answer changed for one input.
+//! The comparison has teeth: a reading or a produced case altered in any single compared field
+//! fails it, and so does a detection answer changed for one input.
 //!
-//! Each case compares one recorded reading with one altered copy of it, through the same
+//! Each case compares one recorded answer with one altered copy of it, through the same
 //! [`Run::report`] the gate uses, so a field the comparison stopped looking at fails here.
 
 use document_engine::reading::{ImageArtifact, Reading};
 use document_parity::baseline::Baseline;
-use document_parity::engine::{EngineIdentity, Kind};
-use document_parity::harness::{ReadingOutcome, Run};
-use document_parity::transcript::ReadingTranscript;
+use document_parity::engine::{EngineIdentity, Family, Key, Kind};
+use document_parity::harness::{CaseOutcome, Judgement, ReadingOutcome, Run};
+use document_parity::transcript::{CaseTranscript, ReadingTranscript, Status};
+use std::collections::BTreeMap;
 
 /// One reading with every compared field populated: text, two pictures, two notes, two report
 /// lines, both flags and a detection.
@@ -179,4 +180,122 @@ fn a_changed_detection_is_reported_on_its_own() {
         "the difference names both answers: {:?}",
         verdict.problems
     );
+}
+
+/// One produced case's transcript with every compared field populated: a status, a note, a loss
+/// and one produced file.
+fn case_sample() -> CaseTranscript {
+    CaseTranscript {
+        status: Status::Produced,
+        class: None,
+        reason: None,
+        notes: vec!["the package's signature no longer matches the file".to_string()],
+        missing: Vec::new(),
+        placeholders: None,
+        unsupported: Vec::new(),
+        losses: vec!["the chart keeps the values it was written with".to_string()],
+        outputs: BTreeMap::from([(
+            "edited.xlsx".to_string(),
+            serde_json::json!({ "sheet": "First", "cells": ["A1"] }),
+        )]),
+    }
+}
+
+/// Compare one case against the recorded baseline, exactly as the gate does, and answer its
+/// verdict.
+///
+/// The key is one the corpus does not hold, so what is compared is the transcript's own fields: the
+/// declared effects of a real case are not in play here.
+fn compare_case(transcript: CaseTranscript) -> document_parity::harness::Verdict {
+    let mut baseline = Baseline::load(&Baseline::default_path())
+        .expect("the baseline is recorded: run `cargo run --bin record-baseline` deliberately");
+    let key = Key::new(Family::Xlsx, "xlsx_edit", Some("teeth"));
+    baseline.cases.insert(key.slug(), case_sample());
+    let run = Run {
+        writer: EngineIdentity::default(),
+        reader: EngineIdentity::default(),
+        outcomes: vec![CaseOutcome {
+            key,
+            transcript: Some(transcript),
+            problem: None,
+            judgement: Judgement::Judged,
+        }],
+        readings: Vec::new(),
+    };
+    let mut verdicts = run.report(&baseline).verdicts;
+    assert_eq!(verdicts.len(), 1, "one case, one verdict");
+    verdicts.remove(0)
+}
+
+/// How one case alters the sample.
+#[derive(Clone, Copy, Debug)]
+enum CaseAlter {
+    None,
+    ChangeStatus,
+    RewordNote,
+    DropNote,
+    RewordLoss,
+    DropLoss,
+    RenameOutput,
+    ChangeOutput,
+    AddMissing,
+}
+
+impl CaseAlter {
+    fn apply(self, transcript: &mut CaseTranscript) {
+        match self {
+            Self::None => {}
+            Self::ChangeStatus => transcript.status = Status::Refused,
+            Self::RewordNote => transcript.notes[0].push_str(" (amended)"),
+            Self::DropNote => transcript.notes.clear(),
+            Self::RewordLoss => transcript.losses[0].push_str(" (amended)"),
+            Self::DropLoss => transcript.losses.clear(),
+            Self::RenameOutput => {
+                let output = transcript
+                    .outputs
+                    .remove("edited.xlsx")
+                    .expect("the output");
+                transcript.outputs.insert("out.xlsx".to_string(), output);
+            }
+            Self::ChangeOutput => {
+                transcript.outputs.insert(
+                    "edited.xlsx".to_string(),
+                    serde_json::json!({ "sheet": "First", "cells": ["A2"] }),
+                );
+            }
+            Self::AddMissing => transcript
+                .missing
+                .push("the image was not embedded".to_string()),
+        }
+    }
+}
+
+#[test]
+fn the_unaltered_case_passes() {
+    let mut transcript = case_sample();
+    CaseAlter::None.apply(&mut transcript);
+    let verdict = compare_case(transcript);
+    assert!(verdict.passed(), "{:?}", verdict.problems);
+}
+
+#[test]
+fn every_single_altered_case_field_fails_the_comparison() {
+    for alter in [
+        CaseAlter::ChangeStatus,
+        CaseAlter::RewordNote,
+        CaseAlter::DropNote,
+        CaseAlter::RewordLoss,
+        CaseAlter::DropLoss,
+        CaseAlter::RenameOutput,
+        CaseAlter::ChangeOutput,
+        CaseAlter::AddMissing,
+    ] {
+        let mut transcript = case_sample();
+        alter.apply(&mut transcript);
+        let verdict = compare_case(transcript);
+        assert!(
+            !verdict.passed(),
+            "{alter:?} changed a compared field and the comparison passed it"
+        );
+    }
 }

@@ -1,12 +1,15 @@
 //! The coverage ledger: for every mark a reading prints, the corpus document whose recorded
-//! reading contains it.
+//! reading contains it; and, for every mark a writing operation prints, the corpus case whose
+//! recorded answer contains it.
 //!
 //! The key list is the vocabulary's own — every `marks` entry whose `printed_by` names the
-//! reading, together with the marks the `rules` section states and `derived_marks` says the
-//! reading prints — so a mark added to the vocabulary without a witness is visible here rather
-//! than silently uncovered. Each [`Witness`] names the mark, the generated corpus document and
-//! the concrete rendering that document's reading carries; each [`Unproducible`] names a mark a
-//! synthesized document genuinely cannot carry and says why.
+//! reading or the writing, together with the marks the `rules` section states and `derived_marks`
+//! says that side prints — so a mark added to the vocabulary without a witness is visible here
+//! rather than silently uncovered. Each [`Witness`] names the mark, the generated corpus document
+//! and the concrete rendering that document's reading carries; each [`WritingWitness`] names the
+//! mark, the corpus case's slug and the rendering that case's answer carries; each
+//! [`Unproducible`] / [`Unreached`] names a mark a synthesized document or a generated request
+//! genuinely cannot raise and says why.
 //!
 //! This module is a reviewed statement, not a test: it holds no assertion and reads nothing at run
 //! time. The documents it names are built by [`super::build`] and listed by
@@ -23,12 +26,20 @@ pub struct Witness {
     pub witness: &'static str,
 }
 
-/// A reading mark no synthesized document can carry.
+/// The reading marks no synthesized document can carry, and why.
 pub struct Unproducible {
-    /// The vocabulary key, as it appears under `marks`.
-    pub mark: &'static str,
-    /// Why a generated document cannot raise it, in one sentence.
+    /// Why a generated document cannot raise them, in one sentence.
     pub reason: &'static str,
+    /// The vocabulary keys, as they appear under `marks`.
+    pub marks: &'static [&'static str],
+}
+
+/// The writing marks no generated request reaches, and why.
+pub struct Unreached {
+    /// Why no corpus request can raise these marks, in one sentence.
+    pub reason: &'static str,
+    /// The vocabulary keys, as they appear under `marks`.
+    pub marks: &'static [&'static str],
 }
 
 /// Every reading mark, with the document that witnesses it.
@@ -1198,15 +1209,541 @@ pub const WITNESSES: &[Witness] = &[
 /// The reading marks a synthesized document cannot carry.
 pub const UNPRODUCIBLE: &[Unproducible] = &[
     Unproducible {
-        mark: "reason_could_not_be_read",
         reason: "the engine prints it only when the file itself cannot be read or the reader panics. A synthesized document always reaches a format reader that answers for it; the only way to reach this reason is an environmental failure — an input the process cannot open, say — which a generated file cannot carry.",
+        marks: &["reason_could_not_be_read"],
     },
     Unproducible {
-        mark: "reason_old_office_version",
         reason: "office_oxide 0.1.13 routes a 0xA5DC wIdent to its Word 6/95 reader before the Word 97 FIB parser that refuses it, so DocError::UnsupportedVersion is never constructed for a .doc and the reason cannot be printed.",
+        marks: &["reason_old_office_version"],
     },
     Unproducible {
-        mark: "unshown_page",
+        reason: "the engine prints it only when its own code panics inside a contained region. A synthesized document never makes the engine panic — that is the invariant every reader holds — so only a defect can raise it.",
+        marks: &["engine_failed"],
+    },
+    Unproducible {
         reason: "a page the page tree holds always rasterizes (a zero-area page is clamped to one pixel) and a page outside it is counted by neither reader. The only way to leave a page undelivered is an environmental write failure — an output directory that cannot be written — which a synthesized document cannot force.",
+        marks: &["unshown_page"],
+    },
+    Unproducible {
+        reason: "the reading's page-render refusals answer a caller that renders a page; the corpus records readings, and no recorded reading renders one",
+        marks: &[
+            "render_unreadable",
+            "render_not_pdf",
+            "render_password_protected",
+            "render_no_such_page",
+            "render_no_pixels",
+            "render_failed",
+            "render_invalid_size",
+        ],
+    },
+];
+
+/// One writing mark and the corpus case whose recorded answer renders it.
+pub struct WritingWitness {
+    /// The vocabulary key, as it appears under `marks`.
+    pub mark: &'static str,
+    /// The corpus case's slug, as the baseline keys it.
+    pub case: &'static str,
+    /// The mark rendered with concrete values, as that case's answer prints it.
+    pub witness: &'static str,
+}
+
+/// Every writing mark, with the case that witnesses it.
+pub const WRITING_WITNESSES: &[WritingWitness] = &[
+    WritingWitness {
+        mark: "edit_address_shape",
+        case: "xlsx/xlsx_edit/format_cells@column_range",
+        witness: "range must be an A1 address like B7, got: \"A\"",
+    },
+    WritingWitness {
+        mark: "edit_chart_note",
+        case: "xlsx/xlsx_edit/clear_cell@formula",
+        witness: "[the workbook's charts were copied unchanged — nothing recomputes them, so a chart that reads the changed cells keeps the values it had]",
+    },
+    WritingWitness {
+        mark: "edit_format_no_height",
+        case: "xlsx/xlsx_edit/format_cells@row_no_height",
+        witness: "a format_cells row target names no height_points — hint: name height_points",
+    },
+    WritingWitness {
+        mark: "edit_format_no_property",
+        case: "xlsx/xlsx_edit/format_cells@no_property",
+        witness: "a format_cells range target names no property — hint: name at least one of font, size, bold, italic, underline, strike, color, fill, border, align, vertical, wrap or number_format",
+    },
+    WritingWitness {
+        mark: "edit_format_no_width",
+        case: "xlsx/xlsx_edit/format_cells@column_no_width",
+        witness: "a format_cells column target names no width_chars — hint: name width_chars",
+    },
+    WritingWitness {
+        mark: "edit_format_target_many",
+        case: "xlsx/xlsx_edit/format_cells@two_targets",
+        witness: "a format_cells edit names more than one target (range or column), but takes exactly one",
+    },
+    WritingWitness {
+        mark: "edit_formula_note",
+        case: "xlsx/xlsx_edit/delete_row",
+        witness: "[the sheet's 1 formula was left as it is while a cell it names moved — check the references]",
+    },
+    WritingWitness {
+        mark: "edit_formula_phrase_one",
+        case: "xlsx/xlsx_edit/delete_row",
+        witness: "formula was left as it is",
+    },
+    WritingWitness {
+        mark: "edit_formula_subject_one",
+        case: "xlsx/xlsx_edit/delete_row",
+        witness: "a cell it names moved",
+    },
+    WritingWitness {
+        mark: "edit_formula_phrase_many",
+        case: "xlsx/xlsx_edit/delete_column@formula_left",
+        witness: "formulas were left as they are",
+    },
+    WritingWitness {
+        mark: "edit_formula_subject_many",
+        case: "xlsx/xlsx_edit/delete_column@formula_left",
+        witness: "cells they name moved",
+    },
+    WritingWitness {
+        mark: "edit_wrong_family",
+        case: "xlsx/xlsx_edit/set_cell@wrong_family",
+        witness: "the input is really a .docx package, not the .xlsx one its name says — hint: use docx_edit to edit it",
+    },
+    WritingWitness {
+        mark: "edit_wrong_family_hint",
+        case: "xlsx/xlsx_edit/set_cell@wrong_family",
+        witness: "use docx_edit to edit it",
+    },
+    WritingWitness {
+        mark: "edit_no_family_part",
+        case: "xlsx/xlsx_edit/set_cell@no_family_part",
+        witness: "cannot edit no-family.xlsx: it holds no document, workbook or presentation part, so it is not a .xlsx package",
+    },
+    WritingWitness {
+        mark: "edit_no_content_types",
+        case: "xlsx/xlsx_edit/add_sheet@no_content_types",
+        witness: "cannot edit no-types.xlsx: it has no [Content_Types].xml part",
+    },
+    WritingWitness {
+        mark: "edit_formula_shape",
+        case: "xlsx/xlsx_edit/set_cell@formula_shape",
+        witness: "cell A1: an object value must be {\"formula\": \"SUM(A1:A2)\"}",
+    },
+    WritingWitness {
+        mark: "edit_image_label_png",
+        case: "xlsx/xlsx_edit/add_image@broken_picture",
+        witness: "PNG",
+    },
+    WritingWitness {
+        mark: "edit_image_not_whole",
+        case: "xlsx/xlsx_edit/add_image@broken_picture",
+        witness: "cannot embed broken.png as a PNG image: the file's bytes are not a whole PNG image",
+    },
+    WritingWitness {
+        mark: "edit_kind_chart_series",
+        case: "xlsx/xlsx_edit/delete_sheet@parts_and_names",
+        witness: "the charts' series",
+    },
+    WritingWitness {
+        mark: "edit_kind_defined_names",
+        case: "xlsx/xlsx_edit/delete_column@formula_left",
+        witness: "the workbook's defined names",
+    },
+    WritingWitness {
+        mark: "edit_kind_drawing_anchors",
+        case: "xlsx/xlsx_edit/delete_column@formula_left",
+        witness: "the sheet's drawing anchors",
+    },
+    WritingWitness {
+        mark: "edit_kind_formulas",
+        case: "xlsx/xlsx_edit/rename_sheet@dangling_references",
+        witness: "the workbook's formulas",
+    },
+    WritingWitness {
+        mark: "edit_kind_links",
+        case: "xlsx/xlsx_edit/rename_sheet@dangling_references",
+        witness: "the sheets' links",
+    },
+    WritingWitness {
+        mark: "edit_kind_table_ranges",
+        case: "xlsx/xlsx_edit/delete_column@formula_left",
+        witness: "the sheet's table ranges",
+    },
+    WritingWitness {
+        mark: "edit_list_too_many",
+        case: "xlsx/xlsx_edit/set_cell@too_many_edits",
+        witness: "a call may carry at most 200 edits, got: 201",
+    },
+    WritingWitness {
+        mark: "edit_merge_already",
+        case: "xlsx/xlsx_edit/merge_cells@repeat",
+        witness: "sheet \"First\" already has A9:B9 merged — hint: unmerge A9:B9 first, or name a range that is not merged",
+    },
+    WritingWitness {
+        mark: "edit_merge_none",
+        case: "xlsx/xlsx_edit/unmerge_cells@none",
+        witness: "none",
+    },
+    WritingWitness {
+        mark: "edit_merge_one_cell",
+        case: "xlsx/xlsx_edit/merge_cells@single_cell",
+        witness: "the range A9 covers one cell, and a merge needs at least two — hint: name a range like A1:B2",
+    },
+    WritingWitness {
+        mark: "edit_merge_overlaps",
+        case: "xlsx/xlsx_edit/merge_cells@overlap",
+        witness: "the range A5:B6 overlaps A5:B5, which sheet \"First\" already has merged — hint: unmerge A5:B5 first",
+    },
+    WritingWitness {
+        mark: "edit_merge_unclosed_block",
+        case: "xlsx/xlsx_edit/merge_cells@unreadable",
+        witness: "the sheet part holds <mergeCells> opened and never closed, so its merges cannot be read",
+    },
+    WritingWitness {
+        mark: "edit_merge_unclosed_cell",
+        case: "xlsx/xlsx_edit/merge_cells@unclosed_cell",
+        witness: "the sheet part holds a <mergeCell> opened and never closed, so its merges cannot be read",
+    },
+    WritingWitness {
+        mark: "edit_merge_unreadable",
+        case: "xlsx/xlsx_edit/merge_cells@unreadable_ref",
+        witness: "sheet \"First\" holds a merge this kit cannot read, so a merge into it was refused rather than written over it",
+    },
+    WritingWitness {
+        mark: "edit_move_no_position",
+        case: "xlsx/xlsx_edit/move_sheet@no_position",
+        witness: "no position 9: this workbook has 3 sheets",
+    },
+    WritingWitness {
+        mark: "edit_move_same_position",
+        case: "xlsx/xlsx_edit/move_sheet@same_position",
+        witness: "sheet \"Second\" is already at position 2 — moving it there would change nothing",
+    },
+    WritingWitness {
+        mark: "edit_only_sheet",
+        case: "xlsx/xlsx_edit/delete_sheet@only_sheet",
+        witness: "sheet \"Only\" is the workbook's only sheet, and a workbook keeps at least one",
+    },
+    WritingWitness {
+        mark: "edit_only_visible_sheet",
+        case: "xlsx/xlsx_edit/delete_sheet@last_visible",
+        witness: "sheet \"First\" is the workbook's only visible sheet, and a workbook keeps at least one",
+    },
+    WritingWitness {
+        mark: "edit_open_unreadable",
+        case: "xlsx/xlsx_edit/set_cell@truncated_input",
+        witness: "truncated.xlsx is not a readable .xlsx package: {{variable}}",
+    },
+    WritingWitness {
+        mark: "edit_pivot_note",
+        case: "xlsx/xlsx_edit/clear_cell@formula",
+        witness: "[the workbook's pivot tables were copied unchanged — nothing recomputes them, so a pivot that reads the changed cells keeps the values it had]",
+    },
+    WritingWitness {
+        mark: "edit_range_cap",
+        case: "xlsx/xlsx_edit/format_cells@too_many_cells",
+        witness: "the range A1:BZ1000 covers 78000 cells, more than the 10000 one format may name",
+    },
+    WritingWitness {
+        mark: "edit_range_data_validation",
+        case: "xlsx/xlsx_edit/delete_column@formula_left",
+        witness: "data validation's range",
+    },
+    WritingWitness {
+        mark: "edit_row_past_range",
+        case: "xlsx/xlsx_edit/insert_row@past_range",
+        witness: "row 500 is past the sheet's used range (1-10)",
+    },
+    WritingWitness {
+        mark: "edit_scoped_names_gone",
+        case: "xlsx/xlsx_edit/delete_sheet@drops_scoped_names",
+        witness: "[the workbook's sheet-scoped names for \"Second\" went with the sheet]",
+    },
+    WritingWitness {
+        mark: "edit_set_cell_no_value",
+        case: "xlsx/xlsx_edit/set_cell@no_value",
+        witness: "set_cell needs a value — hint: use the format_cells op to change only a cell's formatting",
+    },
+    WritingWitness {
+        mark: "edit_sheet_exists",
+        case: "xlsx/xlsx_edit/add_sheet@exists",
+        witness: "a sheet named \"First\" already exists — hint: pick a name no sheet uses, ignoring case",
+    },
+    WritingWitness {
+        mark: "edit_sheet_gone",
+        case: "xlsx/xlsx_edit/delete_sheet@parts_and_names",
+        witness: "[the sheet \"First\" is gone, but the workbook's defined names and the charts' series still name it — those references were not rewritten]",
+    },
+    WritingWitness {
+        mark: "edit_sheet_missing",
+        case: "xlsx/xlsx_edit/set_cell@missing_sheet",
+        witness: "there is no sheet named \"Nope\": this workbook has First, Second or Third",
+    },
+    WritingWitness {
+        mark: "edit_sheet_renamed",
+        case: "xlsx/xlsx_edit/rename_sheet@dangling_references",
+        witness: "[the sheet \"First\" is now \"Start\", but the workbook's formulas, the workbook's defined names, the charts' series and the sheets' links still name \"First\" — those references were not rewritten]",
+    },
+    WritingWitness {
+        mark: "edit_shift_range_gone",
+        case: "xlsx/xlsx_edit/delete_column@formula_left",
+        witness: "[the deleted column covered the whole data validation's range, \"A2:A3\", which is gone with it]",
+    },
+    WritingWitness {
+        mark: "edit_signature_note",
+        case: "xlsx/xlsx_edit/set_cell@macro_keeps_extension",
+        witness: "[the input carries a digital signature, which was carried through unchanged — the file changed, so the signature no longer matches it]",
+    },
+    WritingWitness {
+        mark: "edit_span_between",
+        case: "xlsx/xlsx_edit/format_cells@width_span",
+        witness: "between 0 and 255",
+    },
+    WritingWitness {
+        mark: "edit_stale_note",
+        case: "xlsx/xlsx_edit/delete_column@formula_left",
+        witness: "[the shift left the workbook's defined names and the sheet's table ranges and the sheet's drawing anchors pointing at the old cells — they were not rewritten]",
+    },
+    WritingWitness {
+        mark: "edit_font_too_long",
+        case: "xlsx/xlsx_edit/format_cells@text_counted_in_characters",
+        witness: "font must be at most 31 characters, got: 7000",
+    },
+    WritingWitness {
+        mark: "edit_number_format_too_long",
+        case: "xlsx/xlsx_edit/set_cell@text_counted_in_characters",
+        witness: "a number format must be at most 200 characters, got: 7000",
+    },
+    WritingWitness {
+        mark: "edit_text_too_long",
+        case: "xlsx/xlsx_edit/set_cell@text_too_long",
+        witness: "number_format must be at most 20000 characters",
+    },
+    WritingWitness {
+        mark: "edit_unmerge_not_merge",
+        case: "xlsx/xlsx_edit/unmerge_cells@none",
+        witness: "the range A1:B1 is not a merge in sheet \"Only\": it has none",
+    },
+    WritingWitness {
+        mark: "edit_width_span",
+        case: "xlsx/xlsx_edit/format_cells@width_span",
+        witness: "width_chars must be between 0 and 255 characters, got: 300",
+    },
+];
+
+pub const WRITING_UNREACHED: &[Unreached] = &[
+    Unreached {
+        reason: "a value a request names that breaks a formatting rule the corpus's own values satisfy; the port reads each rule from the same rules.json entry the vocabulary states, and a case per refused value would add one case per bound",
+        marks: &[
+            "edit_absent_value",
+            "edit_align_value",
+            "edit_border_boolean",
+            "edit_border_empty",
+            "edit_border_object",
+            "edit_border_side",
+            "edit_color_digits",
+            "edit_font_empty",
+            "edit_height_span",
+            "edit_number_format_empty",
+            "edit_size_span",
+            "edit_toggle_boolean",
+            "edit_vertical_value",
+            "edit_wrap_boolean",
+        ],
+    },
+    Unreached {
+        reason: "an address, range or format target the corpus never spells wrongly: every generated edit names a cell, range or target the workbook holds, and the port's own tests raise each shape refusal from a literal",
+        marks: &[
+            "edit_address_column",
+            "edit_address_row",
+            "edit_column_letters",
+            "edit_format_target_missing",
+            "edit_range_shape",
+            "edit_row_number",
+        ],
+    },
+    Unreached {
+        reason: "a workbook state the corpus does not build: a cell or column the sheet does not hold, a sheet at the grid's last row or column, a workbook that declares no sheets, or rows out of address order",
+        marks: &[
+            "edit_cell_not_in_sheet",
+            "edit_column_past_range",
+            "edit_rows_not_ordered",
+            "edit_sheet_last_column",
+            "edit_sheet_last_row",
+            "edit_sheet_none",
+        ],
+    },
+    Unreached {
+        reason: "a sheet name the corpus never spells badly: every generated name is text of the allowed length with none of the forbidden characters",
+        marks: &[
+            "edit_sheet_name_forbidden",
+            "edit_sheet_name_length",
+            "edit_sheet_name_text",
+        ],
+    },
+    Unreached {
+        reason: "the refusal a written sheet part earns when it states one address twice, and the labels it names that address by; no recorded edit leaves a duplicate — the mis-ported element pattern that did is fixed and covered by the port's own tests",
+        marks: &[
+            "edit_cell_address",
+            "edit_row_address",
+            "edit_sheet_repeat_address",
+        ],
+    },
+    Unreached {
+        reason: "a part with an element opened and never closed; every generated part closes these elements, and the port's own tests raise each refusal from a literal part",
+        marks: &[
+            "edit_cells_unclosed",
+            "edit_content_types_no_close",
+            "edit_drawing_no_close",
+            "edit_element_unclosed",
+            "edit_move_no_close",
+            "edit_rows_unclosed",
+            "edit_styles_root",
+            "edit_worksheet_no_close",
+        ],
+    },
+    Unreached {
+        reason: "a part whose relationship list cannot be read; every generated package's relationships are readable",
+        marks: &["edit_relationships_unreadable"],
+    },
+    Unreached {
+        reason: "a sheet list naming a chart sheet or another non-worksheet part; every generated workbook holds worksheets",
+        marks: &["edit_sheet_is_chart", "edit_sheet_not_worksheet"],
+    },
+    Unreached {
+        reason: "a sheet whose part neither the workbook's relationships nor the package holds; every generated sheet has its part, and its drawing when it has one",
+        marks: &[
+            "edit_image_no_drawing",
+            "edit_sheet_no_part",
+            "edit_sheet_part_missing",
+        ],
+    },
+    Unreached {
+        reason: "a workbook with no sheet list; every generated workbook declares one",
+        marks: &["edit_sheet_list_missing"],
+    },
+    Unreached {
+        reason: "a sheet with no rows, or no <cols> block, for a shift to act on; every generated sheet holds what the edit names",
+        marks: &[
+            "edit_sheet_no_columns",
+            "edit_sheet_no_columns_insert",
+            "edit_sheet_no_rows",
+            "edit_sheet_no_rows_insert",
+        ],
+    },
+    Unreached {
+        reason: "a sheet part stating a row outside its <sheetData>, or a second <sheetData>; every generated part holds one body",
+        marks: &["edit_sheet_rows_outside"],
+    },
+    Unreached {
+        reason: "a format target a merge widens; the recorded formats name cells no merge covers",
+        marks: &[
+            "edit_format_widened",
+            "edit_format_widened_many",
+            "edit_format_widened_one",
+        ],
+    },
+    Unreached {
+        reason: "a picture request the corpus does not make: a WebP or unreadable file, or a size outside the rule; the recorded picture is a PNG of the stated size",
+        marks: &[
+            "edit_image_extension",
+            "edit_image_implied_span",
+            "edit_image_label_jpeg",
+            "edit_image_label_webp",
+            "edit_image_side_span",
+            "edit_image_unreadable",
+        ],
+    },
+    Unreached {
+        reason: "the noun a shift prints for a range-carrying element it empties; the recorded delete empties a data validation's range, which prints a different noun",
+        marks: &[
+            "edit_range_conditional_format",
+            "edit_range_extended_conditional_format",
+            "edit_range_extended_data_validation",
+            "edit_range_ignored_error",
+            "edit_range_protected",
+            "edit_range_selection",
+        ],
+    },
+    Unreached {
+        reason: "a kind of stale reference the recorded workbook does not carry: comments and their shapes, another sheet's formula naming the renamed sheet, or a conditional-format or data-validation formula",
+        marks: &[
+            "edit_kind_comment_shapes",
+            "edit_kind_comments",
+            "edit_kind_other_sheets",
+            "edit_kind_rule_formulas",
+        ],
+    },
+    Unreached {
+        reason: "an environmental failure a generated case cannot force: a package stating a part twice, a part over the entry bound, a call over the work budget, or a destination that refuses the write",
+        marks: &[
+            "edit_part_duplicate",
+            "edit_part_too_large",
+            "edit_work_over_budget",
+            "edit_write_failed",
+        ],
+    },
+    Unreached {
+        reason: "an internal invariant of the styles engine: its block table is closed and its root is checked before any edit runs",
+        marks: &[
+            "edit_styles_no_entry_element",
+            "edit_styles_no_root_to_write",
+        ],
+    },
+    Unreached {
+        reason: "a workbook whose relationships cannot name a styles part; every generated workbook names one",
+        marks: &["edit_styles_no_relationship"],
+    },
+    Unreached {
+        reason: "the phrase an exclusive rule's range is named by; the corpus's span refusals name the inclusive rules",
+        marks: &["edit_span_above"],
+    },
+    Unreached {
+        reason: "a value of the wrong kind for a field the corpus always fills: text where text is needed, and a scalar for a cell value; the port's own tests raise each from a literal",
+        marks: &["edit_text_not_text", "edit_value_kind"],
+    },
+    Unreached {
+        reason: "a caller naming a worksheet child the sequence does not list; every arm here names one it does",
+        marks: &["edit_worksheet_order"],
+    },
+    Unreached {
+        reason: "the reference kit reads the input path before it checks it, so a request with no \"input\" fails there with the runtime's own error instead of this sentence",
+        marks: &["edit_input_missing"],
+    },
+    Unreached {
+        reason: "the operation surface refuses a request's shape before any operation runs; the corpus only sends requests the surface accepts, and operation's own tests pin each sentence",
+        marks: &[
+            "surface_edit_unnamed",
+            "surface_edits_missing",
+            "surface_format_missing",
+            "surface_reserved_output",
+            "surface_unknown_edit",
+            "surface_unknown_format",
+            "surface_unknown_operation",
+        ],
+    },
+    Unreached {
+        reason: "the operation surface refuses a split's shape before any operation runs; the corpus's split cases name a non-empty groups array under the cap",
+        marks: &[
+            "surface_groups_empty",
+            "surface_groups_missing",
+            "surface_groups_too_many",
+        ],
+    },
+    Unreached {
+        reason: "the destination is checked before any work, and the harness hands every case its own real, empty directory with a one-component base name",
+        marks: &[
+            "surface_base_not_a_name",
+            "surface_destination_missing",
+            "surface_destination_not_directory",
+            "surface_destination_symlink",
+            "surface_destination_unreadable",
+            "surface_output_taken",
+        ],
+    },
+    Unreached {
+        reason: "printed only for the twelve operations the writing half does not carry out; the recorded reference carries every one of them out, so no recorded answer prints it",
+        marks: &["reason_not_carried_out"],
     },
 ];

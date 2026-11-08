@@ -73,8 +73,9 @@ pub struct ReferenceWriter {
     directory: PathBuf,
     identity: EngineIdentity,
     /// A per-run counter for the request and result files: no randomness, so a failure is
-    /// reproducible and no transcript can carry a nonce the harness minted itself.
-    runs: std::cell::Cell<u64>,
+    /// reproducible and no transcript can carry a nonce the harness minted itself. Atomic because
+    /// each case runs on its own thread and an abandoned one may still be in flight.
+    runs: std::sync::atomic::AtomicU64,
 }
 
 impl ReferenceWriter {
@@ -122,7 +123,7 @@ impl ReferenceWriter {
                 runtime: Some(format!("bun {version}")),
                 components,
             },
-            runs: std::cell::Cell::new(0),
+            runs: std::sync::atomic::AtomicU64::new(0),
         })
     }
 }
@@ -133,8 +134,7 @@ impl Writer for ReferenceWriter {
     }
 
     fn run(&self, request: &Value, scratch: &Path) -> Result<WriterOutcome> {
-        let run = self.runs.get() + 1;
-        self.runs.set(run);
+        let run = self.runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
         let request_path = scratch.join(format!("request-{run:06}.json"));
         let result_path = scratch.join(format!("result-{run:06}.json"));
         // The runner owns both paths, so a request can never point the kit at a file of its own
