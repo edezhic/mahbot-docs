@@ -324,6 +324,30 @@ pub const MERGE_B_PDF: Document = Document {
     build: build::pdf_basic,
 };
 
+/// A third distinct document a merge names, so the order its pages arrive in is judged.
+pub const MERGE_C_PDF: Document = Document {
+    name: "c.pdf",
+    build: build::pdf_third,
+};
+
+/// One A4 page whose rotation is stated on the page tree, not on the page.
+pub const ROTATED_PDF: Document = Document {
+    name: "rotated.pdf",
+    build: build::pdf_rotated_page,
+};
+
+/// Two A4 pages carrying every document-level structure a merge must drop and an edit must keep.
+pub const RICH_PDF: Document = Document {
+    name: "rich.pdf",
+    build: build::pdf_rich,
+};
+
+/// One A4 page whose annotation states no rectangle.
+pub const NO_GEOMETRY_PDF: Document = Document {
+    name: "no-geometry.pdf",
+    build: build::pdf_no_geometry,
+};
+
 /// One A4 page drawing a line and painting the sample picture.
 pub const PICTURE_PDF: Document = Document {
     name: "picture.pdf",
@@ -711,4 +735,18 @@ pub fn reader_documents() -> Vec<Document> {
 #[must_use]
 pub fn mutations() -> Vec<Document> {
     build::mutations()
+}
+
+/// The documents a writer case builds that the reader corpus deliberately does not record, so their
+/// readings stay out of the baseline: the inputs a produced file is compared against.
+#[must_use]
+pub fn writer_documents() -> Vec<Document> {
+    vec![
+        MERGE_A_PDF,
+        MERGE_B_PDF,
+        MERGE_C_PDF,
+        ROTATED_PDF,
+        RICH_PDF,
+        NO_GEOMETRY_PDF,
+    ]
 }

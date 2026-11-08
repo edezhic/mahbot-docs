@@ -10,18 +10,21 @@ use crate::engine::Key;
 
 /// The operations the crate's writer carries out today, by name. Listing an operation covers every
 /// sub-operation it declares.
-pub const CRATE_WRITER: &[&str] = &["docx_edit", "xlsx_edit"];
+pub const CRATE_WRITER: &[&str] = &[
+    "docx_edit",
+    "xlsx_edit",
+    "pdf_merge",
+    "pdf_split",
+    "pdf_rotate",
+    "pdf_crop",
+    "pdf_resize",
+];
 
 /// The operations the writing half does not deliver. Every unjudged corpus case must name one.
 pub const NOT_YET_DELIVERED: &[&str] = &[
     "create",
     "fill_template",
     "pptx_edit",
-    "pdf_merge",
-    "pdf_split",
-    "pdf_rotate",
-    "pdf_crop",
-    "pdf_resize",
     "pdf_text",
     "pdf_image",
     "pdf_form_fill",

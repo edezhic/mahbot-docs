@@ -281,6 +281,7 @@ dependencies = [
  "flate2",
  "hayro",
  "image",
+ "lopdf",
  "office_oxide",
  "pdf-extract",
  "quick-xml 0.39.4",

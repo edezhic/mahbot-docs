@@ -1,8 +1,9 @@
 // The codecs whose resolved versions are part of the comparison identity: the JPEG encoder and
 // decoder, the PDF parser, rasterizer and image decoders a page raster reaches through, the legacy
-// and OOXML parsers, and the ZIP/deflate layer. Both the reader arms and the writer's canonical
-// model decode with these, so a bump can change a compared digest without changing any source this
-// workspace holds.
+// and OOXML parsers, the ZIP/deflate layer, and the PDF object model the crate's page actions copy
+// pages with. The reader arms and the writer's canonical model decode with these, so a bump can
+// change a compared digest without changing any source this workspace holds; the object model is
+// recorded for the same reason, because a new version of it can write a different file.
 //
 // This file is the list's one home: `build.rs` includes it to emit the versions, and
 // `tests/engine_contract.rs` reads it through the crate. Adding a codec here is therefore covered
@@ -31,6 +32,7 @@ pub const CODECS: &[&str] = &[
     "skrifa",
     "read-fonts",
     "pdf-extract",
+    "lopdf",
     "office_oxide",
     "zip",
     "quick-xml",

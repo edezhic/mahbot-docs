@@ -16,7 +16,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use regex::Regex;
 
 use crate::operation::Failure;
-use crate::vocabulary::{Span, vocabulary};
+use crate::vocabulary::vocabulary;
 
 /// One compiled pattern per distinct pattern text. Every text is built from a format's own words —
 /// an element or attribute name the code states — and never from a document's bytes, so the map
@@ -555,36 +555,6 @@ pub(super) fn listed<S: Borrow<str>>(values: &[S], conjunction: &str) -> String 
     }
 }
 
-/// Whether `value` is a finite number inside `span`.
-#[must_use]
-pub(super) fn in_span(value: f64, span: &Span) -> bool {
-    if !value.is_finite() {
-        return false;
-    }
-    if if span.min_exclusive {
-        value <= span.min
-    } else {
-        value < span.min
-    } {
-        return false;
-    }
-    value <= span.max
-}
-
-/// The phrase a refusal names `span` by, so a rule that flips `min_exclusive` cannot leave one
-/// message saying "between" and another "greater than" about the same range.
-#[must_use]
-pub(super) fn span_bounds(span: &Span) -> String {
-    let marks = &vocabulary().marks;
-    let min = span.min.to_string();
-    let max = span.max.to_string();
-    if span.min_exclusive {
-        marks.format("edit_span_above", &[("min", &min), ("max", &max)])
-    } else {
-        marks.format("edit_span_between", &[("min", &min), ("max", &max)])
-    }
-}
-
 /// The value of the attribute `name` on a tag, or `None` when the tag states none.
 #[must_use]
 pub(super) fn attribute_value<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
@@ -748,26 +718,6 @@ mod tests {
         assert_eq!(listed::<&str>(&[], "or"), "");
         assert_eq!(listed(&["a", "b"], "and"), "a and b");
         assert_eq!(listed(&["a", "b", "c"], "and"), "a, b and c");
-    }
-
-    #[test]
-    fn a_span_includes_or_excludes_its_low_end() {
-        let span = crate::vocabulary::Span {
-            min: 0.0,
-            max: 1.0,
-            min_exclusive: true,
-        };
-        assert!(!in_span(0.0, &span));
-        assert!(in_span(1.0, &span));
-        assert!(!in_span(1.1, &span));
-        assert!(!in_span(f64::NAN, &span));
-        assert_eq!(span_bounds(&span), "greater than 0 and at most 1");
-        let span = crate::vocabulary::Span {
-            min: -2000.0,
-            max: 2000.0,
-            min_exclusive: false,
-        };
-        assert_eq!(span_bounds(&span), "between -2000 and 2000");
     }
 
     #[test]

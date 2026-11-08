@@ -11,8 +11,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use super::opc::image_type;
-use super::xml;
-use super::{interpolated, js_number, js_round};
+use super::{in_span, interpolated, js_number, js_round, span_bounds};
 use crate::operation::Failure;
 use crate::vocabulary::vocabulary;
 
@@ -342,13 +341,13 @@ pub(super) fn image_size(
         let Some(value) = value.filter(|value| !value.is_null()) else {
             return Ok(None);
         };
-        if let Some(points) = value.as_f64().filter(|points| xml::in_span(*points, span)) {
+        if let Some(points) = value.as_f64().filter(|points| in_span(*points, span)) {
             return Ok(Some(points));
         }
         Err(Failure::usage(marks.format(
             "edit_image_side_span",
             &[
-                ("bounds", &xml::span_bounds(span)),
+                ("bounds", &span_bounds(span)),
                 ("side", &interpolated(Some(value))),
             ],
         )))
@@ -368,13 +367,13 @@ pub(super) fn image_size(
             height: px(width) * natural.height / natural.width,
         };
         let points = size.height * PX_TO_POINTS;
-        if !xml::in_span(points, span) {
+        if !in_span(points, span) {
             return Err(Failure::usage(marks.format(
                 "edit_image_implied_span",
                 &[
                     ("side", "height"),
                     ("other", "width"),
-                    ("bounds", &xml::span_bounds(span)),
+                    ("bounds", &span_bounds(span)),
                     ("points", &js_number(js_round(points))),
                 ],
             )));
@@ -388,13 +387,13 @@ pub(super) fn image_size(
             height: px(height),
         };
         let points = size.width * PX_TO_POINTS;
-        if !xml::in_span(points, span) {
+        if !in_span(points, span) {
             return Err(Failure::usage(marks.format(
                 "edit_image_implied_span",
                 &[
                     ("side", "width"),
                     ("other", "height"),
-                    ("bounds", &xml::span_bounds(span)),
+                    ("bounds", &span_bounds(span)),
                     ("points", &js_number(js_round(points))),
                 ],
             )));

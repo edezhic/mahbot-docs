@@ -16,6 +16,10 @@ test-support = []
 # decompressed to decide a family. The versions are the product's own, pinned by its lockfile.
 hayro = "=0.7.1"
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
+# The PDF page actions' object model: parsing, page-tree walking, deep-copying a page's objects
+# between documents and writing the result back. Already resolved by `pdf-extract`; named here
+# because the writing half uses it directly.
+lopdf = { version = "=0.42.0", default-features = false }
 office_oxide = "=0.1.13"
 pdf-extract = { version = "=0.12.1", default-features = false }
 quick-xml = { version = "=0.39.4", default-features = false }

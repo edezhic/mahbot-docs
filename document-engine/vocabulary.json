@@ -490,7 +490,9 @@
     "split_parts_max": 50
   },
   "engine": {
-    "paragraph_nesting_max": 1000
+    "paragraph_nesting_max": 1000,
+    "page_tree_depth_max": 64,
+    "object_depth_max": 128
   },
   "marks": {
     "block_annotations": {
@@ -1018,13 +1020,15 @@
     "note_page_noun_many": {
       "text": "pages",
       "printed_by": [
-        "reading"
+        "reading",
+        "writing"
       ]
     },
     "note_page_noun_one": {
       "text": "page",
       "printed_by": [
-        "reading"
+        "reading",
+        "writing"
       ]
     },
     "note_page_text_lost": {
@@ -1873,6 +1877,12 @@
         "writing"
       ]
     },
+    "write_leftover": {
+      "text": "the call failed ({message}) and what it had already written could not be removed: {files}",
+      "printed_by": [
+        "writing"
+      ]
+    },
     "edit_element_unclosed": {
       "text": "{what} holds <{name}> opened and never closed, so a second <{name}> cannot be written beside it",
       "printed_by": [
@@ -1911,6 +1921,18 @@
     },
     "edit_absent_value": {
       "text": "undefined",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_object_value": {
+      "text": "[object Object]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_null_value": {
+      "text": "null",
       "printed_by": [
         "writing"
       ]
@@ -2713,6 +2735,126 @@
         "writing"
       ]
     },
+    "surface_inputs_missing": {
+      "text": "the pdf_merge operation needs \"inputs\" to be a list of file paths",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_merge_inputs_too_many": {
+      "text": "the pdf_merge operation takes at most {max} inputs",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_merge_bytes_too_many": {
+      "text": "the pdf_merge inputs hold {megabytes} MB together, more than one call loads (limit {limit_megabytes} MB)",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_unreadable_file": {
+      "text": "cannot read {name} — the file is not readable",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_unparseable": {
+      "text": "cannot read {name} as a PDF — its bytes do not form a PDF this tool can read",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_encrypted": {
+      "text": "{name} is password-protected — the tool cannot open an encrypted PDF",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_no_page": {
+      "text": "no page {page}: this document has {count} page(s)",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_count_limit": {
+      "text": "the request names {count} pages, more than one call takes (limit {limit})",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_degrees": {
+      "text": "\"degrees\" must be a multiple of {step}, got: {degrees}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_area_shape": {
+      "text": "\"area\" must be an object of x, y, width and height, as fractions of the page",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_area_side": {
+      "text": "\"area.{side}\" must be {bounds} of the page, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_area_inside": {
+      "text": "\"area\" must lie inside the page and be non-degenerate: its x and y must leave room for its width and height, and both must be positive",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_no_area_crop": {
+      "text": "page {page} has no visible area to crop",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_no_area_resize": {
+      "text": "page {page} has no visible area to resize",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_side": {
+      "text": "\"{side}\" must be {bounds} points, and a resize names both sides, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_metadata_text": {
+      "text": "\"{key}\" must be text",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_stuck": {
+      "text": "[{total} annotation(s) could not follow the resized content on {pages}]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_write_failed": {
+      "text": "the produced PDF could not be written: {message}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_tree_nested": {
+      "text": "the page tree nests deeper than this engine walks (limit {max})",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_object_nested": {
+      "text": "an object the page reaches nests deeper than this engine copies (limit {max})",
+      "printed_by": [
+        "writing"
+      ]
+    },
     "surface_base_not_a_name": {
       "text": "\"{base}\" is not one file-name component",
       "printed_by": [
@@ -3225,6 +3367,12 @@
       "writing"
     ],
     "split_parts_max": [
+      "writing"
+    ],
+    "page_tree_depth_max": [
+      "writing"
+    ],
+    "object_depth_max": [
       "writing"
     ],
     "paragraph_nesting_max": [

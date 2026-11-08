@@ -1,4 +1,6 @@
-//! The writing half: opening a package, changing the parts an edit names, and writing it back.
+//! The writing half: opening a package, changing the parts an edit names, and writing it back; and
+//! the PDF page actions, which share this module's write path and value rendering but work through
+//! their own object model rather than a package.
 //!
 //! The engine writes files; the caller owns the tool interface. A caller hands in one
 //! [`Request`](crate::operation::Request) with the operation's values and a
@@ -17,8 +19,10 @@
 //! The [`Editor`] mirrors the producing kit's editor object: a part is written only when its text
 //! really changed, every walk over a part's text is charged against one call's work budget, and a
 //! part a family guards is checked by that family's own invariant before it is written. A note is
-//! kept once, in the order it was first raised; the subset that says part of the call is *not* in
-//! the produced file is also a loss.
+//! kept once, in the order it was first raised. A loss is an entry the reference's answer carries in
+//! its loss field: the crate records one where the reference raises one, and never infers a loss
+//! from a note's wording — which is why the PDF page actions' answers are notes-only, as the
+//! reference's are.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -26,27 +30,51 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use crate::operation::{Failure, Outcome, Request};
-use crate::vocabulary::{Family, vocabulary};
+use crate::vocabulary::{Family, Span, vocabulary};
 
 mod docx;
 mod image;
 mod opc;
 mod package;
+pub(crate) mod pdf;
 mod xlsx;
 mod xml;
 
 // ── values as the kit renders them ────────────────────────────────────────────────────────────
 
-/// A value as the kit's `${value}` renders it: a string as it stands, and anything else as the
-/// JSON it would have arrived as. An array or an object is the one exception — JavaScript's own
-/// interpolation spells an object `[object Object]` and an array its elements joined by commas, and
-/// no corpus request names one. An absent value is the kit's own `undefined`, which is a word the
-/// vocabulary states rather than a sentence this module invents.
+/// A value as the kit's `${value}` renders it, which is JavaScript's own `String()`: a string as it
+/// stands, an array as its elements joined by commas, and anything else as its literal. The three
+/// words JavaScript prints for a value that is not one — `undefined`, `null` and `[object Object]`
+/// — are marks the vocabulary states rather than words this module invents.
 pub(super) fn interpolated(value: Option<&Value>) -> String {
     match value {
         None => vocabulary().marks.get("edit_absent_value").to_string(),
-        Some(Value::String(text)) => text.clone(),
-        Some(other) => json_literal(other),
+        Some(value) => js_string(value),
+    }
+}
+
+/// A value as JavaScript's `String()` renders it.
+fn js_string(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Array(values) => values
+            .iter()
+            .map(array_element)
+            .collect::<Vec<String>>()
+            .join(","),
+        Value::Object(_) => vocabulary().marks.get("edit_object_value").to_string(),
+        Value::Null => vocabulary().marks.get("edit_null_value").to_string(),
+        other => json_literal(other),
+    }
+}
+
+/// An array element as `Array.join` renders it: a null element is the empty string, not the word
+/// JavaScript prints for the value on its own.
+fn array_element(value: &Value) -> String {
+    if value.is_null() {
+        String::new()
+    } else {
+        js_string(value)
     }
 }
 
@@ -88,6 +116,36 @@ pub(super) fn js_number(value: f64) -> String {
         format!("{value:.0}")
     } else {
         format!("{value}")
+    }
+}
+
+/// Whether `value` is a finite number inside `span`, a bound a family's rule states.
+#[must_use]
+pub(super) fn in_span(value: f64, span: &Span) -> bool {
+    if !value.is_finite() {
+        return false;
+    }
+    if if span.min_exclusive {
+        value <= span.min
+    } else {
+        value < span.min
+    } {
+        return false;
+    }
+    value <= span.max
+}
+
+/// The phrase a refusal names `span` by, so a rule that flips `min_exclusive` cannot leave one
+/// message saying "between" and another "greater than" about the same range.
+#[must_use]
+pub(super) fn span_bounds(span: &Span) -> String {
+    let marks = &vocabulary().marks;
+    let min = span.min.to_string();
+    let max = span.max.to_string();
+    if span.min_exclusive {
+        marks.format("edit_span_above", &[("min", &min), ("max", &max)])
+    } else {
+        marks.format("edit_span_between", &[("min", &min), ("max", &max)])
     }
 }
 
@@ -151,7 +209,7 @@ pub(crate) struct Finished {
     pub(crate) bytes: Vec<u8>,
     /// The user-facing notes, once each, in the order first raised.
     pub(crate) notes: Vec<String>,
-    /// The subset of `notes` saying part of the call is not in the produced file.
+    /// The entries the reference's answer carries in its loss field; each is a note as well.
     pub(crate) losses: Vec<String>,
 }
 
@@ -163,7 +221,7 @@ pub(crate) struct Editor {
     parts: Vec<(String, Vec<u8>)>,
     /// The user-facing notes, once each, in the order first raised.
     notes: Vec<String>,
-    /// The subset of `notes` saying part of the call is not in the produced file.
+    /// The entries the reference's answer carries in its loss field; each is a note as well.
     losses: Vec<String>,
     /// Whether any part's text was really changed.
     changed: bool,
@@ -429,8 +487,8 @@ impl Editor {
         Ok(())
     }
 
-    /// Keep a user-facing note once, in the order first raised. `loss` marks a note that says part
-    /// of what the call asked for is *not* in the produced file.
+    /// Keep a user-facing note once, in the order first raised. `loss` marks a note the reference's
+    /// answer also carries in its loss field; the crate never infers one from the note's wording.
     pub(crate) fn note(&mut self, message: String, loss: bool) {
         if !self.notes.contains(&message) {
             self.notes.push(message.clone());
@@ -499,9 +557,10 @@ pub(super) fn code_units(text: &str) -> usize {
     text.encode_utf16().count()
 }
 
-/// `code_units` in whole mebibytes, rounded the way the kit rounds the MB it states.
-fn rounded_mebibytes(code_units: u64) -> String {
-    (code_units.saturating_add(MEBIBYTE / 2) / MEBIBYTE).to_string()
+/// A count of bytes or of code units in whole mebibytes, rounded the way the kit rounds the MB it
+/// states.
+fn rounded_mebibytes(count: u64) -> String {
+    (count.saturating_add(MEBIBYTE / 2) / MEBIBYTE).to_string()
 }
 
 /// Carry out one edit operation, writing `output`. On any failure after the write starts, the file
@@ -566,46 +625,94 @@ fn run_edit(request: &Request, family: Family, output: &Path) -> Result<Finished
     Ok(finished)
 }
 
+/// The refusal a failed edit write is answered with.
+const EDIT_WRITE_FAILED: &str = "edit_write_failed";
+
 /// Write `bytes` to `output`, which must not already exist. A file this call created is removed
 /// when the write fails, so a failure leaves nothing behind.
 fn write_new(output: &Path, bytes: &[u8]) -> Result<(), Failure> {
-    // `write_all` reports the errors it meets and `sync_all` reports the ones a buffered or delayed
-    // write meets on the way out, so a produced file is never reported as written while the device
-    // holds only part of it.
-    write_new_with(output, |file| {
-        file.write_all(bytes).and_then(|()| file.sync_all())
-    })
+    write_new_with(output, bytes, &write_bytes)
 }
 
-/// [`write_new`] with the write itself injected, so a test can prove a failed write removes the
-/// file the call created.
+/// [`write_new`] with the write itself injected, so a test can prove a failure removes the file the
+/// call created.
 fn write_new_with(
     output: &Path,
-    write: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
+    bytes: &[u8],
+    write: &dyn Fn(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
 ) -> Result<(), Failure> {
-    let mut file = std::fs::OpenOptions::new()
+    let mut file = create_new(output, EDIT_WRITE_FAILED)?;
+    let written = write_into(&mut file, bytes, EDIT_WRITE_FAILED, write);
+    // The handle is closed before anything is removed: a file still open cannot be removed
+    // everywhere, and the leftover sentence would then name a file that was removable.
+    drop(file);
+    written.map_err(|failure| remove_and(&[output], failure))
+}
+
+/// Create `output`, which must not already exist, answering the open file. The caller owns the file
+/// from here and removes it when the call fails: a call that produces several files removes them
+/// all once, so what stayed behind is named once.
+pub(super) fn create_new(output: &Path, mark: &str) -> Result<std::fs::File, Failure> {
+    std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(output)
-        .map_err(|error| write_failure(&error))?;
-    if let Err(error) = write(&mut file) {
-        drop(file);
-        let _ = std::fs::remove_file(output);
-        return Err(write_failure(&error));
-    }
-    Ok(())
+        .map_err(|error| write_failure(mark, &error))
+}
+
+/// Write `bytes` into a file the call created, answering the sentence `mark` names when the write
+/// fails. This never removes the file: the caller's cleanup owns it.
+pub(super) fn write_into(
+    file: &mut std::fs::File,
+    bytes: &[u8],
+    mark: &str,
+    write: &dyn Fn(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
+) -> Result<(), Failure> {
+    write(file, bytes).map_err(|error| write_failure(mark, &error))
+}
+
+/// The write a produced file is made with: `write_all` reports the errors it meets and `sync_all`
+/// reports the ones a buffered or delayed write meets on the way out, so a produced file is never
+/// reported as written while the device holds only part of it.
+pub(super) fn write_bytes(file: &mut std::fs::File, bytes: &[u8]) -> std::io::Result<()> {
+    file.write_all(bytes).and_then(|()| file.sync_all())
 }
 
 /// The refusal a write failure is answered with. The destination was a valid directory when it was
 /// checked, so a permission or a read-only filesystem is a condition the engine met while carrying
 /// the request out rather than a fault in the request; the reference lets the write error propagate
-/// the same way. The file the call created is already removed, so nothing is left behind.
-fn write_failure(error: &std::io::Error) -> Failure {
+/// the same way.
+fn write_failure(mark: &str, error: &std::io::Error) -> Failure {
     Failure::internal(
         vocabulary()
             .marks
-            .format("edit_write_failed", &[("message", &error.to_string())]),
+            .format(mark, &[("message", &error.to_string())]),
     )
+}
+
+/// Remove every file this call created, answering `failure` — or, when a file cannot be removed,
+/// the vocabulary's own sentence naming what stayed behind, since "leaves nothing behind" is a
+/// promise the answer must not quietly break.
+pub(super) fn remove_and(created: &[&Path], failure: Failure) -> Failure {
+    let leftovers: Vec<String> = created
+        .iter()
+        .filter(|path| match std::fs::remove_file(path) {
+            Ok(()) => false,
+            Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+        })
+        .map(|path| path.display().to_string())
+        .collect();
+    if leftovers.is_empty() {
+        failure
+    } else {
+        Failure::internal(vocabulary().marks.format(
+            "write_leftover",
+            &[
+                ("message", &failure.reason),
+                ("files", &leftovers.join(", ")),
+            ],
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -642,6 +749,40 @@ mod tests {
                 base_name: base.to_string(),
             },
         }
+    }
+
+    #[test]
+    fn a_span_includes_or_excludes_its_low_end() {
+        let span = Span {
+            min: 0.0,
+            max: 1.0,
+            min_exclusive: true,
+        };
+        assert!(!in_span(0.0, &span));
+        assert!(in_span(1.0, &span));
+        assert!(!in_span(1.1, &span));
+        assert!(!in_span(f64::NAN, &span));
+        assert_eq!(span_bounds(&span), "greater than 0 and at most 1");
+        let span = Span {
+            min: -2000.0,
+            max: 2000.0,
+            min_exclusive: false,
+        };
+        assert_eq!(span_bounds(&span), "between -2000 and 2000");
+    }
+
+    #[test]
+    fn an_interpolated_value_is_the_one_javascript_prints() {
+        // A refusal quotes the value the kit's own template printed: an array is its elements joined
+        // by commas — a null element is nothing rather than the word `null` — an object is
+        // `[object Object]`, a null alone is `null`, and a scalar is its literal.
+        assert_eq!(interpolated(Some(&json!("a"))), "a");
+        assert_eq!(interpolated(Some(&json!([90]))), "90");
+        assert_eq!(interpolated(Some(&json!([90, "a", null]))), "90,a,");
+        assert_eq!(interpolated(Some(&json!([[1, 2], 3]))), "1,2,3");
+        assert_eq!(interpolated(Some(&Value::Null)), "null");
+        assert_eq!(interpolated(Some(&json!({ "x": 1 }))), "[object Object]");
+        assert_eq!(interpolated(Some(&json!(90.5))), "90.5");
     }
 
     #[test]
@@ -748,7 +889,7 @@ mod tests {
     fn a_write_that_fails_partway_removes_the_file_it_created() {
         let directory = scratch();
         let output = directory.path().join("out.xlsx");
-        let failure = write_new_with(&output, |_file| {
+        let failure = write_new_with(&output, &b"bytes"[..], &|_file, _bytes| {
             Err(std::io::Error::other("injected write error"))
         })
         .expect_err("a failed write");

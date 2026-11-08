@@ -146,3 +146,9 @@ pub fn writer_cases() -> Vec<Case> {
 pub fn reader_documents() -> Vec<Document> {
     document_engine::test_support::reader_documents()
 }
+
+/// Every document a writer case builds that the reader corpus does not record.
+#[must_use]
+pub fn writer_documents() -> Vec<Document> {
+    document_engine::test_support::writer_documents()
+}

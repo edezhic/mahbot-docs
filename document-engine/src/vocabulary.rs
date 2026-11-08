@@ -380,6 +380,13 @@ pub struct EngineBounds {
     /// deliberately conservative, set where the reference's own walk is still under a second, so the
     /// crate answers in bounded time on a document the kit would spend minutes on.
     pub paragraph_nesting_max: usize,
+    /// The deepest page tree the walk follows before it refuses: a real tree nests a handful of
+    /// levels, and the bound keeps a crafted chain from making the walk as long as the file.
+    pub page_tree_depth_max: usize,
+    /// The deepest object syntax a page copy follows before it refuses. The parser bounds its own
+    /// nesting at a hundred, so this guard sits above it and catches only an object the engine built
+    /// deeper; it exists so a copy never relies on the parser's bound alone.
+    pub object_depth_max: usize,
 }
 
 /// One mark: the text it prints and the sides that print it.
@@ -759,6 +766,32 @@ rule_view!(
     Span,
     "dimension_points",
     "The sizes a placed picture may be given."
+);
+
+// The PDF page actions' rules: the bounds `writing/pdf` validates a request against.
+rule_view!(
+    pub(crate) degrees_step,
+    u64,
+    "degrees_step",
+    "The step a page rotation must be a multiple of."
+);
+rule_view!(
+    pub(crate) pdf_page_fraction,
+    Span,
+    "pdf_page_fraction",
+    "The fractions of a page a crop area's sides may name."
+);
+rule_view!(
+    pub(crate) pdf_fraction_slack,
+    f64,
+    "pdf_fraction_slack",
+    "The slack a crop area's inside test allows for a fraction a caller computed."
+);
+rule_view!(
+    pub(crate) max_pages_per_request,
+    u64,
+    "max_pages_per_request",
+    "The most pages one call may name."
 );
 
 // The Word edits' rules: the bounds and lists `writing/docx` validates a request against.

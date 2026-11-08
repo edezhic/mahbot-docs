@@ -44,9 +44,11 @@ use serde_json::Value;
 
 use super::Editor;
 use super::edit_text;
+use super::in_span;
 use super::js_number;
 use super::js_round;
 use super::quoted;
+use super::span_bounds;
 use super::stringified;
 use super::xml;
 use crate::operation::Failure;
@@ -456,11 +458,11 @@ fn run_format(edit: &Value, op: &str) -> Result<format::RunFormat, Failure> {
     }
     if let Some(value) = edit.get("size").filter(|value| !value.is_null()) {
         let span = crate::vocabulary::text_size_points();
-        let Some(size) = value.as_f64().filter(|size| xml::in_span(*size, span)) else {
+        let Some(size) = value.as_f64().filter(|size| in_span(*size, span)) else {
             return Err(Failure::usage(marks.format(
                 "edit_size_span",
                 &[
-                    ("bounds", &xml::span_bounds(span)),
+                    ("bounds", &span_bounds(span)),
                     ("value", &stringified(Some(value))),
                 ],
             )));

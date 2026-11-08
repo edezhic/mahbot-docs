@@ -221,6 +221,36 @@ const FORMAT_NAMES: &[(&str, &[(&str, &str)])] = &[
         )],
     ),
     (
+        "src/writing/pdf/mod.rs",
+        &[
+            (
+                "page",
+                "the `page` placeholder name the page-number sentences take",
+            ),
+            (
+                "pages",
+                "the `pages` placeholder name the resize note's page list takes",
+            ),
+        ],
+    ),
+    (
+        "src/writing/pdf/page.rs",
+        &[
+            (
+                "producer",
+                "the `pdf_metadata_fields` key a fresh document's description names",
+            ),
+            (
+                "created",
+                "the `pdf_metadata_fields` key a fresh document's description names",
+            ),
+            (
+                "modified",
+                "the `pdf_metadata_fields` key an edited document's description advances",
+            ),
+        ],
+    ),
+    (
         "src/reading/ooxml/chart.rs",
         &[("title", "a chart title element the reader matches")],
     ),
@@ -356,6 +386,49 @@ fn marks_for(path: &Path) -> Vec<String> {
 /// a cheap heuristic; the guarantee that a bound the crate's own halves enforce is read from the
 /// vocabulary is [`every_bound_the_crate_enforces_is_read_from_the_vocabulary`].
 const SPEC_CONSTANTS: &[(&str, f64, &str)] = &[
+    (
+        "src/writing/pdf/mod.rs",
+        4.0,
+        "a crop area's four sides — x, y, width and height",
+    ),
+    (
+        "src/writing/pdf/page.rs",
+        3.0,
+        "the quarter turns a page's turn is counted in — one, two or three — not a scale",
+    ),
+    (
+        "src/writing/pdf/date.rs",
+        3.0,
+        "the three months the algorithm adds to a March-based month to reach the civil month from \
+         March on",
+    ),
+    (
+        "src/writing/pdf/date.rs",
+        4.0,
+        "the leap year every fourth year in the algorithm's day-of-year correction",
+    ),
+    (
+        "src/writing/pdf/date.rs",
+        9.0,
+        "the nine months the algorithm subtracts for January and February, which belong to the year \
+         before its March-based one",
+    ),
+    (
+        "src/writing/pdf/date.rs",
+        10.0,
+        "the ten March-based months from March to December, after which the month is January or \
+         February",
+    ),
+    (
+        "src/writing/pdf/date.rs",
+        100.0,
+        "the century correction in the algorithm's day-of-year count, a century not being a leap year",
+    ),
+    (
+        "src/writing/pdf/page.rs",
+        4.0,
+        "a page box's four numbers and the four entries a page inherits",
+    ),
     (
         "src/writing/mod.rs",
         0.5,
@@ -1143,14 +1216,6 @@ fn every_mark_names_a_producer() {
     }
 }
 
-/// The bounds the `enforced` map assigns to a half whose operation the crate has not ported, so no
-/// crate code reads them yet: merge has no port here, so its two bounds are stated ahead of their
-/// consumer and the `enforced` map records the reference's own half for them.
-const UNREAD: &[(&str, &str)] = &[
-    ("limits", "merge_inputs_max"),
-    ("limits", "merge_bytes_max"),
-];
-
 /// The crate's own source, comments and literals removed and whitespace stripped, so a typed field
 /// access can be searched for across a line break and prose or a string cannot satisfy it.
 fn crate_source() -> String {
@@ -1167,10 +1232,9 @@ fn every_bound_the_crate_enforces_is_read_from_the_vocabulary() {
     // Every entry the `enforced` map assigns to one of the crate's own halves is named by a typed
     // field access in the crate's code. That the enclosing statement consumes the value is a review
     // question; the typed accessor makes the vocabulary the only way to obtain it. A
-    // caller-enforced entry has no crate-side consumer and is held by the restatement scan instead,
-    // as is an entry in [`UNREAD`] until its operation is ported. The sections iterated are the ones
-    // a bound is read from by section and name; `rules` is read through the `rule_view!` accessors
-    // instead, so it is not listed here.
+    // caller-enforced entry has no crate-side consumer and is held by the restatement scan instead.
+    // The sections iterated are the ones a bound is read from by section and name; `rules` is read
+    // through the `rule_view!` accessors instead, so it is not listed here.
     let source = crate_source();
     let json = document_engine::vocabulary::json();
     let enforced = &vocabulary().enforced;
@@ -1185,7 +1249,7 @@ fn every_bound_the_crate_enforces_is_read_from_the_vocabulary() {
             .unwrap_or_else(|| panic!("the vocabulary states `{section}`"))
             .keys()
         {
-            if !enforced.enforces(entry, half) || UNREAD.contains(&(section, entry.as_str())) {
+            if !enforced.enforces(entry, half) {
                 continue;
             }
             assert!(
@@ -1194,33 +1258,6 @@ fn every_bound_the_crate_enforces_is_read_from_the_vocabulary() {
                  vocabulary"
             );
         }
-    }
-}
-
-#[test]
-fn an_unread_bound_is_one_the_crate_still_does_not_read() {
-    // The other half of the same check: an exemption is only honest while the bound really has no
-    // consumer, so a port that starts reading one fails here until the entry is removed.
-    let source = crate_source();
-    let json = document_engine::vocabulary::json();
-    let enforced = &vocabulary().enforced;
-    for (section, entry) in UNREAD {
-        assert!(
-            json[*section].get(entry).is_some(),
-            "`{entry}` is exempted but the vocabulary does not state it under `{section}`"
-        );
-        assert!(
-            json["enforced"].get(entry).is_some(),
-            "`{entry}` is exempted but the `enforced` map does not name it"
-        );
-        assert!(
-            enforced.enforces(entry, Producer::Writing),
-            "`{entry}` is exempted but the `enforced` map assigns it to no writing half"
-        );
-        assert!(
-            !source.contains(&format!("{section}.{entry}")),
-            "`{entry}` is exempted but the crate now reads `{section}.{entry}`"
-        );
     }
 }
 

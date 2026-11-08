@@ -26,7 +26,7 @@ crate the harness depends on. `cargo test -p document-engine` runs the crate's o
 its vocabulary restatement scan) without the harness.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 213 cases and 91 readings — takes about a minute; the whole
+managed runtime. A full pass — 240 cases and 91 readings — takes about a minute; the whole
 test suite, which runs the corpus twice for its determinism check, takes a couple of minutes.
 
 `parity --engine noop` runs the same corpus against the do-nothing engine. That engine exists only
@@ -58,7 +58,7 @@ shown as `SKIP`, not failed, and a run that judged no case at all is not a pass.
 | `tests/engine_contract.rs` | The engine crate's contract, proved from here: its vocabulary is the reference's data, its result shapes carry every recorded field, its closed operation set holds every corpus operation and edit, the reference copies are byte-for-byte the product's, and the host's media tables are the product's own. |
 | `tests/coverage.rs` | The corpus's depth: every reading mark is witnessed by a recorded reading or recorded as unproducible with its reason, every mark only the writing half prints is witnessed by a recorded case's answer or recorded unreached with its reason, neither ledger's "not produced" side names a mark a recorded answer really prints, every per-family failure verdict is witnessed, and every corpus document is in the baseline. |
 | `tests/teeth.rs` | The comparison has teeth: a reading or a produced case altered in any single compared field — a picture dropped, a note or a loss reworded, an output renamed, a produced file's content changed, a status flipped — fails it, and so does a detection answer changed for one input. |
-| `baseline/baseline.json` | The recorded reference (about 7 MB of canonical documents). |
+| `baseline/baseline.json` | The recorded reference (about 6.8 MB of canonical documents). |
 | `src/bin/parity.rs`, `src/bin/record-baseline.rs` | The gate and the deliberate recorder. |
 
 The reader sources are **copies** under `src/reference_sources/`, byte for byte those of
@@ -197,7 +197,7 @@ builders have one home in `document_engine::test_support`, which the crate's own
 - every `docx_edit` sub-operation (9), every `xlsx_edit` sub-operation (14) and every `pptx_edit`
   sub-operation (14), each with the precondition it needs — a second sheet to move, a merged range
   to unmerge, a picture to place, a paragraph to remove that is not the last one;
-- the workbook edit in depth, since it is one of the two actions the crate's writer carries out: one
+- the workbook edit in depth, since it is one of the actions the crate's writer carries out: one
   case per sub-operation against a plain workbook, and a case with its own identifier for each
   behaviour the action promises — a merge that keeps the content it covers and each way a merge is
   refused, the only-sheet and last-visible-sheet refusals beside a hidden sheet removed while
@@ -219,7 +219,7 @@ builders have one home in `document_engine::test_support`, which the crate's own
   existing picture and its drawing, merges over content, conditional formats, a data validation,
   hyperlinks, a page break and a table; a macro-enabled copy of it with a signature part; and the
   small workbooks each sheet refusal and each self-closing case needs;
-- the Word edit in depth, since it is the second action the crate's writer carries out: one case
+- the Word edit in depth, since it is another action the crate's writer carries out: one case
   per sub-operation against a combined document, and a case with its own identifier for each
   behaviour the action promises — every occurrence in every matching paragraph rewritten, a
   fragment reaching across a paragraph boundary, a replacement spanning differently formatted runs
@@ -249,6 +249,17 @@ builders have one home in `document_engine::test_support`, which the crate's own
   run's and the numbering part's root each opened and never closed); and one with no body at all;
 - the eight PDF actions, with form filling over every field kind a form can hold and flattening
   both on and off;
+- the five PDF page actions in depth, since they are the actions the crate's writer carries out
+  without a package: a rotated page (its turn stated on the page tree) rotated, cropped and
+  resized; a rich document — a picture, a filled form field, a page-level attachment, an outline,
+  page labels, a structure tree, marked content and a description — merged, and rotated, cropped
+  and resized; a page whose annotation has no geometry, so the resize note is reached; a third
+  distinct document, so a merge's order is judged; a description passed to each action; a merge of
+  no input and of one; a split whose group names one page twice, so the produced part holds two
+  page objects; and the refusals the reference itself makes — a quarter turn that is not one, an
+  area of the wrong shape, outside the page or degenerate, a side a page cannot be fitted into, a
+  description value that is not text, an encrypted file, a page with no visible area, a page the
+  document does not have and an input that is a PDF by its magic bytes alone;
 - the failure side: requests the engine refuses as the caller's to fix, and one it accepts and
   fails to carry out (a PDF whose `/AcroForm` is not a dictionary).
 
@@ -382,10 +393,10 @@ runner that reads the kit's answer), the reader's source digest and `rustc <vers
 copied reader source's digest under `src/reference_sources/`, the host modules, the adapter that
 turns a reading into a transcript, the shared `rules.json` and the embedded font the reader
 rasterises with). Every engine identity also records a `codecs` digest over the resolved versions
-of the JPEG encoder and decoder, the PDF parser, rasterizer and image decoders, the legacy and OOXML
-parsers and the ZIP/deflate layer, read from `Cargo.lock`; every codec a manifest names is pinned
-exactly, and every resolved copy — direct or transitive — is recorded, so a codec bump changes
-the identity rather than silently changing every compared digest. The crate's own
+of the JPEG encoder and decoder, the PDF parser and object model, rasterizer and image decoders, the
+legacy and OOXML parsers and the ZIP/deflate layer, read from `Cargo.lock`; every codec a manifest
+names is pinned exactly, and every resolved copy — direct or transitive — is recorded, so a codec
+bump changes the identity rather than silently changing every compared digest. The crate's own
 reader is identified separately, by a digest of every Rust source in `document-engine/src`, its
 `vocabulary.json` and its font. A difference is therefore attributable to a build, not merely
 observed. The gate always prints both identities and states whether they match; passing means every

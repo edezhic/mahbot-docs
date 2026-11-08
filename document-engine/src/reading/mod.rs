@@ -961,7 +961,7 @@ fn max_note_ranges() -> usize {
 }
 
 /// `pages 3, 7-9` for the 1-based `pages`, which are ascending.
-fn page_list(pages: &[usize]) -> String {
+pub(crate) fn page_list(pages: &[usize]) -> String {
     let marks = &crate::vocabulary::vocabulary().marks;
     let noun = if pages.len() == 1 {
         marks.get("note_page_noun_one")

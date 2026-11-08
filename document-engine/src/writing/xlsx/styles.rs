@@ -32,7 +32,7 @@ use super::super::opc::{
     add_relationship, part_directory, relationships, rels_writable, resolve_part, with_override,
 };
 use super::super::package::CONTENT_TYPES;
-use super::super::{code_units, hex_digits};
+use super::super::{code_units, hex_digits, in_span, span_bounds};
 use super::Editor;
 use super::xml;
 use super::{
@@ -951,12 +951,12 @@ fn range_format(edit: &Value) -> Result<CellFormat, Failure> {
     }
     if let Some(value) = edit.get("size") {
         let span = crate::vocabulary::cell_font_points();
-        let size = value.as_f64().filter(|size| xml::in_span(*size, span));
+        let size = value.as_f64().filter(|size| in_span(*size, span));
         let Some(size) = size else {
             return Err(Failure::usage(marks.format(
                 "edit_size_span",
                 &[
-                    ("bounds", &xml::span_bounds(span)),
+                    ("bounds", &span_bounds(span)),
                     ("value", &stringified(Some(value))),
                 ],
             )));
@@ -1533,14 +1533,11 @@ pub(super) fn format_cells_edit(
             ));
         };
         let span = crate::vocabulary::column_width_chars();
-        if !width
-            .as_f64()
-            .is_some_and(|width| xml::in_span(width, span))
-        {
+        if !width.as_f64().is_some_and(|width| in_span(width, span)) {
             return Err(Failure::usage(marks.format(
                 "edit_width_span",
                 &[
-                    ("bounds", &xml::span_bounds(span)),
+                    ("bounds", &span_bounds(span)),
                     ("value", &stringified(Some(width))),
                 ],
             )));
@@ -1553,14 +1550,11 @@ pub(super) fn format_cells_edit(
         ));
     };
     let span = crate::vocabulary::row_height_points();
-    if !height
-        .as_f64()
-        .is_some_and(|height| xml::in_span(height, span))
-    {
+    if !height.as_f64().is_some_and(|height| in_span(height, span)) {
         return Err(Failure::usage(marks.format(
             "edit_height_span",
             &[
-                ("bounds", &xml::span_bounds(span)),
+                ("bounds", &span_bounds(span)),
                 ("value", &stringified(Some(height))),
             ],
         )));

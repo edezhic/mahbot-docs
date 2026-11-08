@@ -38,9 +38,10 @@
 //! sub-operation takes (an `add_image`'s `image`) travels inside that object.
 //!
 //! Which operations are carried out is the writing half's business, not this surface's:
-//! `docx_edit` and `xlsx_edit` are, and every other operation answers with the vocabulary's
+//! `docx_edit`, `xlsx_edit` and the five PDF page actions (`pdf_merge`, `pdf_split`, `pdf_rotate`,
+//! `pdf_crop`, `pdf_resize`) are, and every other operation answers with the vocabulary's
 //! `reason_not_carried_out` until its port lands. The surface's own checks run first either way,
-//! so a request refused here is refused before any package is opened.
+//! so a request refused here is refused before any file is opened.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -92,7 +93,7 @@ pub struct Outcome {
     pub unsupported: Vec<String>,
     /// The engine's notes, already user-facing.
     pub notes: Vec<String>,
-    /// The subset of `notes` saying part of what the call asked for is not in the produced file.
+    /// The entries the reference's answer carries in its loss field; each is one of `notes` too.
     pub losses: Vec<String>,
     /// Present when the engine refused or failed the request.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -211,7 +212,14 @@ fn dispatch(request: &Request) -> Outcome {
     if let Some(family @ (Family::Docx | Family::Xlsx)) = operation.edit_family() {
         return crate::writing::edit_operation(request, family, &outputs[0]);
     }
-    Outcome::failed(INTERNAL, not_carried_out(operation.name()))
+    match operation {
+        Operation::PdfMerge => crate::writing::pdf::merge(request, &outputs[0]),
+        Operation::PdfSplit => crate::writing::pdf::split(request, &outputs),
+        Operation::PdfRotate => crate::writing::pdf::rotate(request, &outputs[0]),
+        Operation::PdfCrop => crate::writing::pdf::crop(request, &outputs[0]),
+        Operation::PdfResize => crate::writing::pdf::resize(request, &outputs[0]),
+        _ => Outcome::failed(INTERNAL, not_carried_out(operation.name())),
+    }
 }
 
 /// The interim answer for an operation whose port has not landed: the one sentence that says so,
@@ -412,6 +420,18 @@ fn validate(request: &Request, operation: Operation) -> Result<(), String> {
                 return Err(marks.format("surface_groups_too_many", &[("max", &max.to_string())]));
             }
         }
+        Operation::PdfMerge => {
+            // The crate's own cap on how many inputs one merge may name. The reference has none,
+            // and its tool layer applies a different one above it, so no case can judge this.
+            let inputs = merge_inputs(request)?;
+            let max = crate::vocabulary::vocabulary().limits.merge_inputs_max;
+            if inputs.len() > max {
+                return Err(marks.format(
+                    "surface_merge_inputs_too_many",
+                    &[("max", &max.to_string())],
+                ));
+            }
+        }
         _ => {}
     }
     Ok(())
@@ -470,6 +490,22 @@ fn split_groups(request: &Request) -> Result<&[Value], String> {
             crate::vocabulary::vocabulary()
                 .marks
                 .get("surface_groups_missing")
+                .to_string()
+        })
+}
+
+/// The inputs a merge names: a list of file paths, which the crate's own cap then bounds.
+fn merge_inputs(request: &Request) -> Result<&[Value], String> {
+    request
+        .values
+        .get("inputs")
+        .and_then(Value::as_array)
+        .filter(|values| values.iter().all(Value::is_string))
+        .map(Vec::as_slice)
+        .ok_or_else(|| {
+            crate::vocabulary::vocabulary()
+                .marks
+                .get("surface_inputs_missing")
                 .to_string()
         })
 }
@@ -766,6 +802,52 @@ mod tests {
         let failure = outcome.failure.expect("a failure");
         assert!(failure.is_usage(), "{failure:?}");
         assert!(failure.reason.contains("at most"), "{failure:?}");
+    }
+
+    #[test]
+    fn a_merge_without_a_list_of_inputs_is_refused_by_the_surface() {
+        let dir = scratch();
+        for values in [
+            json!({}),
+            json!({ "inputs": "one.pdf" }),
+            json!({ "inputs": [5] }),
+        ] {
+            let outcome = execute(&request(dir.path(), "pdf_merge", values.clone()));
+            let failure = outcome.failure.expect("a failure");
+            assert!(failure.is_usage(), "{values}: {failure:?}");
+            assert_eq!(
+                failure.reason,
+                crate::vocabulary::vocabulary()
+                    .marks
+                    .get("surface_inputs_missing"),
+                "{values}"
+            );
+            assert!(outcome.outputs.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_merge_is_bounded_by_the_vocabularys_input_cap() {
+        let dir = scratch();
+        let max = crate::vocabulary::vocabulary().limits.merge_inputs_max;
+        let inputs: Vec<Value> = (0..=max)
+            .map(|index| json!(format!("in-{index}.pdf")))
+            .collect();
+        let outcome = execute(&request(
+            dir.path(),
+            "pdf_merge",
+            json!({ "inputs": inputs }),
+        ));
+        let failure = outcome.failure.expect("a failure");
+        assert!(failure.is_usage(), "{failure:?}");
+        assert_eq!(
+            failure.reason,
+            crate::vocabulary::vocabulary().marks.format(
+                "surface_merge_inputs_too_many",
+                &[("max", &max.to_string())]
+            )
+        );
+        assert!(outcome.outputs.is_empty());
     }
 
     #[test]

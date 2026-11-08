@@ -37,3 +37,9 @@ pub fn reader_documents() -> Vec<Document> {
 pub fn mutations() -> Vec<Document> {
     documents::mutations()
 }
+
+/// The documents a writer case builds that the reader corpus does not record.
+#[must_use]
+pub fn writer_documents() -> Vec<Document> {
+    documents::writer_documents()
+}

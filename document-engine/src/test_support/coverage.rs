@@ -1838,6 +1838,73 @@ pub const WRITING_WITNESSES: &[WritingWitness] = &[
         case: "xlsx/xlsx_edit/format_cells@width_span",
         witness: "width_chars must be between 0 and 255 characters, got: 300",
     },
+    // ── the PDF page actions' marks ───────────────────────────────────────────────────────────────
+    // The reference's own refusals and its one note, each witnessed by the case that reaches it.
+    WritingWitness {
+        mark: "pdf_page_unparseable",
+        case: "pdf/pdf_rotate/unreadable_input",
+        witness: "cannot read truncated.pdf as a PDF — its bytes do not form a PDF this tool can read",
+    },
+    WritingWitness {
+        mark: "pdf_page_encrypted",
+        case: "pdf/pdf_rotate/encrypted",
+        witness: "encrypted.pdf is password-protected — the tool cannot open an encrypted PDF",
+    },
+    WritingWitness {
+        mark: "pdf_page_no_page",
+        case: "pdf/pdf_rotate/no_page",
+        witness: "no page 5: this document has 2 page(s)",
+    },
+    WritingWitness {
+        mark: "pdf_page_degrees",
+        case: "pdf/pdf_rotate/degrees_not_a_quarter_turn",
+        witness: "\"degrees\" must be a multiple of 90, got: 45",
+    },
+    WritingWitness {
+        mark: "pdf_page_area_shape",
+        case: "pdf/pdf_crop/area_shape",
+        witness: "\"area\" must be an object of x, y, width and height, as fractions of the page",
+    },
+    WritingWitness {
+        mark: "pdf_page_area_side",
+        case: "pdf/pdf_crop/area_side",
+        witness: "\"area.x\" must be between 0 and 1 of the page, got: 2",
+    },
+    WritingWitness {
+        mark: "pdf_page_area_inside",
+        case: "pdf/pdf_crop/area_inside",
+        witness: "\"area\" must lie inside the page and be non-degenerate: its x and y must leave room for its width and height, and both must be positive",
+    },
+    WritingWitness {
+        mark: "pdf_page_no_area_crop",
+        case: "pdf/pdf_crop/no_visible_area",
+        witness: "page 1 has no visible area to crop",
+    },
+    WritingWitness {
+        mark: "pdf_page_no_area_resize",
+        case: "pdf/pdf_resize/no_visible_area",
+        witness: "page 1 has no visible area to resize",
+    },
+    WritingWitness {
+        mark: "pdf_page_side",
+        case: "pdf/pdf_resize/side",
+        witness: "\"width\" must be greater than 0 and at most 20000 points, and a resize names both sides, got: 0",
+    },
+    WritingWitness {
+        mark: "edit_span_above",
+        case: "pdf/pdf_resize/side",
+        witness: "greater than 0 and at most 20000",
+    },
+    WritingWitness {
+        mark: "pdf_page_metadata_text",
+        case: "pdf/pdf_rotate/metadata_not_text",
+        witness: "\"title\" must be text",
+    },
+    WritingWitness {
+        mark: "pdf_page_stuck",
+        case: "pdf/pdf_resize/no_geometry",
+        witness: "[1 annotation(s) could not follow the resized content on page 1]",
+    },
 ];
 
 pub const WRITING_UNREACHED: &[Unreached] = &[
@@ -1860,7 +1927,9 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
             "edit_color_digits",
             "edit_font_empty",
             "edit_height_span",
+            "edit_null_value",
             "edit_number_format_empty",
+            "edit_object_value",
             "edit_toggle_boolean",
             "edit_vertical_value",
             "edit_wrap_boolean",
@@ -2009,10 +2078,6 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         marks: &["edit_styles_no_relationship"],
     },
     Unreached {
-        reason: "the phrase an exclusive rule's range is named by; the corpus's span refusals name the inclusive rules",
-        marks: &["edit_span_above"],
-    },
-    Unreached {
         reason: "a value of the wrong kind for a field the corpus always fills: text where text is needed, and a scalar for a cell value; the port's own tests raise each from a literal",
         marks: &["edit_text_not_text", "edit_value_kind"],
     },
@@ -2056,7 +2121,43 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         ],
     },
     Unreached {
-        reason: "printed only for the eleven operations the writing half does not carry out; the recorded reference carries every one of them out, so no recorded answer prints it",
+        reason: "the reference kit reads an input's bytes before it parses them, and the harness materialises every input a case names, so no recorded run met a file it could not read",
+        marks: &["pdf_page_unreadable_file"],
+    },
+    Unreached {
+        reason: "an I/O failure while a produced file is written; the harness hands every case its own writable directory, so no recorded run met one",
+        marks: &["pdf_page_write_failed"],
+    },
+    Unreached {
+        reason: "a call that failed after it had written some of its files and could not remove one of them; the harness hands every case its own writable directory, so no recorded run met one",
+        marks: &["write_leftover"],
+    },
+    Unreached {
+        reason: "no generated fixture nests a page tree as deep as the engine follows: the cap that refuses one is the crate's own (`engine.page_tree_depth_max`), with no counterpart in the reference",
+        marks: &["pdf_page_tree_nested"],
+    },
+    Unreached {
+        reason: "no generated fixture nests an object as deep as the copy follows, and the parser stops at its own nesting cap first: the cap is the crate's own (`engine.object_depth_max`)",
+        marks: &["pdf_page_object_nested"],
+    },
+    Unreached {
+        reason: "a request whose \"inputs\" is absent or is not a list of file paths; the corpus's merge cases all name their inputs, and the surface refuses such a request before the engine runs, so its own test pins the sentence",
+        marks: &["surface_inputs_missing"],
+    },
+    Unreached {
+        reason: "a selection longer than the shared page cap of ten thousand pages, which no generated fixture is: a document that long would make every case that reads it a fixture of its own",
+        marks: &["pdf_page_count_limit"],
+    },
+    Unreached {
+        reason: "the crate's own cap on a merge's inputs; the reference has none, so it produces where the crate refuses, and no corpus merge names more than two — one names none at all",
+        marks: &["surface_merge_inputs_too_many"],
+    },
+    Unreached {
+        reason: "the crate's own cap on what a merge reads; a corpus input that large would be a two-hundred-megabyte file, so the cap is reached through the crate's own test seam",
+        marks: &["surface_merge_bytes_too_many"],
+    },
+    Unreached {
+        reason: "printed only for the six operations the writing half does not carry out; the recorded reference carries every one of them out, so no recorded answer prints it",
         marks: &["reason_not_carried_out"],
     },
 ];

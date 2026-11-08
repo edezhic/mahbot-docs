@@ -96,18 +96,37 @@ and the flags that tell a document with no text layer from one that could not be
 no input-size bound and clamps no page size or scale a caller asked for; it never overwrites the
 file it reads.
 
-The writing half has started: `src/writing/` opens a package, changes the parts an edit names and
-writes it back, carrying every part the edit does not name through with the content it had.
-`xlsx_edit` — the workbook edit, all fourteen sub-operations — and `docx_edit` — the Word edit,
-all nine — are carried out end to end. `mod.rs` holds the `Editor`, `package.rs` the archive,
-`xml.rs` the string surgery, `opc.rs` the packaging conventions every family's edit shares,
+The writing half is landing family by family. For a package, `src/writing/` opens it, changes the
+parts an edit names and writes it back, carrying every part the edit does not name through with the
+content it had: `xlsx_edit` — the workbook edit, all fourteen sub-operations — and `docx_edit` —
+the Word edit, all nine — are carried out end to end. `mod.rs` holds the `Editor`, `package.rs` the
+archive, `xml.rs` the string surgery, `opc.rs` the packaging conventions every family's edit shares,
 `image.rs` the picture a placement embeds, `xlsx/` the workbook port and `docx/` the Word port.
-The other eleven operations answer with the vocabulary's `reason_not_carried_out` until their
-port lands. Every sentence the engine prints — an edit's refusals, notes and losses, the request
-surface's own shape refusals, a page-render refusal and the panic fallback — is a vocabulary
-mark (`edit_*`, `surface_*`, `render_*`, `engine_failed`), not a sentence in code, and
-`src/test_support/coverage.rs` records every writing mark as witnessed by a corpus case or as
-unreached with its reason.
+
+For a PDF, `src/writing/pdf/` is the object model the page actions build on (`lopdf`, which the
+crate's lockfile already resolved through `pdf-extract`): a page is deep-copied between documents
+with everything it reaches, a page's boxes and turn are read and written, its content is wrapped and
+the annotations that sit on it are moved. A copy is memoised per destination and source, so an
+object two pages share is copied once, and every produced page states the page tree it belongs to.
+A file the model cannot read — a page tree that does not resolve or that names a kid which is not
+a page, a page or a stream whose content the parser never read, a reference a copy follows that
+names an object the file does not hold, a cross-reference table too damaged to follow — is refused
+rather than rewritten. A stream the parser degraded to a dictionary is caught by what it kept — a
+length beside a stream-only entry — and refused too; that recognition is not a proof, since a
+degraded stream that kept nothing but its length is carried as the dictionary it became, and
+getting those bytes back is the recovery work's. `page.rs`'s module documentation says what that
+covers and where the reference, and the crate's reading, are more forgiving. The five page actions
+are carried out end to end — `pdf_merge` and `pdf_split` build a fresh document out of the pages,
+`pdf_rotate`, `pdf_crop` and `pdf_resize` change what the pages they name show and keep everything
+else the file holds. The three operations that draw into a page (`pdf_text`, `pdf_image`,
+`pdf_form_fill`), `create`, `fill_template` and `pptx_edit` answer with the vocabulary's
+`reason_not_carried_out` until their port lands.
+
+Every sentence the engine prints — an edit's refusals, notes and losses, the request surface's own
+shape refusals, a PDF page action's refusals and its note, a page-render refusal and the panic
+fallback — is a vocabulary mark (`edit_*`, `surface_*`, `pdf_page_*`, `render_*`, `engine_failed`),
+not a sentence in code, and `src/test_support/coverage.rs` records every writing mark as witnessed
+by a corpus case or as unreached with its reason.
 
 The document builders live in the crate's `test_support`, the one home shared by the crate's tests
 and the harness. `tests/standalone.rs` builds and tests the crate in a temporary copy with no

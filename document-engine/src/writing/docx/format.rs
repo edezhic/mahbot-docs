@@ -14,7 +14,7 @@ use serde_json::Value;
 
 use super::super::Editor;
 use super::super::xml;
-use super::super::{edit_text, js_round, quoted, stringified};
+use super::super::{edit_text, in_span, js_round, quoted, span_bounds, stringified};
 use super::DOCX_STYLES;
 use super::Dialect;
 use super::OFF_VALUES;
@@ -457,12 +457,12 @@ fn points_to_twips(
     key: &str,
     span: &crate::vocabulary::Span,
 ) -> Result<i64, Failure> {
-    let Some(points) = value.as_f64().filter(|points| xml::in_span(*points, span)) else {
+    let Some(points) = value.as_f64().filter(|points| in_span(*points, span)) else {
         return Err(Failure::usage(vocabulary().marks.format(
             "edit_docx_points",
             &[
                 ("key", key),
-                ("bounds", &xml::span_bounds(span)),
+                ("bounds", &span_bounds(span)),
                 ("value", &stringified(Some(value))),
             ],
         )));

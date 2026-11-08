@@ -7,9 +7,10 @@
 //! produced document: an effect that only a no-op could satisfy is not a check.
 
 use super::documents::{
-    BASIC_DOCX, BASIC_PDF, BASIC_PPTX, BASIC_XLSX, BROKEN_FORM_PDF, DOCX_BODYLESS, DOCX_BREAKS,
-    DOCX_BROKEN, DOCX_COLUMNS, DOCX_EDIT, DOCX_MACRO, DOCX_REVISIONS, DOCX_STRICT, FORM_PDF,
-    MERGE_A_PDF, MERGE_B_PDF, PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_PDF, PICTURE_PNG,
+    BASIC_DOCX, BASIC_PDF, BASIC_PPTX, BASIC_XLSX, BROKEN_FORM_PDF, DEGENERATE_PAGE_PDF,
+    DOCX_BODYLESS, DOCX_BREAKS, DOCX_BROKEN, DOCX_COLUMNS, DOCX_EDIT, DOCX_MACRO, DOCX_REVISIONS,
+    DOCX_STRICT, ENCRYPTED_PDF, FORM_PDF, MERGE_A_PDF, MERGE_B_PDF, MERGE_C_PDF, NO_GEOMETRY_PDF,
+    PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_PDF, PICTURE_PNG, RICH_PDF, ROTATED_PDF,
     TEMPLATE_DOCX, TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF, TRUNCATED_XLSX, XLSX_ALL_HIDDEN,
     XLSX_BAD_MERGE_REF, XLSX_BROKEN_MERGES, XLSX_EDIT, XLSX_MACRO, XLSX_NO_CONTENT_TYPES,
     XLSX_NO_FAMILY, XLSX_ONE_VISIBLE, XLSX_ONLY_SHEET, XLSX_SELF_CLOSING, XLSX_UNCLOSED_MERGE_CELL,
@@ -3399,6 +3400,35 @@ fn pdf_cases() -> Vec<Case> {
         ),
         produced(
             Family::Pdf,
+            "pdf_split",
+            Some("repeated_page"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_split",
+                "input": "$in/basic.pdf",
+                "groups": [[1, 1]],
+                "outputs": ["$out/basic_part1.pdf"],
+            }),
+            vec!["basic_part1.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: Some("basic_part1.pdf"),
+                    count: 2,
+                },
+                Effect::PageText {
+                    output: Some("basic_part1.pdf"),
+                    page: 0,
+                    text: "Page one text",
+                },
+                Effect::PageText {
+                    output: Some("basic_part1.pdf"),
+                    page: 1,
+                    text: "Page one text",
+                },
+            ],
+        ),
+        produced(
+            Family::Pdf,
             "pdf_rotate",
             None,
             vec![BASIC_PDF],
@@ -3477,6 +3507,483 @@ fn pdf_cases() -> Vec<Case> {
                     value: [0.0, 0.0, 595.28, 841.89],
                 },
             ],
+        ),
+        // The rotated fixture states its turn on the page tree, so every one of these cases proves
+        // the inherited turn is resolved before anything is placed on the page.
+        produced(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("rotated_page"),
+            vec![ROTATED_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/rotated.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            vec![Effect::PageRotate {
+                output: None,
+                page: 0,
+                degrees: 180,
+            }],
+        ),
+        // A crop is a fraction of what the page SHOWS, measured from the displayed top-left: the
+        // page is turned a quarter, so its displayed size is 841.89 by 595.28 and the user-space box
+        // is the rectangle's four mapped corners.
+        produced(
+            Family::Pdf,
+            "pdf_crop",
+            Some("rotated_page"),
+            vec![ROTATED_PDF],
+            json!({
+                "op": "pdf_crop",
+                "input": "$in/rotated.pdf",
+                "area": { "x": 0.1, "y": 0.1, "width": 0.5, "height": 0.5 },
+                "pages": [1],
+                "output": "$out/cropped.pdf",
+            }),
+            vec!["cropped.pdf"],
+            vec![
+                Effect::PageBox {
+                    output: None,
+                    page: 0,
+                    which: BoxKind::Crop,
+                    value: [59.528, 84.189, 357.168, 505.134],
+                },
+                Effect::PageRotate {
+                    output: None,
+                    page: 0,
+                    degrees: 90,
+                },
+            ],
+        ),
+        // A resize fits the displayed page into the asked size and centres it: on a quarter-turned
+        // page the stored media box is the asked size with its sides swapped.
+        produced(
+            Family::Pdf,
+            "pdf_resize",
+            Some("rotated_page"),
+            vec![ROTATED_PDF],
+            json!({
+                "op": "pdf_resize",
+                "input": "$in/rotated.pdf",
+                "width": 400,
+                "height": 500,
+                "pages": [1],
+                "output": "$out/resized.pdf",
+            }),
+            vec!["resized.pdf"],
+            vec![
+                Effect::PageBox {
+                    output: None,
+                    page: 0,
+                    which: BoxKind::Media,
+                    value: [0.0, 0.0, 500.0, 400.0],
+                },
+                Effect::PageRotate {
+                    output: None,
+                    page: 0,
+                    degrees: 90,
+                },
+            ],
+        ),
+        // The rich document merged into the basic one: the pages and what sits on them come
+        // across, and nothing of the source's catalog does.
+        produced(
+            Family::Pdf,
+            "pdf_merge",
+            Some("rich"),
+            vec![RICH_PDF, BASIC_PDF],
+            json!({
+                "op": "pdf_merge",
+                "inputs": ["$in/rich.pdf", "$in/basic.pdf"],
+                "output": "$out/merged.pdf",
+            }),
+            vec!["merged.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 4,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "Rich page one",
+                },
+                Effect::PageImages {
+                    output: None,
+                    page: 0,
+                    count: 1,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 2,
+                    text: "Page one text",
+                },
+            ],
+        ),
+        // In place, the same document keeps its description, its picture and its form: only the
+        // turn changes.
+        produced(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("rich"),
+            vec![RICH_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/rich.pdf",
+                "degrees": 180,
+                "pages": [1],
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            vec![
+                Effect::PageRotate {
+                    output: None,
+                    page: 0,
+                    degrees: 180,
+                },
+                Effect::PageRotate {
+                    output: None,
+                    page: 1,
+                    degrees: 0,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "Rich page one",
+                },
+                Effect::PageImages {
+                    output: None,
+                    page: 0,
+                    count: 1,
+                },
+                Effect::Info {
+                    output: None,
+                    key: "title",
+                    value: "Rich document",
+                },
+            ],
+        ),
+        produced(
+            Family::Pdf,
+            "pdf_crop",
+            Some("rich"),
+            vec![RICH_PDF],
+            json!({
+                "op": "pdf_crop",
+                "input": "$in/rich.pdf",
+                "area": { "x": 0, "y": 0, "width": 0.5, "height": 0.5 },
+                "pages": [2],
+                "output": "$out/cropped.pdf",
+            }),
+            vec!["cropped.pdf"],
+            vec![
+                Effect::PageBox {
+                    output: None,
+                    page: 1,
+                    which: BoxKind::Crop,
+                    value: [0.0, 420.945, 297.64, 841.89],
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 1,
+                    text: "Rich page two",
+                },
+                Effect::Info {
+                    output: None,
+                    key: "author",
+                    value: "Ada",
+                },
+            ],
+        ),
+        produced(
+            Family::Pdf,
+            "pdf_resize",
+            Some("rich"),
+            vec![RICH_PDF],
+            json!({
+                "op": "pdf_resize",
+                "input": "$in/rich.pdf",
+                "width": 400,
+                "height": 400,
+                "pages": [1],
+                "output": "$out/resized.pdf",
+            }),
+            vec!["resized.pdf"],
+            vec![
+                Effect::PageBox {
+                    output: None,
+                    page: 0,
+                    which: BoxKind::Media,
+                    value: [0.0, 441.89, 400.0, 841.89],
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "Rich page one",
+                },
+                Effect::PageImages {
+                    output: None,
+                    page: 0,
+                    count: 1,
+                },
+                Effect::Info {
+                    output: None,
+                    key: "subject",
+                    value: "Everything it holds",
+                },
+            ],
+        ),
+        // An annotation with no geometry cannot follow the content: the answer says so, once, for
+        // the pages it happened on.
+        produced(
+            Family::Pdf,
+            "pdf_resize",
+            Some("no_geometry"),
+            vec![NO_GEOMETRY_PDF],
+            json!({
+                "op": "pdf_resize",
+                "input": "$in/no-geometry.pdf",
+                "width": 400,
+                "height": 500,
+                "pages": "all",
+                "output": "$out/resized.pdf",
+            }),
+            vec!["resized.pdf"],
+            vec![Effect::PageBox {
+                output: None,
+                page: 0,
+                which: BoxKind::Media,
+                value: [0.0, 341.89, 400.0, 841.89],
+            }],
+        ),
+        // Two distinct documents, so the order the pages land in is judged rather than assumed.
+        produced(
+            Family::Pdf,
+            "pdf_merge",
+            Some("order"),
+            vec![MERGE_A_PDF, MERGE_C_PDF],
+            json!({
+                "op": "pdf_merge",
+                "inputs": ["$in/a.pdf", "$in/c.pdf"],
+                "output": "$out/merged.pdf",
+            }),
+            vec!["merged.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 3,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "Page one text",
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 2,
+                    text: "Third document text",
+                },
+            ],
+        ),
+        // One input is not refused: the crate adds no minimum of its own. The rich document is the
+        // one to merge alone, because a copy of it would still carry the description a merge drops —
+        // merging the basic document alone produces the very file a copy is, so that case could not
+        // tell a merge from a copy.
+        produced(
+            Family::Pdf,
+            "pdf_merge",
+            Some("one_input"),
+            vec![RICH_PDF],
+            json!({
+                "op": "pdf_merge",
+                "inputs": ["$in/rich.pdf"],
+                "output": "$out/merged.pdf",
+            }),
+            vec!["merged.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 2,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "Rich page one",
+                },
+                // A merge builds a fresh description: the source's title is not carried, and an
+                // absent field reads as the empty string.
+                Effect::Info {
+                    output: None,
+                    key: "title",
+                    value: "",
+                },
+            ],
+        ),
+        // No input at all is not refused either: a document with no page takes the one the writer
+        // gives a document it builds with none.
+        produced(
+            Family::Pdf,
+            "pdf_merge",
+            Some("no_inputs"),
+            vec![],
+            json!({
+                "op": "pdf_merge",
+                "inputs": [],
+                "output": "$out/merged.pdf",
+            }),
+            vec!["merged.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageBox {
+                    output: None,
+                    page: 0,
+                    which: BoxKind::Media,
+                    value: [0.0, 0.0, 595.28, 841.89],
+                },
+            ],
+        ),
+        // A description passed to each action: a fresh document starts with the caller's, an edit
+        // keeps the file's own and adds the caller's.
+        produced(
+            Family::Pdf,
+            "pdf_merge",
+            Some("described"),
+            vec![MERGE_A_PDF],
+            json!({
+                "op": "pdf_merge",
+                "inputs": ["$in/a.pdf"],
+                "metadata": {
+                    "title": "Merged title",
+                    "author": "Ada",
+                    "subject": "Two pages",
+                    "keywords": "one, two",
+                },
+                "output": "$out/merged.pdf",
+            }),
+            vec!["merged.pdf"],
+            vec![
+                Effect::Info {
+                    output: None,
+                    key: "title",
+                    value: "Merged title",
+                },
+                Effect::Info {
+                    output: None,
+                    key: "author",
+                    value: "Ada",
+                },
+                Effect::Info {
+                    output: None,
+                    key: "subject",
+                    value: "Two pages",
+                },
+                Effect::Info {
+                    output: None,
+                    key: "keywords",
+                    value: "one, two",
+                },
+            ],
+        ),
+        produced(
+            Family::Pdf,
+            "pdf_split",
+            Some("described"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_split",
+                "input": "$in/basic.pdf",
+                "groups": [[1], [2]],
+                "metadata": { "title": "Split title" },
+                "outputs": ["$out/basic_part1.pdf", "$out/basic_part2.pdf"],
+            }),
+            vec!["basic_part1.pdf", "basic_part2.pdf"],
+            vec![
+                Effect::Info {
+                    output: Some("basic_part1.pdf"),
+                    key: "title",
+                    value: "Split title",
+                },
+                Effect::Info {
+                    output: Some("basic_part2.pdf"),
+                    key: "title",
+                    value: "Split title",
+                },
+            ],
+        ),
+        produced(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("described"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/basic.pdf",
+                "degrees": 90,
+                "pages": [1],
+                "metadata": { "title": "Turned" },
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            vec![
+                Effect::Info {
+                    output: None,
+                    key: "title",
+                    value: "Turned",
+                },
+                Effect::PageRotate {
+                    output: None,
+                    page: 0,
+                    degrees: 90,
+                },
+            ],
+        ),
+        produced(
+            Family::Pdf,
+            "pdf_crop",
+            Some("described"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_crop",
+                "input": "$in/basic.pdf",
+                "area": { "x": 0.1, "y": 0.1, "width": 0.5, "height": 0.5 },
+                "pages": [1],
+                "metadata": { "author": "Ada" },
+                "output": "$out/cropped.pdf",
+            }),
+            vec!["cropped.pdf"],
+            vec![Effect::Info {
+                output: None,
+                key: "author",
+                value: "Ada",
+            }],
+        ),
+        produced(
+            Family::Pdf,
+            "pdf_resize",
+            Some("described"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_resize",
+                "input": "$in/basic.pdf",
+                "width": 400,
+                "height": 500,
+                "pages": [1],
+                "metadata": { "subject": "Fitted" },
+                "output": "$out/resized.pdf",
+            }),
+            vec!["resized.pdf"],
+            vec![Effect::Info {
+                output: None,
+                key: "subject",
+                value: "Fitted",
+            }],
         ),
         produced(
             Family::Pdf,
@@ -3659,6 +4166,176 @@ fn failure_cases() -> Vec<Case> {
             }),
             vec!["rotated.pdf"],
             Expect::Refused(Reason::contains("do not form a PDF this tool can read")),
+        ),
+        // The three shapes a crop's area is refused for, in the order the reference checks them.
+        declined(
+            Family::Pdf,
+            "pdf_crop",
+            Some("area_shape"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_crop",
+                "input": "$in/basic.pdf",
+                "area": 5,
+                "pages": [1],
+                "output": "$out/cropped.pdf",
+            }),
+            vec!["cropped.pdf"],
+            Expect::Refused(Reason::contains(
+                "must be an object of x, y, width and height",
+            )),
+        ),
+        declined(
+            Family::Pdf,
+            "pdf_crop",
+            Some("area_side"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_crop",
+                "input": "$in/basic.pdf",
+                "area": { "x": 2, "y": 0, "width": 0.5, "height": 0.5 },
+                "pages": [1],
+                "output": "$out/cropped.pdf",
+            }),
+            vec!["cropped.pdf"],
+            Expect::Refused(Reason::contains(
+                "\"area.x\" must be between 0 and 1 of the page",
+            )),
+        ),
+        declined(
+            Family::Pdf,
+            "pdf_crop",
+            Some("area_inside"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_crop",
+                "input": "$in/basic.pdf",
+                "area": { "x": 0.8, "y": 0.8, "width": 0.5, "height": 0.5 },
+                "pages": [1],
+                "output": "$out/cropped.pdf",
+            }),
+            vec!["cropped.pdf"],
+            Expect::Refused(Reason::contains(
+                "must lie inside the page and be non-degenerate",
+            )),
+        ),
+        // A side a resize cannot fit a page into.
+        declined(
+            Family::Pdf,
+            "pdf_resize",
+            Some("side"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_resize",
+                "input": "$in/basic.pdf",
+                "width": 0,
+                "height": 500,
+                "pages": [1],
+                "output": "$out/resized.pdf",
+            }),
+            vec!["resized.pdf"],
+            Expect::Refused(Reason::contains(
+                "\"width\" must be greater than 0 and at most 20000 points",
+            )),
+        ),
+        // A description value that is not text: the reference refuses it before it reads the file.
+        declined(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("metadata_not_text"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/basic.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "metadata": { "title": 5 },
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            Expect::Refused(Reason::contains("\"title\" must be text")),
+        ),
+        // A file carrying an encryption dictionary is refused whatever it would open with: the
+        // reference names it rather than letting the library's own message surface.
+        declined(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("encrypted"),
+            vec![ENCRYPTED_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/encrypted.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            Expect::Refused(Reason::contains(
+                "is password-protected — the tool cannot open an encrypted PDF",
+            )),
+        ),
+        // A page with no visible area: nothing to crop, nothing to fit.
+        declined(
+            Family::Pdf,
+            "pdf_crop",
+            Some("no_visible_area"),
+            vec![DEGENERATE_PAGE_PDF],
+            json!({
+                "op": "pdf_crop",
+                "input": "$in/degenerate-page.pdf",
+                "area": { "x": 0, "y": 0, "width": 1, "height": 1 },
+                "pages": "all",
+                "output": "$out/cropped.pdf",
+            }),
+            vec!["cropped.pdf"],
+            Expect::Refused(Reason::contains("page 1 has no visible area to crop")),
+        ),
+        declined(
+            Family::Pdf,
+            "pdf_resize",
+            Some("no_visible_area"),
+            vec![DEGENERATE_PAGE_PDF],
+            json!({
+                "op": "pdf_resize",
+                "input": "$in/degenerate-page.pdf",
+                "width": 400,
+                "height": 500,
+                "pages": "all",
+                "output": "$out/resized.pdf",
+            }),
+            vec!["resized.pdf"],
+            Expect::Refused(Reason::contains("page 1 has no visible area to resize")),
+        ),
+        // A page the document does not have, named by the sentence the reference uses rather than
+        // the library's own message.
+        declined(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("no_page"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/basic.pdf",
+                "degrees": 90,
+                "pages": [5],
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            Expect::Refused(Reason::contains("no page 5: this document has 2 page(s)")),
+        ),
+        // A merge input that is a PDF by its magic bytes alone.
+        declined(
+            Family::Pdf,
+            "pdf_merge",
+            Some("unreadable_input"),
+            vec![TRUNCATED_PDF],
+            json!({
+                "op": "pdf_merge",
+                "inputs": ["$in/truncated.pdf"],
+                "output": "$out/merged.pdf",
+            }),
+            vec!["merged.pdf"],
+            Expect::Refused(Reason::contains("cannot read truncated.pdf as a PDF")),
         ),
         // A request the engine accepts and cannot carry out: the catalog names an `/AcroForm` that
         // is not a dictionary, which the PDF library refuses.

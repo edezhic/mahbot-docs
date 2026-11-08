@@ -4234,6 +4234,170 @@ pub fn pdf_many_images() -> Vec<u8> {
     pdf.finish(&catalog, "")
 }
 
+// ── pdf: the edit corpus ────────────────────────────────────────────────────────────────────
+//
+// These documents are edit inputs, not reading documents: the recorded readings must not move, so
+// none of them joins `reader_documents`.
+
+/// One A4 page whose `/Rotate 90` sits on the `/Pages` node: the rotation is inherited, so a writer
+/// has to resolve it before it can place anything.
+#[must_use]
+pub fn pdf_rotated_page() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let content = pdf.stream("", b"BT /F1 18 Tf 72 760 Td (Rotated page text) Tj ET");
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 /Rotate 90 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// Two A4 pages carrying every document-level structure a merge must drop and an in-place action
+/// must keep: a picture, a filled form field, an attachment, an outline, page labels, a structure
+/// tree, marked content and a description.
+#[must_use]
+pub fn pdf_rich() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let image = pdf.stream(
+        &format!(
+            "/Type /XObject /Subtype /Image /Width {PICTURE_WIDTH} /Height {PICTURE_HEIGHT} \
+             /ColorSpace /DeviceRGB /BitsPerComponent 8"
+        ),
+        &picture_samples(),
+    );
+    let pages = pdf.reserve();
+    let page_one = pdf.reserve();
+    let page_two = pdf.reserve();
+    let embedded = pdf.stream("/Type /EmbeddedFile", b"the attached file's bytes");
+    let filespec = pdf.push(format!(
+        "<< /Type /Filespec /F (notes.txt) /EF << /F {embedded} >> >>"
+    ));
+    let widget = pdf.push(format!(
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (field) /V (Ada) /Rect [72 620 272 644] \
+         /P {page_one} /F 4 >>"
+    ));
+    let attachment = pdf.push(format!(
+        "<< /Type /Annot /Subtype /FileAttachment /Rect [300 620 320 640] \
+         /Contents (An attached file) /FS {filespec} /P {page_one} >>"
+    ));
+    let note = pdf.push(format!(
+        "<< /Type /Annot /Subtype /Text /Rect [72 700 92 720] /Contents (A note) /P {page_two} >>"
+    ));
+    let outlines = pdf.reserve();
+    let item = pdf.push(format!(
+        "<< /Title (Chapter) /Parent {outlines} /Dest [{page_one} /Fit] >>"
+    ));
+    pdf.set(
+        &outlines,
+        format!("<< /Type /Outlines /First {item} /Last {item} /Count 1 >>"),
+    );
+    let structure = pdf.push("<< /Type /StructTreeRoot /K [] >>");
+    let content_one = pdf.stream(
+        "",
+        b"BT /F1 18 Tf 72 780 Td (Rich page one) Tj ET q 80 0 0 40 72 700 cm /Im1 Do Q",
+    );
+    let content_two = pdf.stream("", b"BT /F1 18 Tf 72 760 Td (Rich page two) Tj ET");
+    pdf.set(
+        &page_one,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> /XObject << /Im1 {image} >> >> \
+             /Contents {content_one} /Annots [{widget} {attachment}] >>"
+        ),
+    );
+    pdf.set(
+        &page_two,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content_two} \
+             /Annots [{note}] >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page_one} {page_two}] /Count 2 >>"),
+    );
+    let catalog = pdf.push(format!(
+        "<< /Type /Catalog /Pages {pages} /AcroForm << /Fields [{widget}] >> \
+         /Outlines {outlines} /PageLabels << /Nums [0 << /S /D >>] >> \
+         /StructTreeRoot {structure} /MarkInfo << /Marked true >> \
+         /Names << /EmbeddedFiles << /Names [(notes.txt) {filespec}] >> >> >>"
+    ));
+    let info = pdf.push(
+        "<< /Title (Rich document) /Author (Ada) /Subject (Everything it holds) \
+         /Keywords (one, two) /Producer (reference) \
+         /CreationDate (D:20200101000000Z) /ModDate (D:20200101000000Z) >>",
+    );
+    pdf.finish(&catalog, &format!(" /Info {info}"))
+}
+
+/// One A4 page whose annotation dictionary states no `/Rect`: a mark with no geometry for an edit
+/// to place.
+#[must_use]
+pub fn pdf_no_geometry() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let content = pdf.stream(
+        "",
+        b"BT /F1 18 Tf 72 760 Td (Annotation without geometry) Tj ET",
+    );
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let annotation = pdf.push(format!(
+        "<< /Type /Annot /Subtype /Square /Contents (No rectangle) /P {page} >>"
+    ));
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} \
+             /Annots [{annotation}] >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// One A4 page drawing its own line with Helvetica — the third distinct document a merge names, so
+/// the order its pages arrive in is judged.
+#[must_use]
+pub fn pdf_third() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Third document text) Tj ET");
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
 // ── negative inputs ─────────────────────────────────────────────────────────────────────────
 
 /// A file with no bytes at all.

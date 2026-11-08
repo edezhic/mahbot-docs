@@ -13,7 +13,7 @@ copy carries its licence beside it (`NotoSans-LICENSE.txt`).
 | `rules` | The shared writer/reader rules — a copy of `assets/docgen/rules.json`, value for value, the data the JavaScript kit inlines at build time. It is kept as data, not restated as a typed graph: the code that reads a rule adds the view it needs. |
 | `reading` | The bounds and constants of the reading surface: the prefix a caller peeks, the input size a caller caps, the pictures a caller delivers and the text a caller spills, the page-text floor, the crop-box slack, the raster envelope (target, quality, scale ceiling) and the raster decode envelope applied to an embedded image. |
 | `limits` | The reader and producer caps: the ZIP entry, XML depth, Word table/style/field/link, Excel range-probe, chart, number-format, PDF mark/field, edit-work and multi-file bounds. Every entry is the reference's own number, read from its sources. |
-| `engine` | The bounds the engine states for itself, where the reference states none: today the paragraph-nesting cap that keeps a Word edit's cost bounded on a deeply nested body. Nothing here is the reference's number, so nothing here is pinned by the contract test. |
+| `engine` | The bounds the engine states for itself, where the reference states none: the paragraph-nesting cap that keeps a Word edit's cost bounded on a deeply nested body, and the page-tree and object-copy depth caps that keep the PDF writer's walks off the stack. Nothing here is the reference's number, so nothing here is pinned by the contract test. |
 | `marks` | The fixed words, labels, templates and note fragments a reading or an operation prints, by key, each with the producers that print it. `{name}` placeholders are replaced with `Marks::format`. A mark the `rules` section already states (a Word tracked-change or chart label, a peripheral part's kind, a PDF form word) is not repeated here: `src/vocabulary.rs` reads it from `rules` under its key. A note with no values ("the workbook declares no sheets") is a fixed sentence and lives here; one that interpolates values is composed at the reporting site from this section's fragments and marks. |
 | `derived_marks` | The `rules` sections whose values are printed marks (Word marks and their chart labels, slide labels, PDF form words and field kinds, metadata keys, and peripheral parts), each naming the producers that print them today. The Word marks and peripheral parts are printed by both halves — a reading labels them and a Word edit names them in a refusal — and the rest by the reading only, until their writing port prints one. They live in `rules` because the kit needs them as request vocabulary; this section says they are marks too. |
 | `enforced` | Who enforces each entry of `reading`, `limits` and `engine`: `reading`, `writing` or `caller`. An entry may name more than one, because one number can be enforced in more than one place. `rules` stands for the whole rules section, which is request vocabulary rather than a bound. |
@@ -23,17 +23,25 @@ result names them through `Family::as_str`.
 
 One mark is interim: `reason_not_carried_out` is the engine's answer for a recognised operation it
 does not carry out. It is stated here rather than in code, and the operation's own reason replaces
-it once the dispatch carries the operation out. The writing half carries `docx_edit` and `xlsx_edit`
-out today, so that mark is the answer for the other eleven operations only.
+it once the dispatch carries the operation out. The writing half carries `docx_edit`, `xlsx_edit`
+and the five PDF page actions out today, so that mark is the answer for the other six operations
+only.
 
-The writing half's marks have their own namespaces: a refusal or a value an edit names is an `edit_*`
-mark, a note or a loss it raises is a `note_*` mark, and every sentence the request surface prints
-before an operation runs is a `surface_*` mark. The reading's marks keep their own prefixes
-(`xlsx_*`, `docx_*`, `render_*` and others) and share `note_*` and `reason_*`, so a key rather than a
-prefix keeps the two halves' sentences apart. Two edits that refuse a value with the same
-sentence share one mark (`edit_align_value`, `edit_size_span`), so a wording stated twice
-is never mistaken for two. Both halves also print the panic fallback `engine_failed` and the Word
-marks `rules` states (a tracked-change label, a chart label).
+The writing half's marks have their own namespaces: a refusal or a value an edit names is an
+`edit_*` mark, a note or a loss it raises is a `note_*` mark, every sentence the request surface
+prints before an operation runs is a `surface_*` mark, and a PDF page action's refusals and its one
+note are `pdf_page_*` marks. A write that fails after it created files and cannot remove one of them
+is `write_leftover`, whichever half was writing. The page actions' namespace is separate from the
+reading's `pdf_*` marks because the reading already owns that prefix for what it prints about a PDF.
+A sentence that is operation-agnostic is shared rather than copied: `edit_input_missing` names the
+operation and is the one sentence an operation with a single input refuses with, whichever half
+carries it out, and the crate's own caps on a merge extend the `surface_*` namespace that already
+carries the split's group refusals. The reading's marks keep their own prefixes (`xlsx_*`, `docx_*`,
+`render_*` and others) and share `note_*` and `reason_*`, so a key rather than a prefix keeps the
+two halves' sentences apart. Two edits that refuse a value with the same sentence share one mark
+(`edit_align_value`, `edit_size_span`), so a wording stated twice is never mistaken for two. Both
+halves also print the panic fallback `engine_failed` and the Word marks `rules` states (a
+tracked-change label, a chart label).
 `edit_open_unreadable` names the input by its base name in `{name}` and quotes the container
 library's own text in `{message}`; `edit_wrong_family` composes its advice from
 `edit_wrong_family_hint`, the way the reading composes a note from its fragments. Every other
@@ -64,12 +72,15 @@ The `enforced` map is the reading of every bound that matters to a caller:
   refuses, the pictures it delivers and the text it spills. It also owns the rasterize caller's
   ceiling on a requested page size. The reading itself applies no input-size bound and clamps no
   size or scale a caller explicitly asked for;
-- the **writing** half owns the edit-work bound and the engine's own paragraph-nesting cap
-  (`engine.paragraph_nesting_max`), which no reference bound states: the bound's own doc records why
-  it is conservative and the measured curve it sits on. Merge and split have no port here: split's
-  parts bound is read by the request surface that checks a split's groups, so only merge's two
-  bounds are stated ahead of their consumer and the map records them against the writing half
-  while no crate code reads them (`UNREAD` in the bound-read test);
+- the **writing** half owns the edit-work bound, the engine's own paragraph-nesting cap
+  (`engine.paragraph_nesting_max`), which no reference bound states — the bound's own doc records
+  why it is conservative and the measured curve it sits on — the engine's own page-tree and
+  object-copy depth caps (`engine.page_tree_depth_max`, `engine.object_depth_max`), and the three
+  caps the crate owns for the PDF page actions: the most inputs one merge may name, the most bytes
+  one merge may read, and the most parts one split may produce. The reference has none of these, so
+  no corpus case can judge them: the depth caps are the engine's own internal refusals, the three
+  request caps are usage refusals of the surface or the merge, and each is read from the vocabulary
+  and pinned by the crate's own tests;
 - `rules` is enforced by the writing half (the kit refuses out-of-range arguments) and by a caller
   (the tool validates before it builds a request).
 
@@ -139,24 +150,22 @@ reader composes with values is composed from fragments and is not a whole senten
 rule that is request vocabulary — an alignment, a size, a header or footer part the engine asks
 for — is not a printed mark and is not scanned.
 
-Three reviewed lists carry what a test needs named rather than read, each entry tied to the file or
+Two reviewed lists carry what a test needs named rather than read, each entry tied to the file or
 bound it covers:
 
 - `FORMAT_NAMES` — a plain-text extension, an Info dictionary key, a Word package part, an
-  annotation subtype, an element name, a placeholder name. A name is an exact literal, so the file
-  that matches the format is the scope; each still collides with a vocabulary mark, and a test
-  fails when an entry stops colliding, so the list cannot rot into silence;
+  annotation subtype, an element name, a placeholder name (the `page` and `pages` a PDF sentence
+  interpolates). A name is an exact literal, so the file that matches the format is the scope; each
+  still collides with a vocabulary mark, and a test fails when an entry stops colliding, so the list
+  cannot rot into silence;
 - `SPEC_CONSTANTS` — a PDF channel rounder, a number format's operator count, a sample width, a
   byte's maximum, a percentage's or a thousand's scale factor, Word's heading levels, a PDF flag
-  bit, Excel's last column, and the no-overwrite loop bound. Each names the one file and value it
-  covers and why it is not a restatement;
-- `UNREAD` — the bounds the `enforced` map assigns to a half whose operation the crate has not
-  ported, so no crate code reads them yet: merge's two bounds, whose half is the reference's own.
-  The bound-read test skips an entry only while the source still never reads it, and a test fails
-  once the crate does, so a port cannot leave the exemption behind.
+  bit, Excel's last column, a crop area's four sides, a page's quarter turns, and the constants of
+  the date conversion a produced file's information dictionary is dated with. Each names the one
+  file and value it covers and why it is not a restatement.
 
-None of the three silences the check wholesale: a coincidence in a file that does not state the
-value fails until it is added with a reason. Because the scope is the file and the value, a second
+Neither silences the check wholesale: a coincidence in a file that does not state the value fails
+until it is added with a reason. Because the scope is the file and the value, a second
 literal of an already-exempted value in that file is covered by the same entry — a restated bound
 is held to the vocabulary by the separate bound-read test, not by this scan. The mark check does not
 fire on a format name, nor the number check on a specification constant, and the same word or

@@ -9,9 +9,9 @@
 
 use document_parity::corpus::documents::{
     ANNOTATED_PDF, BASIC_DOCX, BASIC_PDF, BASIC_PPTX, BASIC_XLSX, BINARY, BROKEN_FORM_PDF,
-    FORM_PDF, LEGACY_DOC, LEGACY_PPT, LEGACY_XLS, LOST_TEXT_PDF, PARTIAL_TEXT_PDF, PICTURE_DOCX,
-    PICTURE_PDF, PLAIN_TEXT, TABLE_DOCX, TEMPLATE_DOCX, TEMPLATE_PPTX, TEMPLATE_XLSX,
-    TRUNCATED_PDF,
+    FORM_PDF, LEGACY_DOC, LEGACY_PPT, LEGACY_XLS, LOST_TEXT_PDF, MERGE_C_PDF, NO_GEOMETRY_PDF,
+    PARTIAL_TEXT_PDF, PICTURE_DOCX, PICTURE_PDF, PLAIN_TEXT, RICH_PDF, ROTATED_PDF, TABLE_DOCX,
+    TEMPLATE_DOCX, TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF,
 };
 use document_parity::corpus::{Document, build};
 use document_parity::engine::{Reader, Reading};
@@ -35,7 +35,7 @@ struct Sample {
     expect: Expect,
 }
 
-/// Every document in the reader corpus, with the text each must be read back as.
+/// The documents a corpus case hands the engine, with the text each must be read back as.
 const SAMPLES: &[Sample] = &[
     Sample {
         document: BASIC_DOCX,
@@ -133,6 +133,22 @@ const SAMPLES: &[Sample] = &[
     Sample {
         document: LOST_TEXT_PDF,
         expect: Expect::Text(&[]),
+    },
+    Sample {
+        document: ROTATED_PDF,
+        expect: Expect::Text(&["Rotated page text"]),
+    },
+    Sample {
+        document: RICH_PDF,
+        expect: Expect::Text(&["Rich page one", "Rich page two"]),
+    },
+    Sample {
+        document: NO_GEOMETRY_PDF,
+        expect: Expect::Text(&["Annotation without geometry"]),
+    },
+    Sample {
+        document: MERGE_C_PDF,
+        expect: Expect::Text(&["Third document text"]),
     },
     Sample {
         document: TRUNCATED_PDF,
@@ -287,20 +303,24 @@ fn a_reading_names_what_it_could_not_read_and_what_it_did_not_show() {
 }
 
 #[test]
-fn the_samples_are_documents_of_the_reader_corpus() {
+fn the_samples_are_documents_of_the_corpus() {
     // The sample list states what a curated set of documents must read as, by hand. Every sample
     // must name a document the corpus really holds — a stale sample would check nothing — and no
     // document may be sampled twice. The rest of the corpus is covered by the recorded baseline
     // and by `tests/coverage.rs`, which needs no hand-written expectation.
+    //
+    // The recorded reader corpus and the writer-only documents beside it, so neither list has to be
+    // repeated here.
     let corpus: std::collections::BTreeSet<&str> = document_parity::corpus::reader_documents()
-        .iter()
+        .into_iter()
+        .chain(document_parity::corpus::writer_documents())
         .map(|document| document.name)
         .collect();
     let mut sampled = std::collections::BTreeSet::new();
     for sample in SAMPLES {
         assert!(
             corpus.contains(sample.document.name),
-            "{} is sampled but is not in the reader corpus",
+            "{} is sampled but is not in the corpus",
             sample.document.name
         );
         assert!(
