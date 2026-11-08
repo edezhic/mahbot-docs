@@ -484,10 +484,13 @@
     "pdf_fields_max": 1000,
     "pdf_field_options_max": 100,
     "pdf_field_depth_max": 32,
-    "edit_work_max_bytes": 4294967296,
+    "edit_work_max_code_units": 4294967296,
     "merge_inputs_max": 50,
     "merge_bytes_max": 209715200,
     "split_parts_max": 50
+  },
+  "engine": {
+    "paragraph_nesting_max": 1000
   },
   "marks": {
     "block_annotations": {
@@ -1876,12 +1879,6 @@
         "writing"
       ]
     },
-    "edit_part_too_large": {
-      "text": "the part {name} is larger than the {limit} bytes one part may hold",
-      "printed_by": [
-        "writing"
-      ]
-    },
     "edit_part_duplicate": {
       "text": "the package states the part {name} twice",
       "printed_by": [
@@ -2728,14 +2725,382 @@
         "reading",
         "writing"
       ]
+    },
+    "edit_docx_edited_text": {
+      "text": "the body's own text, a text box's and a table cell's included",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_edited_block": {
+      "text": "the body's own paragraphs, a table cell's included",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_addressed_text": {
+      "text": "a text box's own text and a table cell's are addressed, a field's cached result is not",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_addressed_block": {
+      "text": "a table cell's own text is addressed, a text box's or a field's cached result is not",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_find_across": {
+      "text": "the text {find} is not in the document's body: the fragment reaches across a paragraph boundary, and an edit addresses one paragraph at a time",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_find_indent": {
+      "text": "the text {find} is not in the document's body: the fragment's leading whitespace is either the indentation the reader prints under a block or whitespace the file's text does not hold — search for {trimmed}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_find_peripheral": {
+      "text": "the text {find} is in {parts} of this document, which a docx edit does not change — it edits {edited}, and not that part",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_find_peripheral_revised": {
+      "text": "the text {find} is not in the document's body: it is text a tracked revision holds in {parts} of this document, which the reading prints as revised rather than as live text, and an edit addresses the text the body's runs hold today",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_find_contents": {
+      "text": "the text {find} is in this document's table of contents, which an edit does not change — its entries and their page numbers are the table's own field result, and an edit addresses {edited}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_find_revised": {
+      "text": "the text {find} is not in the document's body: it is text a tracked revision holds, which the reading prints as revised rather than as live text, and an edit addresses the text the body's runs hold today",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_find_label": {
+      "text": "the text {find} is not in the document's body: {mark} is a label the reader prints, not text in the file",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_find_break": {
+      "text": "the text {find} is not in the document's body: {reason}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_find_absent": {
+      "text": "the text {find} is not in the document's body, its headers, its footers, its footnotes, its endnotes or its comments — {addressed}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_break_reason": {
+      "text": "the fragment holds a tab or a line break, and the file keeps it as markup of its own ({markup}) or as a paragraph of its own ({paragraph}), not as text — name a fragment on one side of it",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_bridged": {
+      "text": "the text {find} reaches across a {markup} in the file: a {markup} is markup of its own, not text an edit addresses, so writing across it would leave it with nothing to belong to — name a fragment on one side of it",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_container_last": {
+      "text": "removing every paragraph holding {find} would leave a {container} with no paragraph — a {container} must keep one",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_section_break": {
+      "text": "the paragraph holding {find} ends a section, and removing it would delete the section break — remove its text instead, with remove_text",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_page_break": {
+      "text": "the paragraph holding {find} holds a page break, and removing it would delete the page break — remove its text instead, with remove_text",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_listed_heading": {
+      "text": "the text {find} is in a heading this document's table of contents lists — an edit cannot rewrite the table's own entries, so changing the heading would leave the table disagreeing with it; leave that heading as it is, and have a document this tool creates write the table from the headings you want",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_nested": {
+      "text": "the document holds {depth} paragraphs open at once, and the engine walks at most {max}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_points": {
+      "text": "{key} must be {bounds} points, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_no_property": {
+      "text": "format_paragraph needs at least one of align, style, indent_left, indent_right, indent_first_line, spacing_before, spacing_after, line_spacing or list",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_level_without_list": {
+      "text": "level needs a list to belong to — name \"list\" as {values} beside it",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_list_value": {
+      "text": "list must be {values}, or false to take the paragraph's list away, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_level": {
+      "text": "level must be a whole number from 0 to {max}, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_format_no_property": {
+      "text": "format_text needs at least one of bold, italic, underline, strike, size or color",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_position": {
+      "text": "position must be \"after\" or \"before\", got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_find_empty": {
+      "text": "find must not be empty",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_insert_empty": {
+      "text": "insert must not be empty",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_after_empty": {
+      "text": "after must not be empty",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_unknown": {
+      "text": "unknown docx edit: {op}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_row_shape": {
+      "text": "every table row must be a list of cells",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_table_empty": {
+      "text": "a table needs at least one row or one heading",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_table_columns": {
+      "text": "a table may hold at most {max} columns, got: {count}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_style_not_paragraph": {
+      "text": "{name} is the document's {kind} style, and paragraph formatting needs a paragraph style",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_no_styles": {
+      "text": "the document defines no paragraph styles, so {name} cannot be resolved — hint: a built-in name such as Normal or Heading 1 always works",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_no_style": {
+      "text": "the document defines no paragraph style named {name} — it defines {names} — hint: a built-in name such as Normal or Heading 1 always works",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_numbering_root": {
+      "text": "the document's numbering part cannot be written into: its <w:numbering> root is missing or never closed",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_run_unclosed": {
+      "text": "a run holds <w:rPr> opened and never closed, so its properties cannot be read",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_ppr_unclosed": {
+      "text": "the paragraph holds <w:pPr> opened and never closed, so its properties cannot be read",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_no_body_anchor": {
+      "text": "the document has no body, so there is nothing to place an {op} after",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_no_body": {
+      "text": "the document has no body to add a paragraph to",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_docx_anchor_text_box": {
+      "text": "the text {after} is inside a text box: an {op} after anchors in the document's own paragraphs (a table cell's counts), and a text box's paragraph is a nested one",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_docx_replacement_formatting": {
+      "text": "[the replaced text spanned several differently formatted runs — it took the formatting of the first one]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_docx_heading_unlisted": {
+      "text": "[the paragraph is a heading this document's table of contents does not list]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_docx_added_heading": {
+      "text": "[the paragraph added after a heading is a heading of its own, and this document's table of contents does not list it]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_docx_added_section": {
+      "text": "[the paragraph the new one follows ends a section, so the new one does not carry its section break]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_docx_matched_paragraphs": {
+      "text": "[the fragment matched {count} paragraphs — every one was formatted]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_docx_matched_times": {
+      "text": "[the fragment matched {count} times — every one was formatted]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_docx_partial_run": {
+      "text": "[the fragment covers only part of a run, and a run is the smallest unit formatting is stated on — the rest of that run's text took the formatting too]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_docx_reached": {
+      "text": "[the edit also reached {kinds}, which the call did not name]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_docx_tracked_on": {
+      "text": "[the document has tracked changes turned on, and what this call changed is written as plain content, not as a recorded revision]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_box_past_edge": {
+      "text": "[the {what}'s box reaches past {where} — the part beyond {where}'s edge is not shown on it]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_reached_section_break": {
+      "text": "a section break",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_reached_page_break": {
+      "text": "a page break",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_reached_bookmark": {
+      "text": "a bookmark",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_reached_hyperlink": {
+      "text": "a hyperlink",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_reached_footnote": {
+      "text": "a footnote reference",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_reached_endnote": {
+      "text": "an endnote reference",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_reached_comment": {
+      "text": "a comment",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_reached_revision": {
+      "text": "an unaccepted tracked change",
+      "printed_by": [
+        "writing"
+      ]
     }
   },
   "derived_marks": {
     "docx_marks": [
-      "reading"
+      "reading",
+      "writing"
     ],
     "docx_peripheral_parts": [
-      "reading"
+      "reading",
+      "writing"
     ],
     "ppt_marks": [
       "reading"
@@ -2850,7 +3215,7 @@
     "pdf_field_depth_max": [
       "reading"
     ],
-    "edit_work_max_bytes": [
+    "edit_work_max_code_units": [
       "writing"
     ],
     "merge_inputs_max": [
@@ -2860,6 +3225,9 @@
       "writing"
     ],
     "split_parts_max": [
+      "writing"
+    ],
+    "paragraph_nesting_max": [
       "writing"
     ],
     "rules": [

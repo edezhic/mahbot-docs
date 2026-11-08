@@ -37,9 +37,9 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde_json::Value;
 
-use super::Editor;
 use super::opc::{is_digits, relationships, resolve_part};
 use super::xml;
+use super::{Editor, edit_text, interpolated, js_number, number_text, quoted, stringified};
 use crate::operation::Failure;
 use crate::support::column_letters;
 use crate::vocabulary::vocabulary;
@@ -141,73 +141,6 @@ fn sheet_column_max() -> usize {
 /// The last column a sheet holds, in the letters a refusal names it by.
 fn last_column_name() -> String {
     column_letters(sheet_column_max().saturating_sub(1))
-}
-
-// ── values as the kit renders them ────────────────────────────────────────────────────────────
-
-/// A value as the kit's `${value}` renders it: a string as it stands, and anything else as the
-/// JSON it would have arrived as. An absent value is the kit's own `undefined`, which is a word
-/// the vocabulary states rather than a sentence this module invents.
-fn interpolated(value: Option<&Value>) -> String {
-    match value {
-        None => vocabulary().marks.get("edit_absent_value").to_string(),
-        Some(Value::String(text)) => text.clone(),
-        Some(other) => json_literal(other),
-    }
-}
-
-/// A value as the kit's `JSON.stringify` renders it, which is what a refusal quotes a name by: a
-/// string keeps its quotes, and an absent value is the kit's own `undefined`.
-fn stringified(value: Option<&Value>) -> String {
-    value.map_or_else(
-        || vocabulary().marks.get("edit_absent_value").to_string(),
-        json_literal,
-    )
-}
-
-/// A value as JSON text, the way `JSON.stringify` spells it.
-fn json_literal(value: &Value) -> String {
-    match value {
-        Value::Number(number) => number_text(number),
-        other => serde_json::to_string(other).unwrap_or_default(),
-    }
-}
-
-/// A number as JavaScript prints it: a whole-valued double carries no fraction.
-fn number_text(value: &serde_json::Number) -> String {
-    if let Some(whole) = value.as_i64() {
-        return whole.to_string();
-    }
-    if let Some(whole) = value.as_u64() {
-        return whole.to_string();
-    }
-    let float = value.as_f64().unwrap_or_default();
-    if float.is_finite() && float.fract() == 0.0 && float.abs() < 1e21 {
-        return format!("{float:.0}");
-    }
-    format!("{float}")
-}
-
-/// A number as the kit's `${value}` renders it: a whole-valued double carries no fraction.
-fn js_number(value: f64) -> String {
-    if value.fract() == 0.0 && value.abs() < 1e21 {
-        format!("{value:.0}")
-    } else {
-        format!("{value}")
-    }
-}
-
-/// A string as the kit's `JSON.stringify` renders it — the spelling a refusal quotes a name by.
-fn quoted(value: &str) -> String {
-    serde_json::to_string(value).unwrap_or_default()
-}
-
-/// A name as a refusal quotes it, with the kit's own word for a name the request left out.
-fn quoted_or_absent(value: Option<&str>) -> String {
-    value.map_or_else(
-        || vocabulary().marks.get("edit_absent_value").to_string(),
-        quoted,
-    )
 }
 
 // ── the entry point ───────────────────────────────────────────────────────────────────────────
@@ -658,9 +591,10 @@ fn sheet_part(editor: &mut Editor, name: Option<&str>) -> Result<SheetRef, Failu
         } else {
             listed
         };
+        let quoted_name = name.map_or_else(|| marks.get("edit_absent_value").to_string(), quoted);
         return Err(Failure::usage(marks.format(
             "edit_sheet_missing",
-            &[("name", &quoted_or_absent(name)), ("sheets", &has)],
+            &[("name", &quoted_name), ("sheets", &has)],
         )));
     };
     let entry = sheets[index].clone();
@@ -860,28 +794,6 @@ fn check_sheet_name(value: Option<&Value>, where_: &str) -> Result<String, Failu
         )));
     }
     Ok(name.to_string())
-}
-
-/// One string an edit names, as the kit's last line after the tool's own boundary.
-///
-/// # Errors
-///
-/// The value is not text, or it is longer than the edit-text rule allows.
-fn edit_text(value: Option<&Value>, what: &str) -> Result<String, Failure> {
-    let marks = &vocabulary().marks;
-    let Some(text) = value.and_then(Value::as_str) else {
-        return Err(Failure::usage(
-            marks.format("edit_text_not_text", &[("what", what)]),
-        ));
-    };
-    let max = *crate::vocabulary::edit_text_max();
-    if u64::try_from(text.chars().count()).unwrap_or(u64::MAX) > max {
-        return Err(Failure::usage(marks.format(
-            "edit_text_too_long",
-            &[("what", what), ("max", &max.to_string())],
-        )));
-    }
-    Ok(text.to_string())
 }
 
 // ── the cells a value makes ──────────────────────────────────────────────────────────────────

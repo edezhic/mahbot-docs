@@ -166,6 +166,63 @@ pub const XLSX_MACRO: Document = Document {
     build: build::xlsx_macro,
 };
 
+/// The Word input every `docx_edit` behaviour case runs on: a heading a table of contents lists,
+/// plain and styled runs, a fragment spanning two differently formatted runs, a tab between two
+/// runs, a list item, a field with a cached result, a page break, a section break, a text box, a
+/// comment, tracked changes, a bookmark, a link, a table, a table-of-contents field and a picture,
+/// with a header, a footer, a footnote, an endnote and a comments part beside it. These are edit
+/// inputs, not reading documents: the reading baseline must not move.
+pub const DOCX_EDIT: Document = Document {
+    name: "edit.docx",
+    build: build::docx_edit,
+};
+
+/// The combined Word edit input with revisions tracking switched on in its settings part.
+pub const DOCX_REVISIONS: Document = Document {
+    name: "revisions.docx",
+    build: build::docx_edit_revisions,
+};
+
+/// The combined Word edit input with a macro project and a signature part, saved as a `.docm`.
+pub const DOCX_MACRO: Document = Document {
+    name: "edit.docm",
+    build: build::docx_edit_macro,
+};
+
+/// A Word document written in the strict WordprocessingML dialect.
+pub const DOCX_STRICT: Document = Document {
+    name: "strict.docx",
+    build: build::docx_strict,
+};
+
+/// A Word document holding a table at the writing action's own column bound, with no styles part:
+/// the input a `format_paragraph` naming a style that is not built in is refused on.
+pub const DOCX_COLUMNS: Document = Document {
+    name: "columns.docx",
+    build: build::docx_columns,
+};
+
+/// The Word input for the breaks a call reaches without naming them, so an edit's answer says what
+/// went with the text it rewrote.
+pub const DOCX_BREAKS: Document = Document {
+    name: "breaks.docx",
+    build: build::docx_breaks,
+};
+
+/// The Word input whose refusals each name the element they found rather than splicing a second one
+/// beside it.
+pub const DOCX_BROKEN: Document = Document {
+    name: "broken.docx",
+    build: build::docx_broken,
+};
+
+/// The Word input for the refusals a document without a body earns, which name the block the
+/// caller asked for.
+pub const DOCX_BODYLESS: Document = Document {
+    name: "bodyless.docx",
+    build: build::docx_bodyless,
+};
+
 /// A workbook with one visible sheet and one cell.
 pub const XLSX_ONLY_SHEET: Document = Document {
     name: "only.xlsx",

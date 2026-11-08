@@ -1,6 +1,6 @@
 //! The vocabulary has one home, and this is the check that keeps it one.
 //!
-//! Every numeric bound in the `reading` and `limits` sections and every printed mark in
+//! Every numeric bound in the `reading`, `limits` and `engine` sections and every printed mark in
 //! `vocabulary.json` is read here, and the crate's own sources are scanned for a literal that
 //! repeats one. A match fails the test: a bound or a mark belongs in the data file, and the code
 //! reads it from there. What the scan sees and what it cannot see are recorded once, in
@@ -54,18 +54,19 @@ fn numbers(value: &Value, out: &mut BTreeSet<u64>) {
     }
 }
 
-/// The reading surface's numeric bounds: every value the `reading` section (`read`/`render_page`'s
-/// own numbers and the caller policy stated beside them) and the `limits` section (the readers'
-/// caps) state.
+/// The numeric bounds the crate states: every value the `reading` section (`read`/`render_page`'s
+/// own numbers and the caller policy stated beside them), the `limits` section (the readers' and
+/// the reference producer's caps) and the `engine` section (the caps the engine states for itself)
+/// holds.
 ///
-/// A literal repeating one is a second statement of it. The reading reads every entry it enforces
-/// from the vocabulary; a caller-enforced entry (the prefix it peeks, the size it refuses, the
-/// pictures it delivers, the text it spills) has no crate-side consumer, so only the scan, not the
-/// bound-read test, holds it.
+/// A literal repeating one is a second statement of it. The crate reads every entry its own halves
+/// enforce from the vocabulary; a caller-enforced entry (the prefix it peeks, the size it refuses,
+/// the pictures it delivers, the text it spills) has no crate-side consumer, so only the scan, not
+/// the bound-read test, holds it.
 fn all_bounds() -> Vec<f64> {
     let mut bits = BTreeSet::new();
     let json = document_engine::vocabulary::json();
-    for section in ["reading", "limits"] {
+    for section in ["reading", "limits", "engine"] {
         numbers(&json[section], &mut bits);
     }
     bits.into_iter().map(f64::from_bits).collect()
@@ -265,6 +266,47 @@ const FORMAT_NAMES: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "src/writing/docx/mod.rs",
+        &[(
+            "underline",
+            "the `underline` property a format names, the format's own key rather than a printed word",
+        )],
+    ),
+    (
+        "src/writing/docx/blocks.rs",
+        &[(
+            "text",
+            "the `text` key an added paragraph names, and the `w:t` element an edit addresses",
+        )],
+    ),
+    (
+        "src/writing/docx/format.rs",
+        &[
+            (
+                "highlight",
+                "a run property in ECMA-376's `EG_RPrBase` sequence",
+            ),
+            (
+                "none",
+                "the `ST_Underline` value that draws no underline, format knowledge rather than a printed word",
+            ),
+        ],
+    ),
+    (
+        "src/writing/docx/marks.rs",
+        &[(
+            "page",
+            "the `w:type=\"page\"` value a page break is told apart by",
+        )],
+    ),
+    (
+        "src/writing/docx/text.rs",
+        &[(
+            "page",
+            "the `w:type=\"page\"` value a page break is told apart by",
+        )],
+    ),
+    (
         "src/writing/xlsx/mod.rs",
         &[
             (
@@ -311,9 +353,15 @@ fn marks_for(path: &Path) -> Vec<String> {
 ///
 /// The file and value are the scope: the same number in another file still fails the scan. There is
 /// no site or occurrence count, so a rename or a reformat never fails this gate. The number scan is
-/// a cheap heuristic; the guarantee that a bound the reading enforces is read from the vocabulary is
-/// [`every_bound_the_reading_enforces_is_read_from_the_vocabulary`].
+/// a cheap heuristic; the guarantee that a bound the crate's own halves enforce is read from the
+/// vocabulary is [`every_bound_the_crate_enforces_is_read_from_the_vocabulary`].
 const SPEC_CONSTANTS: &[(&str, f64, &str)] = &[
+    (
+        "src/writing/mod.rs",
+        0.5,
+        "the half JavaScript's `Math.round` adds before flooring, the rounding a negative half-tie \
+         needs",
+    ),
     (
         "src/writing/xml.rs",
         16.0,
@@ -470,21 +518,25 @@ const SPEC_CONSTANTS: &[(&str, f64, &str)] = &[
         "a regular-expression capture-group index (the sixth group), not a bound",
     ),
     (
-        "src/writing/xlsx/sheets.rs",
+        "src/writing/image.rs",
         4.0,
         "a big-endian word's four bytes, the unit an image format's offsets are counted in",
     ),
     (
-        "src/writing/xlsx/sheets.rs",
+        "src/writing/image.rs",
         8.0,
         "the eight bytes of two big-endian words, the unit an image format's offsets are counted in",
     ),
     (
-        "src/writing/xlsx/sheets.rs",
+        "src/writing/image.rs",
         3.0,
         "an image format's own arithmetic: a VP8 key frame's three-byte frame tag and the three \
-         bytes of start code the sides follow, the three four-byte words a RIFF header holds, and a \
-         regular-expression capture-group index (the third group)",
+         bytes of start code the sides follow, and the three four-byte words a RIFF header holds",
+    ),
+    (
+        "src/writing/xlsx/sheets.rs",
+        3.0,
+        "a regular-expression capture-group index (the third group) in a merge rewrite",
     ),
 ];
 
@@ -1026,7 +1078,7 @@ fn every_bound_is_classified_by_a_known_producer() {
         .collect();
 
     let mut expected = BTreeSet::new();
-    for section in ["reading", "limits"] {
+    for section in ["reading", "limits", "engine"] {
         for key in json[section]
             .as_object()
             .unwrap_or_else(|| panic!("the vocabulary states `{section}`"))
@@ -1091,36 +1143,84 @@ fn every_mark_names_a_producer() {
     }
 }
 
-#[test]
-fn every_bound_the_reading_enforces_is_read_from_the_vocabulary() {
-    // Every entry the `enforced` map assigns to the reading is named by a typed field access in the
-    // crate's code, with comments and literals removed so prose or a string cannot satisfy it. That
-    // the enclosing statement consumes the value is a review question; the typed accessor makes the
-    // vocabulary the only way to obtain it. A caller-enforced entry has no crate-side consumer and
-    // is held by the restatement scan instead.
+/// The bounds the `enforced` map assigns to a half whose operation the crate has not ported, so no
+/// crate code reads them yet: merge has no port here, so its two bounds are stated ahead of their
+/// consumer and the `enforced` map records the reference's own half for them.
+const UNREAD: &[(&str, &str)] = &[
+    ("limits", "merge_inputs_max"),
+    ("limits", "merge_bytes_max"),
+];
+
+/// The crate's own source, comments and literals removed and whitespace stripped, so a typed field
+/// access can be searched for across a line break and prose or a string cannot satisfy it.
+fn crate_source() -> String {
     let mut source = String::new();
     for path in sources() {
         let text = std::fs::read_to_string(&path).expect("a source");
         source.push_str(&lex(&text[..test_module_start(&text)]).0);
     }
-    // A field access may wrap across lines, so whitespace is stripped before the search.
-    let source: String = source.chars().filter(|c| !c.is_whitespace()).collect();
+    source.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+#[test]
+fn every_bound_the_crate_enforces_is_read_from_the_vocabulary() {
+    // Every entry the `enforced` map assigns to one of the crate's own halves is named by a typed
+    // field access in the crate's code. That the enclosing statement consumes the value is a review
+    // question; the typed accessor makes the vocabulary the only way to obtain it. A
+    // caller-enforced entry has no crate-side consumer and is held by the restatement scan instead,
+    // as is an entry in [`UNREAD`] until its operation is ported. The sections iterated are the ones
+    // a bound is read from by section and name; `rules` is read through the `rule_view!` accessors
+    // instead, so it is not listed here.
+    let source = crate_source();
     let json = document_engine::vocabulary::json();
     let enforced = &vocabulary().enforced;
-    for (section, prefix) in [("reading", "reading"), ("limits", "limits")] {
+    for (section, half) in [
+        ("reading", Producer::Reading),
+        ("limits", Producer::Reading),
+        ("limits", Producer::Writing),
+        ("engine", Producer::Writing),
+    ] {
         for entry in json[section]
             .as_object()
             .unwrap_or_else(|| panic!("the vocabulary states `{section}`"))
             .keys()
         {
-            if !enforced.enforces(entry, Producer::Reading) {
+            if !enforced.enforces(entry, half) || UNREAD.contains(&(section, entry.as_str())) {
                 continue;
             }
             assert!(
-                source.contains(&format!("{prefix}.{entry}")),
-                "the reading enforces `{entry}` but never reads `{prefix}.{entry}` from the vocabulary"
+                source.contains(&format!("{section}.{entry}")),
+                "the {half:?} half enforces `{entry}` but never reads `{section}.{entry}` from the \
+                 vocabulary"
             );
         }
+    }
+}
+
+#[test]
+fn an_unread_bound_is_one_the_crate_still_does_not_read() {
+    // The other half of the same check: an exemption is only honest while the bound really has no
+    // consumer, so a port that starts reading one fails here until the entry is removed.
+    let source = crate_source();
+    let json = document_engine::vocabulary::json();
+    let enforced = &vocabulary().enforced;
+    for (section, entry) in UNREAD {
+        assert!(
+            json[*section].get(entry).is_some(),
+            "`{entry}` is exempted but the vocabulary does not state it under `{section}`"
+        );
+        assert!(
+            json["enforced"].get(entry).is_some(),
+            "`{entry}` is exempted but the `enforced` map does not name it"
+        );
+        assert!(
+            enforced.enforces(entry, Producer::Writing),
+            "`{entry}` is exempted but the `enforced` map assigns it to no writing half"
+        );
+        assert!(
+            !source.contains(&format!("{section}.{entry}")),
+            "`{entry}` is exempted but the crate now reads `{section}.{entry}`"
+        );
     }
 }
 

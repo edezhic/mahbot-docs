@@ -9,6 +9,7 @@
 //! A name is a format word the caller states (an element's own name), so the regular expressions
 //! built from it are the caller's own and not a document's bytes.
 
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -128,6 +129,84 @@ pub(super) fn element_pattern(name: &str) -> Arc<Regex> {
         open_tag_with(name, PAIRED_MIDDLE),
         close_tag(name)
     ))
+}
+
+/// The pattern of a tag of `name` in all three spellings a part may write it, for a balanced walk:
+/// the self-closing shape, the open one and the close one. A walker tells them apart by the text the
+/// match carries, so the spellings stay disjoint ([`PAIRED_MIDDLE`]).
+///
+/// # Panics
+///
+/// The name is a format word the caller states; one that does not build a regular expression is a
+/// defect here.
+#[must_use]
+pub(super) fn tag_pattern(name: &str) -> Arc<Regex> {
+    pattern(format!(
+        "{}|{}|{}",
+        self_closing_tag(name),
+        open_tag_with(name, PAIRED_MIDDLE),
+        close_tag(name)
+    ))
+}
+
+/// The pattern of an element of `name` in both shapes, whose open tag also states
+/// `attr="value"` — a `<w:br w:type="page"/>` told apart from a bare line break.
+///
+/// # Panics
+///
+/// The names are format words the caller states; one that does not build a regular expression is a
+/// defect here.
+#[must_use]
+pub(super) fn element_with_attribute(name: &str, attr: &str, value: &str) -> Arc<Regex> {
+    let middle = format!(
+        r#"\b[^<>]*\b{}="{}"[^<>]*"#,
+        regex::escape(attr),
+        regex::escape(value)
+    );
+    pattern(format!(
+        "{}|{}[\\s\\S]*?{}",
+        self_closing_tag_with(name, &middle),
+        open_tag_with(name, &middle),
+        close_tag(name)
+    ))
+}
+
+/// The balanced span of the `<name>` element that starts exactly at `at`, in either shape.
+///
+/// Found by balancing rather than by a lazy close match, because the first `</name>` may close a
+/// nested element of the same name (a `<w:rPrChange>` holds its own `<w:rPr>`). Deliberately not a
+/// [`tag_pattern`] walk: the scan starts at `at` and runs once per element, so walking the whole
+/// part each time would be quadratic.
+#[must_use]
+pub(super) fn element_span(xml_text: &str, at: usize, name: &str) -> Option<(usize, usize)> {
+    let rest = xml_text.get(at..)?;
+    let open = pattern(format!(
+        "(?:{})|(?:{})",
+        self_closing_tag(name),
+        open_tag_with(name, PAIRED_MIDDLE)
+    ));
+    let found = open.find(rest)?;
+    if found.start() != 0 {
+        return None;
+    }
+    let tag = found.as_str();
+    if tag.ends_with("/>") {
+        return Some((at, at.saturating_add(tag.len())));
+    }
+    let mut depth = 1usize;
+    let body_start = at.saturating_add(tag.len());
+    for token in tag_pattern(name).find_iter(&xml_text[body_start..]) {
+        let text = token.as_str();
+        if text.starts_with("</") {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                return Some((at, body_start.saturating_add(token.end())));
+            }
+        } else if !text.ends_with("/>") {
+            depth = depth.saturating_add(1);
+        }
+    }
+    None
 }
 
 /// The shape of an element a part states: its own open tag byte for byte, where its body starts,
@@ -468,11 +547,11 @@ pub(super) fn column_of(reference: &str) -> Option<usize> {
 
 /// `1, 2 or 3` (or `1, 2 and 3`) — how these messages name the values a rule allows.
 #[must_use]
-pub(super) fn listed(values: &[&str], conjunction: &str) -> String {
+pub(super) fn listed<S: Borrow<str>>(values: &[S], conjunction: &str) -> String {
     match values.split_last() {
         None => String::new(),
-        Some((last, [])) => (*last).to_string(),
-        Some((last, rest)) => format!("{} {conjunction} {last}", rest.join(", ")),
+        Some((last, [])) => last.borrow().to_string(),
+        Some((last, rest)) => format!("{} {conjunction} {}", rest.join(", "), last.borrow()),
     }
 }
 
@@ -666,7 +745,7 @@ mod tests {
     fn listed_names_the_values_a_rule_allows() {
         assert_eq!(listed(&["a", "b", "c"], "or"), "a, b or c");
         assert_eq!(listed(&["a"], "or"), "a");
-        assert_eq!(listed(&[], "or"), "");
+        assert_eq!(listed::<&str>(&[], "or"), "");
         assert_eq!(listed(&["a", "b"], "and"), "a and b");
         assert_eq!(listed(&["a", "b", "c"], "and"), "a, b and c");
     }

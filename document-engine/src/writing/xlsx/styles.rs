@@ -32,14 +32,15 @@ use super::super::opc::{
     add_relationship, part_directory, relationships, rels_writable, resolve_part, with_override,
 };
 use super::super::package::CONTENT_TYPES;
+use super::super::{code_units, hex_digits};
 use super::Editor;
 use super::xml;
 use super::{
     COLUMN, RANGE, ROW, Rect, STYLES_REL_TYPE, WORKBOOK, WORKBOOK_RELS, col_entries, column_number,
-    column_style_entries, ensure_sheet_data, inherited_style, insert_sheet_row, interpolated,
-    js_number, materialize_addresses, quoted, rect_label, rects_overlap, require_range_cap,
-    row_cells, row_number, row_style_of, same_rect, sheet_body, sheet_edit, sheet_merges,
-    sheet_part, sheet_rows, stringified, style_of, widen_dimension,
+    column_style_entries, ensure_sheet_data, inherited_style, insert_sheet_row, js_number,
+    materialize_addresses, quoted, rect_label, rects_overlap, require_range_cap, row_cells,
+    row_number, row_style_of, same_rect, sheet_body, sheet_edit, sheet_merges, sheet_part,
+    sheet_rows, stringified, style_of, widen_dimension,
 };
 use crate::operation::Failure;
 use crate::support::column_letters;
@@ -918,30 +919,6 @@ fn range_border(value: Option<&Value>) -> Result<Vec<(String, bool)>, Failure> {
     Ok(border)
 }
 
-/// The digits a colour must have, taken once from the shared rules.
-///
-/// # Errors
-///
-/// The value is not a string of the digits the rule states, with an optional leading `#`.
-fn hex_digits(value: Option<&Value>) -> Result<String, Failure> {
-    let digits = value
-        .and_then(Value::as_str)
-        .map(|text| text.strip_prefix('#').unwrap_or(text))
-        .unwrap_or_default();
-    let wanted = *crate::vocabulary::color_digits();
-    let shape = usize::try_from(wanted).unwrap_or(usize::MAX);
-    if digits.chars().count() != shape || !digits.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(Failure::usage(vocabulary().marks.format(
-            "edit_color_digits",
-            &[
-                ("digits", &wanted.to_string()),
-                ("value", &interpolated(value)),
-            ],
-        )));
-    }
-    Ok(digits.to_string())
-}
-
 /// The properties a `range` target names, normalized for [`styled_xf`]: each one bounded, colours
 /// reduced to their digits and booleans checked.
 ///
@@ -1148,7 +1125,7 @@ impl StyleWriter<'_> {
         if let Some(index) = self.indices.get(&key) {
             return Ok(index.clone());
         }
-        self.editor.charge(self.styles.len())?;
+        self.editor.charge(code_units(&self.styles))?;
         let applied = cell_style_index(&self.styles, self.edit, base)?;
         self.styles = applied.0;
         let index = applied.1.to_string();

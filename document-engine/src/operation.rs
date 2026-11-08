@@ -38,7 +38,7 @@
 //! sub-operation takes (an `add_image`'s `image`) travels inside that object.
 //!
 //! Which operations are carried out is the writing half's business, not this surface's:
-//! `xlsx_edit` is, and every other operation answers with the vocabulary's
+//! `docx_edit` and `xlsx_edit` are, and every other operation answers with the vocabulary's
 //! `reason_not_carried_out` until its port lands. The surface's own checks run first either way,
 //! so a request refused here is refused before any package is opened.
 
@@ -205,18 +205,22 @@ fn dispatch(request: &Request) -> Outcome {
             ),
         );
     }
-    // The one operation the writing half carries out so far. The edit opens the package, proves
-    // its family from the content, and writes a copy of it; the destination is still the engine's
-    // to name, and the write is create-new.
-    if operation == Operation::XlsxEdit {
-        return crate::writing::edit_operation(request, &outputs[0]);
+    // The edits the writing half carries out so far. The edit opens the package, proves its family
+    // from the content, and writes a copy of it; the destination is still the engine's to name, and
+    // the write is create-new.
+    if let Some(family @ (Family::Docx | Family::Xlsx)) = operation.edit_family() {
+        return crate::writing::edit_operation(request, family, &outputs[0]);
     }
-    Outcome::failed(
-        INTERNAL,
-        crate::vocabulary::vocabulary().marks.format(
-            crate::vocabulary::REASON_NOT_CARRIED_OUT,
-            &[("operation", operation.name())],
-        ),
+    Outcome::failed(INTERNAL, not_carried_out(operation.name()))
+}
+
+/// The interim answer for an operation whose port has not landed: the one sentence that says so,
+/// composed here for the dispatch and for the writing half's exhaustive-match guard, which no
+/// request reaches.
+pub(crate) fn not_carried_out(operation: &str) -> String {
+    crate::vocabulary::vocabulary().marks.format(
+        crate::vocabulary::REASON_NOT_CARRIED_OUT,
+        &[("operation", operation)],
     )
 }
 
@@ -489,15 +493,15 @@ fn output_paths(request: &Request, operation: Operation) -> Result<Vec<PathBuf>,
 
 /// The extension a request's output carries.
 fn output_extension(request: &Request, operation: Operation) -> Result<String, String> {
+    if let Some(family) = operation.edit_family() {
+        return Ok(copy_extension(request.values.get("input"), family));
+    }
     match operation {
         Operation::Create => Ok(format_family(request, &Family::ALL)?.as_str().to_string()),
         Operation::FillTemplate => {
             let family = format_family(request, &TEMPLATE_FORMATS)?;
             Ok(copy_extension(request.values.get("template"), family))
         }
-        Operation::DocxEdit => Ok(copy_extension(request.values.get("input"), Family::Docx)),
-        Operation::XlsxEdit => Ok(copy_extension(request.values.get("input"), Family::Xlsx)),
-        Operation::PptxEdit => Ok(copy_extension(request.values.get("input"), Family::Pptx)),
         _ => Ok(Family::Pdf.as_str().to_string()),
     }
 }

@@ -2,8 +2,8 @@
 //!
 //! The kit's functions carried here, one for one: `mergeCells`, `unmergeCells`, `addSheet`,
 //! `renameSheet`, `deleteSheet`, `moveSheet`, `sheetHidden`, `remapWorkbookIndices`,
-//! `sheetReferenceKinds`, `addSheetImage`, `readImage`, `imageType` (in the parent), `imageSize`,
-//! `pngSize`, `jpegSize` and `webpSize`.
+//! `sheetReferenceKinds` and `addSheetImage`; the picture a sheet embeds is read and sized by
+//! [`super::super::image`].
 //!
 //! # Invariants
 //!
@@ -17,16 +17,17 @@
 //! - A sheet move remaps the workbook's own indices and nothing else: parts and `sheetId`s keep
 //!   their numbers.
 
-use std::path::Path;
 use std::sync::LazyLock;
 
 use regex::Regex;
 use serde_json::Value;
 
+use super::super::image::{PX_TO_EMU, Pixels, image_size, read_image};
+use super::super::js_round;
 use super::super::opc::{
-    DRAWING_NS, IMAGE_REL_TYPE, REL_NS, add_relationship, image_type, next_media_part,
-    numbered_parts, part_directory, relationship_map, rels_part_for, remove_override, resolve_part,
-    with_namespace, with_override, with_relationship_namespace, without_relationship,
+    DRAWING_NS, IMAGE_REL_TYPE, REL_NS, add_relationship, next_media_part, numbered_parts,
+    part_directory, relationship_map, rels_part_for, remove_override, resolve_part, with_namespace,
+    with_override, with_relationship_namespace, without_relationship,
 };
 use super::super::package::CONTENT_TYPES;
 use super::Editor;
@@ -34,9 +35,8 @@ use super::xml;
 use super::{
     CHART_PART, DRAWING_CONTENT_TYPE, DRAWING_REL_TYPE, DRAWINGS_DIRECTORY, MEDIA_DIRECTORY, RANGE,
     SheetList, WORKBOOK, WORKBOOK_RELS, WORKSHEET_CONTENT_TYPE, WORKSHEET_REL_TYPE, WorkbookSheet,
-    XDR_NS, check_sheet_name, grid_rect, insert_worksheet_child, interpolated, js_number,
-    merge_rect, quoted, rect_label, rects_overlap, same_rect, sheet_edit, sheet_merges, sheet_part,
-    stringified,
+    XDR_NS, check_sheet_name, grid_rect, insert_worksheet_child, js_number, merge_rect, quoted,
+    rect_label, rects_overlap, same_rect, sheet_edit, sheet_merges, sheet_part, stringified,
 };
 use crate::operation::Failure;
 use crate::vocabulary::vocabulary;
@@ -685,391 +685,6 @@ fn sheet_reference_kinds(
     Ok(kinds)
 }
 
-// ── a picture ───────────────────────────────────────────────────────────────────────────────
-
-/// A pixel in the units a part states a length in: 1in = 914400 EMU = 96 px, so a 96-dpi pixel is
-/// 9525 EMU. Stated once, since every arm converts with it.
-const PX_TO_EMU: f64 = 914_400.0 / 96.0;
-
-/// The points one pixel is: 96 px = 72 pt.
-const PX_TO_POINTS: f64 = 72.0 / 96.0;
-
-/// A picture the request embeds: its bytes, the kind its name claims, and the pixel size the frame
-/// header states.
-struct Picture {
-    kind: &'static str,
-    content_type: &'static str,
-    bytes: Vec<u8>,
-    width: u32,
-    height: u32,
-}
-
-/// A size in pixels.
-#[derive(Clone, Copy, Debug)]
-struct Pixels {
-    width: f64,
-    height: f64,
-}
-
-/// An image's bytes, checked against the kind its name claims: every writer embeds them as that
-/// type and two of the three do not decode what they embed, so a mislabelled or truncated file
-/// would become content no reader can open — in a document the caller receives as a success.
-///
-/// # Errors
-///
-/// The file cannot be read, its name's extension is not one the shared rules list, or its bytes are
-/// not a whole image of the kind the name claims.
-fn read_image(value: Option<&Value>) -> Result<Picture, Failure> {
-    let marks = &vocabulary().marks;
-    let Some(path) = value.and_then(Value::as_str) else {
-        return Err(Failure::usage(
-            marks.format("edit_image_extension", &[("name", &interpolated(value))]),
-        ));
-    };
-    let (kind, content_type) = image_type(Path::new(path))?;
-    let name = crate::support::file_name_or_path(path).to_string();
-    let Ok(bytes) = std::fs::read(path) else {
-        return Err(Failure::usage(
-            marks.format("edit_image_unreadable", &[("name", &name)]),
-        ));
-    };
-    let size = match kind {
-        "png" => png_size(&bytes),
-        "webp" => webp_size(&bytes),
-        _ => jpeg_size(&bytes),
-    };
-    // A declared size of nothing means the bytes are not a whole image of the kind the name claims
-    // — truncated, or another format under that extension — not that the image is small: the
-    // proportions every other size is scaled from would not exist.
-    let Some((width, height)) = size.filter(|(width, height)| *width > 0 && *height > 0) else {
-        let label = match kind {
-            "png" => marks.get("edit_image_label_png"),
-            "webp" => marks.get("edit_image_label_webp"),
-            _ => marks.get("edit_image_label_jpeg"),
-        };
-        return Err(Failure::usage(marks.format(
-            "edit_image_not_whole",
-            &[("name", &name), ("label", label)],
-        )));
-    };
-    Ok(Picture {
-        kind,
-        content_type,
-        bytes,
-        width,
-        height,
-    })
-}
-
-/// A 32-bit word's four bytes, the unit the image formats' own offsets are counted in.
-const U32_BYTES: usize = 4;
-
-/// Two 32-bit words: a PNG signature's length and a RIFF chunk header's.
-const U64_BYTES: usize = 8;
-
-/// The eight bytes every PNG starts with.
-const PNG_SIGNATURE: [u8; U64_BYTES] = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-
-/// Where a PNG's IHDR states its width: past the signature and the chunk's length and type.
-const PNG_IHDR_WIDTH: usize = PNG_SIGNATURE.len() + U32_BYTES + U32_BYTES;
-
-/// A PNG chunk's length, type and CRC fields around its data: 4 + 4 + 4 bytes.
-const PNG_CHUNK_OVERHEAD: usize = 12;
-
-/// The bits one byte holds: the shift a little-endian word's next byte starts at.
-const BITS_PER_BYTE: u32 = 8;
-
-/// A PNG's pixel size: the signature, then chunks of declared length whose first is a 13-byte
-/// IHDR, at least one of which is image data, closed by an IEND.
-fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
-    if bytes.len() < PNG_SIGNATURE.len() + PNG_CHUNK_OVERHEAD
-        || !PNG_SIGNATURE
-            .iter()
-            .enumerate()
-            .all(|(index, byte)| bytes.get(index) == Some(byte))
-    {
-        return None;
-    }
-    let mut offset = PNG_SIGNATURE.len();
-    let mut pixels = false;
-    // Chunks are length(4) + type(4) + data(length) + crc(4).
-    while offset.saturating_add(PNG_CHUNK_OVERHEAD) <= bytes.len() {
-        let length = word_at(bytes, offset)?;
-        let kind = bytes.get(offset.saturating_add(U32_BYTES)..offset.saturating_add(U64_BYTES))?;
-        if offset == PNG_SIGNATURE.len() && (kind != b"IHDR".as_slice() || length != 13) {
-            return None;
-        }
-        if kind == b"IDAT".as_slice() {
-            pixels = true;
-        }
-        if kind == b"IEND".as_slice() {
-            if !pixels {
-                return None;
-            }
-            return Some((
-                u32::try_from(word_at(bytes, PNG_IHDR_WIDTH)?).ok()?,
-                u32::try_from(word_at(bytes, PNG_IHDR_WIDTH + U32_BYTES)?).ok()?,
-            ));
-        }
-        offset = offset
-            .saturating_add(PNG_CHUNK_OVERHEAD)
-            .saturating_add(usize::try_from(length).unwrap_or(usize::MAX));
-    }
-    None
-}
-
-/// One big-endian 32-bit word at `offset`.
-fn word_at(bytes: &[u8], offset: usize) -> Option<u64> {
-    let slice: [u8; U32_BYTES] = bytes
-        .get(offset..offset.saturating_add(U32_BYTES))?
-        .try_into()
-        .ok()?;
-    Some(u64::from(u32::from_be_bytes(slice)))
-}
-
-/// A JPEG's pixel size: SOI, marker segments of declared length, a frame header, and an EOI after
-/// the scan. Only the marker segments are walked — past the start-of-scan marker the image data is
-/// entropy-coded and not length-prefixed.
-fn jpeg_size(bytes: &[u8]) -> Option<(u32, u32)> {
-    if bytes.len() < U32_BYTES || bytes.first() != Some(&0xff) || bytes.get(1) != Some(&0xd8) {
-        return None;
-    }
-    let mut offset = 2usize;
-    let mut size = None;
-    while offset.saturating_add(U32_BYTES) <= bytes.len() {
-        if bytes.get(offset) != Some(&0xff) {
-            return None;
-        }
-        while bytes.get(offset) == Some(&0xff) {
-            offset = offset.saturating_add(1);
-        }
-        if offset.saturating_add(U32_BYTES) > bytes.len() {
-            return None;
-        }
-        let marker = *bytes.get(offset)?;
-        if marker == 0xda {
-            let ends = bytes
-                .get(offset..)?
-                .windows(2)
-                .any(|pair| pair == [0xff, 0xd9]);
-            return if size.is_some() && ends { size } else { None };
-        }
-        if marker == 0xd9 {
-            return None;
-        }
-        // A restart or a temporary marker carries no payload and no length.
-        if marker == 0x01 || (0xd0..=0xd7).contains(&marker) {
-            offset = offset.saturating_add(1);
-            continue;
-        }
-        let length = usize::from(u16::from_be_bytes([
-            *bytes.get(offset.saturating_add(1))?,
-            *bytes.get(offset.saturating_add(2))?,
-        ]));
-        if length < 2 {
-            return None;
-        }
-        // The frame headers carry the image's dimensions, and are read only once their own bytes
-        // are there: a file cut right after the marker is a truncated image.
-        if (0xc0..=0xcf).contains(&marker) && ![0xc4, 0xc8, 0xcc].contains(&marker) {
-            if offset.saturating_add(U64_BYTES) > bytes.len() {
-                return None;
-            }
-            // Past the marker, its two length bytes and the one precision byte.
-            let height_at = offset.saturating_add(U32_BYTES);
-            let width_at = height_at.saturating_add(2);
-            let height = u16::from_be_bytes([
-                *bytes.get(height_at)?,
-                *bytes.get(height_at.saturating_add(1))?,
-            ]);
-            let width = u16::from_be_bytes([
-                *bytes.get(width_at)?,
-                *bytes.get(width_at.saturating_add(1))?,
-            ]);
-            size = Some((u32::from(width), u32::from(height)));
-        }
-        offset = offset.saturating_add(1).saturating_add(length);
-    }
-    None
-}
-
-/// The 14 bits a VP8 or a VP8L header gives each side.
-const SIDE_MASK: u16 = 0x3fff;
-
-/// The bit a VP8L header's height starts at: its 14 bits of width come first.
-const VP8L_HEIGHT_BITS: u32 = 14;
-
-/// A WebP's pixel size: a RIFF container whose form is WEBP, holding the image in one of three
-/// chunks — `VP8 `, `VP8L` or `VP8X`. The first of them states the pixel size.
-fn webp_size(bytes: &[u8]) -> Option<(u32, u32)> {
-    /// `RIFF`, the file's size, then `WEBP`.
-    const RIFF_HEADER: usize = 3 * U32_BYTES;
-    /// A chunk's fourcc and its length.
-    const CHUNK_HEADER: usize = 2 * U32_BYTES;
-    /// The bytes of a VP8 key frame's frame tag, which its start code follows.
-    const START_CODE: usize = 3;
-    if bytes.len() < RIFF_HEADER + CHUNK_HEADER
-        || bytes.get(..U32_BYTES)? != b"RIFF".as_slice()
-        || bytes.get(CHUNK_HEADER..RIFF_HEADER)? != b"WEBP".as_slice()
-    {
-        return None;
-    }
-    // The RIFF size counts everything after the eight bytes it follows; a file that claims more
-    // than it holds is cut short.
-    let riff = le_word_at(bytes, U32_BYTES)?;
-    if riff.saturating_add(CHUNK_HEADER as u64) > bytes.len() as u64 {
-        return None;
-    }
-    // Chunks are fourcc(4) + length(4) + data, padded to an even length.
-    let mut offset = RIFF_HEADER;
-    while offset.saturating_add(CHUNK_HEADER) <= bytes.len() {
-        let fourcc = bytes.get(offset..offset.saturating_add(U32_BYTES))?;
-        let length = usize::try_from(le_word_at(bytes, offset.saturating_add(U32_BYTES))?).ok()?;
-        let body = offset.saturating_add(CHUNK_HEADER);
-        if body.saturating_add(length) > bytes.len() {
-            return None;
-        }
-        if fourcc == b"VP8 ".as_slice() {
-            // A three-byte frame tag, then the 9d 01 2a start code and the 14-bit sides.
-            if length < CHUNK_HEADER + 2
-                || bytes.get(body.saturating_add(START_CODE)) != Some(&0x9d)
-                || bytes.get(body.saturating_add(START_CODE + 1)) != Some(&0x01)
-                || bytes.get(body.saturating_add(START_CODE + 2)) != Some(&0x2a)
-            {
-                return None;
-            }
-            let width = le_half_at(bytes, body.saturating_add(START_CODE + 3))? & SIDE_MASK;
-            let height = le_half_at(bytes, body.saturating_add(START_CODE + 5))? & SIDE_MASK;
-            return Some((u32::from(width), u32::from(height)));
-        }
-        if fourcc == b"VP8L".as_slice() {
-            // The 0x2f signature, then 14 bits of width and 14 of height, each one less than the
-            // side it states.
-            if length < 5 || bytes.get(body) != Some(&0x2f) {
-                return None;
-            }
-            let bits = u32::try_from(le_word_at(bytes, body.saturating_add(1))?).ok()?;
-            return Some((
-                1 + (bits & u32::from(SIDE_MASK)),
-                1 + ((bits >> VP8L_HEIGHT_BITS) & u32::from(SIDE_MASK)),
-            ));
-        }
-        if fourcc == b"VP8X".as_slice() {
-            // A flags byte and three reserved ones, then the 24-bit canvas width and height.
-            if length < CHUNK_HEADER + 2 {
-                return None;
-            }
-            let side = |at: usize| -> Option<u32> {
-                let low = u32::from(*bytes.get(at)?);
-                let middle = u32::from(*bytes.get(at.saturating_add(1))?) << BITS_PER_BYTE;
-                let high = u32::from(*bytes.get(at.saturating_add(2))?) << (2 * BITS_PER_BYTE);
-                Some(1 + low + middle + high)
-            };
-            return Some((
-                side(body.saturating_add(U32_BYTES))?,
-                side(body.saturating_add(U32_BYTES + START_CODE))?,
-            ));
-        }
-        offset = body.saturating_add(length).saturating_add(length & 1);
-    }
-    None
-}
-
-/// One little-endian 32-bit word at `offset`.
-fn le_word_at(bytes: &[u8], offset: usize) -> Option<u64> {
-    let slice: [u8; U32_BYTES] = bytes
-        .get(offset..offset.saturating_add(U32_BYTES))?
-        .try_into()
-        .ok()?;
-    Some(u64::from(u32::from_le_bytes(slice)))
-}
-
-/// One little-endian 16-bit half-word at `offset`.
-fn le_half_at(bytes: &[u8], offset: usize) -> Option<u16> {
-    Some(u16::from_le_bytes([
-        *bytes.get(offset)?,
-        *bytes.get(offset.saturating_add(1))?,
-    ]))
-}
-
-/// The size a picture is drawn at, in pixels. A request states its sides in points, a side it gives
-/// alone keeps the picture's own proportions, and one it gives neither keeps the picture's own size.
-///
-/// # Errors
-///
-/// A stated side, or the side the other one implies, is outside the shared span.
-fn image_size(
-    natural: Pixels,
-    width: Option<f64>,
-    height: Option<f64>,
-    span: &crate::vocabulary::Span,
-) -> Result<Pixels, Failure> {
-    let marks = &vocabulary().marks;
-    for side in [width, height].into_iter().flatten() {
-        if !xml::in_span(side, span) {
-            return Err(Failure::usage(marks.format(
-                "edit_image_side_span",
-                &[
-                    ("bounds", &xml::span_bounds(span)),
-                    ("side", &js_number(side)),
-                ],
-            )));
-        }
-    }
-    let px = |points: f64| points / PX_TO_POINTS;
-    if let (Some(width), Some(height)) = (width, height) {
-        return Ok(Pixels {
-            width: px(width),
-            height: px(height),
-        });
-    }
-    if let Some(width) = width {
-        let mut size = Pixels {
-            width: px(width),
-            height: px(width) * natural.height / natural.width,
-        };
-        let points = size.height * PX_TO_POINTS;
-        if !xml::in_span(points, span) {
-            return Err(Failure::usage(marks.format(
-                "edit_image_implied_span",
-                &[
-                    ("side", "height"),
-                    ("other", "width"),
-                    ("bounds", &xml::span_bounds(span)),
-                    ("points", &js_number(points.round())),
-                ],
-            )));
-        }
-        size.height = size.height.max(1.0);
-        return Ok(size);
-    }
-    if let Some(height) = height {
-        let mut size = Pixels {
-            width: px(height) * natural.width / natural.height,
-            height: px(height),
-        };
-        let points = size.width * PX_TO_POINTS;
-        if !xml::in_span(points, span) {
-            return Err(Failure::usage(marks.format(
-                "edit_image_implied_span",
-                &[
-                    ("side", "width"),
-                    ("other", "height"),
-                    ("bounds", &xml::span_bounds(span)),
-                    ("points", &js_number(points.round())),
-                ],
-            )));
-        }
-        size.width = size.width.max(1.0);
-        return Ok(size);
-    }
-    let round = |side: f64| side.round().max(1.0);
-    Ok(Pixels {
-        width: round(natural.width),
-        height: round(natural.height),
-    })
-}
-
 /// The relationship id of an element that refers to a part (`r:id="rId1"`): the prefixed `id`,
 /// never the element's own unprefixed one, the way the reader's own scan picks it out.
 fn relationship_id(tag: &str) -> Option<String> {
@@ -1105,12 +720,13 @@ pub(super) fn add_image(editor: &mut Editor, edit: &Value) -> Result<(), Failure
             width: f64::from(image.width),
             height: f64::from(image.height),
         },
-        edit.get("width").and_then(Value::as_f64),
-        edit.get("height").and_then(Value::as_f64),
+        edit.get("width"),
+        edit.get("height"),
         span,
+        None,
     )?;
-    let cx = js_number((size.width * PX_TO_EMU).round().max(1.0));
-    let cy = js_number((size.height * PX_TO_EMU).round().max(1.0));
+    let cx = js_number(js_round(size.width * PX_TO_EMU).max(1.0));
+    let cy = js_number(js_round(size.height * PX_TO_EMU).max(1.0));
     let names = editor.part_names();
     let media = next_media_part(&names, MEDIA_DIRECTORY, image.kind);
     editor.add_bytes(&media, image.bytes)?;
@@ -1211,93 +827,6 @@ pub(super) fn add_image(editor: &mut Editor, edit: &Value) -> Result<(), Failure
 mod tests {
     use super::*;
     use crate::operation::Failure;
-
-    /// A span the shared rules state, for a size the test names.
-    fn span() -> crate::vocabulary::Span {
-        *crate::vocabulary::dimension_points()
-    }
-
-    /// A picture's own size, as the reader states it.
-    fn natural() -> Pixels {
-        Pixels {
-            width: 200.0,
-            height: 100.0,
-        }
-    }
-
-    #[test]
-    fn a_stated_width_and_height_are_points_and_become_pixels() {
-        let size = image_size(natural(), Some(90.0), Some(45.0), &span()).expect("a size");
-        assert!((size.width - 120.0).abs() < f64::EPSILON);
-        assert!((size.height - 60.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn one_stated_side_keeps_the_pictures_own_proportions() {
-        let wide = image_size(natural(), Some(90.0), None, &span()).expect("a size");
-        assert!((wide.width - 120.0).abs() < f64::EPSILON);
-        assert!((wide.height - 60.0).abs() < f64::EPSILON);
-        let tall = image_size(natural(), None, Some(45.0), &span()).expect("a size");
-        assert!((tall.width - 120.0).abs() < f64::EPSILON);
-        assert!((tall.height - 60.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn neither_side_keeps_the_pictures_own_size() {
-        let size = image_size(natural(), None, None, &span()).expect("a size");
-        assert!((size.width - 200.0).abs() < f64::EPSILON);
-        assert!((size.height - 100.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn a_side_outside_the_rule_is_refused() {
-        let failure = image_size(natural(), Some(0.0), None, &span()).expect_err("a refusal");
-        assert!(failure.is_usage());
-        assert!(failure.reason.contains("points"), "{failure:?}");
-        let implied = image_size(natural(), None, Some(19_000.0), &span()).expect_err("a refusal");
-        assert!(implied.reason.contains("implied"), "{implied:?}");
-    }
-
-    #[test]
-    fn a_png_a_jpeg_and_a_webp_state_their_own_pixel_size() {
-        let mut png = vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-        png.extend_from_slice(&[0, 0, 0, 13]);
-        png.extend_from_slice(b"IHDR");
-        png.extend_from_slice(&[0, 0, 0, 2, 0, 0, 0, 3, 8, 2, 0, 0, 0]);
-        png.extend_from_slice(&[0, 0, 0, 0]);
-        png.extend_from_slice(&[0, 0, 0, 1]);
-        png.extend_from_slice(b"IDAT");
-        png.push(0);
-        png.extend_from_slice(&[0, 0, 0, 0]);
-        png.extend_from_slice(&[0, 0, 0, 0]);
-        png.extend_from_slice(b"IEND");
-        png.extend_from_slice(&[0, 0, 0, 0]);
-        assert_eq!(png_size(&png), Some((2, 3)));
-
-        // SOI, a frame header carrying 5 by 7, a start of scan and an end of image.
-        let jpeg = [
-            0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x07, 0x00, 0x05, 0x03, 0x01, 0x11,
-            0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01, 0xff, 0xda, 0x00, 0x02, 0xff, 0xd9,
-        ];
-        assert_eq!(jpeg_size(&jpeg), Some((5, 7)));
-
-        let mut webp = Vec::new();
-        webp.extend_from_slice(b"RIFF");
-        webp.extend_from_slice(&16u32.to_le_bytes());
-        webp.extend_from_slice(b"WEBP");
-        webp.extend_from_slice(b"VP8L");
-        webp.extend_from_slice(&5u32.to_le_bytes());
-        webp.push(0x2f);
-        webp.extend_from_slice(&0x0000_0000u32.to_le_bytes());
-        assert_eq!(webp_size(&webp), Some((1, 1)));
-    }
-
-    #[test]
-    fn a_truncated_picture_is_not_a_whole_one() {
-        assert_eq!(png_size(&[0x89, 0x50, 0x4e, 0x47]), None);
-        assert_eq!(jpeg_size(&[0xff, 0xd8]), None);
-        assert_eq!(webp_size(b"RIFF"), None);
-    }
 
     /// A workbook opened for a reading, with the directory that holds it kept alive.
     fn opened(book: Vec<u8>) -> (Editor, tempfile::TempDir) {

@@ -85,6 +85,22 @@ pub enum Effect {
         value: Option<&'static str>,
         on: bool,
     },
+    /// An attribute of a paragraph property or of one of its children: `<w:ind w:left="400"/>`,
+    /// `<w:numPr><w:ilvl w:val="1"/></w:numPr>`. Names are local, so a case names `left` for a
+    /// transitional document and `start` for a strict one.
+    ParagraphAttribute {
+        output: Option<&'static str>,
+        part: &'static str,
+        /// The text of the paragraph the property belongs to.
+        text: &'static str,
+        /// The property's local name: the child element of `<w:pPr>`, `ind`, `spacing` or `numPr`.
+        property: &'static str,
+        /// The property's own child element when the attribute sits on one, `ilvl` or `numId`.
+        child: Option<&'static str>,
+        /// The attribute's local name, without its namespace prefix.
+        attribute: &'static str,
+        value: &'static str,
+    },
     /// The workbook's sheet names, in order.
     SheetNames {
         output: Option<&'static str>,
@@ -339,6 +355,44 @@ impl Effect {
                             (true, None) => "present".to_string(),
                             (true, Some(want)) => format!("{want:?}"),
                         }
+                    )
+                })
+            }
+            Self::ParagraphAttribute {
+                part,
+                text,
+                property,
+                child,
+                attribute,
+                value: expected,
+                ..
+            } => {
+                let tree = part_tree(value, part)?;
+                let paragraph = format_container(tree, Scope::Paragraph, text)
+                    .ok_or_else(|| format!("no paragraph holds {text:?}"))?;
+                let property_element =
+                    paragraph_property(paragraph, property).ok_or_else(|| {
+                        format!("the paragraph holding {text:?} states no {property}")
+                    })?;
+                let element = match child {
+                    None => property_element,
+                    Some(child) => elements_local(property_element, child)
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| {
+                            format!(
+                                "{property} on the paragraph holding {text:?} states no {child}"
+                            )
+                        })?,
+                };
+                let found = attribute_local(element, attribute);
+                expect(found == Some(expected), || {
+                    let label = match child {
+                        None => property.to_string(),
+                        Some(child) => format!("{property}/{child}"),
+                    };
+                    format!(
+                        "{label}'s {attribute} on the paragraph holding {text:?} is {found:?}, expected {expected:?}"
                     )
                 })
             }
@@ -647,6 +701,7 @@ impl Effect {
             | Self::Info { output, .. }
             | Self::FormValue { output, .. }
             | Self::FormFlattened { output }
+            | Self::ParagraphAttribute { output, .. }
             | Self::ImageParts { output, .. } => output,
         }
     }
@@ -681,6 +736,19 @@ impl Effect {
                     .map(|value| format!(" = {value:?}"))
                     .unwrap_or_default()
             ),
+            Self::ParagraphAttribute {
+                text,
+                property,
+                child,
+                attribute,
+                value,
+                ..
+            } => match child {
+                None => format!("{property} {attribute}={value} on the paragraph holding {text:?}"),
+                Some(child) => format!(
+                    "{property}/{child} {attribute}={value} on the paragraph holding {text:?}"
+                ),
+            },
             Self::SheetNames { names, .. } => format!("sheet names {names:?}"),
             Self::Cell {
                 sheet, cell, value, ..
@@ -923,6 +991,12 @@ fn property_value(container: &Value, scope: Scope, property: &str) -> Option<Str
     attribute_local(props, property).map(str::to_string)
 }
 
+/// A paragraph property's own child element, whatever its prefix.
+fn paragraph_property<'a>(paragraph: &'a Value, property: &str) -> Option<&'a Value> {
+    let props = elements(paragraph, "w:pPr").into_iter().next()?;
+    elements_local(props, property).into_iter().next()
+}
+
 fn attribute<'a>(node: &'a Value, name: &str) -> Option<&'a str> {
     node.get("attrs")?.get(name)?.as_str()
 }
@@ -932,13 +1006,7 @@ fn attribute_local<'a>(node: &'a Value, name: &str) -> Option<&'a str> {
     node.get("attrs")?
         .as_object()?
         .iter()
-        .find_map(|(key, value)| {
-            (key.rsplit_once(':')
-                .map_or(key.as_str(), |(_, local)| local)
-                == name)
-                .then(|| value.as_str())
-                .flatten()
-        })
+        .find_map(|(key, value)| (local(key) == name).then(|| value.as_str()).flatten())
 }
 
 /// Every element with this local name, whatever its prefix.

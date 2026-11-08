@@ -7,9 +7,10 @@
 //! produced document: an effect that only a no-op could satisfy is not a check.
 
 use super::documents::{
-    BASIC_DOCX, BASIC_PDF, BASIC_PPTX, BASIC_XLSX, BROKEN_FORM_PDF, FORM_PDF, MERGE_A_PDF,
-    MERGE_B_PDF, PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_PDF, PICTURE_PNG, TEMPLATE_DOCX,
-    TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF, TRUNCATED_XLSX, XLSX_ALL_HIDDEN,
+    BASIC_DOCX, BASIC_PDF, BASIC_PPTX, BASIC_XLSX, BROKEN_FORM_PDF, DOCX_BODYLESS, DOCX_BREAKS,
+    DOCX_BROKEN, DOCX_COLUMNS, DOCX_EDIT, DOCX_MACRO, DOCX_REVISIONS, DOCX_STRICT, FORM_PDF,
+    MERGE_A_PDF, MERGE_B_PDF, PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_PDF, PICTURE_PNG,
+    TEMPLATE_DOCX, TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF, TRUNCATED_XLSX, XLSX_ALL_HIDDEN,
     XLSX_BAD_MERGE_REF, XLSX_BROKEN_MERGES, XLSX_EDIT, XLSX_MACRO, XLSX_NO_CONTENT_TYPES,
     XLSX_NO_FAMILY, XLSX_ONE_VISIBLE, XLSX_ONLY_SHEET, XLSX_SELF_CLOSING, XLSX_UNCLOSED_MERGE_CELL,
 };
@@ -523,6 +524,1348 @@ fn docx_edit_cases() -> Vec<Case> {
                     text: "c1",
                 },
             ],
+        ),
+    ]
+    .into_iter()
+    .chain(docx_edit_paths())
+    .collect()
+}
+
+// ── docx_edit: the paths that carry the risk ─────────────────────────────────────────────────
+
+/// One docx edit against `document`, named by `id` because its sub-operation already has a case,
+/// and written to `$out/edited.docx` (or `.docm` for a macro-enabled input).
+fn docx_edit_on(
+    sub_operation: &'static str,
+    id: &'static str,
+    document: Document,
+    edits: Value,
+    effects: Vec<Effect>,
+) -> Case {
+    let output = if document.name.ends_with(".docm") {
+        "edited.docm"
+    } else {
+        "edited.docx"
+    };
+    produced(
+        Family::Docx,
+        "docx_edit",
+        Some(sub_operation),
+        inputs(sub_operation, document),
+        json!({
+            "op": "docx_edit",
+            "input": format!("$in/{}", document.name),
+            "edits": edits,
+            "output": format!("$out/{output}"),
+        }),
+        vec![output],
+        effects,
+    )
+    .named(id)
+}
+
+/// One refused docx edit: the request a `docx_edit_on` would carry, with the reason the engine must
+/// give.
+fn docx_refusal_on(
+    sub_operation: &'static str,
+    id: &'static str,
+    document: Document,
+    edits: Value,
+    reason: Reason,
+) -> Case {
+    declined(
+        Family::Docx,
+        "docx_edit",
+        Some(sub_operation),
+        inputs(sub_operation, document),
+        json!({
+            "op": "docx_edit",
+            "input": format!("$in/{}", document.name),
+            "edits": edits,
+            "output": "$out/edited.docx",
+        }),
+        vec!["edited.docx"],
+        Expect::Refused(reason),
+    )
+    .named(id)
+}
+
+/// The text of a request value longer than the edit-text cap, for the six refusals it earns.
+fn over_long() -> String {
+    "x".repeat(20_001)
+}
+
+fn docx_edit_paths() -> Vec<Case> {
+    let body = Some(DOCX_BODY);
+    vec![
+        // Every occurrence, in every matching paragraph, is rewritten — not just the first.
+        docx_edit_on(
+            "replace_text",
+            "every_occurrence",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "paragraph", "replace": "section" }]),
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: body,
+                    text: "Alpha section one",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: body,
+                    text: "Beta section two",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: body,
+                    text: "Gamma section three",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: body,
+                    text: "paragraph",
+                    present: false,
+                },
+            ],
+        ),
+        // A fragment that reaches from one paragraph into the next is refused, not joined.
+        docx_refusal_on(
+            "replace_text",
+            "across_paragraphs",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "one\nBeta", "replace": "x" }]),
+            Reason::contains("reaches across a paragraph boundary"),
+        ),
+        // A replacement spanning differently formatted runs takes the first one's formatting, and
+        // says so as a loss.
+        docx_edit_on(
+            "replace_text",
+            "formatted_runs",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "Gamma paragraph", "replace": "Replaced" }]),
+            vec![Effect::Text {
+                output: None,
+                part: body,
+                text: "Replaced three",
+                present: true,
+            }],
+        ),
+        // Inserting before, so the inserted text precedes the fragment it names.
+        docx_edit_on(
+            "insert_text",
+            "before",
+            DOCX_EDIT,
+            json!([{ "op": "insert_text", "find": "Alpha", "insert": "Start ", "position": "before" }]),
+            vec![Effect::Text {
+                output: None,
+                part: body,
+                text: "Start Alpha paragraph one",
+                present: true,
+            }],
+        ),
+        docx_refusal_on(
+            "insert_text",
+            "unknown_position",
+            DOCX_EDIT,
+            json!([{ "op": "insert_text", "find": "Alpha", "insert": "x", "position": "middle" }]),
+            Reason::contains("position must be"),
+        ),
+        // A tab between two runs is markup of its own, so a match across it is refused.
+        docx_refusal_on(
+            "remove_text",
+            "tab_bridged",
+            DOCX_EDIT,
+            json!([{ "op": "remove_text", "find": "Deltap" }]),
+            Reason::contains("reaches across a tab in the file"),
+        ),
+        // A find carrying the reader's own label is refused rather than searched for.
+        docx_refusal_on(
+            "replace_text",
+            "reading_mark",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "C2:", "replace": "x" }]),
+            Reason::contains("is a label the reader prints"),
+        ),
+        docx_refusal_on(
+            "replace_text",
+            "header_text",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "Header text here", "replace": "x" }]),
+            Reason::contains("is in a header of this document"),
+        ),
+        docx_refusal_on(
+            "replace_text",
+            "footer_text",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "Footer text here", "replace": "x" }]),
+            Reason::contains("is in a footer of this document"),
+        ),
+        docx_refusal_on(
+            "replace_text",
+            "footnote_text",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "Footnote text here", "replace": "x" }]),
+            Reason::contains("is in a footnote of this document"),
+        ),
+        docx_refusal_on(
+            "replace_text",
+            "endnote_text",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "Endnote text here", "replace": "x" }]),
+            Reason::contains("is in an endnote of this document"),
+        ),
+        docx_refusal_on(
+            "replace_text",
+            "comment_text",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "Comment text here", "replace": "x" }]),
+            Reason::contains("is in a comment of this document"),
+        ),
+        // A table of contents' own entry is that field's result, not body text.
+        docx_refusal_on(
+            "replace_text",
+            "contents_entry",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "Contents entry", "replace": "x" }]),
+            Reason::contains("is in this document's table of contents"),
+        ),
+        // A field's cached result outside the table of contents falls through to the honest miss.
+        docx_refusal_on(
+            "replace_text",
+            "field_result",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "Page seven", "replace": "x" }]),
+            Reason::contains("a field's cached result is not"),
+        ),
+        // Text a tracked deletion holds is not live text.
+        docx_refusal_on(
+            "replace_text",
+            "revised_text",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "Mu deleted", "replace": "x" }]),
+            Reason::contains("it is text a tracked revision holds"),
+        ),
+        // A heading the table lists is protected, keyed on the bookmark the table wrote.
+        docx_refusal_on(
+            "replace_text",
+            "listed_heading",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "Chapter one", "replace": "x" }]),
+            Reason::contains("is in a heading this document's table of contents lists"),
+        ),
+        docx_refusal_on(
+            "remove_paragraph",
+            "listed_heading",
+            DOCX_EDIT,
+            json!([{ "op": "remove_paragraph", "find": "Chapter one" }]),
+            Reason::contains("is in a heading this document's table of contents lists"),
+        ),
+        // A text box's own text and a table cell's are addressable.
+        docx_edit_on(
+            "remove_text",
+            "text_box",
+            DOCX_EDIT,
+            json!([{ "op": "remove_text", "find": "Iota text box" }]),
+            vec![Effect::Text {
+                output: None,
+                part: body,
+                text: "Iota text box",
+                present: false,
+            }],
+        ),
+        docx_edit_on(
+            "replace_text",
+            "table_cell",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "Cell A", "replace": "Cell X" }]),
+            vec![Effect::Text {
+                output: None,
+                part: body,
+                text: "Cell X",
+                present: true,
+            }],
+        ),
+        // Removing a paragraph that carries a break, or the only one a container holds, is refused.
+        docx_refusal_on(
+            "remove_paragraph",
+            "page_break",
+            DOCX_EDIT,
+            json!([{ "op": "remove_paragraph", "find": "Eta page" }]),
+            Reason::contains("holds a page break"),
+        ),
+        docx_refusal_on(
+            "remove_paragraph",
+            "section_break",
+            DOCX_EDIT,
+            json!([{ "op": "remove_paragraph", "find": "Theta section" }]),
+            Reason::contains("ends a section"),
+        ),
+        docx_refusal_on(
+            "remove_paragraph",
+            "container_last",
+            DOCX_EDIT,
+            json!([{ "op": "remove_paragraph", "find": "Cell A" }]),
+            Reason::contains("would leave a table cell with no paragraph"),
+        ),
+        // A text box's own paragraph is the only one its container holds, so it is not removed.
+        docx_refusal_on(
+            "remove_paragraph",
+            "text_box_paragraph",
+            DOCX_EDIT,
+            json!([{ "op": "remove_paragraph", "find": "Iota text box" }]),
+            Reason::contains("would leave a text box with no paragraph"),
+        ),
+        docx_edit_on(
+            "remove_paragraph",
+            "every_match",
+            DOCX_EDIT,
+            json!([{ "op": "remove_paragraph", "find": "paragraph" }]),
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: body,
+                    text: "Alpha",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: body,
+                    text: "Epsilon list item",
+                    present: true,
+                },
+            ],
+        ),
+        // Each run property the request names: the four toggles, a size and a colour.
+        docx_edit_on(
+            "format_text",
+            "toggles",
+            DOCX_EDIT,
+            json!([
+                { "op": "format_text", "find": "Alpha", "bold": true },
+                { "op": "format_text", "find": "Beta", "italic": true },
+                { "op": "format_text", "find": "Gamma", "underline": true },
+                { "op": "format_text", "find": "Epsilon", "strike": true },
+                { "op": "format_text", "find": "Zeta", "size": 16 },
+                { "op": "format_text", "find": "Kappa", "color": "1f4e79" },
+            ]),
+            vec![
+                Effect::FormatOn {
+                    output: None,
+                    part: DOCX_BODY,
+                    scope: Scope::Run,
+                    text: "Alpha paragraph one",
+                    property: "b",
+                    value: None,
+                    on: true,
+                },
+                Effect::FormatOn {
+                    output: None,
+                    part: DOCX_BODY,
+                    scope: Scope::Run,
+                    text: "Beta paragraph two",
+                    property: "i",
+                    value: None,
+                    on: true,
+                },
+                Effect::FormatOn {
+                    output: None,
+                    part: DOCX_BODY,
+                    scope: Scope::Run,
+                    text: "Gamma",
+                    property: "u",
+                    value: Some("single"),
+                    on: true,
+                },
+                Effect::FormatOn {
+                    output: None,
+                    part: DOCX_BODY,
+                    scope: Scope::Run,
+                    text: "Epsilon list item",
+                    property: "strike",
+                    value: None,
+                    on: true,
+                },
+                Effect::FormatOn {
+                    output: None,
+                    part: DOCX_BODY,
+                    scope: Scope::Run,
+                    text: "Zeta",
+                    property: "sz",
+                    value: Some("32"),
+                    on: true,
+                },
+                Effect::FormatOn {
+                    output: None,
+                    part: DOCX_BODY,
+                    scope: Scope::Run,
+                    text: "Kappa commented",
+                    property: "color",
+                    value: Some("1F4E79"),
+                    on: true,
+                },
+            ],
+        ),
+        // A property switched off states the off value, so a style's own is not inherited.
+        docx_edit_on(
+            "format_text",
+            "off_values",
+            DOCX_EDIT,
+            json!([
+                { "op": "format_text", "find": "Beta", "bold": false },
+                { "op": "format_text", "find": "Gamma", "underline": false },
+                { "op": "format_text", "find": "Epsilon", "strike": false },
+            ]),
+            vec![
+                Effect::FormatOn {
+                    output: None,
+                    part: DOCX_BODY,
+                    scope: Scope::Run,
+                    text: "Beta paragraph two",
+                    property: "b",
+                    value: None,
+                    on: false,
+                },
+                Effect::FormatOn {
+                    output: None,
+                    part: DOCX_BODY,
+                    scope: Scope::Run,
+                    text: "Gamma",
+                    property: "u",
+                    value: None,
+                    on: false,
+                },
+                Effect::FormatOn {
+                    output: None,
+                    part: DOCX_BODY,
+                    scope: Scope::Run,
+                    text: "Epsilon list item",
+                    property: "strike",
+                    value: None,
+                    on: false,
+                },
+            ],
+        ),
+        // A fragment matching several runs formats every one of them, and says so.
+        docx_edit_on(
+            "format_text",
+            "every_match",
+            DOCX_EDIT,
+            json!([{ "op": "format_text", "find": "paragraph", "bold": true }]),
+            vec![Effect::FormatOn {
+                output: None,
+                part: DOCX_BODY,
+                scope: Scope::Run,
+                text: "Alpha paragraph one",
+                property: "b",
+                value: None,
+                on: true,
+            }],
+        ),
+        docx_refusal_on(
+            "format_text",
+            "no_property",
+            DOCX_EDIT,
+            json!([{ "op": "format_text", "find": "Alpha" }]),
+            Reason::contains("format_text needs at least one of"),
+        ),
+        docx_refusal_on(
+            "format_text",
+            "size_out_of_span",
+            DOCX_EDIT,
+            json!([{ "op": "format_text", "find": "Alpha", "size": 1000 }]),
+            Reason::contains("size must be"),
+        ),
+        // A formatting call rewrites the run holding the text, and a page break beside that text
+        // goes with it.
+        docx_edit_on(
+            "format_text",
+            "reaches_page_break",
+            DOCX_BREAKS,
+            json!([{ "op": "format_text", "find": "Eta break text", "bold": true }]),
+            vec![Effect::FormatOn {
+                output: None,
+                part: DOCX_BODY,
+                scope: Scope::Run,
+                text: "Eta break text",
+                property: "b",
+                value: None,
+                on: true,
+            }],
+        ),
+        // Each paragraph property the request names, in the unit its attribute counts in.
+        docx_edit_on(
+            "format_paragraph",
+            "indent_and_spacing",
+            DOCX_EDIT,
+            json!([
+                { "op": "format_paragraph", "find": "Alpha", "indent_left": 20 },
+                { "op": "format_paragraph", "find": "Beta", "indent_right": 10 },
+                { "op": "format_paragraph", "find": "Gamma", "indent_first_line": -12 },
+                { "op": "format_paragraph", "find": "Epsilon", "spacing_before": 6 },
+                { "op": "format_paragraph", "find": "Zeta", "spacing_after": 8 },
+                { "op": "format_paragraph", "find": "Kappa", "line_spacing": 14 },
+            ]),
+            vec![
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: DOCX_BODY,
+                    text: "Alpha paragraph one",
+                    property: "ind",
+                    child: None,
+                    attribute: "left",
+                    value: "400",
+                },
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: DOCX_BODY,
+                    text: "Beta paragraph two",
+                    property: "ind",
+                    child: None,
+                    attribute: "right",
+                    value: "200",
+                },
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: DOCX_BODY,
+                    text: "Gamma",
+                    property: "ind",
+                    child: None,
+                    attribute: "hanging",
+                    value: "240",
+                },
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: DOCX_BODY,
+                    text: "Epsilon list item",
+                    property: "spacing",
+                    child: None,
+                    attribute: "before",
+                    value: "120",
+                },
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: DOCX_BODY,
+                    text: "Zeta",
+                    property: "spacing",
+                    child: None,
+                    attribute: "after",
+                    value: "160",
+                },
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: DOCX_BODY,
+                    text: "Kappa commented",
+                    property: "spacing",
+                    child: None,
+                    attribute: "line",
+                    value: "280",
+                },
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: DOCX_BODY,
+                    text: "Kappa commented",
+                    property: "spacing",
+                    child: None,
+                    attribute: "lineRule",
+                    value: "exact",
+                },
+            ],
+        ),
+        // A style the document defines is resolved against its styles part, not allocated.
+        docx_edit_on(
+            "format_paragraph",
+            "style_defined",
+            DOCX_EDIT,
+            json!([{ "op": "format_paragraph", "find": "Alpha", "style": "Custom Body" }]),
+            vec![Effect::ParagraphAttribute {
+                output: None,
+                part: DOCX_BODY,
+                text: "Alpha paragraph one",
+                property: "pStyle",
+                child: None,
+                attribute: "val",
+                value: "CustomBody",
+            }],
+        ),
+        // A built-in heading name the document does not define still resolves, and the heading it
+        // makes is one the document's table of contents does not list.
+        docx_edit_on(
+            "format_paragraph",
+            "style_builtin",
+            DOCX_EDIT,
+            json!([{ "op": "format_paragraph", "find": "Alpha", "style": "Heading 3" }]),
+            vec![Effect::ParagraphAttribute {
+                output: None,
+                part: DOCX_BODY,
+                text: "Alpha paragraph one",
+                property: "pStyle",
+                child: None,
+                attribute: "val",
+                value: "Heading3",
+            }],
+        ),
+        docx_refusal_on(
+            "format_paragraph",
+            "style_character",
+            DOCX_EDIT,
+            json!([{ "op": "format_paragraph", "find": "Alpha", "style": "Emphasis" }]),
+            Reason::contains("and paragraph formatting needs a paragraph style"),
+        ),
+        docx_refusal_on(
+            "format_paragraph",
+            "style_unknown",
+            DOCX_EDIT,
+            json!([{ "op": "format_paragraph", "find": "Alpha", "style": "Nonexistent" }]),
+            Reason::contains("the document defines no paragraph style named"),
+        ),
+        // A document with no styles part at all cannot resolve a name that is not a built-in.
+        docx_refusal_on(
+            "format_paragraph",
+            "style_no_styles_part",
+            DOCX_COLUMNS,
+            json!([{ "op": "format_paragraph", "find": "Columns anchor", "style": "Nonexistent" }]),
+            Reason::contains("the document defines no paragraph styles"),
+        ),
+        // A list the document has no definition of gets one, with fresh identifiers.
+        docx_edit_on(
+            "format_paragraph",
+            "list_allocated",
+            DOCX_EDIT,
+            json!([{ "op": "format_paragraph", "find": "Alpha", "list": "number" }]),
+            vec![
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: DOCX_BODY,
+                    text: "Alpha paragraph one",
+                    property: "numPr",
+                    child: Some("ilvl"),
+                    attribute: "val",
+                    value: "0",
+                },
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: DOCX_BODY,
+                    text: "Alpha paragraph one",
+                    property: "numPr",
+                    child: Some("numId"),
+                    attribute: "val",
+                    value: "2",
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/numbering.xml",
+                    element: "w:abstractNum",
+                    count: 2,
+                },
+            ],
+        ),
+        // A list at a level the document's own definition does not state.
+        docx_edit_on(
+            "format_paragraph",
+            "list_level",
+            DOCX_EDIT,
+            json!([{ "op": "format_paragraph", "find": "Beta", "list": "bullet", "level": 2 }]),
+            vec![
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: DOCX_BODY,
+                    text: "Beta paragraph two",
+                    property: "numPr",
+                    child: Some("ilvl"),
+                    attribute: "val",
+                    value: "2",
+                },
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: DOCX_BODY,
+                    text: "Beta paragraph two",
+                    property: "numPr",
+                    child: Some("numId"),
+                    attribute: "val",
+                    value: "2",
+                },
+            ],
+        ),
+        // Taking a list away cancels the numbering in place, so its level survives.
+        docx_edit_on(
+            "format_paragraph",
+            "list_off",
+            DOCX_EDIT,
+            json!([{ "op": "format_paragraph", "find": "Epsilon", "list": false }]),
+            vec![
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: DOCX_BODY,
+                    text: "Epsilon list item",
+                    property: "numPr",
+                    child: Some("numId"),
+                    attribute: "val",
+                    value: "0",
+                },
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: DOCX_BODY,
+                    text: "Epsilon list item",
+                    property: "numPr",
+                    child: Some("ilvl"),
+                    attribute: "val",
+                    value: "0",
+                },
+            ],
+        ),
+        // A paragraph numbering through its style is cancelled too, though it states no list.
+        docx_edit_on(
+            "format_paragraph",
+            "list_off_style",
+            DOCX_EDIT,
+            json!([{ "op": "format_paragraph", "find": "Sigma", "list": false }]),
+            vec![Effect::ParagraphAttribute {
+                output: None,
+                part: DOCX_BODY,
+                text: "Sigma styled list",
+                property: "numPr",
+                child: Some("numId"),
+                attribute: "val",
+                value: "0",
+            }],
+        ),
+        docx_refusal_on(
+            "format_paragraph",
+            "level_without_list",
+            DOCX_EDIT,
+            json!([{ "op": "format_paragraph", "find": "Alpha", "level": 1 }]),
+            Reason::contains("level needs a list to belong to"),
+        ),
+        docx_refusal_on(
+            "format_paragraph",
+            "no_property",
+            DOCX_EDIT,
+            json!([{ "op": "format_paragraph", "find": "Alpha" }]),
+            Reason::contains("format_paragraph needs at least one of"),
+        ),
+        docx_refusal_on(
+            "format_paragraph",
+            "listed_heading",
+            DOCX_EDIT,
+            json!([{ "op": "format_paragraph", "find": "Chapter one", "style": "Heading 2" }]),
+            Reason::contains("is in a heading this document's table of contents lists"),
+        ),
+        // A paragraph added with no anchor goes to the end of the body, before its section.
+        docx_edit_on(
+            "add_paragraph",
+            "body_end",
+            DOCX_EDIT,
+            json!([{ "op": "add_paragraph", "text": "Trailing paragraph" }]),
+            vec![Effect::Text {
+                output: None,
+                part: body,
+                text: "Trailing paragraph",
+                present: true,
+            }],
+        ),
+        // A paragraph added after a heading takes the heading's style, which the table does not
+        // list, and the answer says so.
+        docx_edit_on(
+            "add_paragraph",
+            "after_heading",
+            DOCX_EDIT,
+            json!([{ "op": "add_paragraph", "text": "Chapter two", "after": "Chapter one" }]),
+            vec![Effect::Text {
+                output: None,
+                part: body,
+                text: "Chapter two",
+                present: true,
+            }],
+        ),
+        // A paragraph added after a table cell's paragraph lands after the whole table.
+        docx_edit_on(
+            "add_paragraph",
+            "after_table_cell",
+            DOCX_EDIT,
+            json!([{ "op": "add_paragraph", "text": "After the table", "after": "Cell A" }]),
+            vec![Effect::Text {
+                output: None,
+                part: body,
+                text: "After the table",
+                present: true,
+            }],
+        ),
+        // A paragraph added after a section-ending paragraph does not carry its section break.
+        docx_edit_on(
+            "add_paragraph",
+            "after_section",
+            DOCX_EDIT,
+            json!([{ "op": "add_paragraph", "text": "Next section", "after": "Theta section" }]),
+            vec![Effect::Text {
+                output: None,
+                part: body,
+                text: "Next section",
+                present: true,
+            }],
+        ),
+        docx_refusal_on(
+            "add_paragraph",
+            "after_text_box",
+            DOCX_EDIT,
+            json!([{ "op": "add_paragraph", "text": "x", "after": "Iota text box" }]),
+            Reason::contains("is inside a text box"),
+        ),
+        // A block op's anchor that only a peripheral part holds is named as that part's, with the
+        // wording a block edit states.
+        docx_refusal_on(
+            "add_paragraph",
+            "after_header",
+            DOCX_EDIT,
+            json!([{ "op": "add_paragraph", "text": "x", "after": "Header text here" }]),
+            Reason::contains(
+                "it edits the body's own paragraphs, a table cell's included, and not that part",
+            ),
+        ),
+        docx_refusal_on(
+            "add_paragraph",
+            "unknown_anchor",
+            DOCX_EDIT,
+            json!([{ "op": "add_paragraph", "text": "x", "after": "Nowhere at all" }]),
+            Reason::contains("is not in the document's body"),
+        ),
+        // A picture sized from the image, fitted whole into the page's text column.
+        docx_edit_on(
+            "add_image",
+            "natural_size",
+            DOCX_EDIT,
+            json!([{ "op": "add_image", "after": "Alpha paragraph one", "image": "$in/picture.png" }]),
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: DOCX_BODY,
+                    element: "w:drawing",
+                    count: 2,
+                },
+                Effect::ImageParts {
+                    output: None,
+                    count: 2,
+                },
+            ],
+        ),
+        // A picture sized explicitly, in points.
+        docx_edit_on(
+            "add_image",
+            "sized",
+            DOCX_EDIT,
+            json!([{ "op": "add_image", "after": "Alpha paragraph one", "image": "$in/picture.png", "width": 120, "height": 60 }]),
+            vec![Effect::ElementCount {
+                output: None,
+                part: DOCX_BODY,
+                element: "w:drawing",
+                count: 2,
+            }],
+        ),
+        // A picture whose box reaches past the page is reported rather than silently clipped.
+        docx_edit_on(
+            "add_image",
+            "past_page",
+            DOCX_EDIT,
+            json!([{ "op": "add_image", "after": "Alpha paragraph one", "image": "$in/picture.png", "width": 5000, "height": 60 }]),
+            vec![Effect::ElementCount {
+                output: None,
+                part: DOCX_BODY,
+                element: "w:drawing",
+                count: 2,
+            }],
+        ),
+        docx_refusal_on(
+            "add_image",
+            "unknown_anchor",
+            DOCX_EDIT,
+            json!([{ "op": "add_image", "after": "Nowhere at all", "image": "$in/picture.png" }]),
+            Reason::contains("is not in the document's body"),
+        ),
+        // A table placed after a named anchor.
+        docx_edit_on(
+            "add_table",
+            "after_anchor",
+            DOCX_EDIT,
+            json!([{
+                "op": "add_table",
+                "after": "Alpha paragraph one",
+                "headers": ["H1", "H2"],
+                "rows": [["placed cell", "second"]],
+            }]),
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: DOCX_BODY,
+                    element: "w:tbl",
+                    count: 2,
+                },
+                Effect::Text {
+                    output: None,
+                    part: body,
+                    text: "placed cell",
+                    present: true,
+                },
+            ],
+        ),
+        // A table anchored on a table cell's paragraph lands after the whole table.
+        docx_edit_on(
+            "add_table",
+            "after_table_cell",
+            DOCX_EDIT,
+            json!([{
+                "op": "add_table",
+                "after": "Cell A",
+                "headers": ["H1"],
+                "rows": [["after table cell"]],
+            }]),
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: DOCX_BODY,
+                    element: "w:tbl",
+                    count: 2,
+                },
+                Effect::Text {
+                    output: None,
+                    part: body,
+                    text: "after table cell",
+                    present: true,
+                },
+            ],
+        ),
+        // A table at the writing action's own column bound is produced; one column past it is not.
+        docx_edit_on(
+            "add_table",
+            "at_column_bound",
+            DOCX_COLUMNS,
+            json!([{
+                "op": "add_table",
+                "after": "Columns anchor",
+                "rows": [vec!["bound"; 63]],
+            }]),
+            vec![Effect::ElementCount {
+                output: None,
+                part: DOCX_BODY,
+                element: "w:gridCol",
+                count: 126,
+            }],
+        ),
+        docx_refusal_on(
+            "add_table",
+            "past_column_bound",
+            DOCX_COLUMNS,
+            json!([{
+                "op": "add_table",
+                "after": "Columns anchor",
+                "rows": [vec!["bound"; 64]],
+            }]),
+            Reason::contains("a table may hold at most 63 columns"),
+        ),
+        // A fragment whose leading whitespace is the reader's indentation is named as such.
+        docx_refusal_on(
+            "replace_text",
+            "leading_indent",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "  Alpha", "replace": "x" }]),
+            Reason::contains("the fragment's leading whitespace"),
+        ),
+        // A peripheral part whose own tracked revision holds the fragment is named as revised.
+        docx_refusal_on(
+            "replace_text",
+            "peripheral_revised",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "Old comment words", "replace": "x" }]),
+            Reason::contains("it is text a tracked revision holds in a comment of this document"),
+        ),
+        // A find holding a tab the file keeps as markup of its own is refused with that reason.
+        docx_refusal_on(
+            "replace_text",
+            "break_markup",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "Alpha\tparagraph", "replace": "x" }]),
+            Reason::contains("the fragment holds a tab or a line break"),
+        ),
+        docx_refusal_on(
+            "replace_text",
+            "empty_find",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "", "replace": "x" }]),
+            Reason::contains("find must not be empty"),
+        ),
+        docx_refusal_on(
+            "insert_text",
+            "empty_insert",
+            DOCX_EDIT,
+            json!([{ "op": "insert_text", "find": "Alpha", "insert": "" }]),
+            Reason::contains("insert must not be empty"),
+        ),
+        docx_refusal_on(
+            "add_paragraph",
+            "empty_after",
+            DOCX_EDIT,
+            json!([{ "op": "add_paragraph", "text": "x", "after": "" }]),
+            Reason::contains("after must not be empty"),
+        ),
+        docx_refusal_on(
+            "format_paragraph",
+            "align_value",
+            DOCX_EDIT,
+            json!([{ "op": "format_paragraph", "find": "Alpha", "align": "middle" }]),
+            Reason::contains("align must be"),
+        ),
+        docx_refusal_on(
+            "format_paragraph",
+            "indent_out_of_span",
+            DOCX_EDIT,
+            json!([{ "op": "format_paragraph", "find": "Alpha", "indent_left": 5000 }]),
+            Reason::contains("indent_left must be"),
+        ),
+        docx_refusal_on(
+            "format_paragraph",
+            "list_value",
+            DOCX_EDIT,
+            json!([{ "op": "format_paragraph", "find": "Alpha", "list": "roman" }]),
+            Reason::contains("list must be"),
+        ),
+        docx_refusal_on(
+            "format_paragraph",
+            "level_out_of_span",
+            DOCX_EDIT,
+            json!([{ "op": "format_paragraph", "find": "Alpha", "list": "bullet", "level": 99 }]),
+            Reason::contains("level must be a whole number from 0 to 8"),
+        ),
+        docx_refusal_on(
+            "add_table",
+            "empty_table",
+            DOCX_EDIT,
+            json!([{ "op": "add_table", "after": "Alpha paragraph one", "headers": [], "rows": [] }]),
+            Reason::contains("a table needs at least one row or one heading"),
+        ),
+        docx_refusal_on(
+            "add_table",
+            "row_shape",
+            DOCX_EDIT,
+            json!([{ "op": "add_table", "after": "Alpha paragraph one", "rows": ["not a list"] }]),
+            Reason::contains("every table row must be a list of cells"),
+        ),
+        // A fragment matching several paragraphs is formatted in every one, and the answer says so.
+        docx_edit_on(
+            "format_paragraph",
+            "every_match",
+            DOCX_EDIT,
+            json!([{ "op": "format_paragraph", "find": "paragraph", "indent_left": 20 }]),
+            vec![Effect::ParagraphAttribute {
+                output: None,
+                part: DOCX_BODY,
+                text: "Alpha paragraph one",
+                property: "ind",
+                child: None,
+                attribute: "left",
+                value: "400",
+            }],
+        ),
+        // The markup an edit reached without naming it: a bookmark, a comment, a hyperlink, a
+        // footnote reference, an endnote reference and an unaccepted tracked change.
+        docx_edit_on(
+            "remove_paragraph",
+            "reaches_bookmark",
+            DOCX_EDIT,
+            json!([{ "op": "remove_paragraph", "find": "Nu bookmarked" }]),
+            vec![Effect::Text {
+                output: None,
+                part: body,
+                text: "Nu bookmarked",
+                present: false,
+            }],
+        ),
+        docx_edit_on(
+            "remove_paragraph",
+            "reaches_comment",
+            DOCX_EDIT,
+            json!([{ "op": "remove_paragraph", "find": "Kappa commented" }]),
+            vec![Effect::Text {
+                output: None,
+                part: body,
+                text: "Kappa commented",
+                present: false,
+            }],
+        ),
+        docx_edit_on(
+            "remove_paragraph",
+            "reaches_hyperlink",
+            DOCX_EDIT,
+            json!([{ "op": "remove_paragraph", "find": "Xi linked" }]),
+            vec![Effect::Text {
+                output: None,
+                part: body,
+                text: "Xi linked",
+                present: false,
+            }],
+        ),
+        docx_edit_on(
+            "remove_paragraph",
+            "reaches_footnote",
+            DOCX_EDIT,
+            json!([{ "op": "remove_paragraph", "find": "Omicron noted" }]),
+            vec![Effect::Text {
+                output: None,
+                part: body,
+                text: "Omicron noted",
+                present: false,
+            }],
+        ),
+        docx_edit_on(
+            "remove_paragraph",
+            "reaches_endnote",
+            DOCX_EDIT,
+            json!([{ "op": "remove_paragraph", "find": "Pi noted" }]),
+            vec![Effect::Text {
+                output: None,
+                part: body,
+                text: "Pi noted",
+                present: false,
+            }],
+        ),
+        docx_edit_on(
+            "remove_paragraph",
+            "reaches_revision",
+            DOCX_EDIT,
+            json!([{ "op": "remove_paragraph", "find": "Lambda inserted" }]),
+            vec![Effect::Text {
+                output: None,
+                part: body,
+                text: "Lambda inserted",
+                present: false,
+            }],
+        ),
+        // A removal takes the text box's own paragraph, section break and all, with the paragraph
+        // that held it.
+        docx_edit_on(
+            "remove_paragraph",
+            "reaches_section_break",
+            DOCX_BREAKS,
+            json!([{ "op": "remove_paragraph", "find": "Alpha box holder" }]),
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: body,
+                    text: "Alpha box holder",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: body,
+                    text: "Beta boxed",
+                    present: false,
+                },
+            ],
+        ),
+        // A call holding two text edits: the second acts on the text the first wrote.
+        docx_edit_on(
+            "replace_text",
+            "sequential",
+            DOCX_EDIT,
+            json!([
+                { "op": "replace_text", "find": "Alpha", "replace": "First" },
+                { "op": "replace_text", "find": "First", "replace": "Second" },
+            ]),
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: body,
+                    text: "Second paragraph one",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: body,
+                    text: "First",
+                    present: false,
+                },
+            ],
+        ),
+        // The twenty-thousand-character cap, on each string an edit names.
+        docx_refusal_on(
+            "replace_text",
+            "find_too_long",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": over_long(), "replace": "x" }]),
+            Reason::contains("find must be at most 20000 characters"),
+        ),
+        docx_refusal_on(
+            "replace_text",
+            "replace_too_long",
+            DOCX_EDIT,
+            json!([{ "op": "replace_text", "find": "Alpha", "replace": over_long() }]),
+            Reason::contains("replace must be at most 20000 characters"),
+        ),
+        docx_refusal_on(
+            "insert_text",
+            "insert_too_long",
+            DOCX_EDIT,
+            json!([{ "op": "insert_text", "find": "Alpha", "insert": over_long() }]),
+            Reason::contains("insert must be at most 20000 characters"),
+        ),
+        docx_refusal_on(
+            "add_paragraph",
+            "text_too_long",
+            DOCX_EDIT,
+            json!([{ "op": "add_paragraph", "text": over_long() }]),
+            Reason::contains("text must be at most 20000 characters"),
+        ),
+        docx_refusal_on(
+            "add_paragraph",
+            "after_too_long",
+            DOCX_EDIT,
+            json!([{ "op": "add_paragraph", "text": "x", "after": over_long() }]),
+            Reason::contains("after must be at most 20000 characters"),
+        ),
+        docx_refusal_on(
+            "format_paragraph",
+            "style_too_long",
+            DOCX_EDIT,
+            json!([{ "op": "format_paragraph", "find": "Alpha", "style": over_long() }]),
+            Reason::contains("style must be at most 20000 characters"),
+        ),
+        // The strict dialect: the alignment and the indent are written in its own spellings, and a
+        // list at a level the part does not state gets a definition in that dialect.
+        docx_edit_on(
+            "format_paragraph",
+            "strict_dialect",
+            DOCX_STRICT,
+            json!([{
+                "op": "format_paragraph",
+                "find": "Strict alpha",
+                "align": "left",
+                "indent_left": 20,
+                "line_spacing": 14,
+                "list": "bullet",
+                "level": 1,
+            }]),
+            vec![
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: DOCX_BODY,
+                    text: "Strict alpha",
+                    property: "jc",
+                    child: None,
+                    attribute: "val",
+                    value: "start",
+                },
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: DOCX_BODY,
+                    text: "Strict alpha",
+                    property: "ind",
+                    child: None,
+                    attribute: "start",
+                    value: "400",
+                },
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: DOCX_BODY,
+                    text: "Strict alpha",
+                    property: "spacing",
+                    child: None,
+                    attribute: "line",
+                    value: "280",
+                },
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: DOCX_BODY,
+                    text: "Strict alpha",
+                    property: "spacing",
+                    child: None,
+                    attribute: "lineRule",
+                    value: "exact",
+                },
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: DOCX_BODY,
+                    text: "Strict alpha",
+                    property: "numPr",
+                    child: Some("ilvl"),
+                    attribute: "val",
+                    value: "1",
+                },
+            ],
+        ),
+        // A macro-enabled input is written with the extension it arrived with, and the signature it
+        // carries no longer matches, which the answer says.
+        docx_edit_on(
+            "replace_text",
+            "macro_output",
+            DOCX_MACRO,
+            json!([{ "op": "replace_text", "find": "Alpha", "replace": "Bravo" }]),
+            vec![Effect::Text {
+                output: None,
+                part: body,
+                text: "Bravo paragraph one",
+                present: true,
+            }],
+        ),
+        // A document with revisions tracking switched on gets its change as plain content, and the
+        // answer says so.
+        docx_edit_on(
+            "replace_text",
+            "tracked_on",
+            DOCX_REVISIONS,
+            json!([{ "op": "replace_text", "find": "Alpha", "replace": "Bravo" }]),
+            vec![Effect::Text {
+                output: None,
+                part: body,
+                text: "Bravo paragraph one",
+                present: true,
+            }],
+        ),
+        // The places a call writes into that a broken package does not let it read: each is refused
+        // with the sentence naming the element, never spliced a second one into.
+        docx_refusal_on(
+            "format_paragraph",
+            "properties_unclosed",
+            DOCX_BROKEN,
+            json!([{ "op": "format_paragraph", "find": "Alpha open properties", "align": "center" }]),
+            Reason::contains(
+                "the paragraph holds <w:pPr> opened and never closed, so its properties cannot be read",
+            ),
+        ),
+        docx_refusal_on(
+            "format_text",
+            "run_properties_unclosed",
+            DOCX_BROKEN,
+            json!([{ "op": "format_text", "find": "Beta open run", "bold": true }]),
+            Reason::contains(
+                "a run holds <w:rPr> opened and never closed, so its properties cannot be read",
+            ),
+        ),
+        docx_refusal_on(
+            "format_paragraph",
+            "numbering_root_unclosed",
+            DOCX_BROKEN,
+            json!([{ "op": "format_paragraph", "find": "Gamma list target", "list": "bullet" }]),
+            Reason::contains(
+                "the document's numbering part cannot be written into: its <w:numbering> root is missing or never closed",
+            ),
+        ),
+        // A document with no body: a paragraph has nothing to be appended to, and a block has
+        // nothing to be placed after — the refusal names the block the caller asked for.
+        docx_refusal_on(
+            "add_paragraph",
+            "no_body",
+            DOCX_BODYLESS,
+            json!([{ "op": "add_paragraph", "text": "Appended line" }]),
+            Reason::contains("the document has no body to add a paragraph to"),
+        ),
+        docx_refusal_on(
+            "add_table",
+            "no_body_anchor",
+            DOCX_BODYLESS,
+            json!([{ "op": "add_table", "after": "Anything", "headers": ["A"], "rows": [["1"]] }]),
+            Reason::contains(
+                "the document has no body, so there is nothing to place an add_table after",
+            ),
         ),
     ]
 }

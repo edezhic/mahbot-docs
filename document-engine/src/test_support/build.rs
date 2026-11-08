@@ -464,6 +464,8 @@ const DOCX_ENDNOTES_TYPE: &str =
     "application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml";
 const DOCX_COMMENTS_TYPE: &str =
     "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml";
+const DOCX_NUMBERING_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml";
 const DOCX_CHART_TYPE: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
 
 /// A Word package around `body`, written with `namespaces`, whose document relationships are
@@ -478,6 +480,17 @@ fn docx_package_around(
 ) -> Vec<u8> {
     let document =
         format!("{DECLARATION}<w:document {namespaces}><w:body>{body}</w:body></w:document>");
+    docx_package_of(&document, rels, content_types, parts)
+}
+
+/// A Word package around the exact `word/document.xml` text, for the documents whose own markup is
+/// not a body this builder can wrap.
+fn docx_package_of(
+    document: &str,
+    rels: &str,
+    content_types: &str,
+    parts: &[(&str, &[u8])],
+) -> Vec<u8> {
     let root_rels = concat!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
         r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#,
@@ -490,7 +503,7 @@ fn docx_package_around(
             content_types.as_bytes().to_vec(),
         ),
         ("_rels/.rels".to_owned(), root_rels.as_bytes().to_vec()),
-        ("word/document.xml".to_owned(), document.into_bytes()),
+        ("word/document.xml".to_owned(), document.as_bytes().to_vec()),
         (
             "word/_rels/document.xml.rels".to_owned(),
             rels.as_bytes().to_vec(),
@@ -4565,6 +4578,417 @@ pub fn plain_text() -> Vec<u8> {
 #[must_use]
 pub fn unsupported_binary() -> Vec<u8> {
     (0u8..0x40).collect()
+}
+
+// ── docx: the edit corpus ───────────────────────────────────────────────────────────────────
+//
+// These documents are edit inputs, not reading documents: the recorded readings must not move, so
+// none of them joins `reader_documents`. Every one is built from the same pieces a package needs —
+// a content-type list, a root relationship list, the body and the parts the body points at — so a
+// case can address the markup an edit has to respect.
+
+/// The content type of the macro project a `.docm` carries, and of the signature part beside it.
+const DOCX_VBA_TYPE: &str = "application/vnd.ms-office.vbaProject";
+const DOCX_SIGNATURE_TYPE: &str = "application/vnd.openxmlformats-package.digital-signature-origin";
+
+/// The combined edit input's body: a heading a table of contents lists, plain and styled runs, a
+/// fragment spanning two differently formatted runs, a tab between two runs, a list item, a field
+/// with a cached result, a page break, a paragraph ending a section, a text box, a comment, tracked
+/// changes, a bookmark, a link, a table, a table-of-contents field and a picture.
+fn docx_edit_body() -> String {
+    concat!(
+        r#"<w:p><w:bookmarkStart w:id="1" w:name="_Toc1001"/><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>"#,
+        r#"<w:r><w:t xml:space="preserve">Chapter one</w:t></w:r><w:bookmarkEnd w:id="1"/></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Alpha paragraph one</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:rPr><w:rStyle w:val="Strong"/></w:rPr>"#,
+        r#"<w:t xml:space="preserve">Beta paragraph two</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Gamma</w:t></w:r>"#,
+        r#"<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve"> paragraph three</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Delta</w:t></w:r><w:r><w:tab/></w:r>"#,
+        r#"<w:r><w:t xml:space="preserve">paragraph four</w:t></w:r></w:p>"#,
+        r#"<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>"#,
+        r#"<w:r><w:t xml:space="preserve">Epsilon list item</w:t></w:r></w:p>"#,
+        r#"<w:p><w:pPr><w:pStyle w:val="ListParagraph"/></w:pPr>"#,
+        r#"<w:r><w:t xml:space="preserve">Sigma styled list</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Zeta </w:t></w:r>"#,
+        r#"<w:fldSimple w:instr=" PAGE "><w:r><w:t xml:space="preserve">Page seven</w:t></w:r></w:fldSimple>"#,
+        r#"<w:r><w:t xml:space="preserve"> end</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Eta page</w:t></w:r><w:r><w:br w:type="page"/></w:r></w:p>"#,
+        r#"<w:p><w:pPr><w:sectPr><w:pgSz w:w="11906" w:h="16838"/>"#,
+        r#"<w:pgMar w:top="1418" w:right="1418" w:bottom="1418" w:left="1418"/></w:sectPr></w:pPr>"#,
+        r#"<w:r><w:t xml:space="preserve">Theta section</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:pict><w:txbxContent><w:p><w:r>"#,
+        r#"<w:t xml:space="preserve">Iota text box</w:t></w:r></w:p></w:txbxContent></w:pict></w:r></w:p>"#,
+        r#"<w:p><w:commentRangeStart w:id="1"/><w:r><w:t xml:space="preserve">Kappa commented</w:t></w:r>"#,
+        r#"<w:commentRangeEnd w:id="1"/><w:r><w:commentReference w:id="1"/></w:r></w:p>"#,
+        r#"<w:p><w:ins w:id="1" w:author="Anna"><w:r><w:t xml:space="preserve">Lambda inserted</w:t></w:r></w:ins>"#,
+        r#"<w:del w:id="2" w:author="Anna"><w:r><w:delText xml:space="preserve">Mu deleted</w:delText></w:r></w:del></w:p>"#,
+        r#"<w:p><w:bookmarkStart w:id="2" w:name="mark"/><w:r><w:t xml:space="preserve">Nu bookmarked</w:t></w:r>"#,
+        r#"<w:bookmarkEnd w:id="2"/><w:hyperlink r:id="rId8">"#,
+        r#"<w:r><w:t xml:space="preserve"> Xi linked</w:t></w:r></w:hyperlink></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Omicron noted</w:t></w:r>"#,
+        r#"<w:r><w:footnoteReference w:id="1"/></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Pi noted</w:t></w:r>"#,
+        r#"<w:r><w:endnoteReference w:id="1"/></w:r></w:p>"#,
+        r#"<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr>"#,
+        r#"<w:tblGrid><w:gridCol w:w="4675"/><w:gridCol w:w="4675"/></w:tblGrid>"#,
+        r#"<w:tr><w:tc><w:tcPr><w:tcW w:w="4675" w:type="dxa"/></w:tcPr>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Header A</w:t></w:r></w:p></w:tc>"#,
+        r#"<w:tc><w:tcPr><w:tcW w:w="4675" w:type="dxa"/></w:tcPr>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Header B</w:t></w:r></w:p></w:tc></w:tr>"#,
+        r#"<w:tr><w:tc><w:tcPr><w:tcW w:w="4675" w:type="dxa"/></w:tcPr>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Cell A</w:t></w:r></w:p></w:tc>"#,
+        r#"<w:tc><w:tcPr><w:tcW w:w="4675" w:type="dxa"/></w:tcPr>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Cell B</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"#,
+        r#"<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r>"#,
+        r#"<w:r><w:instrText xml:space="preserve"> TOC \h \o "1-3" </w:instrText></w:r>"#,
+        r#"<w:r><w:fldChar w:fldCharType="separate"/></w:r>"#,
+        r#"<w:r><w:t xml:space="preserve">Contents entry</w:t></w:r>"#,
+        r#"<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>"#,
+        r#"<w:p><w:r><w:drawing><wp:inline><wp:extent cx="38100" cy="19050"/>"#,
+        r#"<wp:docPr id="1" name="Picture 1"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">"#,
+        r#"<pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="Picture 1"/><pic:cNvPicPr/></pic:nvPicPr>"#,
+        r#"<pic:blipFill><a:blip r:embed="rId7"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>"#,
+        r#"<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="38100" cy="19050"/></a:xfrm>"#,
+        r#"<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>"#,
+        r#"</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"#,
+        r#"<w:sectPr><w:headerReference w:type="default" r:id="rId3"/>"#,
+        r#"<w:footerReference w:type="default" r:id="rId4"/>"#,
+        r#"<w:pgSz w:w="11906" w:h="16838"/>"#,
+        r#"<w:pgMar w:top="1418" w:right="1418" w:bottom="1418" w:left="1418" "#,
+        r#"w:header="709" w:footer="709" w:gutter="0"/></w:sectPr>"#,
+    )
+    .to_string()
+}
+
+/// The styles part the combined edit input and its copies carry: two headings, a character style,
+/// a paragraph style of its own and a paragraph style that numbers what takes it.
+const DOCX_EDIT_STYLES: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+    r#"<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">"#,
+    r#"<w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="22"/></w:rPr></w:rPrDefault></w:docDefaults>"#,
+    r#"<w:style w:type="paragraph" w:styleId="Normal" w:default="1"><w:name w:val="Normal"/></w:style>"#,
+    r#"<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/>"#,
+    r#"<w:basedOn w:val="Normal"/></w:style>"#,
+    r#"<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/>"#,
+    r#"<w:basedOn w:val="Normal"/></w:style>"#,
+    r#"<w:style w:type="paragraph" w:styleId="CustomBody"><w:name w:val="Custom Body"/>"#,
+    r#"<w:basedOn w:val="Normal"/></w:style>"#,
+    r#"<w:style w:type="paragraph" w:styleId="ListParagraph"><w:name w:val="List Paragraph"/>"#,
+    r#"<w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr></w:style>"#,
+    r#"<w:style w:type="character" w:styleId="Strong"><w:name w:val="Strong"/></w:style>"#,
+    r#"<w:style w:type="character" w:styleId="Emphasis"><w:name w:val="Emphasis"/></w:style>"#,
+    r#"</w:styles>"#,
+);
+
+/// The numbering part the combined edit input carries: one bullet definition at level 0 only, so a
+/// list at a deeper level has a definition allocated for it.
+const DOCX_EDIT_NUMBERING: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+    r#"<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">"#,
+    r#"<w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:start w:val="1"/>"#,
+    r#"<w:numFmt w:val="bullet"/><w:lvlText w:val="&#9679;"/><w:lvlJc w:val="left"/></w:lvl></w:abstractNum>"#,
+    r#"<w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num></w:numbering>"#,
+);
+
+/// A story part holding one paragraph with `text`: a header or a footer.
+fn docx_story_part(root: &str, text: &str) -> String {
+    format!(
+        concat!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+            r#"<w:{root} xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">"#,
+            r#"<w:p><w:r><w:t xml:space="preserve">{text}</w:t></w:r></w:p></w:{root}>"#,
+        ),
+        root = root,
+        text = text,
+    )
+}
+
+/// The comments part the combined edit input carries: one comment, with a tracked deletion of its
+/// own so a fragment only that revision holds is named as the comment's revised text.
+const DOCX_EDIT_COMMENTS: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+    r#"<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">"#,
+    r#"<w:comment w:id="1"><w:p><w:r><w:t xml:space="preserve">Comment text here</w:t></w:r></w:p>"#,
+    r#"<w:p><w:del w:id="3" w:author="Anna"><w:r>"#,
+    r#"<w:delText xml:space="preserve">Old comment words</w:delText></w:r></w:del></w:p></w:comment>"#,
+    r#"</w:comments>"#,
+);
+
+/// A note part holding one note with `text`: a footnote, an endnote or a comment.
+fn docx_note_part(root: &str, child: &str, text: &str) -> String {
+    format!(
+        concat!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+            r#"<w:{root} xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">"#,
+            r#"<w:{child} w:id="1"><w:p><w:r><w:t xml:space="preserve">{text}</w:t></w:r></w:p></w:{child}>"#,
+            r#"</w:{root}>"#,
+        ),
+        root = root,
+        child = child,
+        text = text,
+    )
+}
+
+/// A Word document with `body`, the combined edit input's parts, and `extra` parts beside them.
+fn docx_edit_package(body: &str, extra: &[(&str, &[u8])], settings: bool, signed: bool) -> Vec<u8> {
+    let mut entries: Vec<(&str, &str, &str)> = vec![
+        ("rId1", "styles", "styles.xml"),
+        ("rId2", "numbering", "numbering.xml"),
+        ("rId3", "header", "header1.xml"),
+        ("rId4", "footer", "footer1.xml"),
+        ("rId5", "footnotes", "footnotes.xml"),
+        ("rId6", "endnotes", "endnotes.xml"),
+        ("rId7", "image", "media/image1.png"),
+        ("rId8", "hyperlink", "https://example.invalid/doc"),
+        ("rId10", "comments", "comments.xml"),
+    ];
+    if settings {
+        entries.push(("rId9", "settings", "settings.xml"));
+    }
+    let rels = docx_rels(&entries);
+    let mut overrides = vec![
+        ("/word/styles.xml", DOCX_STYLES_TYPE),
+        ("/word/numbering.xml", DOCX_NUMBERING_TYPE),
+        ("/word/header1.xml", DOCX_HEADER_TYPE),
+        ("/word/footer1.xml", DOCX_FOOTER_TYPE),
+        ("/word/footnotes.xml", DOCX_FOOTNOTES_TYPE),
+        ("/word/endnotes.xml", DOCX_ENDNOTES_TYPE),
+        ("/word/comments.xml", DOCX_COMMENTS_TYPE),
+    ];
+    if settings {
+        overrides.push((
+            "/word/settings.xml",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml",
+        ));
+    }
+    if signed {
+        overrides.push(("/word/vbaProject.bin", DOCX_VBA_TYPE));
+        overrides.push(("/_xmlsignatures/sig1.xml", DOCX_SIGNATURE_TYPE));
+    }
+    let content_types = docx_content_types(&[("png", "image/png")], &overrides);
+    let mut parts: Vec<(String, Vec<u8>)> = vec![
+        (
+            "word/styles.xml".to_string(),
+            DOCX_EDIT_STYLES.as_bytes().to_vec(),
+        ),
+        (
+            "word/numbering.xml".to_string(),
+            DOCX_EDIT_NUMBERING.as_bytes().to_vec(),
+        ),
+        (
+            "word/header1.xml".to_string(),
+            docx_story_part("hdr", "Header text here").into_bytes(),
+        ),
+        (
+            "word/footer1.xml".to_string(),
+            docx_story_part("ftr", "Footer text here").into_bytes(),
+        ),
+        (
+            "word/footnotes.xml".to_string(),
+            docx_note_part("footnotes", "footnote", "Footnote text here").into_bytes(),
+        ),
+        (
+            "word/endnotes.xml".to_string(),
+            docx_note_part("endnotes", "endnote", "Endnote text here").into_bytes(),
+        ),
+        (
+            "word/comments.xml".to_string(),
+            DOCX_EDIT_COMMENTS.as_bytes().to_vec(),
+        ),
+        ("word/media/image1.png".to_string(), png()),
+    ];
+    if settings {
+        parts.push((
+            "word/settings.xml".to_string(),
+            concat!(
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+                r#"<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">"#,
+                r#"<w:trackRevisions/></w:settings>"#,
+            )
+            .as_bytes()
+            .to_vec(),
+        ));
+    }
+    if signed {
+        parts.push(("word/vbaProject.bin".to_string(), b"macro project".to_vec()));
+        parts.push((
+            "_xmlsignatures/sig1.xml".to_string(),
+            b"<?xml version=\"1.0\"?><Signature/>".to_vec(),
+        ));
+    }
+    for (name, bytes) in extra {
+        parts.push(((*name).to_string(), bytes.to_vec()));
+    }
+    let borrowed: Vec<(&str, &[u8])> = parts
+        .iter()
+        .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+        .collect();
+    docx_package_around(body, DOCX_NAMESPACES, &rels, &content_types, &borrowed)
+}
+
+/// The combined Word edit input: every kind of markup an edit has to respect, in one document.
+#[must_use]
+pub fn docx_edit() -> Vec<u8> {
+    docx_edit_package(&docx_edit_body(), &[], false, false)
+}
+
+/// The combined edit input with revisions tracking switched on in its settings part.
+#[must_use]
+pub fn docx_edit_revisions() -> Vec<u8> {
+    docx_edit_package(&docx_edit_body(), &[], true, false)
+}
+
+/// The combined edit input with a macro project and a signature part, saved as a `.docm`.
+#[must_use]
+pub fn docx_edit_macro() -> Vec<u8> {
+    docx_edit_package(&docx_edit_body(), &[], false, true)
+}
+
+/// A document written in the strict WordprocessingML dialect: the strict namespace on every part,
+/// a strict relationship list, and an indent already stated with the strict edge attributes.
+#[must_use]
+pub fn docx_strict() -> Vec<u8> {
+    const STRICT_W: &str = "http://purl.oclc.org/ooxml/wordprocessingml/main";
+    const STRICT_R: &str = "http://purl.oclc.org/ooxml/officeDocument/relationships";
+    let namespaces = format!(r#"xmlns:w="{STRICT_W}" xmlns:r="{STRICT_R}""#);
+    let body = concat!(
+        r#"<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>"#,
+        r#"<w:r><w:t xml:space="preserve">Strict heading</w:t></w:r></w:p>"#,
+        r#"<w:p><w:pPr><w:ind w:start="200" w:end="100"/></w:pPr>"#,
+        r#"<w:r><w:t xml:space="preserve">Strict alpha</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Strict beta</w:t></w:r></w:p>"#,
+        r#"<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>"#,
+        r#"<w:pgMar w:top="1418" w:right="1418" w:bottom="1418" w:left="1418"/></w:sectPr>"#,
+    );
+    let rels = format!(
+        concat!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+            r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#,
+            r#"<Relationship Id="rId1" Type="{STRICT_R}/styles" Target="styles.xml"/>"#,
+            r#"<Relationship Id="rId2" Type="{STRICT_R}/numbering" Target="numbering.xml"/>"#,
+            r#"</Relationships>"#,
+        ),
+        STRICT_R = STRICT_R,
+    );
+    let styles = format!(
+        concat!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+            r#"<w:styles xmlns:w="{STRICT_W}">"#,
+            r#"<w:style w:type="paragraph" w:styleId="Normal" w:default="1"><w:name w:val="Normal"/></w:style>"#,
+            r#"<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/></w:style>"#,
+            r#"</w:styles>"#,
+        ),
+        STRICT_W = STRICT_W,
+    );
+    let numbering = format!(
+        concat!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+            r#"<w:numbering xmlns:w="{STRICT_W}">"#,
+            r#"<w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:start w:val="1"/>"#,
+            r#"<w:numFmt w:val="bullet"/><w:lvlText w:val="&#9679;"/><w:lvlJc w:val="start"/></w:lvl></w:abstractNum>"#,
+            r#"<w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num></w:numbering>"#,
+        ),
+        STRICT_W = STRICT_W,
+    );
+    let content_types = docx_content_types(
+        &[],
+        &[
+            ("/word/styles.xml", DOCX_STYLES_TYPE),
+            ("/word/numbering.xml", DOCX_NUMBERING_TYPE),
+        ],
+    );
+    docx_package_around(
+        body,
+        &namespaces,
+        &rels,
+        &content_types,
+        &[
+            ("word/styles.xml", styles.as_bytes()),
+            ("word/numbering.xml", numbering.as_bytes()),
+        ],
+    )
+}
+
+/// A document whose body holds an anchor paragraph and a table at the writing action's own column
+/// bound, on a page wide enough to hold it: the input an `add_table` at that bound lands on.
+#[must_use]
+pub fn docx_columns() -> Vec<u8> {
+    let mut table =
+        String::from(r#"<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr><w:tblGrid>"#);
+    for _ in 0..63 {
+        table.push_str(r#"<w:gridCol w:w="350"/>"#);
+    }
+    table.push_str("</w:tblGrid><w:tr>");
+    for column in 0..63 {
+        table.push_str(&format!(
+            r#"<w:tc><w:p><w:r><w:t xml:space="preserve">Bound {column}</w:t></w:r></w:p></w:tc>"#
+        ));
+    }
+    table.push_str("</w:tr></w:tbl>");
+    let body = format!(
+        r#"<w:p><w:r><w:t xml:space="preserve">Columns anchor</w:t></w:r></w:p>{table}<w:sectPr><w:pgSz w:w="23811" w:h="16838" w:orient="landscape"/><w:pgMar w:top="709" w:right="709" w:bottom="709" w:left="709"/></w:sectPr>"#,
+        table = table,
+    );
+    let content_types = docx_content_types(&[], &[]);
+    docx_package_around(&body, DOCX_NAMESPACES, &docx_rels(&[]), &content_types, &[])
+}
+
+/// A document whose markup a call reaches beyond what it names: a run holding its text and a page
+/// break together, and a paragraph holding its text beside a text box whose own paragraph ends a
+/// section.
+#[must_use]
+pub fn docx_breaks() -> Vec<u8> {
+    let body = concat!(
+        r#"<w:p><w:r><w:t xml:space="preserve">Eta break text</w:t><w:br w:type="page"/></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Alpha box holder</w:t></w:r>"#,
+        r#"<w:r><w:pict><w:txbxContent><w:p><w:pPr>"#,
+        r#"<w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr>"#,
+        r#"</w:pPr><w:r><w:t xml:space="preserve">Beta boxed</w:t></w:r></w:p>"#,
+        r#"</w:txbxContent></w:pict></w:r></w:p>"#,
+        r#"<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1418" w:right="1418" w:bottom="1418" w:left="1418"/></w:sectPr>"#,
+    );
+    let content_types = docx_content_types(&[], &[]);
+    docx_package_around(body, DOCX_NAMESPACES, &docx_rels(&[]), &content_types, &[])
+}
+
+/// A document whose own markup is broken in each of the three places a call writes into: a
+/// paragraph whose `<w:pPr>` is opened and never closed, a run whose `<w:rPr>` is, and a numbering
+/// part whose `<w:numbering>` root is — the shapes a call refuses rather than splicing a second
+/// element into a place no reader resolves.
+#[must_use]
+pub fn docx_broken() -> Vec<u8> {
+    let body = concat!(
+        r#"<w:p><w:pPr><w:r><w:t xml:space="preserve">Alpha open properties</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:rPr><w:t xml:space="preserve">Beta open run</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Gamma list target</w:t></w:r></w:p>"#,
+        r#"<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>"#,
+        r#"<w:pgMar w:top="1418" w:right="1418" w:bottom="1418" w:left="1418"/></w:sectPr>"#,
+    );
+    let numbering = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">"#,
+    );
+    let rels = docx_rels(&[("rId1", "numbering", "numbering.xml")]);
+    let content_types = docx_content_types(&[], &[("/word/numbering.xml", DOCX_NUMBERING_TYPE)]);
+    docx_package_around(
+        body,
+        DOCX_NAMESPACES,
+        &rels,
+        &content_types,
+        &[("word/numbering.xml", numbering.as_bytes())],
+    )
+}
+
+/// A document whose root states no `<w:body>` at all: nothing to append a paragraph to and nothing
+/// to place a block after.
+#[must_use]
+pub fn docx_bodyless() -> Vec<u8> {
+    let document = format!(
+        "{DECLARATION}<w:document {DOCX_NAMESPACES}><w:background w:color=\"FFFFFF\"/></w:document>"
+    );
+    let content_types = docx_content_types(&[], &[]);
+    docx_package_of(&document, &docx_rels(&[]), &content_types, &[])
 }
 
 // ── legacy containers ────────────────────────────────────────────────────────────────────────

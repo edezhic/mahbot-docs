@@ -12,8 +12,8 @@
 //!   produces several files, and never overwrites. An edit is carried out by the writing half part
 //!   by part: every part the edit does not name is carried into the produced file with the content
 //!   it had, so a chart, a comment, a macro or a media file the caller never mentioned survives.
-//!   The workbook edit is the first operation the writing half carries out; the other twelve answer
-//!   with the vocabulary's `reason_not_carried_out` until their port lands.
+//!   The workbook and Word edits are the operations the writing half carries out; the other eleven
+//!   answer with the vocabulary's `reason_not_carried_out` until their port lands.
 //! - [`vocabulary`]: every reading bound the engine enforces, every mark it prints, who enforces
 //!   and who prints each one, the enumerations it shares between reading and producing, and the
 //!   embedded font the producing half draws with — one file, embedded at build time, read from

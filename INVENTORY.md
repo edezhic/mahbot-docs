@@ -37,7 +37,7 @@ copies the harness compiles. This directory remains the reference those copies a
 | `pdf_marks.rs` | Annotations, form fields, page labels. |
 | `reader_output.rs` | The output vocabulary of the readers, including "what was not shown". Also used by the writing tool and the read prompt. |
 | `docgen.rs` | Runs bun, the embedded bundle, provenance check, access to `rules.json`, font data. `TEXT_FONT_DATA` is also used by the rasterizer. |
-| `tools/document.rs` | Tool registration, argument schema, validation, request building, file delivery. 7 394 lines, about 45% of them tests (44 tests). |
+| `tools/document.rs` | Tool registration, argument schema, validation, request building, file delivery. 7 394 lines, about a third of them tests (44 tests). |
 | `tools/read_document.rs` | The document branch of the shared `read` tool; called from `tools/read.rs` and from the CLI. |
 | `prompt/tool/document.md` | Tool description for the model, 8 036 bytes, 13 substitutions. |
 | `prompt/tool/read.md` | Shared with other readers: lines 13–25 (seven paragraphs about documents) and 32 of its 33 substitutions are document-related. |
@@ -97,15 +97,17 @@ no input-size bound and clamps no page size or scale a caller asked for; it neve
 file it reads.
 
 The writing half has started: `src/writing/` opens a package, changes the parts an edit names and
-writes it back, carrying every part the edit does not name through with the content it had, and
-`xlsx_edit` — the workbook edit, all fourteen sub-operations — is carried out end to end. `mod.rs`
-holds the `Editor`, `package.rs` the archive, `xml.rs` the string surgery, `opc.rs` the packaging
-conventions every family's edit shares, and `xlsx/` the workbook port. The other twelve operations
-answer with the vocabulary's `reason_not_carried_out` until their port lands. Every sentence the
-engine prints — an edit's refusals, notes and losses, the request surface's own shape refusals, a
-page-render refusal and the panic fallback — is a vocabulary mark (`edit_*`, `surface_*`,
-`render_*`, `engine_failed`), not a sentence in code, and `src/test_support/coverage.rs` records
-every writing mark as witnessed by a corpus case or as unreached with its reason.
+writes it back, carrying every part the edit does not name through with the content it had.
+`xlsx_edit` — the workbook edit, all fourteen sub-operations — and `docx_edit` — the Word edit,
+all nine — are carried out end to end. `mod.rs` holds the `Editor`, `package.rs` the archive,
+`xml.rs` the string surgery, `opc.rs` the packaging conventions every family's edit shares,
+`image.rs` the picture a placement embeds, `xlsx/` the workbook port and `docx/` the Word port.
+The other eleven operations answer with the vocabulary's `reason_not_carried_out` until their
+port lands. Every sentence the engine prints — an edit's refusals, notes and losses, the request
+surface's own shape refusals, a page-render refusal and the panic fallback — is a vocabulary
+mark (`edit_*`, `surface_*`, `render_*`, `engine_failed`), not a sentence in code, and
+`src/test_support/coverage.rs` records every writing mark as witnessed by a corpus case or as
+unreached with its reason.
 
 The document builders live in the crate's `test_support`, the one home shared by the crate's tests
 and the harness. `tests/standalone.rs` builds and tests the crate in a temporary copy with no

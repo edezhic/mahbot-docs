@@ -10,13 +10,12 @@ use crate::engine::Key;
 
 /// The operations the crate's writer carries out today, by name. Listing an operation covers every
 /// sub-operation it declares.
-pub const CRATE_WRITER: &[&str] = &["xlsx_edit"];
+pub const CRATE_WRITER: &[&str] = &["docx_edit", "xlsx_edit"];
 
 /// The operations the writing half does not deliver. Every unjudged corpus case must name one.
 pub const NOT_YET_DELIVERED: &[&str] = &[
     "create",
     "fill_template",
-    "docx_edit",
     "pptx_edit",
     "pdf_merge",
     "pdf_split",
@@ -54,31 +53,41 @@ mod tests {
 
     #[test]
     fn a_covered_operation_covers_every_sub_operation() {
-        let key = Key::new(Family::Xlsx, "xlsx_edit", Some("merge_cells"));
-        assert!(crate_writer_covers(&key));
-        let other = Key::new(Family::Docx, "docx_edit", Some("merge_cells"));
+        // Coverage is by operation, not by family or sub-operation: a name the ledger lists covers
+        // every sub-operation it declares, and one it does not list is covered by no key at all.
+        for (family, operation, sub_operation) in [
+            (Family::Xlsx, "xlsx_edit", Some("merge_cells")),
+            (Family::Docx, "docx_edit", Some("add_table")),
+        ] {
+            let key = Key::new(family, operation, sub_operation);
+            assert!(crate_writer_covers(&key), "{key} is covered");
+        }
+        let other = Key::new(Family::Pptx, "pptx_edit", Some("merge_cells"));
         assert!(!crate_writer_covers(&other));
     }
 
     #[test]
-    fn every_workbook_edit_case_is_judged() {
-        // The general test above accepts an operation that is named as not delivered; this one
-        // pins the action this writing half delivers, so moving it to `NOT_YET_DELIVERED` would
-        // take its cases out of judgement without any test noticing.
+    fn every_delivered_operation_is_exercised_by_a_case() {
+        // An operation the ledger lists must have at least one case: a name that covers nothing
+        // would report a delivered action with nothing judged. Whether a listed operation is
+        // judged follows from the list itself; `the_two_lists_are_disjoint` is the other half.
         let cases = crate::corpus::writer_cases();
-        let workbook: Vec<_> = cases
-            .iter()
-            .filter(|case| case.operation == "xlsx_edit")
-            .collect();
-        assert!(
-            !workbook.is_empty(),
-            "the corpus exercises the workbook edit"
-        );
-        for case in workbook {
+        for operation in CRATE_WRITER {
             assert!(
-                crate_writer_covers(&case.key()),
-                "{} is a workbook edit the crate's writer does not cover",
-                case.key()
+                cases.iter().any(|case| case.operation == *operation),
+                "the corpus does not exercise `{operation}`, which the ledger says is delivered"
+            );
+        }
+    }
+
+    #[test]
+    fn the_two_lists_are_disjoint() {
+        // An operation in both lists would be judged and recorded as not delivered at once: the
+        // gate would stay green while the ledger read as less than it is.
+        for operation in CRATE_WRITER {
+            assert!(
+                !NOT_YET_DELIVERED.contains(operation),
+                "`{operation}` is both delivered and named as not delivered"
             );
         }
     }

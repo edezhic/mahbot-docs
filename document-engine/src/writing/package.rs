@@ -6,10 +6,9 @@
 //! parts it does not name.
 //!
 //! A folder entry is not a part: neither the format nor a reader looks one up by name, and the
-//! editor's part list skips it. Every entry is bounded by
-//! [`zip_entry_max_bytes`](crate::vocabulary::Limits::zip_entry_max_bytes), read one byte past the
-//! bound so an entry exactly at the limit is accepted whole and a larger one is refused rather than
-//! silently truncated.
+//! editor's part list skips it. An entry is read whole and unbounded: the producing kit has no
+//! per-entry bound of its own, so a writer that refused one would answer a call the product carries
+//! out.
 
 use std::collections::HashSet;
 use std::io::{Cursor, Read, Write};
@@ -21,18 +20,13 @@ use crate::vocabulary::{Family, vocabulary};
 /// the type of a part it adds, so an edit refuses it rather than writing an undeclared part.
 pub(super) const CONTENT_TYPES: &str = "[Content_Types].xml";
 
-/// Read every part of `bytes` in archive order, bounded by the vocabulary's entry limit.
+/// Read every part of `bytes` in archive order.
 ///
 /// # Errors
 ///
-/// The archive cannot be opened, an entry cannot be read, or an entry is larger than one part may
-/// be. The message is the container library's own, or the bound's sentence.
+/// The archive cannot be opened or an entry cannot be read. The message is the container library's
+/// own.
 pub(super) fn read_package(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
-    read_package_with_limit(bytes, vocabulary().limits.zip_entry_max_bytes)
-}
-
-/// [`read_package`] with an explicit bound, so a test can exercise the bound without a 64 MiB part.
-fn read_package_with_limit(bytes: &[u8], limit: u64) -> Result<Vec<(String, Vec<u8>)>, String> {
     let mut archive =
         zip::ZipArchive::new(Cursor::new(bytes)).map_err(|error| error.to_string())?;
     let mut parts = Vec::with_capacity(archive.len());
@@ -42,29 +36,13 @@ fn read_package_with_limit(bytes: &[u8], limit: u64) -> Result<Vec<(String, Vec<
             continue;
         }
         let name = entry.name().to_string();
-        if entry.size() > limit {
-            return Err(too_large(&name, limit));
-        }
         let mut content = Vec::new();
         entry
-            .by_ref()
-            .take(limit.saturating_add(1))
             .read_to_end(&mut content)
             .map_err(|error| error.to_string())?;
-        if u64::try_from(content.len()).unwrap_or(u64::MAX) > limit {
-            return Err(too_large(&name, limit));
-        }
         parts.push((name, content));
     }
     Ok(parts)
-}
-
-/// The refusal a part past the entry bound is named by.
-fn too_large(name: &str, limit: u64) -> String {
-    vocabulary().marks.format(
-        "edit_part_too_large",
-        &[("name", name), ("limit", &limit.to_string())],
-    )
 }
 
 /// Write `parts` back as one package, in the order given, every part DEFLATEd.
@@ -180,13 +158,6 @@ mod tests {
         let bytes = writer.finish().expect("a package").into_inner();
         let parts = read_package(&bytes).expect("a package");
         assert_eq!(parts, vec![("a.xml".to_string(), b"<a/>".to_vec())]);
-    }
-
-    #[test]
-    fn a_part_past_the_entry_bound_is_refused() {
-        let bytes = build::xlsx_basic();
-        let failure = read_package_with_limit(&bytes, 4).expect_err("a bound");
-        assert!(failure.contains("larger than"), "{failure}");
     }
 
     #[test]

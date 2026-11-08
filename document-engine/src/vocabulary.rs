@@ -6,7 +6,7 @@
 //! for a literal that repeats one (see `tests/vocabulary.rs` and `VOCABULARY.md`). The font is
 //! `assets/NotoSans-Regular.ttf`, embedded as [`FONT`].
 //!
-//! The file has five sections:
+//! The file has seven sections:
 //!
 //! - `rules`: the shared writer/reader rules — a copy of the producing kit's `rules.json`, value
 //!   for value. It is kept as data: the typed views below read it, so the shape of an external
@@ -14,7 +14,8 @@
 //! - `reading`: the bounds of the reading surface — those a reading enforces and those a caller's
 //!   tool layer applies above it.
 //! - `limits`: the reader and producer caps (container, XML, chart, form, edit-work and
-//!   multi-file bounds).
+//!   multi-file bounds), each the reference's own number.
+//! - `engine`: the bounds the engine states for itself, where the reference states none.
 //! - `enforced`: which side enforces each bound, by entry name.
 //! - `marks` and `derived_marks`: the fixed words, labels, templates and note fragments a reading
 //!   or an operation prints, each saying which side prints it. A mark the `rules` section already
@@ -223,6 +224,8 @@ pub struct Vocabulary {
     pub reading: ReadingLimits,
     /// The reader and producer caps.
     pub limits: Limits,
+    /// The bounds the engine states for itself, where the reference states none.
+    pub engine: EngineBounds,
     /// The fixed words, labels, templates and note fragments a reading or an operation prints.
     pub marks: Marks,
     /// Who prints the marks the `rules` section states, by the section they derive from.
@@ -318,7 +321,7 @@ pub struct ReadingLimits {
 pub struct Limits {
     /// The most bytes decompressed from a single ZIP entry.
     pub zip_entry_max_bytes: u64,
-    /// The deepest XML element walk.
+    /// The deepest XML element walk a reading's structure scan descends.
     pub xml_element_depth_max: usize,
     /// The most columns a Word table's geometry is read for.
     pub docx_table_columns_max: usize,
@@ -354,14 +357,29 @@ pub struct Limits {
     pub pdf_field_options_max: usize,
     /// The deepest form-field parent chain a PDF reading resolves.
     pub pdf_field_depth_max: usize,
-    /// The most part text one edit call may rewrite.
-    pub edit_work_max_bytes: u64,
+    /// The most part text one edit call may rewrite, in UTF-16 code units — the unit the kit's own
+    /// `EDIT_WORK_MAX` is compared against.
+    pub edit_work_max_code_units: u64,
     /// The most inputs one merge may name.
     pub merge_inputs_max: usize,
     /// The most bytes one merge may load in total.
     pub merge_bytes_max: u64,
     /// The most parts one split may produce.
     pub split_parts_max: usize,
+}
+
+/// The bounds the engine states for itself, where the reference states none.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EngineBounds {
+    /// The most `<w:p>` elements one Word part may hold open at once before a walk over it refuses:
+    /// the body, or a header, footer or footnote a text edit searches.
+    ///
+    /// The kit has no such bound: its walk re-serialises each level, so the cost grows with the
+    /// nesting (measured: 0.55 s at a thousand levels, 47 s at five thousand). The cap is therefore
+    /// deliberately conservative, set where the reference's own walk is still under a second, so the
+    /// crate answers in bounded time on a document the kit would spend minutes on.
+    pub paragraph_nesting_max: usize,
 }
 
 /// One mark: the text it prints and the sides that print it.
@@ -378,8 +396,8 @@ pub struct Mark {
 /// The fixed words, labels, templates and note fragments the engine prints, by key.
 ///
 /// A key is the vocabulary's own name for the mark. A template's `{name}` placeholders are
-/// replaced by [`Marks::format`]; a mark with none is printed verbatim. [`Marks::printed`] is
-/// exactly the set a reading prints, so the crate's tests can require every one of them to be
+/// replaced by [`Marks::format`]; a mark with none is printed verbatim. [`Marks::printed`] yields
+/// the marks a given producer prints, so the crate's tests can require every one of them to be
 /// exercised.
 #[derive(Debug, Deserialize)]
 #[serde(transparent)]
@@ -743,6 +761,76 @@ rule_view!(
     "The sizes a placed picture may be given."
 );
 
+// The Word edits' rules: the bounds and lists `writing/docx` validates a request against.
+rule_view!(
+    pub(crate) paragraph_alignments,
+    Vec<[String; 2]>,
+    "paragraph_alignments",
+    "The words a paragraph's alignment may name, and the `w:jc` value each writes."
+);
+rule_view!(
+    pub(crate) paragraph_lists,
+    Vec<[String; 2]>,
+    "paragraph_lists",
+    "The list kinds a paragraph may name, and the `w:numFmt` each writes."
+);
+rule_view!(
+    pub(crate) paragraph_indent_points,
+    Span,
+    "paragraph_indent_points",
+    "The point values a paragraph's indents may be set to."
+);
+rule_view!(
+    pub(crate) paragraph_spacing_points,
+    Span,
+    "paragraph_spacing_points",
+    "The point values a paragraph's spacing may be set to."
+);
+rule_view!(
+    pub(crate) paragraph_line_points,
+    Span,
+    "paragraph_line_points",
+    "The point values a paragraph's line spacing may be set to."
+);
+rule_view!(
+    pub(crate) text_size_points,
+    Span,
+    "text_size_points",
+    "The point sizes a run's text may be set to."
+);
+rule_view!(
+    pub(crate) paragraph_level_max,
+    u64,
+    "paragraph_level_max",
+    "The deepest list level a paragraph may be set to."
+);
+rule_view!(
+    pub(crate) table_columns_max,
+    u64,
+    "table_columns_max",
+    "The most columns a table an edit adds may hold."
+);
+rule_view!(
+    pub(crate) heading_levels,
+    Vec<u64>,
+    "heading_levels",
+    "The heading levels a table of contents covers."
+);
+
+/// Every peripheral part a Word document may carry, in the rules' order.
+///
+/// # Panics
+///
+/// The embedded rules do not state them: a defect in this crate, never caller input.
+#[must_use]
+pub fn docx_peripheral_parts() -> &'static [DocxPeripheralPart] {
+    static PARTS: OnceLock<Vec<DocxPeripheralPart>> = OnceLock::new();
+    PARTS.get_or_init(|| {
+        serde_json::from_value(rules()["docx_peripheral_parts"].clone())
+            .expect("the rules must state the peripheral parts an edit leaves alone")
+    })
+}
+
 /// The metadata fields a PDF's description names, in the rules' order.
 #[must_use]
 pub fn pdf_metadata_fields() -> &'static [PdfMetadataField] {
@@ -780,12 +868,7 @@ pub fn docx_marks() -> &'static [DocxMark] {
 /// The embedded rules do not name it: a defect in this crate, never caller input.
 #[must_use]
 pub fn docx_peripheral_part(kind: &str) -> &'static DocxPeripheralPart {
-    static PARTS: OnceLock<Vec<DocxPeripheralPart>> = OnceLock::new();
-    PARTS
-        .get_or_init(|| {
-            serde_json::from_value(rules()["docx_peripheral_parts"].clone())
-                .expect("the rules must state the peripheral parts an edit leaves alone")
-        })
+    docx_peripheral_parts()
         .iter()
         .find(|part| part.kind == kind)
         .unwrap_or_else(|| panic!("the rules do not name the peripheral part `{kind}`"))

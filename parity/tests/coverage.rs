@@ -208,7 +208,7 @@ fn sentence(text: &str) -> Option<Regex> {
         .then(|| Regex::new(&pattern).expect("a mark's own words must build a pattern"))
 }
 
-/// Every mark only the writing half prints: the shared ones (a Word mark, a chart kind) are
+/// Every mark only the writing half prints: the shared ones (a Word mark, a chart label) are
 /// witnessed by the reading ledger, which reads the very same vocabulary entries.
 fn writing_marks() -> BTreeSet<&'static str> {
     let marks = &vocabulary().marks;

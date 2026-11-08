@@ -28,12 +28,121 @@ use serde_json::Value;
 use crate::operation::{Failure, Outcome, Request};
 use crate::vocabulary::{Family, vocabulary};
 
+mod docx;
+mod image;
 mod opc;
 mod package;
 mod xlsx;
 mod xml;
 
-/// One mebibyte, the unit the work budget's sentence names its size in.
+// ── values as the kit renders them ────────────────────────────────────────────────────────────
+
+/// A value as the kit's `${value}` renders it: a string as it stands, and anything else as the
+/// JSON it would have arrived as. An array or an object is the one exception — JavaScript's own
+/// interpolation spells an object `[object Object]` and an array its elements joined by commas, and
+/// no corpus request names one. An absent value is the kit's own `undefined`, which is a word the
+/// vocabulary states rather than a sentence this module invents.
+pub(super) fn interpolated(value: Option<&Value>) -> String {
+    match value {
+        None => vocabulary().marks.get("edit_absent_value").to_string(),
+        Some(Value::String(text)) => text.clone(),
+        Some(other) => json_literal(other),
+    }
+}
+
+/// A value as the kit's `JSON.stringify` renders it, which is what a refusal quotes a name by: a
+/// string keeps its quotes, and an absent value is the kit's own `undefined`.
+pub(super) fn stringified(value: Option<&Value>) -> String {
+    value.map_or_else(
+        || vocabulary().marks.get("edit_absent_value").to_string(),
+        json_literal,
+    )
+}
+
+/// A value as JSON text, the way `JSON.stringify` spells it.
+fn json_literal(value: &Value) -> String {
+    match value {
+        Value::Number(number) => number_text(number),
+        other => serde_json::to_string(other).unwrap_or_default(),
+    }
+}
+
+/// A number as JavaScript prints it: a whole-valued double carries no fraction.
+pub(super) fn number_text(value: &serde_json::Number) -> String {
+    if let Some(whole) = value.as_i64() {
+        return whole.to_string();
+    }
+    if let Some(whole) = value.as_u64() {
+        return whole.to_string();
+    }
+    let float = value.as_f64().unwrap_or_default();
+    if float.is_finite() && float.fract() == 0.0 && float.abs() < 1e21 {
+        return format!("{float:.0}");
+    }
+    format!("{float}")
+}
+
+/// A number as the kit's `${value}` renders it: a whole-valued double carries no fraction.
+pub(super) fn js_number(value: f64) -> String {
+    if value.fract() == 0.0 && value.abs() < 1e21 {
+        format!("{value:.0}")
+    } else {
+        format!("{value}")
+    }
+}
+
+/// A string as the kit's `JSON.stringify` renders it — the spelling a refusal quotes a name by.
+pub(super) fn quoted(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_default()
+}
+
+/// One string an edit names, as the kit's last line after the tool's own boundary.
+///
+/// # Errors
+///
+/// The value is not text, or it is longer than the edit-text rule allows.
+pub(super) fn edit_text(value: Option<&Value>, what: &str) -> Result<String, Failure> {
+    let marks = &vocabulary().marks;
+    let Some(text) = value.and_then(Value::as_str) else {
+        return Err(Failure::usage(
+            marks.format("edit_text_not_text", &[("what", what)]),
+        ));
+    };
+    let max = *crate::vocabulary::edit_text_max();
+    if u64::try_from(text.chars().count()).unwrap_or(u64::MAX) > max {
+        return Err(Failure::usage(marks.format(
+            "edit_text_too_long",
+            &[("what", what), ("max", &max.to_string())],
+        )));
+    }
+    Ok(text.to_string())
+}
+
+/// The digits a colour must have, taken once from the shared rules.
+///
+/// # Errors
+///
+/// The value is not a string of the digits the rule states, with an optional leading `#`.
+pub(super) fn hex_digits(value: Option<&Value>) -> Result<String, Failure> {
+    let digits = value
+        .and_then(Value::as_str)
+        .map(|text| text.strip_prefix('#').unwrap_or(text))
+        .unwrap_or_default();
+    let wanted = *crate::vocabulary::color_digits();
+    let shape = usize::try_from(wanted).unwrap_or(usize::MAX);
+    if digits.chars().count() != shape || !digits.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(Failure::usage(vocabulary().marks.format(
+            "edit_color_digits",
+            &[
+                ("digits", &wanted.to_string()),
+                ("value", &interpolated(value)),
+            ],
+        )));
+    }
+    Ok(digits.to_string())
+}
+
+/// The 1024² the work budget's sentence divides by: it calls the result MB.
 const MEBIBYTE: u64 = 1024 * 1024;
 
 /// A finished package: its bytes, and the notes and losses the call raised.
@@ -60,7 +169,8 @@ pub(crate) struct Editor {
     changed: bool,
     /// Whether the call changed the package's content rather than only the markup around it.
     touched: bool,
-    /// The part text the call has walked, in bytes.
+    /// The part text the call has walked, in UTF-16 code units — the unit the kit counts a
+    /// JavaScript string in.
     work: u64,
     /// Whether the input carries a digital signature part.
     signed: bool,
@@ -188,7 +298,7 @@ impl Editor {
             return Ok(None);
         };
         let text = String::from_utf8_lossy(bytes).into_owned();
-        self.charge(text.len())?;
+        self.charge(code_units(&text))?;
         Ok(Some(text))
     }
 
@@ -239,7 +349,7 @@ impl Editor {
         if after == before {
             return Ok(());
         }
-        self.charge(after.len())?;
+        self.charge(code_units(&after))?;
         check(&before, &after)?;
         self.rewrite(part, &before, &after);
         Ok(())
@@ -296,8 +406,8 @@ impl Editor {
     }
 
     /// Charge one walk over a part's text against the call's budget. The budget bounds the work a
-    /// call does rather than the distinct bytes it touches, so a part taken into hand twice is
-    /// charged twice.
+    /// call does rather than the distinct text it touches, so a part taken into hand twice is
+    /// charged twice. A walk is measured in UTF-16 code units, the unit the kit counts a string in.
     ///
     /// # Errors
     ///
@@ -306,15 +416,13 @@ impl Editor {
         self.work = self
             .work
             .saturating_add(u64::try_from(length).unwrap_or(u64::MAX));
-        let limit = vocabulary().limits.edit_work_max_bytes;
+        let limit = vocabulary().limits.edit_work_max_code_units;
         if self.work > limit {
-            let megabytes = rounded_megabytes(self.work);
-            let limit_megabytes = rounded_megabytes(limit);
             return Err(Failure::usage(vocabulary().marks.format(
                 "edit_work_over_budget",
                 &[
-                    ("megabytes", &megabytes),
-                    ("limit_megabytes", &limit_megabytes),
+                    ("megabytes", &rounded_mebibytes(self.work)),
+                    ("limit_megabytes", &rounded_mebibytes(limit)),
                 ],
             )));
         }
@@ -379,15 +487,27 @@ impl Editor {
     }
 }
 
-/// `bytes` in whole mebibytes, rounded the way the kit rounds its work refusal.
-fn rounded_megabytes(bytes: u64) -> String {
-    (bytes.saturating_add(MEBIBYTE / 2) / MEBIBYTE).to_string()
+/// A number rounded the way JavaScript's `Math.round` rounds: a half goes toward positive infinity,
+/// where Rust's `f64::round` sends it away from zero. A negative half-tie is the one place the two
+/// disagree, and an indent stated in points can be one.
+pub(super) fn js_round(value: f64) -> f64 {
+    (value + 0.5).floor()
+}
+
+/// A text's length in UTF-16 code units, the unit the kit's own work budget counts.
+pub(super) fn code_units(text: &str) -> usize {
+    text.encode_utf16().count()
+}
+
+/// `code_units` in whole mebibytes, rounded the way the kit rounds the MB it states.
+fn rounded_mebibytes(code_units: u64) -> String {
+    (code_units.saturating_add(MEBIBYTE / 2) / MEBIBYTE).to_string()
 }
 
 /// Carry out one edit operation, writing `output`. On any failure after the write starts, the file
 /// is removed: a call that fails partway leaves nothing behind.
-pub(crate) fn edit_operation(request: &Request, output: &Path) -> Outcome {
-    match run_edit(request, output) {
+pub(crate) fn edit_operation(request: &Request, family: Family, output: &Path) -> Outcome {
+    match run_edit(request, family, output) {
         Ok(finished) => Outcome {
             outputs: vec![output.to_path_buf()],
             notes: finished.notes,
@@ -402,8 +522,20 @@ pub(crate) fn edit_operation(request: &Request, output: &Path) -> Outcome {
 }
 
 /// The edit operation's body, answering with the finished package on success.
-fn run_edit(request: &Request, output: &Path) -> Result<Finished, Failure> {
+fn run_edit(request: &Request, family: Family, output: &Path) -> Result<Finished, Failure> {
     let marks = &vocabulary().marks;
+    // The family decides how the package is opened and which port edits it. A family the dispatch
+    // does not route here has no port, and answers the interim sentence before anything is opened:
+    // opening a document as a family it is not would answer a different refusal.
+    let port: fn(&mut Editor, &[Value]) -> Result<(), Failure> = match family {
+        Family::Docx => docx::edit,
+        Family::Xlsx => xlsx::edit,
+        Family::Pptx | Family::Pdf => {
+            return Err(Failure::internal(crate::operation::not_carried_out(
+                &request.operation,
+            )));
+        }
+    };
     let Some(edits) = request.values.get("edits").and_then(Value::as_array) else {
         // The operation surface refuses a request without an "edits" array before dispatch, so
         // reaching this is an engine defect.
@@ -417,7 +549,7 @@ fn run_edit(request: &Request, output: &Path) -> Result<Finished, Failure> {
     };
     // The package is opened before the edit list is bounded, as the reference does: a request wrong
     // in both ways answers what is wrong with the input.
-    let mut editor = Editor::open(Path::new(input), Family::Xlsx)?;
+    let mut editor = Editor::open(Path::new(input), family)?;
     let max = *crate::vocabulary::edits_max();
     if u64::try_from(edits.len()).unwrap_or(u64::MAX) > max {
         return Err(Failure::usage(marks.format(
@@ -428,7 +560,7 @@ fn run_edit(request: &Request, output: &Path) -> Result<Finished, Failure> {
             ],
         )));
     }
-    xlsx::edit(&mut editor, edits)?;
+    port(&mut editor, edits)?;
     let finished = editor.finish()?;
     write_new(output, &finished.bytes)?;
     Ok(finished)
@@ -551,7 +683,7 @@ mod tests {
         let path = workbook(directory.path(), "book.xlsx");
         let mut editor = Editor::open(&path, Family::Xlsx).expect("a workbook");
         let limit =
-            usize::try_from(vocabulary().limits.edit_work_max_bytes).expect("a 64-bit bound");
+            usize::try_from(vocabulary().limits.edit_work_max_code_units).expect("a 64-bit bound");
         let failure = editor
             .charge(limit.saturating_add(1))
             .expect_err("a refusal");
@@ -560,6 +692,27 @@ mod tests {
             failure.reason.contains("more than one call applies"),
             "{failure:?}"
         );
+    }
+
+    #[test]
+    fn a_walk_is_charged_in_utf16_code_units() {
+        // The kit's budget counts a JavaScript string's own length, which is UTF-16 code units:
+        // one for `é`, two for a supplementary character. A walk charged in bytes would let a
+        // document of non-ASCII text spend more of the budget than the reference does.
+        let directory = scratch();
+        let body = "<workbook>é𝄞</workbook>";
+        let parts = vec![("xl/workbook.xml".to_string(), body.as_bytes().to_vec())];
+        let bytes = crate::writing::package::write_package(&parts).expect("a package");
+        let path = directory.path().join("book.xlsx");
+        std::fs::write(&path, &bytes).expect("a workbook");
+        let mut editor = Editor::open(&path, Family::Xlsx).expect("a workbook");
+        assert_eq!(
+            editor.read("xl/workbook.xml").expect("a walk").as_deref(),
+            Some(body)
+        );
+        // 10 + 1 + 2 + 11: one code unit for `é`, two for the supplementary character, where the
+        // UTF-8 bytes would be 10 + 2 + 4 + 11.
+        assert_eq!(editor.work, 24);
     }
 
     #[test]

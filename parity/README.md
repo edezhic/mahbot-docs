@@ -26,7 +26,7 @@ crate the harness depends on. `cargo test -p document-engine` runs the crate's o
 its vocabulary restatement scan) without the harness.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 120 cases and 91 readings — takes about a minute; the whole
+managed runtime. A full pass — 213 cases and 91 readings — takes about a minute; the whole
 test suite, which runs the corpus twice for its determinism check, takes a couple of minutes.
 
 `parity --engine noop` runs the same corpus against the do-nothing engine. That engine exists only
@@ -58,7 +58,7 @@ shown as `SKIP`, not failed, and a run that judged no case at all is not a pass.
 | `tests/engine_contract.rs` | The engine crate's contract, proved from here: its vocabulary is the reference's data, its result shapes carry every recorded field, its closed operation set holds every corpus operation and edit, the reference copies are byte-for-byte the product's, and the host's media tables are the product's own. |
 | `tests/coverage.rs` | The corpus's depth: every reading mark is witnessed by a recorded reading or recorded as unproducible with its reason, every mark only the writing half prints is witnessed by a recorded case's answer or recorded unreached with its reason, neither ledger's "not produced" side names a mark a recorded answer really prints, every per-family failure verdict is witnessed, and every corpus document is in the baseline. |
 | `tests/teeth.rs` | The comparison has teeth: a reading or a produced case altered in any single compared field — a picture dropped, a note or a loss reworded, an output renamed, a produced file's content changed, a status flipped — fails it, and so does a detection answer changed for one input. |
-| `baseline/baseline.json` | The recorded reference (about 4 MB of canonical documents). |
+| `baseline/baseline.json` | The recorded reference (about 7 MB of canonical documents). |
 | `src/bin/parity.rs`, `src/bin/record-baseline.rs` | The gate and the deliberate recorder. |
 
 The reader sources are **copies** under `src/reference_sources/`, byte for byte those of
@@ -197,16 +197,16 @@ builders have one home in `document_engine::test_support`, which the crate's own
 - every `docx_edit` sub-operation (9), every `xlsx_edit` sub-operation (14) and every `pptx_edit`
   sub-operation (14), each with the precondition it needs — a second sheet to move, a merged range
   to unmerge, a picture to place, a paragraph to remove that is not the last one;
-- the workbook edit in depth, since it is the action the crate's writer carries out: one case per
-  sub-operation against a plain workbook, and a case with its own identifier for each behaviour the
-  action promises — a merge that keeps the content it covers and each way a merge is refused, the
-  only-sheet and last-visible-sheet refusals beside a hidden sheet removed while everything left is
-  hidden, the parts a deleted sheet leaves behind and the sheet-scoped names it drops, what a move
-  remaps, the dangling references named after a rename and a removal, the count of formulas left
-  behind when a row or a column shifts, a number, a boolean and a formula written into a cell, a
-  number format beside a value, a cell range as a format target, a column and a row as targets
-  carrying a width and a height, a column-wide range refused, the edit-count, text-length and
-  format-target bounds — the text bound with a multi-byte value, so counting characters rather
+- the workbook edit in depth, since it is one of the two actions the crate's writer carries out: one
+  case per sub-operation against a plain workbook, and a case with its own identifier for each
+  behaviour the action promises — a merge that keeps the content it covers and each way a merge is
+  refused, the only-sheet and last-visible-sheet refusals beside a hidden sheet removed while
+  everything left is hidden, the parts a deleted sheet leaves behind and the sheet-scoped names it
+  drops, what a move remaps, the dangling references named after a rename and a removal, the count
+  of formulas left behind when a row or a column shifts, a number, a boolean and a formula written
+  into a cell, a number format beside a value, a cell range as a format target, a column and a row
+  as targets carrying a width and a height, a column-wide range refused, the edit-count, text-length
+  and format-target bounds — the text bound with a multi-byte value, so counting characters rather
   than bytes is what the case tells apart — a macro-enabled input whose copy keeps its extension, a
   signed package, and the chart and pivot notes a content change raises. The sheet-part readers are
   exercised over a self-closing empty cell and a self-closing row: a cell write, a column shift and
@@ -214,11 +214,39 @@ builders have one home in `document_engine::test_support`, which the crate's own
   delete leaves the sheet as it was. Three refusals name the input itself — another family's
   package, a package with no family part, and one with no `[Content_Types].xml`, met by a
   part-adding edit, by a duplicate sheet name and by a formatting edit, since the styles path asks
-  for the content-type list before it declares a styles part. Its inputs are
-  generated for the purpose: a workbook holding charts, a pivot cache, defined names (global and
-  sheet-scoped), an existing picture and its drawing, merges over content, conditional formats, a
-  data validation, hyperlinks, a page break and a table; a macro-enabled copy of it with a
-  signature part; and the small workbooks each sheet refusal and each self-closing case needs;
+  for the content-type list before it declares a styles part. Its inputs are generated for the
+  purpose: a workbook holding charts, a pivot cache, defined names (global and sheet-scoped), an
+  existing picture and its drawing, merges over content, conditional formats, a data validation,
+  hyperlinks, a page break and a table; a macro-enabled copy of it with a signature part; and the
+  small workbooks each sheet refusal and each self-closing case needs;
+- the Word edit in depth, since it is the second action the crate's writer carries out: one case
+  per sub-operation against a combined document, and a case with its own identifier for each
+  behaviour the action promises — every occurrence in every matching paragraph rewritten, a
+  fragment reaching across a paragraph boundary, a replacement spanning differently formatted runs
+  and the loss it raises, inserting before, a match across a tab, a find carrying the reader's own
+  label, a header's, a footer's, a footnote's, an endnote's and a comment's text refused as that
+  part's, a table of contents' entry refused as the field's, a field's cached result, text a
+  tracked deletion holds, a heading the table lists protected through its bookmark, a text box's
+  and a table cell's own text addressed, a removal refused for a page break, a section break or the
+  last paragraph of a container, each run property, size and colour, each one switched off, each
+  paragraph property with its indent, spacing, line-spacing rule and list level, a style resolved
+  against the styles part and a built-in one the document does not define, a list definition
+  allocated, a list cancelled in place and one cancelled through its style, the six text-length
+  refusals, a package whose paragraph properties, run properties or numbering root cannot be read
+  refused by name, one with no body refused rather than appended to, a picture at its own size, at
+  a stated size and past the page, a table after a paragraph and after a table cell's paragraph, a
+  table at the writing action's column bound and one past it, a call whose second edit acts on the
+  text the first wrote, the markup an edit reached without naming it (a bookmark, a comment, a
+  hyperlink, a footnote and an endnote reference, a tracked change, a page break, a section break),
+  a strict-dialect document, a macro-enabled input whose copy keeps its extension and whose
+  signature note is reached, and a document with revisions tracking on. Its inputs are generated
+  for the purpose: one combined document holding a header, a footer, footnotes, endnotes, comments,
+  tracked changes, a text box, a picture, numbering, a section break, a field, a bookmark, a link,
+  a table and a table of contents with its bookmarks; the same document with a macro project and a
+  signature part; one with revisions tracking on; a strict-dialect document; a document holding a
+  table at the column bound; one whose text sits beside a page break and beside a text box that
+  ends a section; one whose own markup is broken where a call writes (a paragraph's properties, a
+  run's and the numbering part's root each opened and never closed); and one with no body at all;
 - the eight PDF actions, with form filling over every field kind a form can hold and flattening
   both on and off;
 - the failure side: requests the engine refuses as the caller's to fix, and one it accepts and
@@ -251,7 +279,7 @@ recorded as unproducible with its reason, and every mark only the writing half p
 by a recorded case's answer or recorded unreached with its reason;
 `document_engine::test_support::coverage` is the ledger and `tests/coverage.rs` checks both against
 the baseline, in both directions: a mark recorded as not produced must not be one a recorded answer
-prints. A writing mark both halves print (a Word mark, a chart kind) is witnessed by the
+prints. A writing mark both halves print (a Word mark, a chart label) is witnessed by the
 reading ledger, which reads the same vocabulary entry.
 
 
@@ -315,7 +343,12 @@ its titles, a page's rotation or box, a form field's value, a flattened form —
 it against the canonical model. The workbook's effects can also assert a cell's formula text, its
 number format (resolved through the styles part), a column's width, a row's height, the presence or
 absence of a part, and the workbook's defined names in order; a formula cell is never mistaken for
-an empty one, so `CellAbsent` cannot pass over a formula a call failed to remove.
+an empty one, so `CellAbsent` cannot pass over a formula a call failed to remove. The Word effects
+also read a paragraph property's own attribute (`<w:ind w:left="400"/>`, `<w:spacing
+w:line="280"/>`, the `lineRule` beside it) and an attribute of its child (`<w:numPr><w:ilvl
+w:val="1"/>`), so an indent, a spacing and a list level are asserted as the value written rather
+than as a count; the attribute is named by its local name, so a strict document's `start` is read
+as the same effect a transitional `left` is.
 `tests/gate.rs` proves the rule with the no-op engine.
 
 ## The arm's own two checks

@@ -1250,6 +1250,314 @@ pub struct WritingWitness {
 
 /// Every writing mark, with the case that witnesses it.
 pub const WRITING_WITNESSES: &[WritingWitness] = &[
+    // ── the Word edit's marks ─────────────────────────────────────────────────────────────────────
+    // The fragments a sentence is composed from (`edit_docx_addressed_*`, `edit_docx_edited_*`,
+    // `edit_break_reason`, `edit_reached_*`) are witnessed by the sentence that carries them.
+    WritingWitness {
+        mark: "edit_align_value",
+        case: "docx/docx_edit/format_paragraph@align_value",
+        witness: "align must be left, center, right or justify, got: \"middle\"",
+    },
+    WritingWitness {
+        mark: "edit_break_reason",
+        case: "docx/docx_edit/replace_text@break_markup",
+        witness: "the fragment holds a tab or a line break, and the file keeps it as markup of its own (<w:tab/>, <w:br/>, <w:cr/>) or as a paragraph of its own (<w:p>), not as text",
+    },
+    WritingWitness {
+        mark: "edit_docx_addressed_block",
+        case: "docx/docx_edit/add_paragraph@unknown_anchor",
+        witness: "a table cell's own text is addressed, a text box's or a field's cached result is not",
+    },
+    WritingWitness {
+        mark: "edit_docx_addressed_text",
+        case: "docx/docx_edit/replace_text@field_result",
+        witness: "a text box's own text and a table cell's are addressed, a field's cached result is not",
+    },
+    WritingWitness {
+        mark: "edit_docx_after_empty",
+        case: "docx/docx_edit/add_paragraph@empty_after",
+        witness: "after must not be empty",
+    },
+    WritingWitness {
+        mark: "edit_docx_anchor_text_box",
+        case: "docx/docx_edit/add_paragraph@after_text_box",
+        witness: "is inside a text box: an add_paragraph after anchors in the document's own paragraphs (a table cell's counts), and a text box's paragraph is a nested one",
+    },
+    WritingWitness {
+        mark: "edit_docx_bridged",
+        case: "docx/docx_edit/remove_text@tab_bridged",
+        witness: "reaches across a tab in the file: a tab is markup of its own, not text an edit addresses",
+    },
+    WritingWitness {
+        mark: "edit_docx_container_last",
+        case: "docx/docx_edit/remove_paragraph@container_last",
+        witness: "would leave a table cell with no paragraph — a table cell must keep one",
+    },
+    WritingWitness {
+        mark: "edit_docx_edited_block",
+        case: "docx/docx_edit/add_paragraph@after_header",
+        witness: "the body's own paragraphs, a table cell's included",
+    },
+    WritingWitness {
+        mark: "edit_docx_edited_text",
+        case: "docx/docx_edit/replace_text@header_text",
+        witness: "the body's own text, a text box's and a table cell's included",
+    },
+    WritingWitness {
+        mark: "edit_docx_find_absent",
+        case: "docx/docx_edit/replace_text@field_result",
+        witness: "is not in the document's body, its headers, its footers, its footnotes, its endnotes or its comments — a text box's own text and a table cell's are addressed, a field's cached result is not",
+    },
+    WritingWitness {
+        mark: "edit_docx_find_across",
+        case: "docx/docx_edit/replace_text@across_paragraphs",
+        witness: "the fragment reaches across a paragraph boundary, and an edit addresses one paragraph at a time",
+    },
+    WritingWitness {
+        mark: "edit_docx_find_break",
+        case: "docx/docx_edit/replace_text@break_markup",
+        witness: "the file keeps it as markup of its own (<w:tab/>, <w:br/>, <w:cr/>) or as a paragraph of its own (<w:p>), not as text",
+    },
+    WritingWitness {
+        mark: "edit_docx_find_contents",
+        case: "docx/docx_edit/replace_text@contents_entry",
+        witness: "is in this document's table of contents, which an edit does not change — its entries and their page numbers are the table's own field result",
+    },
+    WritingWitness {
+        mark: "edit_docx_find_empty",
+        case: "docx/docx_edit/replace_text@empty_find",
+        witness: "find must not be empty",
+    },
+    WritingWitness {
+        mark: "edit_docx_find_indent",
+        case: "docx/docx_edit/replace_text@leading_indent",
+        witness: "the fragment's leading whitespace is either the indentation the reader prints under a block or whitespace the file's text does not hold — search for \"Alpha\"",
+    },
+    WritingWitness {
+        mark: "edit_docx_find_label",
+        case: "docx/docx_edit/replace_text@reading_mark",
+        witness: "is a label the reader prints, not text in the file",
+    },
+    WritingWitness {
+        mark: "edit_docx_find_peripheral",
+        case: "docx/docx_edit/replace_text@header_text",
+        witness: "is in a header of this document, which a docx edit does not change — it edits the body's own text, a text box's and a table cell's included, and not that part",
+    },
+    WritingWitness {
+        mark: "edit_docx_find_peripheral_revised",
+        case: "docx/docx_edit/replace_text@peripheral_revised",
+        witness: "it is text a tracked revision holds in a comment of this document, which the reading prints as revised rather than as live text",
+    },
+    WritingWitness {
+        mark: "edit_docx_find_revised",
+        case: "docx/docx_edit/replace_text@revised_text",
+        witness: "it is text a tracked revision holds, which the reading prints as revised rather than as live text",
+    },
+    WritingWitness {
+        mark: "edit_docx_format_no_property",
+        case: "docx/docx_edit/format_text@no_property",
+        witness: "format_text needs at least one of bold, italic, underline, strike, size or color",
+    },
+    WritingWitness {
+        mark: "edit_docx_insert_empty",
+        case: "docx/docx_edit/insert_text@empty_insert",
+        witness: "insert must not be empty",
+    },
+    WritingWitness {
+        mark: "edit_docx_level",
+        case: "docx/docx_edit/format_paragraph@level_out_of_span",
+        witness: "level must be a whole number from 0 to 8, got: 99",
+    },
+    WritingWitness {
+        mark: "edit_docx_level_without_list",
+        case: "docx/docx_edit/format_paragraph@level_without_list",
+        witness: "level needs a list to belong to — name \"list\" as bullet or number beside it",
+    },
+    WritingWitness {
+        mark: "edit_docx_list_value",
+        case: "docx/docx_edit/format_paragraph@list_value",
+        witness: "list must be bullet or number, or false to take the paragraph's list away, got: \"roman\"",
+    },
+    WritingWitness {
+        mark: "edit_docx_listed_heading",
+        case: "docx/docx_edit/replace_text@listed_heading",
+        witness: "is in a heading this document's table of contents lists — an edit cannot rewrite the table's own entries",
+    },
+    WritingWitness {
+        mark: "edit_docx_no_body",
+        case: "docx/docx_edit/add_paragraph@no_body",
+        witness: "the document has no body to add a paragraph to",
+    },
+    WritingWitness {
+        mark: "edit_docx_no_body_anchor",
+        case: "docx/docx_edit/add_table@no_body_anchor",
+        witness: "the document has no body, so there is nothing to place an add_table after",
+    },
+    WritingWitness {
+        mark: "edit_docx_no_property",
+        case: "docx/docx_edit/format_paragraph@no_property",
+        witness: "format_paragraph needs at least one of align, style, indent_left, indent_right, indent_first_line, spacing_before, spacing_after, line_spacing or list",
+    },
+    WritingWitness {
+        mark: "edit_docx_no_style",
+        case: "docx/docx_edit/format_paragraph@style_unknown",
+        witness: "the document defines no paragraph style named \"Nonexistent\" — it defines Normal, heading 1, heading 2, Custom Body, List Paragraph",
+    },
+    WritingWitness {
+        mark: "edit_docx_no_styles",
+        case: "docx/docx_edit/format_paragraph@style_no_styles_part",
+        witness: "the document defines no paragraph styles, so \"Nonexistent\" cannot be resolved — hint: a built-in name such as Normal or Heading 1 always works",
+    },
+    WritingWitness {
+        mark: "edit_docx_numbering_root",
+        case: "docx/docx_edit/format_paragraph@numbering_root_unclosed",
+        witness: "the document's numbering part cannot be written into: its <w:numbering> root is missing or never closed",
+    },
+    WritingWitness {
+        mark: "edit_docx_page_break",
+        case: "docx/docx_edit/remove_paragraph@page_break",
+        witness: "the paragraph holding \"Eta page\" holds a page break, and removing it would delete the page break",
+    },
+    WritingWitness {
+        mark: "edit_docx_points",
+        case: "docx/docx_edit/format_paragraph@indent_out_of_span",
+        witness: "indent_left must be between -2000 and 2000 points, got: 5000",
+    },
+    WritingWitness {
+        mark: "edit_docx_position",
+        case: "docx/docx_edit/insert_text@unknown_position",
+        witness: "position must be \"after\" or \"before\", got: \"middle\"",
+    },
+    WritingWitness {
+        mark: "edit_docx_ppr_unclosed",
+        case: "docx/docx_edit/format_paragraph@properties_unclosed",
+        witness: "the paragraph holds <w:pPr> opened and never closed, so its properties cannot be read",
+    },
+    WritingWitness {
+        mark: "edit_docx_row_shape",
+        case: "docx/docx_edit/add_table@row_shape",
+        witness: "every table row must be a list of cells",
+    },
+    WritingWitness {
+        mark: "edit_docx_run_unclosed",
+        case: "docx/docx_edit/format_text@run_properties_unclosed",
+        witness: "a run holds <w:rPr> opened and never closed, so its properties cannot be read",
+    },
+    WritingWitness {
+        mark: "edit_docx_section_break",
+        case: "docx/docx_edit/remove_paragraph@section_break",
+        witness: "the paragraph holding \"Theta section\" ends a section, and removing it would delete the section break",
+    },
+    WritingWitness {
+        mark: "edit_size_span",
+        case: "docx/docx_edit/format_text@size_out_of_span",
+        witness: "size must be between 0.5 and 819 points, got: 1000",
+    },
+    WritingWitness {
+        mark: "edit_docx_style_not_paragraph",
+        case: "docx/docx_edit/format_paragraph@style_character",
+        witness: "\"Emphasis\" is the document's character style, and paragraph formatting needs a paragraph style",
+    },
+    WritingWitness {
+        mark: "edit_docx_table_columns",
+        case: "docx/docx_edit/add_table@past_column_bound",
+        witness: "a table may hold at most 63 columns, got: 64",
+    },
+    WritingWitness {
+        mark: "edit_docx_table_empty",
+        case: "docx/docx_edit/add_table@empty_table",
+        witness: "a table needs at least one row or one heading",
+    },
+    WritingWitness {
+        mark: "edit_reached_bookmark",
+        case: "docx/docx_edit/remove_paragraph@reaches_bookmark",
+        witness: "a bookmark",
+    },
+    WritingWitness {
+        mark: "edit_reached_page_break",
+        case: "docx/docx_edit/format_text@reaches_page_break",
+        witness: "a page break",
+    },
+    WritingWitness {
+        mark: "edit_reached_section_break",
+        case: "docx/docx_edit/remove_paragraph@reaches_section_break",
+        witness: "a section break",
+    },
+    WritingWitness {
+        mark: "edit_reached_comment",
+        case: "docx/docx_edit/remove_paragraph@reaches_comment",
+        witness: "a comment",
+    },
+    WritingWitness {
+        mark: "edit_reached_endnote",
+        case: "docx/docx_edit/remove_paragraph@reaches_endnote",
+        witness: "an endnote reference",
+    },
+    WritingWitness {
+        mark: "edit_reached_footnote",
+        case: "docx/docx_edit/remove_paragraph@reaches_footnote",
+        witness: "a footnote reference",
+    },
+    WritingWitness {
+        mark: "edit_reached_hyperlink",
+        case: "docx/docx_edit/remove_paragraph@reaches_hyperlink",
+        witness: "a hyperlink",
+    },
+    WritingWitness {
+        mark: "edit_reached_revision",
+        case: "docx/docx_edit/remove_paragraph@reaches_revision",
+        witness: "an unaccepted tracked change",
+    },
+    WritingWitness {
+        mark: "note_box_past_edge",
+        case: "docx/docx_edit/add_image@past_page",
+        witness: "[the picture's box reaches past the page — the part beyond the page's edge is not shown on it]",
+    },
+    WritingWitness {
+        mark: "note_docx_added_heading",
+        case: "docx/docx_edit/add_paragraph@after_heading",
+        witness: "[the paragraph added after a heading is a heading of its own, and this document's table of contents does not list it]",
+    },
+    WritingWitness {
+        mark: "note_docx_added_section",
+        case: "docx/docx_edit/add_paragraph@after_section",
+        witness: "[the paragraph the new one follows ends a section, so the new one does not carry its section break]",
+    },
+    WritingWitness {
+        mark: "note_docx_heading_unlisted",
+        case: "docx/docx_edit/format_paragraph@style_builtin",
+        witness: "[the paragraph is a heading this document's table of contents does not list]",
+    },
+    WritingWitness {
+        mark: "note_docx_matched_paragraphs",
+        case: "docx/docx_edit/format_paragraph@every_match",
+        witness: "[the fragment matched 4 paragraphs — every one was formatted]",
+    },
+    WritingWitness {
+        mark: "note_docx_matched_times",
+        case: "docx/docx_edit/format_text@every_match",
+        witness: "[the fragment matched 4 times — every one was formatted]",
+    },
+    WritingWitness {
+        mark: "note_docx_partial_run",
+        case: "docx/docx_edit/format_text",
+        witness: "[the fragment covers only part of a run, and a run is the smallest unit formatting is stated on — the rest of that run's text took the formatting too]",
+    },
+    WritingWitness {
+        mark: "note_docx_reached",
+        case: "docx/docx_edit/remove_paragraph@reaches_bookmark",
+        witness: "[the edit also reached a bookmark and a hyperlink, which the call did not name]",
+    },
+    WritingWitness {
+        mark: "note_docx_replacement_formatting",
+        case: "docx/docx_edit/replace_text@formatted_runs",
+        witness: "[the replaced text spanned several differently formatted runs — it took the formatting of the first one]",
+    },
+    WritingWitness {
+        mark: "note_docx_tracked_on",
+        case: "docx/docx_edit/replace_text@tracked_on",
+        witness: "[the document has tracked changes turned on, and what this call changed is written as plain content, not as a recorded revision]",
+    },
     WritingWitness {
         mark: "edit_address_shape",
         case: "xlsx/xlsx_edit/format_cells@column_range",
@@ -1534,10 +1842,17 @@ pub const WRITING_WITNESSES: &[WritingWitness] = &[
 
 pub const WRITING_UNREACHED: &[Unreached] = &[
     Unreached {
+        reason: "the reference prints it for an edit sub-operation it does not know, and the crate's request surface refuses that name before dispatch, so a case carrying one would rest on that surface divergence rather than on the writer",
+        marks: &["edit_docx_unknown"],
+    },
+    Unreached {
+        reason: "the reference has no nesting bound and never refuses on this ground: the cap that stops a deeply nested part is the crate's own (`engine.paragraph_nesting_max`), with no counterpart in the reference",
+        marks: &["edit_docx_nested"],
+    },
+    Unreached {
         reason: "a value a request names that breaks a formatting rule the corpus's own values satisfy; the port reads each rule from the same rules.json entry the vocabulary states, and a case per refused value would add one case per bound",
         marks: &[
             "edit_absent_value",
-            "edit_align_value",
             "edit_border_boolean",
             "edit_border_empty",
             "edit_border_object",
@@ -1546,7 +1861,6 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
             "edit_font_empty",
             "edit_height_span",
             "edit_number_format_empty",
-            "edit_size_span",
             "edit_toggle_boolean",
             "edit_vertical_value",
             "edit_wrap_boolean",
@@ -1676,10 +1990,9 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         ],
     },
     Unreached {
-        reason: "an environmental failure a generated case cannot force: a package stating a part twice, a part over the entry bound, a call over the work budget, or a destination that refuses the write",
+        reason: "an environmental failure a generated case cannot force: a package stating a part twice, a call over the work budget, or a destination that refuses the write",
         marks: &[
             "edit_part_duplicate",
-            "edit_part_too_large",
             "edit_work_over_budget",
             "edit_write_failed",
         ],
@@ -1743,7 +2056,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         ],
     },
     Unreached {
-        reason: "printed only for the twelve operations the writing half does not carry out; the recorded reference carries every one of them out, so no recorded answer prints it",
+        reason: "printed only for the eleven operations the writing half does not carry out; the recorded reference carries every one of them out, so no recorded answer prints it",
         marks: &["reason_not_carried_out"],
     },
 ];
