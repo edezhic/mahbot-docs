@@ -108,15 +108,14 @@ crate's lockfile already resolved through `pdf-extract`): a page is deep-copied 
 with everything it reaches, a page's boxes and turn are read and written, its content is wrapped and
 the annotations that sit on it are moved. A copy is memoised per destination and source, so an
 object two pages share is copied once, and every produced page states the page tree it belongs to.
-A file the model cannot read — a page tree that does not resolve or that names a kid which is not
-a page, a page or a stream whose content the parser never read, a reference a copy follows that
-names an object the file does not hold, a cross-reference table too damaged to follow — is refused
-rather than rewritten. A stream the parser degraded to a dictionary is caught by what it kept — a
-length beside a stream-only entry — and refused too; that recognition is not a proof, since a
-degraded stream that kept nothing but its length is carried as the dictionary it became, and
-getting those bytes back is the recovery work's. `page.rs`'s module documentation says what that
-covers and where the reference, and the crate's reading, are more forgiving. The five page actions
-are carried out end to end — `pdf_merge` and `pdf_split` build a fresh document out of the pages,
+The file itself is read by `scan.rs`, the way the reference's library reads it: object by object, in
+order, and never through the cross-reference index, so an index that is shifted, absent or pointing
+at the wrong place changes nothing. `scan.rs` states what the walk recovers, what it refuses and the
+engine's own bounds on it; `page.rs` states the shapes the page model refuses rather than write what
+it cannot carry, and the divergence from the reference by outcome: where the reference's own code
+refuses or produces a file that lost what the input held, this engine either carries the file or
+refuses it. The harness judges only the shapes where both sides produce. The five page actions are
+carried out end to end — `pdf_merge` and `pdf_split` build a fresh document out of the pages,
 `pdf_rotate`, `pdf_crop` and `pdf_resize` change what the pages they name show and keep everything
 else the file holds. The three operations that draw into a page (`pdf_text`, `pdf_image`,
 `pdf_form_fill`), `create`, `fill_template` and `pptx_edit` answer with the vocabulary's

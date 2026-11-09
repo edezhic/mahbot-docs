@@ -3222,11 +3222,11 @@ pub fn pptx_with_many_pictures() -> Vec<u8> {
 // ── pdf ─────────────────────────────────────────────────────────────────────────────────────
 /// The font every PDF builder draws with: one of the fourteen every reader has, so no builder has
 /// to embed one and the text layer is the file's own.
-const PDF_FONT: &str =
+pub const PDF_FONT: &str =
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>";
 
 /// A4 in points, the page size a case reads a placement against.
-const PDF_PAGE: &str = "[0 0 595.28 841.89]";
+pub const PDF_PAGE: &str = "[0 0 595.28 841.89]";
 
 /// A PDF under construction: objects are numbered in the order they are reserved, so a page can
 /// name the page tree that names it and the catalog can name a page tree written before it.
@@ -3274,14 +3274,57 @@ impl PdfObjects {
     }
 
     /// The file: header, every object, the cross-reference table and the trailer. `entries` is
-    /// whatever the trailer states beyond `/Size` and `/Root`, written as it stands. A slot left
-    /// empty is refused rather than written as an object no reader can use.
+    /// whatever the trailer states beyond `/Size` and `/Root`, written as it stands.
     pub fn finish(self, root: &str, entries: &str) -> Vec<u8> {
+        self.finish_at(root, entries, 0, None)
+    }
+
+    /// The same file with every cross-reference offset shifted by `shift`: an index that cannot be
+    /// followed although every object is exactly where the body puts it.
+    pub fn finish_shifted(self, root: &str, entries: &str, shift: usize) -> Vec<u8> {
+        self.finish_at(root, entries, shift, None)
+    }
+
+    /// The same file with `startxref` naming `pointer` instead of the table it wrote.
+    pub fn finish_pointing(self, root: &str, entries: &str, pointer: usize) -> Vec<u8> {
+        self.finish_at(root, entries, 0, Some(pointer))
+    }
+
+    /// The file's body alone: no cross-reference table, no trailer, no `startxref`.
+    pub fn finish_body_only(self) -> Vec<u8> {
+        self.assemble().0
+    }
+
+    fn finish_at(self, root: &str, entries: &str, shift: usize, pointer: Option<usize>) -> Vec<u8> {
+        let (mut pdf, offsets) = self.assemble();
+        let start_xref = pdf.len();
+        let size = offsets.len() + 1;
+        pdf.extend_from_slice(format!("xref\n0 {size}\n").as_bytes());
+        pdf.extend_from_slice(b"0000000000 65535 f \n");
+        for offset in offsets {
+            pdf.extend_from_slice(format!("{:010} 00000 n \n", offset + shift).as_bytes());
+        }
+        let pointer = pointer.unwrap_or(start_xref);
+        pdf.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {size} /Root {root}{entries} >>\nstartxref\n{pointer}\n%%EOF\n"
+            )
+            .as_bytes(),
+        );
+        pdf
+    }
+
+    /// The header and every object, with the offset each begins at. A slot left empty is refused
+    /// rather than written as an object no reader can use.
+    fn assemble(&self) -> (Vec<u8>, Vec<usize>) {
         let objects = self
             .bodies
-            .into_iter()
-            .map(|body| body.expect("every reserved PDF object was written"))
-            .collect::<Vec<Vec<u8>>>();
+            .iter()
+            .map(|body| {
+                body.as_ref()
+                    .expect("every reserved PDF object was written")
+            })
+            .collect::<Vec<&Vec<u8>>>();
         let mut pdf = b"%PDF-1.4\n".to_vec();
         let mut offsets = Vec::with_capacity(objects.len());
         for (index, object) in objects.iter().enumerate() {
@@ -3290,20 +3333,7 @@ impl PdfObjects {
             pdf.extend_from_slice(object);
             pdf.extend_from_slice(b"\nendobj\n");
         }
-        let start_xref = pdf.len();
-        pdf.extend_from_slice(format!("xref\n0 {}\n", objects.len() + 1).as_bytes());
-        pdf.extend_from_slice(b"0000000000 65535 f \n");
-        for offset in offsets {
-            pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
-        }
-        pdf.extend_from_slice(
-            format!(
-                "trailer\n<< /Size {} /Root {root}{entries} >>\nstartxref\n{start_xref}\n%%EOF\n",
-                objects.len() + 1
-            )
-            .as_bytes(),
-        );
-        pdf
+        (pdf, offsets)
     }
 }
 
@@ -3311,6 +3341,14 @@ impl PdfObjects {
 /// text layer are exercised on.
 #[must_use]
 pub fn pdf_basic() -> Vec<u8> {
+    let (pdf, _, catalog) = basic_pdf_objects();
+    pdf.finish(&catalog, "")
+}
+
+/// The two-page document [`pdf_basic`] writes: its objects, the font every page draws with and the
+/// catalog that names the page tree. The fixtures that damage its index write the same objects with
+/// the damage they name.
+fn basic_pdf_objects() -> (PdfObjects, String, String) {
     let mut pdf = PdfObjects::default();
     let font = pdf.push(PDF_FONT);
     let pages = pdf.reserve();
@@ -3339,7 +3377,721 @@ pub fn pdf_basic() -> Vec<u8> {
         ),
     );
     let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    (pdf, font, catalog)
+}
+
+/// [`pdf_repeated_page`] with its box stated on the page tree and an annotation on the page when
+/// `tree_box_and_annot`, so an action's second read of the page is observable through both.
+fn repeated_page_document(tree_box_and_annot: bool) -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Repeated page text) Tj ET");
+    let annotation = tree_box_and_annot.then(|| {
+        pdf.push(
+            "<< /Type /Annot /Subtype /Text /Rect [50 50 60 60] /Contents (A repeated-page note) >>",
+        )
+    });
+    let page = pdf.reserve();
+    let page_box = if tree_box_and_annot {
+        String::new()
+    } else {
+        format!(" /MediaBox {PDF_PAGE}")
+    };
+    let page_annots = annotation
+        .map(|annotation| format!(" /Annots [{annotation}]"))
+        .unwrap_or_default();
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages}{page_box} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content}{page_annots} >>"
+        ),
+    );
+    let tree_box = if tree_box_and_annot {
+        format!(" /MediaBox {PDF_PAGE}")
+    } else {
+        String::new()
+    };
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page} {page}] /Count 2{tree_box} >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
     pdf.finish(&catalog, "")
+}
+
+/// A document whose page tree names one page object from two `/Kids` entries, so it reads as two
+/// pages and an in-place action reaches the object once per name.
+#[must_use]
+pub fn pdf_repeated_page() -> Vec<u8> {
+    repeated_page_document(false)
+}
+
+/// [`pdf_repeated_page`] with its box on the page tree and an annotation on the page.
+#[must_use]
+pub fn pdf_repeated_page_annotated() -> Vec<u8> {
+    repeated_page_document(true)
+}
+
+// ── pdf: a damaged index, and streams whose length disagrees with their bytes ──────────────────
+//
+// The producing kit's library never consults a file's cross-reference index: it walks the body
+// object by object and recovers a stream from its own end marker. These are the files that walk has
+// to answer for. Each is a document whose body is intact and whose index — or whose stated stream
+// length — is not, so a reader that trusts the index refuses a file the reference reads.
+
+/// The description a damaged fixture carries: a recovered file keeps it, and the comparison reads
+/// its four content-bearing entries.
+const PDF_INFO: &str =
+    "<< /Title (A title) /Author (An author) /Subject (A subject) /Keywords (k1, k2) >>";
+
+/// The standard security handler's dictionary, in the shape a file that needs a password carries.
+const ENCRYPTION_DICTIONARY: &str = "<< /Filter /Standard /V 1 /R 2 \
+     /O <0000000000000000000000000000000000000000000000000000000000000000> \
+     /U <0000000000000000000000000000000000000000000000000000000000000000> /P -44 >>";
+
+/// [`pdf_basic`] with every cross-reference offset shifted by nine bytes: the index points beside
+/// every object.
+#[must_use]
+pub fn pdf_damaged_shifted() -> Vec<u8> {
+    let (mut pdf, _, catalog) = basic_pdf_objects();
+    let info = pdf.push(PDF_INFO);
+    pdf.finish_shifted(&catalog, &format!(" /Info {info}"), 9)
+}
+
+/// [`pdf_basic`]'s body with no index at all: no cross-reference table, no trailer, no `startxref`.
+#[must_use]
+pub fn pdf_damaged_no_index() -> Vec<u8> {
+    basic_pdf_objects().0.finish_body_only()
+}
+
+/// [`pdf_basic`] with its index present and `startxref` naming zero.
+#[must_use]
+pub fn pdf_damaged_pointer() -> Vec<u8> {
+    let (mut pdf, _, catalog) = basic_pdf_objects();
+    let info = pdf.push(PDF_INFO);
+    pdf.finish_pointing(&catalog, &format!(" /Info {info}"), 0)
+}
+
+/// [`pdf_basic`] whose trailer names the font as its root: not a catalog, so the root has to be
+/// recovered from the body.
+#[must_use]
+pub fn pdf_damaged_root() -> Vec<u8> {
+    let (pdf, font, _) = basic_pdf_objects();
+    pdf.finish(&font, "")
+}
+
+/// [`pdf_basic`] holding a second catalog that names a page of its own, while the trailer names the
+/// first: the root the file states is the one the reference reads, so a recovery that took the last
+/// catalog in the body would draw the orphan's page instead.
+#[must_use]
+pub fn pdf_two_catalogs() -> Vec<u8> {
+    let (mut pdf, font, catalog) = basic_pdf_objects();
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Orphan page text) Tj ET");
+    let page = pdf.reserve();
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    let pages = pdf.push(format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"));
+    let orphan = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    debug_assert_ne!(orphan, catalog, "the file states two catalogs");
+    pdf.finish(&catalog, "")
+}
+
+/// A one-page PDF whose trailer states its catalog inline instead of naming it: a root the reference
+/// reads, and one this model reaches only once the catalog has a number of its own.
+#[must_use]
+pub fn pdf_inline_root() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
+    let page = pdf.reserve();
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    pdf.finish(&format!("<< /Type /Catalog /Pages {pages} >>"), "")
+}
+
+/// [`pdf_basic`] with a second revision appended that redefines page one's content, and an index
+/// whose entry for that object still points at the first definition. The last definition in the body
+/// wins, so the file draws the revised text.
+#[must_use]
+pub fn pdf_damaged_incremental() -> Vec<u8> {
+    let (objects, _, catalog) = basic_pdf_objects();
+    let first = objects.finish(&catalog, "");
+    let stale = find(&first, b"3 0 obj").expect("the content object");
+    let revised = b"BT /F1 24 Tf 72 760 Td (Revised text) Tj ET";
+    let mut pdf = first.clone();
+    pdf.extend_from_slice(b"3 0 obj\n");
+    pdf.extend_from_slice(format!("<< /Length {} >>\nstream\n", revised.len()).as_bytes());
+    pdf.extend_from_slice(revised);
+    pdf.extend_from_slice(b"\nendstream\nendobj\n");
+    let table = pdf.len();
+    pdf.extend_from_slice(b"xref\n0 1\n0000000000 65535 f \n3 1\n");
+    pdf.extend_from_slice(format!("{stale:010} 00000 n \n").as_bytes());
+    // The revision is an update of the first one, so its trailer names the first index.
+    let previous = find(&first, b"\nxref\n").map_or(0, |at| at + 1);
+    // The size the first revision states and the one this revision adds; neither parser reads it.
+    pdf.extend_from_slice(
+        format!(
+            "trailer\n<< /Size 8 /Root {catalog} /Prev {previous} >>\nstartxref\n{table}\n%%EOF\n"
+        )
+        .as_bytes(),
+    );
+    pdf
+}
+
+/// [`pdf_basic`] with its first content stream stating `length` instead of the bytes it holds: the
+/// reference recovers the stream from its own end marker.
+fn pdf_with_first_stream(first: impl Fn(&str) -> String) -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let mut kids = Vec::new();
+    for (index, text) in ["Page one text", "Page two text"].iter().enumerate() {
+        let data = format!("BT /F1 24 Tf 72 {} Td ({text}) Tj ET", 760 - index * 24);
+        let content = if index == 0 {
+            pdf.push(first(&data))
+        } else {
+            pdf.stream("", data.as_bytes())
+        };
+        let page = pdf.reserve();
+        kids.push(page.clone());
+        pdf.set(
+            &page,
+            format!(
+                "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+                 /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+            ),
+        );
+    }
+    pdf.set(
+        &pages,
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {} >>",
+            kids.join(" "),
+            kids.len()
+        ),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// A PDF whose first content stream states a length ten bytes short of its own.
+#[must_use]
+pub fn pdf_damaged_length_short() -> Vec<u8> {
+    pdf_with_first_stream(|data| format!("<< /Length 10 >>\nstream\n{data}\nendstream"))
+}
+
+/// A PDF whose first content stream states a length far longer than its own.
+#[must_use]
+pub fn pdf_damaged_length_long() -> Vec<u8> {
+    pdf_with_first_stream(|data| format!("<< /Length 9999 >>\nstream\n{data}\nendstream"))
+}
+
+/// A PDF whose first content stream states no length at all.
+#[must_use]
+pub fn pdf_damaged_length_absent() -> Vec<u8> {
+    pdf_with_first_stream(|data| format!("<< >>\nstream\n{data}\nendstream"))
+}
+
+/// One page drawing twelve lines from twelve content streams, each stating a length far longer than
+/// its own: the reference recovers every one, so the recovery must not spend its bound on the
+/// distances those lengths name.
+#[must_use]
+pub fn pdf_damaged_length_long_many() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let mut streams = Vec::new();
+    for index in 1..=12 {
+        let data = format!(
+            "BT /F1 12 Tf 72 {} Td (Line {index}) Tj ET",
+            800 - index * 14
+        );
+        streams.push(pdf.push(format!("<< /Length 9999 >>\nstream\n{data}\nendstream")));
+    }
+    let content = pdf.push(format!("[{}]", streams.join(" ")));
+    let page = pdf.reserve();
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// What a file whose objects live in an object stream states about its own index.
+#[derive(Clone, Copy)]
+enum ObjectStreamIndex {
+    /// A cross-reference stream whose entries are correct, and a `startxref` that names it.
+    Stated,
+    /// The same file with `startxref` naming zero.
+    Misplaced,
+    /// No cross-reference stream at all: the root lives in the body and nowhere else.
+    Absent,
+    /// A correct index, and a container whose stated length is not its own.
+    WrongContainerLength,
+}
+
+/// The payload an object stream of the modern shape holds: the header stating each object's number
+/// and where its body begins, the bodies themselves, and the offset the bodies start at. `padding` is
+/// that many spaces after the last body; neither parser reads them.
+fn object_stream_payload(padding: usize) -> (Vec<u8>, usize, usize) {
+    // The objects the container holds: the font, the page tree, the two pages and the catalog. Their
+    // numbers are the ones the file gives them, after the two content streams and the container.
+    let held = [
+        (4_u32, PDF_FONT.to_string()),
+        (
+            5,
+            "<< /Type /Pages /Kids [6 0 R 7 0 R] /Count 2 >>".to_string(),
+        ),
+        (
+            6,
+            format!(
+                "<< /Type /Page /Parent 5 0 R /MediaBox {PDF_PAGE} \
+                 /Resources << /Font << /F1 4 0 R >> >> /Contents 1 0 R >>"
+            ),
+        ),
+        (
+            7,
+            format!(
+                "<< /Type /Page /Parent 5 0 R /MediaBox {PDF_PAGE} \
+                 /Resources << /Font << /F1 4 0 R >> >> /Contents 2 0 R >>"
+            ),
+        ),
+        (8, "<< /Type /Catalog /Pages 5 0 R >>".to_string()),
+    ];
+    // The container's own header: each object's number and where its body begins, then the bodies.
+    let mut header = String::new();
+    let mut bodies = String::new();
+    for (number, body) in &held {
+        header.push_str(&format!("{number} {} ", bodies.len()));
+        bodies.push_str(body);
+        bodies.push(' ');
+    }
+    let first = header.len();
+    bodies.extend(std::iter::repeat_n(' ', padding));
+    (format!("{header}{bodies}").into_bytes(), first, held.len())
+}
+
+/// A two-page PDF of the shape a modern file has: the ordinary objects live in one object stream and
+/// the index is a cross-reference stream, both Flate-compressed.
+fn pdf_object_stream(index: ObjectStreamIndex, padding: usize) -> Vec<u8> {
+    pdf_with_object_stream(
+        index,
+        object_stream_payload(padding),
+        " /Filter /FlateDecode",
+        deflate_fixed,
+    )
+}
+
+/// The body of an object stream: its dictionary, stating how many objects it holds, where their
+/// bodies begin, the filter `filter` and the length `stated`, and then the bytes `data`.
+#[must_use]
+pub fn object_stream_body(
+    held: usize,
+    first: usize,
+    filter: &str,
+    stated: usize,
+    data: &[u8],
+) -> Vec<u8> {
+    let mut body =
+        format!("<< /Type /ObjStm /N {held} /First {first}{filter} /Length {stated} >>\nstream\n")
+            .into_bytes();
+    body.extend_from_slice(data);
+    body.extend_from_slice(b"\nendstream");
+    body
+}
+
+/// A two-page PDF of the modern shape whose object stream states `payload` as `filter` and encodes it
+/// with `encode`, and whose index stream `index` states.
+fn pdf_with_object_stream(
+    index: ObjectStreamIndex,
+    (payload, first, held): (Vec<u8>, usize, usize),
+    filter: &str,
+    encode: impl Fn(&[u8]) -> Vec<u8>,
+) -> Vec<u8> {
+    let texts = ["Page one text", "Page two text"];
+    let container = encode(&payload);
+    let stated = match index {
+        ObjectStreamIndex::WrongContainerLength => 7,
+        _ => container.len(),
+    };
+
+    let mut pdf = b"%PDF-1.5\n".to_vec();
+    let mut offsets = Vec::new();
+    for (position, text) in texts.iter().enumerate() {
+        let data = format!("BT /F1 24 Tf 72 {} Td ({text}) Tj ET", 760 - position * 24);
+        pdf_object(
+            &mut pdf,
+            &mut offsets,
+            format!("<< /Length {} >>\nstream\n{data}\nendstream", data.len()).as_bytes(),
+        );
+    }
+    let container_body = object_stream_body(held, first, filter, stated, &container);
+    let number = pdf_object(&mut pdf, &mut offsets, &container_body);
+
+    if matches!(index, ObjectStreamIndex::Absent) {
+        pdf.extend_from_slice(b"startxref\n0\n%%EOF\n");
+        return pdf;
+    }
+    // The index stream's entries: the free head, the three objects written directly, the five the
+    // container holds, and the index stream itself, which is the last number the file states.
+    let offset = pdf_index_stream(&mut pdf, &offsets, held, number, " /Root 8 0 R");
+    let pointer = match index {
+        ObjectStreamIndex::Misplaced => 0,
+        _ => offset,
+    };
+    pdf.extend_from_slice(format!("startxref\n{pointer}\n%%EOF\n").as_bytes());
+    pdf
+}
+
+/// A PDF whose objects live in an object stream, with a correct index.
+#[must_use]
+pub fn pdf_object_stream_stated() -> Vec<u8> {
+    pdf_object_stream(ObjectStreamIndex::Stated, 0)
+}
+
+/// The same file with `startxref` naming zero: the index is there and cannot be found.
+#[must_use]
+pub fn pdf_damaged_object_stream() -> Vec<u8> {
+    pdf_object_stream(ObjectStreamIndex::Misplaced, 0)
+}
+
+/// The same file with no cross-reference stream: nothing states the root but the body.
+#[must_use]
+pub fn pdf_damaged_index_stream() -> Vec<u8> {
+    pdf_object_stream(ObjectStreamIndex::Absent, 0)
+}
+
+/// The same file whose object stream states a length seven bytes instead of its own.
+#[must_use]
+pub fn pdf_damaged_object_stream_length() -> Vec<u8> {
+    pdf_object_stream(ObjectStreamIndex::WrongContainerLength, 0)
+}
+
+/// The same modern shape whose container is ASCII-hex encoded. `ASCIIHexDecode` is one of the two
+/// filters the reference's library reads and lopdf does not, so this file is what exercises the
+/// decoder end to end through the gate.
+#[must_use]
+pub fn pdf_object_stream_ascii_hex() -> Vec<u8> {
+    pdf_with_object_stream(
+        ObjectStreamIndex::Stated,
+        object_stream_payload(0),
+        " /Filter /ASCIIHexDecode",
+        ascii_hex,
+    )
+}
+
+/// `data` in the hexadecimal digits an `ASCIIHexDecode` filter reads.
+fn ascii_hex(data: &[u8]) -> Vec<u8> {
+    let mut hex = Vec::with_capacity(data.len() * 2);
+    for byte in data {
+        hex.extend_from_slice(format!("{byte:02X}").as_bytes());
+    }
+    hex
+}
+
+/// The modern shape whose object stream decodes to far more than the file that holds it: the class
+/// a bound charged in the file's own bytes would refuse. The 256 KiB of padding compress to a few
+/// kilobytes, so the container decodes to more than sixty-four times the file's own length.
+#[must_use]
+pub fn pdf_object_stream_inflated() -> Vec<u8> {
+    let pdf = pdf_object_stream(ObjectStreamIndex::Stated, 256 * 1024);
+    debug_assert!(
+        pdf.len() * 64 < 256 * 1024,
+        "the padding decodes to more than sixty-four times the file"
+    );
+    pdf
+}
+
+/// [`pdf_basic`] with an encryption dictionary and a shifted index: the file still says it needs a
+/// password.
+#[must_use]
+pub fn pdf_damaged_encrypted() -> Vec<u8> {
+    let (mut pdf, _, catalog) = basic_pdf_objects();
+    let encrypt = pdf.push(ENCRYPTION_DICTIONARY);
+    pdf.finish_shifted(&catalog, &format!(" /Encrypt {encrypt}"), 3)
+}
+
+/// The modern shape with a container whose bytes cannot be decoded — what an encrypted PDF 1.5 file
+/// looks like, its objects being ciphertext — and the encryption dictionary still stated by the
+/// index stream. The file says it needs a password although its body cannot be read.
+#[must_use]
+pub fn pdf_damaged_encrypted_container() -> Vec<u8> {
+    const HELD: usize = 5;
+    let mut pdf = b"%PDF-1.5\n".to_vec();
+    let mut offsets = Vec::new();
+    let data = b"BT /F1 24 Tf 72 760 Td (A secret page) Tj ET";
+    let mut content = format!("<< /Length {} >>\nstream\n", data.len()).into_bytes();
+    content.extend_from_slice(data);
+    content.extend_from_slice(b"\nendstream");
+    pdf_object(&mut pdf, &mut offsets, &content);
+    // A container of bytes that are not a compressed stream, as ciphertext under `/FlateDecode` is
+    // not: the walk cannot expand it, and what it holds is unknown.
+    let ciphertext: Vec<u8> = (0..=255_u8).cycle().take(512).collect();
+    let container = object_stream_body(
+        HELD,
+        40,
+        " /Filter /FlateDecode",
+        ciphertext.len(),
+        &ciphertext,
+    );
+    let container_number = pdf_object(&mut pdf, &mut offsets, &container);
+    let encrypt = pdf_object(&mut pdf, &mut offsets, ENCRYPTION_DICTIONARY.as_bytes());
+    // The root is one of the objects the container holds, as it is in a real encrypted file.
+    let offset = pdf_index_stream(
+        &mut pdf,
+        &offsets,
+        HELD,
+        container_number,
+        &format!(" /Root 8 0 R /Encrypt {encrypt} 0 R"),
+    );
+    pdf.extend_from_slice(format!("startxref\n{offset}\n%%EOF\n").as_bytes());
+    pdf
+}
+
+/// [`pdf_basic`] with one more object after the trailer, numbered at the top of the range a number can
+/// hold. The index is the one the file already states; the walk reads the extra object, and the
+/// writer's own high-water mark cannot hold it.
+#[must_use]
+pub fn pdf_object_number_overflow() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(format!("\n{} 0 obj\nnull\nendobj\n", u32::MAX).as_bytes());
+    pdf
+}
+
+/// [`pdf_basic`] cut inside its body: no recovery can account for the objects that are gone.
+#[must_use]
+pub fn pdf_damaged_body() -> Vec<u8> {
+    first_percent(&pdf_basic(), 55)
+}
+
+/// [`pdf_basic`] whose first cross-reference entry starts with a digit and then states something
+/// else: the reference's own parse throws on it although the body is intact.
+#[must_use]
+pub fn pdf_damaged_index_syntax() -> Vec<u8> {
+    let mut bytes = pdf_basic();
+    let at = find(&bytes, b"0000000000 65535 f \n").expect("the free entry");
+    bytes[at + 11..at + 16].copy_from_slice(b"zzzzz");
+    bytes
+}
+
+/// Write one indirect object at the end of `pdf`, numbered by its own place in the file, and answer the
+/// number it took: the objects a file writes are contiguous, so the number is never a caller's to
+/// state. Records where it begins.
+fn pdf_object(pdf: &mut Vec<u8>, offsets: &mut Vec<usize>, body: &[u8]) -> usize {
+    offsets.push(pdf.len());
+    write_object(pdf, offsets.len(), body);
+    offsets.len()
+}
+
+/// Write the object numbered `number`: [`pdf_object`] numbers by place, and the index stream — which no
+/// entry of its own table lists — states its own.
+fn write_object(pdf: &mut Vec<u8>, number: usize, body: &[u8]) {
+    pdf.extend_from_slice(format!("{number} 0 obj\n").as_bytes());
+    pdf.extend_from_slice(body);
+    pdf.extend_from_slice(b"\nendobj\n");
+}
+
+/// Write the cross-reference stream a modern file ends with: a type-1 entry for each object in
+/// `offsets`, a type-2 entry for each of `held` objects inside the container numbered `container`, and
+/// one for the index stream itself, which is the last object the file states. `entries` is whatever
+/// else the stream's dictionary states. Answers where the stream begins. The stream is not one of the
+/// objects `offsets` lists, so its own offset is not recorded there.
+fn pdf_index_stream(
+    pdf: &mut Vec<u8>,
+    offsets: &[usize],
+    held: usize,
+    container: usize,
+    entries: &str,
+) -> usize {
+    let container = u32::try_from(container).expect("a small file");
+    // The held objects take numbers the file never writes, so the index stream is numbered above
+    // them and is the last number its own table states.
+    let number = offsets.len() + held + 1;
+    let size = number + 1;
+    let mut table = vec![0_u8, 0, 0, 0, 0, 0xFF, 0xFF];
+    for offset in offsets {
+        table.push(1);
+        table.extend_from_slice(&u32::try_from(*offset).expect("a small file").to_be_bytes());
+        table.extend_from_slice(&[0, 0]);
+    }
+    for position in 0..held {
+        table.push(2);
+        table.extend_from_slice(&container.to_be_bytes());
+        table.extend_from_slice(
+            &u16::try_from(position)
+                .expect("a handful of objects")
+                .to_be_bytes(),
+        );
+    }
+    let offset = pdf.len();
+    table.push(1);
+    table.extend_from_slice(&u32::try_from(offset).expect("a small file").to_be_bytes());
+    table.extend_from_slice(&[0, 0]);
+    // One entry per object the stream says the file has: the free head, the objects listed, the held
+    // ones and the stream itself. A table of another length would describe a file this one is not.
+    debug_assert_eq!(
+        table.len(),
+        size * 7,
+        "the table states one entry per object"
+    );
+    let table = deflate_fixed(&table);
+    let mut index_body = format!(
+        "<< /Type /XRef /Size {size} /W [1 4 2]{entries} /Filter /FlateDecode /Length {} >>\n\
+         stream\n",
+        table.len()
+    )
+    .into_bytes();
+    index_body.extend_from_slice(&table);
+    index_body.extend_from_slice(b"\nendstream");
+    write_object(pdf, number, &index_body);
+    offset
+}
+
+/// Where `needle` first appears in `bytes`.
+fn find(bytes: &[u8], needle: &[u8]) -> Option<usize> {
+    bytes
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+/// A zlib stream of one fixed-Huffman block, coding a run of three or more identical bytes as a
+/// distance-1 match: the smallest encoder that lets a fixture state a container which decodes to far
+/// more than the file that holds it. `flate2` is only a dev-dependency of the crate, so test support —
+/// compiled into a normal build — cannot use it.
+fn deflate_fixed(data: &[u8]) -> Vec<u8> {
+    let mut out = vec![0x78, 0x01];
+    let mut writer = DeflateBits::default();
+    // One final block with the fixed Huffman codes: BFINAL = 1, BTYPE = 01, least-significant first.
+    writer.bits(1, 1);
+    writer.bits(1, 2);
+    let mut index = 0;
+    while index < data.len() {
+        let byte = data[index];
+        let mut run = 1;
+        while run < 258 && index + run < data.len() && data[index + run] == byte {
+            run += 1;
+        }
+        if index > 0 && data[index - 1] == byte && run >= 3 {
+            let length = u16::try_from(run).expect("a match is at most 258 bytes");
+            let (symbol, extra, extra_bits) = length_code(length);
+            fixed_symbol(&mut writer, symbol);
+            writer.bits(extra, extra_bits);
+            // Distance 1 is the fixed distance code 0, five bits, with no extra bits.
+            writer.code(0, 5);
+            index += run;
+        } else {
+            fixed_symbol(&mut writer, u16::from(byte));
+            index += 1;
+        }
+    }
+    // The end-of-block symbol.
+    fixed_symbol(&mut writer, 256);
+    writer.finish(&mut out);
+    out.extend_from_slice(&adler32(data).to_be_bytes());
+    out
+}
+
+/// Packs a deflate stream's bits into bytes, least-significant bit first.
+#[derive(Default)]
+struct DeflateBits {
+    out: Vec<u8>,
+    accumulator: u8,
+    count: u8,
+}
+
+impl DeflateBits {
+    /// Writes one bit.
+    fn bit(&mut self, bit: u8) {
+        self.accumulator |= (bit & 1) << self.count;
+        self.count += 1;
+        if self.count == 8 {
+            self.out.push(self.accumulator);
+            self.accumulator = 0;
+            self.count = 0;
+        }
+    }
+
+    /// Writes `count` bits of `value`, least-significant bit first: the extra bits of a length or a
+    /// distance.
+    fn bits(&mut self, value: u16, count: u8) {
+        for index in 0..count {
+            self.bit(u8::from(((value >> index) & 1) != 0));
+        }
+    }
+
+    /// Writes a Huffman code, most-significant bit first.
+    fn code(&mut self, code: u16, count: u8) {
+        for index in (0..count).rev() {
+            self.bit(u8::from(((code >> index) & 1) != 0));
+        }
+    }
+
+    /// Appends the whole bytes written, zero-padding the last.
+    fn finish(mut self, out: &mut Vec<u8>) {
+        if self.count > 0 {
+            self.out.push(self.accumulator);
+        }
+        out.extend_from_slice(&self.out);
+    }
+}
+
+/// Writes one symbol of the fixed literal/length code.
+fn fixed_symbol(writer: &mut DeflateBits, symbol: u16) {
+    match symbol {
+        0..=143 => writer.code(0x30 + symbol, 8),
+        144..=255 => writer.code(0x190 + (symbol - 144), 9),
+        256..=279 => writer.code(symbol - 256, 7),
+        _ => writer.code(0xC0 + (symbol - 280), 8),
+    }
+}
+
+/// The length code, extra-bit value and extra-bit count a match of `length` bytes states.
+fn length_code(length: u16) -> (u16, u16, u8) {
+    match length {
+        3..=10 => (257 + (length - 3), 0, 0),
+        11..=18 => (265 + (length - 11) / 2, (length - 11) % 2, 1),
+        19..=34 => (269 + (length - 19) / 4, (length - 19) % 4, 2),
+        35..=66 => (273 + (length - 35) / 8, (length - 35) % 8, 3),
+        67..=130 => (277 + (length - 67) / 16, (length - 67) % 16, 4),
+        131..=257 => (281 + (length - 131) / 32, (length - 131) % 32, 5),
+        258 => (285, 0, 0),
+        _ => unreachable!("a match is three to 258 bytes"),
+    }
+}
+
+/// The checksum a zlib stream ends with.
+fn adler32(data: &[u8]) -> u32 {
+    let (mut low, mut high) = (1_u32, 0_u32);
+    for &byte in data {
+        low = (low + u32::from(byte)) % 65_521;
+        high = (high + low) % 65_521;
+    }
+    high << 16 | low
 }
 
 /// One A4 page drawing a line and painting the sample picture through `Do` — the input the
@@ -3750,11 +4502,7 @@ pub fn pdf_encrypted() -> Vec<u8> {
         format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
     );
     let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
-    let encrypt = format!(
-        "<< /Filter /Standard /V 1 /R 2 /O <{}> /U <{}> /P -44 >>",
-        "00".repeat(32),
-        "00".repeat(32),
-    );
+    let encrypt = pdf.push(ENCRYPTION_DICTIONARY);
     pdf.finish(
         &catalog,
         &format!(
@@ -5246,4 +5994,29 @@ pub fn legacy_ppt_notes() -> Vec<u8> {
 #[must_use]
 pub fn legacy_ppt_corrupt() -> Vec<u8> {
     super::legacy_formats::ppt_corrupt()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::deflate_fixed;
+
+    #[test]
+    fn the_fixed_huffman_encoder_round_trips_through_the_object_models_decoder() {
+        // The fixture's container must decode to exactly the bytes it was built from.
+        let mut payload = b"12 0 13 4 ".to_vec();
+        payload.extend_from_slice(b"<< /Type /Page >> << /Type /Pages >>");
+        payload.extend(std::iter::repeat_n(b' ', 70_000));
+        let compressed = deflate_fixed(&payload);
+        let mut dict = lopdf::Dictionary::new();
+        dict.set("Filter", lopdf::Object::Name(b"FlateDecode".to_vec()));
+        dict.set(
+            "Length",
+            lopdf::Object::Integer(i64::try_from(compressed.len()).expect("a small stream")),
+        );
+        let stream = lopdf::Stream::new(dict, compressed);
+        assert_eq!(
+            stream.decompressed_content().expect("a zlib stream"),
+            payload
+        );
+    }
 }

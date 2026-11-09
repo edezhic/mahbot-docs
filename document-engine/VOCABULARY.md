@@ -13,7 +13,7 @@ copy carries its licence beside it (`NotoSans-LICENSE.txt`).
 | `rules` | The shared writer/reader rules — a copy of `assets/docgen/rules.json`, value for value, the data the JavaScript kit inlines at build time. It is kept as data, not restated as a typed graph: the code that reads a rule adds the view it needs. |
 | `reading` | The bounds and constants of the reading surface: the prefix a caller peeks, the input size a caller caps, the pictures a caller delivers and the text a caller spills, the page-text floor, the crop-box slack, the raster envelope (target, quality, scale ceiling) and the raster decode envelope applied to an embedded image. |
 | `limits` | The reader and producer caps: the ZIP entry, XML depth, Word table/style/field/link, Excel range-probe, chart, number-format, PDF mark/field, edit-work and multi-file bounds. Every entry is the reference's own number, read from its sources. |
-| `engine` | The bounds the engine states for itself, where the reference states none: the paragraph-nesting cap that keeps a Word edit's cost bounded on a deeply nested body, and the page-tree and object-copy depth caps that keep the PDF writer's walks off the stack. Nothing here is the reference's number, so nothing here is pinned by the contract test. |
+| `engine` | The bounds the engine states for itself, where the reference states none: the paragraph-nesting cap that keeps a Word edit's cost bounded on a deeply nested body, the page-tree and object-copy depth caps that keep the PDF writer's walks off the stack, the scan budget the PDF writer's body walk may spend on one file and on each object stream it expands, the bytes one look at what comes next may inspect, the bytes one PDF container may decode to, and the highest object number the writer can state in its index. Nothing here is the reference's number, so nothing here is pinned by the contract test. |
 | `marks` | The fixed words, labels, templates and note fragments a reading or an operation prints, by key, each with the producers that print it. `{name}` placeholders are replaced with `Marks::format`. A mark the `rules` section already states (a Word tracked-change or chart label, a peripheral part's kind, a PDF form word) is not repeated here: `src/vocabulary.rs` reads it from `rules` under its key. A note with no values ("the workbook declares no sheets") is a fixed sentence and lives here; one that interpolates values is composed at the reporting site from this section's fragments and marks. |
 | `derived_marks` | The `rules` sections whose values are printed marks (Word marks and their chart labels, slide labels, PDF form words and field kinds, metadata keys, and peripheral parts), each naming the producers that print them today. The Word marks and peripheral parts are printed by both halves — a reading labels them and a Word edit names them in a refusal — and the rest by the reading only, until their writing port prints one. They live in `rules` because the kit needs them as request vocabulary; this section says they are marks too. |
 | `enforced` | Who enforces each entry of `reading`, `limits` and `engine`: `reading`, `writing` or `caller`. An entry may name more than one, because one number can be enforced in more than one place. `rules` stands for the whole rules section, which is request vocabulary rather than a bound. |
@@ -75,12 +75,19 @@ The `enforced` map is the reading of every bound that matters to a caller:
 - the **writing** half owns the edit-work bound, the engine's own paragraph-nesting cap
   (`engine.paragraph_nesting_max`), which no reference bound states — the bound's own doc records
   why it is conservative and the measured curve it sits on — the engine's own page-tree and
-  object-copy depth caps (`engine.page_tree_depth_max`, `engine.object_depth_max`), and the three
-  caps the crate owns for the PDF page actions: the most inputs one merge may name, the most bytes
-  one merge may read, and the most parts one split may produce. The reference has none of these, so
-  no corpus case can judge them: the depth caps are the engine's own internal refusals, the three
-  request caps are usage refusals of the surface or the merge, and each is read from the vocabulary
-  and pinned by the crate's own tests;
+  object-copy depth caps (`engine.page_tree_depth_max`, `engine.object_depth_max`, the same depth
+  the body scan follows), the engine's own scan budget (`engine.pdf_scan_passes_max`), counted
+  over a file's own bytes and, for an object stream, over the bytes it decodes to, the bytes one
+  look at what comes next may inspect (`engine.scan_look_bytes_max`), the bytes one PDF container —
+  an object stream or an index stream — may decode to (`engine.container_decode_max_bytes`, the same
+  ceiling the OOXML package reader puts on one entry: the crate's own decoders check a run before
+  they allocate it, while a filter lopdf decodes is bounded once it has decoded), the highest object
+  number the writer can state in its index (`engine.object_number_max`), and the three caps the crate
+  owns for the PDF page actions: the most inputs one merge may name, the most bytes one merge may read,
+  and the most parts one split may produce. The reference has none of these, so no corpus case can
+  judge them: the depth caps, the two scan and decode budgets and the object-number bound are the
+  engine's own internal refusals, the three request caps are usage refusals of the surface or the
+  merge, and each is read from the vocabulary and pinned by the crate's own tests;
 - `rules` is enforced by the writing half (the kit refuses out-of-range arguments) and by a caller
   (the tool validates before it builds a request).
 
@@ -160,18 +167,21 @@ bound it covers:
   cannot rot into silence;
 - `SPEC_CONSTANTS` — a PDF channel rounder, a number format's operator count, a sample width, a
   byte's maximum, a percentage's or a thousand's scale factor, Word's heading levels, a PDF flag
-  bit, Excel's last column, a crop area's four sides, a page's quarter turns, and the constants of
-  the date conversion a produced file's information dictionary is dated with. Each names the one
-  file and value it covers and why it is not a restatement.
+  bit, Excel's last column, a crop area's four sides, a page's quarter turns and a box's fourth
+  corner, and the constants of the date conversion a produced file's information dictionary is
+  dated with. Each names the one file and value it covers, how many occurrences of it the file
+  states, and why it is not a restatement; entries for one file and value are summed into one
+  exemption.
 
 Neither silences the check wholesale: a coincidence in a file that does not state the value fails
-until it is added with a reason. Because the scope is the file and the value, a second
-literal of an already-exempted value in that file is covered by the same entry — a restated bound
-is held to the vocabulary by the separate bound-read test, not by this scan. The mark check does not
-fire on a format name, nor the number check on a specification constant, and the same word or
-number in another file still fails. The number scan is deliberately a cheap heuristic — file and
-value only, with no site or occurrence count — so a rename or a reformat never fails it. The number
-check scans `reading`, `limits` and `engine`, so a cap restated in code fails wherever it lives.
+until it is added with a reason. Because the scope is the file, the value and the number of
+occurrences its entries account for, a further literal of an already-exempted value in that file is a
+restatement until it is reviewed into the entry — the list cannot mask a bound restated beside a
+constant it already covers. The mark check does not fire on a format name, nor the number check on a
+specification constant, and the same word or number in another file still fails. The number scan is
+deliberately a cheap heuristic — file, value and count, with no site — so a rename or a reformat never
+fails it. The number check scans `reading`, `limits` and `engine`, so a cap restated in code fails
+wherever it lives.
 
 What it cannot see, and why that is recorded rather than fixed:
 
@@ -182,6 +192,8 @@ What it cannot see, and why that is recorded rather than fixed:
 - a mark embedded in a longer literal: the literal's whole value is compared with a mark, so a mark
   that is only part of a string is invisible;
 - hex, octal and binary literals, and values computed at run time;
+- a restatement that replaces a reviewed occurrence of the same number: the count is the scope, not
+  the purpose, so the scan cannot tell a specification constant from a bound written over it;
 - an escape other than `\n`, `\t`, `\r`, `\0`, `\\`, `\"`, `\'` or `\u{…}`: it is left as written,
   so a mark spelled with `\xNN` is invisible;
 - any other crate, the JavaScript kit and the product's own sources;

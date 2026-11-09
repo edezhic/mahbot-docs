@@ -2137,7 +2137,19 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         marks: &["pdf_page_tree_nested"],
     },
     Unreached {
-        reason: "no generated fixture nests an object as deep as the copy follows, and the parser stops at its own nesting cap first: the cap is the crate's own (`engine.object_depth_max`)",
+        reason: "no generated fixture reads its own bytes more times over than `engine.pdf_scan_passes_max` allows: the cap is the crate's own, so its test lowers the bound through the scan's seam",
+        marks: &["pdf_page_scan_limit"],
+    },
+    Unreached {
+        reason: "no generated fixture holds a container that decodes past `engine.container_decode_max_bytes`: the cap is the crate's own, so its test lowers the ceiling",
+        marks: &["pdf_page_container_limit"],
+    },
+    Unreached {
+        reason: "no generated fixture numbers an object past `engine.object_number_max`: the reference renumbers what its writer holds and so produces, and the crate's own test builds the file",
+        marks: &["pdf_page_object_limit"],
+    },
+    Unreached {
+        reason: "no corpus page nests an object deeper than `engine.object_depth_max`, the depth the body scan and a page copy both follow: the cap is the crate's own, and the crate's own test builds the document that does",
         marks: &["pdf_page_object_nested"],
     },
     Unreached {

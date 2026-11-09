@@ -383,10 +383,35 @@ pub struct EngineBounds {
     /// The deepest page tree the walk follows before it refuses: a real tree nests a handful of
     /// levels, and the bound keeps a crafted chain from making the walk as long as the file.
     pub page_tree_depth_max: usize,
-    /// The deepest object syntax a page copy follows before it refuses. The parser bounds its own
-    /// nesting at a hundred, so this guard sits above it and catches only an object the engine built
-    /// deeper; it exists so a copy never relies on the parser's bound alone.
+    /// The deepest object syntax the body scan and a page copy follow. An object nested past it is
+    /// kept unread by the scan and named, and a page that reaches it — or an in-place action that
+    /// writes every object — is refused with the engine's own sentence.
     pub object_depth_max: usize,
+    /// How many times over a file's own length the body scan may read it before it refuses. A walk
+    /// that reads each byte once stays well inside it; a file built to make the recovery read the
+    /// same bytes over and over is refused rather than scanned indefinitely. A look at what comes
+    /// next is not a read of it and never touches this allowance. An object stream's decoded bytes
+    /// are held to the same number of passes over their own length. The reference has no such bound:
+    /// its library reads the same files without one.
+    pub pdf_scan_passes_max: usize,
+    /// The bytes one look at what comes next may inspect, so the walk's uncharged work is at most
+    /// that many reads per byte. Far more than an object header with comments between its numbers
+    /// takes, and small enough that no look can walk the file.
+    pub scan_look_bytes_max: usize,
+    /// The bytes one PDF container — an object stream or an index stream — may decode to: the same
+    /// ceiling the OOXML package reader puts on one entry. A stream's filter chain is decoded before
+    /// its objects are read, and two input bytes of `RunLengthDecode` can state a run of 128, so the
+    /// crate's own decoders check each run before they allocate it; a filter lopdf decodes states its
+    /// output only once it has allocated it, so for those the ceiling is applied to the result. A
+    /// container past it is refused with the engine's own sentence. The reference has no such bound:
+    /// its library decodes whatever the chain states.
+    pub container_decode_max_bytes: usize,
+    /// The highest object number the engine writes. The writer states one index entry per number up
+    /// to a document's high-water mark, so a body that numbers an object past this would make it emit
+    /// an index of hundreds of megabytes — or, at the top of the range, one that wraps to nothing and
+    /// reports success over a file that lost its index. A real file numbers its objects in the
+    /// thousands; the reference's writer renumbers what it holds, so it has no such bound.
+    pub object_number_max: usize,
 }
 
 /// One mark: the text it prints and the sides that print it.

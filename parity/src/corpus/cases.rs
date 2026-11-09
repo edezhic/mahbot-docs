@@ -7,13 +7,20 @@
 //! produced document: an effect that only a no-op could satisfy is not a check.
 
 use super::documents::{
-    BASIC_DOCX, BASIC_PDF, BASIC_PPTX, BASIC_XLSX, BROKEN_FORM_PDF, DEGENERATE_PAGE_PDF,
-    DOCX_BODYLESS, DOCX_BREAKS, DOCX_BROKEN, DOCX_COLUMNS, DOCX_EDIT, DOCX_MACRO, DOCX_REVISIONS,
-    DOCX_STRICT, ENCRYPTED_PDF, FORM_PDF, MERGE_A_PDF, MERGE_B_PDF, MERGE_C_PDF, NO_GEOMETRY_PDF,
-    PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_PDF, PICTURE_PNG, RICH_PDF, ROTATED_PDF,
-    TEMPLATE_DOCX, TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF, TRUNCATED_XLSX, XLSX_ALL_HIDDEN,
-    XLSX_BAD_MERGE_REF, XLSX_BROKEN_MERGES, XLSX_EDIT, XLSX_MACRO, XLSX_NO_CONTENT_TYPES,
-    XLSX_NO_FAMILY, XLSX_ONE_VISIBLE, XLSX_ONLY_SHEET, XLSX_SELF_CLOSING, XLSX_UNCLOSED_MERGE_CELL,
+    BASIC_DOCX, BASIC_PDF, BASIC_PPTX, BASIC_XLSX, BROKEN_FORM_PDF, DAMAGED_BODY_PDF,
+    DAMAGED_ENCRYPTED_PDF, DAMAGED_INCREMENTAL_PDF, DAMAGED_INDEX_STREAM_PDF,
+    DAMAGED_INDEX_SYNTAX_PDF, DAMAGED_LENGTH_ABSENT_PDF, DAMAGED_LENGTH_LONG_MANY_PDF,
+    DAMAGED_LENGTH_LONG_PDF, DAMAGED_LENGTH_SHORT_PDF, DAMAGED_NO_INDEX_PDF,
+    DAMAGED_OBJECT_STREAM_LENGTH_PDF, DAMAGED_OBJECT_STREAM_PDF, DAMAGED_POINTER_PDF,
+    DAMAGED_ROOT_PDF, DAMAGED_SHIFTED_PDF, DEGENERATE_PAGE_PDF, DOCX_BODYLESS, DOCX_BREAKS,
+    DOCX_BROKEN, DOCX_COLUMNS, DOCX_EDIT, DOCX_MACRO, DOCX_REVISIONS, DOCX_STRICT, ENCRYPTED_PDF,
+    FORM_PDF, MERGE_A_PDF, MERGE_B_PDF, MERGE_C_PDF, NO_GEOMETRY_PDF, OBJECT_STREAM_ASCII_HEX_PDF,
+    OBJECT_STREAM_INFLATED_PDF, OBJECT_STREAM_PDF, PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_PDF,
+    PICTURE_PNG, REPEATED_PAGE_ANNOTATED_PDF, REPEATED_PAGE_PDF, RICH_PDF, ROTATED_PDF,
+    TEMPLATE_DOCX, TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF, TRUNCATED_XLSX, TWO_CATALOGS_PDF,
+    XLSX_ALL_HIDDEN, XLSX_BAD_MERGE_REF, XLSX_BROKEN_MERGES, XLSX_EDIT, XLSX_MACRO,
+    XLSX_NO_CONTENT_TYPES, XLSX_NO_FAMILY, XLSX_ONE_VISIBLE, XLSX_ONLY_SHEET, XLSX_SELF_CLOSING,
+    XLSX_UNCLOSED_MERGE_CELL,
 };
 use super::effect::{BoxKind, Scalar, Scope};
 use super::{Case, Document, Effect, Expect, Reason};
@@ -3335,7 +3342,7 @@ fn pptx_edit_cases() -> Vec<Case> {
 // ── the PDF actions ───────────────────────────────────────────────────────────────────────────
 
 fn pdf_cases() -> Vec<Case> {
-    vec![
+    let mut cases = vec![
         produced(
             Family::Pdf,
             "pdf_merge",
@@ -3450,6 +3457,110 @@ fn pdf_cases() -> Vec<Case> {
                     output: None,
                     page: 1,
                     degrees: 90,
+                },
+            ],
+        ),
+        // An in-place action reads and writes one page object once per name, so the second read
+        // sees the turn the first write left: both names show two quarter turns.
+        produced(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("repeated_page"),
+            vec![REPEATED_PAGE_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/repeated-page.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            vec![
+                Effect::PageRotate {
+                    output: None,
+                    page: 0,
+                    degrees: 180,
+                },
+                Effect::PageRotate {
+                    output: None,
+                    page: 1,
+                    degrees: 180,
+                },
+            ],
+        ),
+        // The same double read through a crop: the second pass crops what the first left, so the
+        // stored box is the crop of the crop.
+        produced(
+            Family::Pdf,
+            "pdf_crop",
+            Some("repeated_page"),
+            vec![REPEATED_PAGE_PDF],
+            json!({
+                "op": "pdf_crop",
+                "input": "$in/repeated-page.pdf",
+                "area": { "x": 0.1, "y": 0.1, "width": 0.5, "height": 0.5 },
+                "pages": "all",
+                "output": "$out/cropped.pdf",
+            }),
+            vec!["cropped.pdf"],
+            vec![
+                Effect::PageBox {
+                    output: None,
+                    page: 0,
+                    which: BoxKind::Crop,
+                    value: [89.292, 505.134, 238.112, 715.6065],
+                },
+                Effect::PageBox {
+                    output: None,
+                    page: 1,
+                    which: BoxKind::Crop,
+                    value: [89.292, 505.134, 238.112, 715.6065],
+                },
+            ],
+        ),
+        // The same double read through a resize, on a page whose box it inherits and whose
+        // annotation moves with the content: the second pass fits what the first left, so both
+        // names end at the asked size with the annotation moved once.
+        produced(
+            Family::Pdf,
+            "pdf_resize",
+            Some("repeated_page"),
+            vec![REPEATED_PAGE_ANNOTATED_PDF],
+            json!({
+                "op": "pdf_resize",
+                "input": "$in/repeated-page-annotated.pdf",
+                "width": 300,
+                "height": 300,
+                "pages": "all",
+                "output": "$out/resized.pdf",
+            }),
+            vec!["resized.pdf"],
+            vec![
+                Effect::PageBox {
+                    output: None,
+                    page: 0,
+                    which: BoxKind::Media,
+                    value: [0.0, 541.89, 300.0, 841.89],
+                },
+                Effect::PageBox {
+                    output: None,
+                    page: 1,
+                    which: BoxKind::Media,
+                    value: [0.0, 541.89, 300.0, 841.89],
+                },
+                Effect::PageAnnot {
+                    output: None,
+                    page: 0,
+                    index: 0,
+                    subtype: "Text",
+                    rect: [61.7557, 559.7071, 65.3191, 563.2705],
+                },
+                Effect::PageAnnot {
+                    output: None,
+                    page: 1,
+                    index: 0,
+                    subtype: "Text",
+                    rect: [61.7557, 559.7071, 65.3191, 563.2705],
                 },
             ],
         ),
@@ -4112,6 +4223,463 @@ fn pdf_cases() -> Vec<Case> {
                 },
             ],
         ),
+    ];
+    // A file whose body is intact and whose index is not: the reference never consults the index, so
+    // all five actions answer from the body alone, and the produced file must hold both pages.
+    cases.extend(damaged_page_actions("shifted_index", DAMAGED_SHIFTED_PDF));
+    cases.extend(damaged_page_actions("absent_index", DAMAGED_NO_INDEX_PDF));
+    cases.extend(damaged_page_actions("misplaced_index", DAMAGED_POINTER_PDF));
+    // A stream whose stated length is not its own is recovered from its own end marker, on the path
+    // that copies what a page reaches and on the path that rewrites every object of the file.
+    cases.extend(length_damaged_page_actions(
+        "short_length",
+        DAMAGED_LENGTH_SHORT_PDF,
+    ));
+    cases.extend(length_damaged_page_actions(
+        "long_length",
+        DAMAGED_LENGTH_LONG_PDF,
+    ));
+    cases.extend(length_damaged_page_actions(
+        "absent_length",
+        DAMAGED_LENGTH_ABSENT_PDF,
+    ));
+    // Twelve streams whose stated lengths all miss their end markers: the recovery looks at the place
+    // a length names rather than reading the distance to it, so all twelve are recovered.
+    cases.push(produced(
+        Family::Pdf,
+        "pdf_merge",
+        Some("long_length_many"),
+        vec![DAMAGED_LENGTH_LONG_MANY_PDF, BASIC_PDF],
+        json!({
+            "op": "pdf_merge",
+            "inputs": ["$in/damaged-length-long-many.pdf", "$in/basic.pdf"],
+            "output": "$out/merged.pdf",
+        }),
+        vec!["merged.pdf"],
+        vec![
+            Effect::PageCount {
+                output: None,
+                count: 3,
+            },
+            Effect::PageText {
+                output: None,
+                page: 0,
+                text: "Line 12",
+            },
+            Effect::PageText {
+                output: None,
+                page: 1,
+                text: "Page one text",
+            },
+        ],
+    ));
+    cases.extend([
+        // The trailer names a font as its root: the catalog is recovered from the body.
+        produced(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("root_recovered"),
+            vec![DAMAGED_ROOT_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/damaged-root.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            vec![
+                Effect::PageRotate {
+                    output: None,
+                    page: 0,
+                    degrees: 90,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "Page one text",
+                },
+            ],
+        ),
+        // The trailer names the first of the file's two catalogs and the second names a page of its
+        // own: the root the file states is the one the reference reads.
+        produced(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("two_catalogs"),
+            vec![TWO_CATALOGS_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/two-catalogs.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 2,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 1,
+                    text: "Page two text",
+                },
+            ],
+        ),
+        // An incremental save left the index pointing at the first definition of page one's content.
+        // The last definition in the body wins, so the produced page draws the revised text and not
+        // the text the index still names.
+        produced(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("last_definition"),
+            vec![DAMAGED_INCREMENTAL_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/damaged-incremental.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            vec![
+                Effect::PageRotate {
+                    output: None,
+                    page: 0,
+                    degrees: 90,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "Revised text",
+                },
+            ],
+        ),
+        // A modern file: its objects live in an object stream and its index is a cross-reference
+        // stream. A misplaced pointer, an index stream that is gone and a container whose own length
+        // is wrong are all recovered from the body.
+        produced(
+            Family::Pdf,
+            "pdf_merge",
+            Some("object_stream_misplaced_index"),
+            vec![DAMAGED_OBJECT_STREAM_PDF, BASIC_PDF],
+            json!({
+                "op": "pdf_merge",
+                "inputs": ["$in/damaged-object-stream.pdf", "$in/basic.pdf"],
+                "output": "$out/merged.pdf",
+            }),
+            vec!["merged.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 4,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 1,
+                    text: "Page two text",
+                },
+            ],
+        ),
+        produced(
+            Family::Pdf,
+            "pdf_merge",
+            Some("index_stream_absent"),
+            vec![DAMAGED_INDEX_STREAM_PDF, BASIC_PDF],
+            json!({
+                "op": "pdf_merge",
+                "inputs": ["$in/damaged-index-stream.pdf", "$in/basic.pdf"],
+                "output": "$out/merged.pdf",
+            }),
+            vec!["merged.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 4,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "Page one text",
+                },
+            ],
+        ),
+        produced(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("object_stream_wrong_length"),
+            vec![DAMAGED_OBJECT_STREAM_LENGTH_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/damaged-object-stream-length.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            vec![
+                Effect::PageRotate {
+                    output: None,
+                    page: 0,
+                    degrees: 90,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "Page one text",
+                },
+            ],
+        ),
+        // A container that decodes to far more than the file that holds it: the allowance its walk
+        // gets is its own decoded length, not a share of the file's.
+        produced(
+            Family::Pdf,
+            "pdf_merge",
+            Some("object_stream_inflated"),
+            vec![OBJECT_STREAM_INFLATED_PDF, BASIC_PDF],
+            json!({
+                "op": "pdf_merge",
+                "inputs": ["$in/object-stream-inflated.pdf", "$in/basic.pdf"],
+                "output": "$out/merged.pdf",
+            }),
+            vec!["merged.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 4,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 1,
+                    text: "Page two text",
+                },
+            ],
+        ),
+        // The same modern shape with nothing damaged: it answers exactly as it does today.
+        produced(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("object_stream"),
+            vec![OBJECT_STREAM_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/object-stream.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            vec![Effect::PageRotate {
+                output: None,
+                page: 1,
+                degrees: 90,
+            }],
+        ),
+        // The same shape whose container is ASCII-hex encoded: the hand-rolled decoder the reference's
+        // library has and lopdf does not, judged by the gate rather than only by a unit test.
+        produced(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("object_stream_ascii_hex"),
+            vec![OBJECT_STREAM_ASCII_HEX_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/object-stream-ascii-hex.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 2,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 1,
+                    text: "Page two text",
+                },
+            ],
+        ),
+    ]);
+    cases
+}
+
+/// The two paths a wrong-length stream takes: a merge copies what a page reaches, and a rotation
+/// rewrites every object of the file, so both must carry the bytes the body holds.
+fn length_damaged_page_actions(sub_operation: &'static str, document: Document) -> Vec<Case> {
+    vec![
+        damaged_merge(sub_operation, document),
+        damaged_rotate(
+            sub_operation,
+            document,
+            vec![
+                Effect::PageRotate {
+                    output: None,
+                    page: 0,
+                    degrees: 90,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "Page one text",
+                },
+            ],
+        ),
+    ]
+}
+
+/// A rotation of every page of `document`, judged by `effects`: the path that rewrites every object of
+/// the file, so a stream the body holds must survive it.
+fn damaged_rotate(sub_operation: &'static str, document: Document, effects: Vec<Effect>) -> Case {
+    produced(
+        Family::Pdf,
+        "pdf_rotate",
+        Some(sub_operation),
+        vec![document],
+        json!({
+            "op": "pdf_rotate",
+            "input": format!("$in/{}", document.name),
+            "degrees": 90,
+            "pages": "all",
+            "output": "$out/rotated.pdf",
+        }),
+        vec!["rotated.pdf"],
+        effects,
+    )
+}
+
+/// A merge of `document` beside the clean file, which must hold four pages: a file merely copied is
+/// not what the operation promises.
+fn damaged_merge(sub_operation: &'static str, document: Document) -> Case {
+    produced(
+        Family::Pdf,
+        "pdf_merge",
+        Some(sub_operation),
+        vec![document, BASIC_PDF],
+        json!({
+            "op": "pdf_merge",
+            "inputs": [format!("$in/{}", document.name), "$in/basic.pdf"],
+            "output": "$out/merged.pdf",
+        }),
+        vec!["merged.pdf"],
+        vec![
+            Effect::PageCount {
+                output: None,
+                count: 4,
+            },
+            Effect::PageText {
+                output: None,
+                page: 0,
+                text: "Page one text",
+            },
+            Effect::PageText {
+                output: None,
+                page: 2,
+                text: "Page one text",
+            },
+        ],
+    )
+}
+
+/// The five page actions on one document whose body is intact and whose index is not. Each must
+/// produce the file the reference produces from the same body, with the same answer: the same two
+/// pages, the same content and the same boxes.
+fn damaged_page_actions(sub_operation: &'static str, document: Document) -> Vec<Case> {
+    let input = format!("$in/{}", document.name);
+    vec![
+        // The merge names the damaged file beside a clean one, so the produced document holds four
+        // pages: a file merely copied is not what the operation promises.
+        damaged_merge(sub_operation, document),
+        produced(
+            Family::Pdf,
+            "pdf_split",
+            Some(sub_operation),
+            vec![document],
+            json!({
+                "op": "pdf_split",
+                "input": input,
+                "groups": [[1], [2]],
+                "outputs": ["$out/damaged_part1.pdf", "$out/damaged_part2.pdf"],
+            }),
+            vec!["damaged_part1.pdf", "damaged_part2.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: Some("damaged_part1.pdf"),
+                    count: 1,
+                },
+                Effect::PageText {
+                    output: Some("damaged_part1.pdf"),
+                    page: 0,
+                    text: "Page one text",
+                },
+                Effect::PageText {
+                    output: Some("damaged_part2.pdf"),
+                    page: 0,
+                    text: "Page two text",
+                },
+            ],
+        ),
+        damaged_rotate(
+            sub_operation,
+            document,
+            vec![
+                Effect::PageRotate {
+                    output: None,
+                    page: 0,
+                    degrees: 90,
+                },
+                Effect::PageRotate {
+                    output: None,
+                    page: 1,
+                    degrees: 90,
+                },
+            ],
+        ),
+        produced(
+            Family::Pdf,
+            "pdf_crop",
+            Some(sub_operation),
+            vec![document],
+            json!({
+                "op": "pdf_crop",
+                "input": input,
+                "area": { "x": 0.1, "y": 0.1, "width": 0.5, "height": 0.5 },
+                "pages": [1],
+                "output": "$out/cropped.pdf",
+            }),
+            vec!["cropped.pdf"],
+            vec![Effect::PageBox {
+                output: None,
+                page: 0,
+                which: BoxKind::Crop,
+                value: [59.528, 336.756, 357.168, 757.701],
+            }],
+        ),
+        produced(
+            Family::Pdf,
+            "pdf_resize",
+            Some(sub_operation),
+            vec![document],
+            json!({
+                "op": "pdf_resize",
+                "input": input,
+                "width": 400,
+                "height": 500,
+                "pages": [1],
+                "output": "$out/resized.pdf",
+            }),
+            vec!["resized.pdf"],
+            vec![Effect::PageBox {
+                output: None,
+                page: 0,
+                which: BoxKind::Media,
+                value: [0.0, 341.89, 400.0, 841.89],
+            }],
+        ),
     ]
 }
 
@@ -4166,6 +4734,55 @@ fn failure_cases() -> Vec<Case> {
             }),
             vec!["rotated.pdf"],
             Expect::Refused(Reason::contains("do not form a PDF this tool can read")),
+        ),
+        // A file whose body itself is cut: nothing can account for the objects that are gone, so the
+        // refusal is the reference's own rather than a recovered file that lost pages.
+        declined(
+            Family::Pdf,
+            "pdf_merge",
+            Some("body_damaged"),
+            vec![DAMAGED_BODY_PDF],
+            json!({
+                "op": "pdf_merge",
+                "inputs": ["$in/damaged-body.pdf"],
+                "output": "$out/merged.pdf",
+            }),
+            vec!["merged.pdf"],
+            Expect::Refused(Reason::contains("do not form a PDF this tool can read")),
+        ),
+        // An index entry that starts with a digit and then states something else: the reference's own
+        // parse throws on it although the body is intact, so this file is refused, not recovered.
+        declined(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("index_syntax_broken"),
+            vec![DAMAGED_INDEX_SYNTAX_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/damaged-index-syntax.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            Expect::Refused(Reason::contains("do not form a PDF this tool can read")),
+        ),
+        // A file that says it needs a password and whose index is damaged: the entry the file still
+        // carries decides, so it answers as encrypted and is not processed.
+        declined(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("encrypted_damaged_index"),
+            vec![DAMAGED_ENCRYPTED_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/damaged-encrypted.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            Expect::Refused(Reason::contains("is password-protected")),
         ),
         // The three shapes a crop's area is refused for, in the order the reference checks them.
         declined(

@@ -314,6 +314,18 @@ pub const BASIC_PDF: Document = Document {
     build: build::pdf_basic,
 };
 
+/// The PDF whose page tree names one page object twice.
+pub const REPEATED_PAGE_PDF: Document = Document {
+    name: "repeated-page.pdf",
+    build: build::pdf_repeated_page,
+};
+
+/// [`REPEATED_PAGE_PDF`] with its box on the page tree and an annotation on the page.
+pub const REPEATED_PAGE_ANNOTATED_PDF: Document = Document {
+    name: "repeated-page-annotated.pdf",
+    build: build::pdf_repeated_page_annotated,
+};
+
 /// The basic PDF under the two names a merge names its inputs.
 pub const MERGE_A_PDF: Document = Document {
     name: "a.pdf",
@@ -322,6 +334,122 @@ pub const MERGE_A_PDF: Document = Document {
 pub const MERGE_B_PDF: Document = Document {
     name: "b.pdf",
     build: build::pdf_basic,
+};
+
+// ── pdf: the writer's own inputs, whose body is intact and whose index is not ─────────────────
+
+/// Two A4 pages whose index offsets are all shifted.
+pub const DAMAGED_SHIFTED_PDF: Document = Document {
+    name: "damaged-shifted.pdf",
+    build: build::pdf_damaged_shifted,
+};
+
+/// The same pages with no index at all.
+pub const DAMAGED_NO_INDEX_PDF: Document = Document {
+    name: "damaged-no-index.pdf",
+    build: build::pdf_damaged_no_index,
+};
+
+/// The same pages with `startxref` naming zero.
+pub const DAMAGED_POINTER_PDF: Document = Document {
+    name: "damaged-pointer.pdf",
+    build: build::pdf_damaged_pointer,
+};
+
+/// The same pages rooted at a font rather than a catalog.
+pub const DAMAGED_ROOT_PDF: Document = Document {
+    name: "damaged-root.pdf",
+    build: build::pdf_damaged_root,
+};
+
+/// Two A4 pages whose trailer names the first of two catalogs, the second naming a page of its own.
+pub const TWO_CATALOGS_PDF: Document = Document {
+    name: "two-catalogs.pdf",
+    build: build::pdf_two_catalogs,
+};
+
+/// The same pages saved again, the index still naming the first definition of a page's content.
+pub const DAMAGED_INCREMENTAL_PDF: Document = Document {
+    name: "damaged-incremental.pdf",
+    build: build::pdf_damaged_incremental,
+};
+
+/// The same pages, the first content stream's length ten bytes short.
+pub const DAMAGED_LENGTH_SHORT_PDF: Document = Document {
+    name: "damaged-length-short.pdf",
+    build: build::pdf_damaged_length_short,
+};
+
+/// The same pages, the first content stream's length far too long.
+pub const DAMAGED_LENGTH_LONG_PDF: Document = Document {
+    name: "damaged-length-long.pdf",
+    build: build::pdf_damaged_length_long,
+};
+
+/// The same pages, the first content stream stating no length.
+pub const DAMAGED_LENGTH_ABSENT_PDF: Document = Document {
+    name: "damaged-length-absent.pdf",
+    build: build::pdf_damaged_length_absent,
+};
+
+/// One page drawing twelve lines from twelve streams, each length far too long.
+pub const DAMAGED_LENGTH_LONG_MANY_PDF: Document = Document {
+    name: "damaged-length-long-many.pdf",
+    build: build::pdf_damaged_length_long_many,
+};
+
+/// A modern file: objects in an object stream, index a cross-reference stream.
+pub const OBJECT_STREAM_PDF: Document = Document {
+    name: "object-stream.pdf",
+    build: build::pdf_object_stream_stated,
+};
+
+/// The same modern file with `startxref` naming zero.
+pub const DAMAGED_OBJECT_STREAM_PDF: Document = Document {
+    name: "damaged-object-stream.pdf",
+    build: build::pdf_damaged_object_stream,
+};
+
+/// The same modern file with no index stream.
+pub const DAMAGED_INDEX_STREAM_PDF: Document = Document {
+    name: "damaged-index-stream.pdf",
+    build: build::pdf_damaged_index_stream,
+};
+
+/// The same modern file whose container states a length that is not its own.
+pub const DAMAGED_OBJECT_STREAM_LENGTH_PDF: Document = Document {
+    name: "damaged-object-stream-length.pdf",
+    build: build::pdf_damaged_object_stream_length,
+};
+
+/// The same modern file whose container is ASCII-hex encoded.
+pub const OBJECT_STREAM_ASCII_HEX_PDF: Document = Document {
+    name: "object-stream-ascii-hex.pdf",
+    build: build::pdf_object_stream_ascii_hex,
+};
+
+/// The same modern file whose container decodes to far more than the file holds.
+pub const OBJECT_STREAM_INFLATED_PDF: Document = Document {
+    name: "object-stream-inflated.pdf",
+    build: build::pdf_object_stream_inflated,
+};
+
+/// Two A4 pages carrying an encryption dictionary, with a shifted index.
+pub const DAMAGED_ENCRYPTED_PDF: Document = Document {
+    name: "damaged-encrypted.pdf",
+    build: build::pdf_damaged_encrypted,
+};
+
+/// A PDF cut inside its body.
+pub const DAMAGED_BODY_PDF: Document = Document {
+    name: "damaged-body.pdf",
+    build: build::pdf_damaged_body,
+};
+
+/// A PDF whose first cross-reference entry is not a number.
+pub const DAMAGED_INDEX_SYNTAX_PDF: Document = Document {
+    name: "damaged-index-syntax.pdf",
+    build: build::pdf_damaged_index_syntax,
 };
 
 /// A third distinct document a merge names, so the order its pages arrive in is judged.
@@ -746,7 +874,28 @@ pub fn writer_documents() -> Vec<Document> {
         MERGE_B_PDF,
         MERGE_C_PDF,
         ROTATED_PDF,
+        REPEATED_PAGE_PDF,
+        REPEATED_PAGE_ANNOTATED_PDF,
         RICH_PDF,
         NO_GEOMETRY_PDF,
+        DAMAGED_SHIFTED_PDF,
+        DAMAGED_NO_INDEX_PDF,
+        DAMAGED_POINTER_PDF,
+        DAMAGED_ROOT_PDF,
+        TWO_CATALOGS_PDF,
+        DAMAGED_INCREMENTAL_PDF,
+        DAMAGED_LENGTH_SHORT_PDF,
+        DAMAGED_LENGTH_LONG_PDF,
+        DAMAGED_LENGTH_ABSENT_PDF,
+        DAMAGED_LENGTH_LONG_MANY_PDF,
+        OBJECT_STREAM_PDF,
+        DAMAGED_OBJECT_STREAM_PDF,
+        DAMAGED_INDEX_STREAM_PDF,
+        DAMAGED_OBJECT_STREAM_LENGTH_PDF,
+        OBJECT_STREAM_ASCII_HEX_PDF,
+        OBJECT_STREAM_INFLATED_PDF,
+        DAMAGED_ENCRYPTED_PDF,
+        DAMAGED_BODY_PDF,
+        DAMAGED_INDEX_SYNTAX_PDF,
     ]
 }

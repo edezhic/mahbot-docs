@@ -4,8 +4,10 @@
 //! the pages into it, so a produced file holds its pages and nothing of the source's catalog — no
 //! form, outline, labels, tags or name tree; `pdf_rotate`, `pdf_crop` and `pdf_resize` load the file
 //! and change the page they name, so everything else it holds survives. [`page`] is the object model
-//! all five work through, and it refuses a file whose pages — or, for the in-place actions, whose
-//! streams — it cannot read rather than rewriting one.
+//! all five work through, and [`scan`] is how it reads a file: the way the reference's library reads
+//! one, from the body and never through the cross-reference index, so a file whose index is damaged
+//! or absent is answered from what its body holds. A file whose pages — or, for the in-place actions,
+//! whose streams — cannot be read at all is refused rather than rewritten.
 //!
 //! The reference's answers for these actions carry notes and no losses — a resize says which
 //! annotations could not follow the content — and its refusals are its own words, read from the
@@ -35,6 +37,7 @@ use crate::vocabulary::{self, vocabulary};
 
 mod date;
 mod page;
+mod scan;
 
 /// The files one call writes, in the order the outputs were named, and the notes its answer
 /// carries. A part is written as soon as it is built, so a split of many parts holds one at a time;
@@ -199,10 +202,14 @@ fn run_merge_with(
         let page::Opened {
             document: source,
             pages: ids,
+            nested,
+            depth,
+            chains,
+            ancestry,
         } = page::open(&bytes, input)?;
         // One copier per input: an object two of its pages share is copied once, and an object of
         // another input can never be mistaken for it.
-        let mut copier = page::Copier::new(page::name(input));
+        let mut copier = page::Copier::new(page::name(input), nested, depth, &chains, &ancestry);
         for id in ids {
             let copy = copier.copy_page(&source, &mut document, id)?;
             page::add_page(&mut document, copy)?;
@@ -218,6 +225,10 @@ fn run_split(request: &Request, produced: &mut Produced) -> Result<(), Failure> 
     let page::Opened {
         document: source,
         pages: ids,
+        nested,
+        depth,
+        chains,
+        ancestry,
     } = page::open(&bytes, input)?;
     // Every group's pages resolve first, so the shared page cap is checked on the total the call
     // names — fifty groups of "all" would each pass a per-group check on their own.
@@ -234,7 +245,8 @@ fn run_split(request: &Request, produced: &mut Produced) -> Result<(), Failure> 
         page::fresh_metadata(&mut document, request.values.get("metadata"))?;
         // One copier per part: each part is its own document, so a page copied into two of them is
         // two copies, as the reference's one copier per copy call makes.
-        let mut copier = page::Copier::new(page::name(input));
+        let mut copier =
+            page::Copier::new(page::name(input), nested.clone(), depth, &chains, &ancestry);
         for index in &indices {
             let copy = copier.copy_page(&source, &mut document, ids[*index])?;
             page::add_page(&mut document, copy)?;
@@ -249,10 +261,13 @@ fn run_rotate(request: &Request, produced: &mut Produced) -> Result<(), Failure>
     let page::Opened {
         mut document,
         pages: ids,
+        chains,
+        ancestry,
+        ..
     } = editable(request)?;
     for index in page_indices(&ids, request.values.get("pages"))? {
         let id = ids[index];
-        let Some(current) = page::rotation(&document, id) else {
+        let Some(current) = page::rotation(&document, &chains, &ancestry, id) else {
             return Err(Failure::internal(crate::contained::engine_failed()));
         };
         let next = ((current + degrees) % 360.0 + 360.0) % 360.0;
@@ -272,10 +287,20 @@ fn run_crop(request: &Request, produced: &mut Produced) -> Result<(), Failure> {
     let page::Opened {
         mut document,
         pages: ids,
+        chains,
+        ancestry,
+        ..
     } = editable(request)?;
     for index in page_indices(&ids, request.values.get("pages"))? {
         let id = ids[index];
-        let frame = visible(&document, id, index, "pdf_page_no_area_crop")?;
+        let frame = visible(
+            &document,
+            &chains,
+            &ancestry,
+            id,
+            index,
+            "pdf_page_no_area_crop",
+        )?;
         // A fraction is of what the page currently shows, measured from the displayed top-left, so
         // a rotated page is cropped where the caller sees it. Only the visible area changes.
         let crop = page::frame_rect(
@@ -297,13 +322,23 @@ fn run_resize(request: &Request, produced: &mut Produced) -> Result<(), Failure>
     let page::Opened {
         mut document,
         pages: ids,
+        chains,
+        ancestry,
+        ..
     } = editable(request)?;
     // The pages whose annotations could not follow their content, with how many on each, so the
     // answer carries one sentence however many pages the call names.
     let mut stuck: BTreeMap<usize, usize> = BTreeMap::new();
     for index in page_indices(&ids, request.values.get("pages"))? {
         let id = ids[index];
-        let frame = visible(&document, id, index, "pdf_page_no_area_resize")?;
+        let frame = visible(
+            &document,
+            &chains,
+            &ancestry,
+            id,
+            index,
+            "pdf_page_no_area_resize",
+        )?;
         // A resize never stretches: the page keeps its proportions and is scaled to the larger size
         // both asked sides allow, then centred in what was asked.
         let scale = (width / frame.width).min(height / frame.height);
@@ -315,14 +350,14 @@ fn run_resize(request: &Request, produced: &mut Produced) -> Result<(), Failure>
         let ty = frame.right.1 * tdx + frame.down.1 * tdy + (1.0 - scale) * frame.origin.1;
         // The library normalises the page before it wraps the content, which is what makes the page
         // state its annotations itself; a page that states something that is not a list fails here.
-        page::normalize_annots(&mut document, id)?;
+        page::normalize_annots(&mut document, &chains, id)?;
         wrap_resize(&mut document, id, scale, tx, ty);
         // The visible area reads exactly the asked size afterwards; both boxes are written, since a
         // page cropped before would keep its old crop box otherwise.
         let fitted = page::frame_rect(&frame, 0.0, 0.0, width, height);
         page::set_box(&mut document, id, "MediaBox", fitted);
         page::set_box(&mut document, id, "CropBox", fitted);
-        let could_not = page::move_annotations(&mut document, id, scale, tx, ty);
+        let could_not = page::move_annotations(&mut document, &chains, id, scale, tx, ty);
         if could_not > 0 {
             stuck.insert(index + 1, could_not);
         }
@@ -397,7 +432,7 @@ fn request_input(request: &Request) -> Result<&Path, Failure> {
 }
 
 /// The document a rotation, a crop or a resize edits: read, opened, dated, and refused when any
-/// stream in it is one the parser never read. An in-place action writes every object the file holds
+/// stream in it is one the walk never read. An in-place action writes every object the file holds
 /// back out, so a stream it could not read would be written empty — the page or its content lost
 /// while the answer reported success. A merge and a split copy only what their pages reach, and the
 /// copier makes the same refusal for that smaller set.
@@ -405,7 +440,7 @@ fn editable(request: &Request) -> Result<page::Opened, Failure> {
     let input = request_input(request)?;
     let bytes = page::read(input)?;
     let mut opened = page::open(&bytes, input)?;
-    page::require_readable(&opened.document, input)?;
+    page::require_readable(&opened, input)?;
     page::edit_metadata(&mut opened.document, request.values.get("metadata"))?;
     Ok(opened)
 }
@@ -468,11 +503,13 @@ fn page_index(value: &Value, count: usize) -> Result<usize, Failure> {
 /// The frame of a page the call changes, refused in `mark` when the page shows nothing.
 fn visible(
     document: &Document,
+    chains: &page::Chains,
+    ancestry: &page::Ancestry,
     page: ObjectId,
     index: usize,
     mark: &str,
 ) -> Result<page::Frame, Failure> {
-    let frame = page::frame(document, page)?;
+    let frame = page::frame(document, chains, ancestry, page)?;
     if frame.width > 0.0 && frame.height > 0.0 {
         return Ok(frame);
     }
@@ -619,13 +656,14 @@ mod tests {
     // is held to a tolerance where it rounds.
     #![allow(clippy::float_cmp)]
 
+    use std::collections::BTreeSet;
     use std::path::{Path, PathBuf};
 
     use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
     use serde_json::{Value, json};
 
     use super::page;
-    use crate::operation::{Destination, Outcome, Request, execute};
+    use crate::operation::{Destination, Failure, Outcome, Request, execute};
     use crate::reading::{Reading, read};
     use crate::test_support::build;
     use crate::vocabulary::{self, vocabulary};
@@ -684,6 +722,56 @@ mod tests {
             }
             Reading::Unsupported => panic!("the produced file is not a document"),
         }
+    }
+
+    /// `work` on its own thread, answering what it answered, and failing the test when it has not
+    /// finished within `seconds`: an in-process walk cannot be interrupted.
+    fn within<T, F>(seconds: u64, what: &str, work: F) -> T
+    where
+        T: Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
+    {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(work());
+        });
+        match receiver.recv_timeout(std::time::Duration::from_secs(seconds)) {
+            Ok(value) => value,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                panic!("{what} did not finish in {seconds} seconds")
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => panic!("{what} panicked"),
+        }
+    }
+
+    /// The failure a call answered with, in the class the engine's own bounds carry: `mark`'s sentence
+    /// with `values`.
+    fn assert_internal(failure: &Failure, mark: &str, values: &[(&str, &str)]) {
+        assert!(!failure.is_usage(), "{failure:?}");
+        assert_eq!(failure.reason, vocabulary().marks.format(mark, values));
+    }
+
+    /// [`assert_internal`] for a call's answer, which must also have written nothing.
+    fn assert_internal_refusal(outcome: &Outcome, mark: &str, values: &[(&str, &str)]) {
+        assert_internal(refusal(outcome), mark, values);
+    }
+
+    /// The failure a call answered with, in the class the reference's own refusals carry: `mark`'s
+    /// sentence with `values`.
+    fn assert_usage(failure: &Failure, mark: &str, values: &[(&str, &str)]) {
+        assert!(failure.is_usage(), "{failure:?}");
+        assert_eq!(failure.reason, vocabulary().marks.format(mark, values));
+    }
+
+    /// [`assert_usage`] for a call's answer, which must also have written nothing.
+    fn assert_usage_refusal(outcome: &Outcome, mark: &str, values: &[(&str, &str)]) {
+        assert_usage(refusal(outcome), mark, values);
+    }
+
+    /// The failure a refused call carries, which must have left no file behind.
+    fn refusal(outcome: &Outcome) -> &Failure {
+        assert!(outcome.outputs.is_empty(), "a refusal wrote a file");
+        outcome.failure.as_ref().expect("the call is refused")
     }
 
     /// The produced file parsed with the object model.
@@ -780,11 +868,161 @@ mod tests {
 
     // ── documents assembled by hand, for shapes no generated fixture states ──────────────────────
 
+    /// A document whose only page references an object nested `depth` arrays deep.
+    fn page_with_deep_object(depth: usize) -> (Document, ObjectId) {
+        let mut document = page::fresh();
+        let content = text_stream(&mut document, "Deep object text");
+        let page = a4_page(&mut document, Object::Reference(content));
+        let deep = deep_object(&mut document, depth);
+        document
+            .get_object_mut(page)
+            .and_then(Object::as_dict_mut)
+            .expect("a page")
+            .set("Deep", Object::Reference(deep));
+        (document, page)
+    }
+
+    /// `depth` nested arrays, as an indirect object.
+    fn deep_object(document: &mut Document, depth: usize) -> ObjectId {
+        let mut deep = Object::Null;
+        for _ in 0..depth {
+            deep = Object::Array(vec![deep]);
+        }
+        document.add_object(deep)
+    }
+
     /// A document written by the object model itself.
     fn written(mut document: Document) -> Vec<u8> {
         let mut bytes = Vec::new();
         document.save_to(&mut bytes).expect("a written document");
         bytes
+    }
+
+    /// A one-page file whose trailer holds an array nested `depth` arrays deep.
+    fn trailer_nested(depth: usize) -> Vec<u8> {
+        let mut pdf = build::PdfObjects::default();
+        let pages = pdf.reserve();
+        let catalog = pdf.reserve();
+        let page = pdf.reserve();
+        let content = pdf.stream("", b"");
+        pdf.set(
+            &page,
+            format!(
+                "<< /Type /Page /Parent {pages} /MediaBox {} /Contents {content} >>",
+                build::PDF_PAGE
+            ),
+        );
+        pdf.set(
+            &pages,
+            format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+        );
+        pdf.set(&catalog, format!("<< /Type /Catalog /Pages {pages} >>"));
+        let deep = format!("{}0{}", "[".repeat(depth), "]".repeat(depth));
+        pdf.finish(&catalog, &format!(" /Deep {deep}"))
+    }
+
+    /// A one-page file: `font` and `content` are two of its objects, and `page` states what the page
+    /// holds beyond its type, parent, box and content — its `/Resources` and any entry of its own —
+    /// receiving the font's reference and the writer, so it can name an object of its own. The font and
+    /// the content are written before `page` runs, so an object it names is the file's last.
+    fn one_page(
+        font: impl Into<Vec<u8>>,
+        content: impl Into<Vec<u8>>,
+        page: impl FnOnce(&mut build::PdfObjects, &str) -> String,
+    ) -> Vec<u8> {
+        let mut pdf = build::PdfObjects::default();
+        let page_ref = pdf.reserve();
+        let pages = pdf.reserve();
+        let catalog = pdf.reserve();
+        let font = pdf.push(font);
+        let content = pdf.push(content);
+        let entries = page(&mut pdf, &font);
+        pdf.set(
+            &page_ref,
+            format!(
+                "<< /Type /Page /Parent {pages} /MediaBox {} {entries} /Contents {content} >>",
+                build::PDF_PAGE
+            ),
+        );
+        pdf.set(
+            &pages,
+            format!("<< /Type /Pages /Kids [{page_ref}] /Count 1 >>"),
+        );
+        pdf.set(&catalog, format!("<< /Type /Catalog /Pages {pages} >>"));
+        pdf.finish(&catalog, "")
+    }
+
+    /// The `/Resources` entry of a page that draws with the standard font alone.
+    fn font_resources(font: &str) -> String {
+        format!("/Resources << /Font << /F1 {font} >> >>")
+    }
+
+    /// A stream object holding `data`, with the `/Length` it states.
+    fn stream_body(data: &[u8]) -> Vec<u8> {
+        let mut body = format!("<< /Length {} >>\nstream\n", data.len()).into_bytes();
+        body.extend_from_slice(data);
+        body.extend_from_slice(b"\nendstream");
+        body
+    }
+
+    /// A one-page file whose content stream states a length and never states its end: the walk has no
+    /// way to find the bytes it holds.
+    fn unterminated_content() -> Vec<u8> {
+        one_page(
+            build::PDF_FONT,
+            b"<< /Length 44 >>\nstream\nBT /F1 24 Tf 72 760 Td (Page one text) Tj ET",
+            |_, font| font_resources(font),
+        )
+    }
+
+    /// A one-page file whose font lives in an object stream that cannot be decoded: the walk keeps the
+    /// container unread, so an in-place action — which writes every object — has nothing to write for
+    /// it. Carrying the container as an ordinary stream would write the file without the font and
+    /// report success, so the file is refused instead.
+    fn font_in_unreadable_container() -> Vec<u8> {
+        // Bytes that are not a compressed stream under the filter they state.
+        let bytes = b"not a compressed stream";
+        one_page(
+            build::object_stream_body(1, 8, " /Filter /FlateDecode", bytes.len(), bytes),
+            stream_body(b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET"),
+            |_, font| font_resources(font),
+        )
+    }
+
+    /// A one-page file whose page dictionary states a key escaped as `/A#20B`, the way a file that
+    /// means a space in a name writes it.
+    fn escaped_name() -> Vec<u8> {
+        one_page(
+            build::PDF_FONT,
+            stream_body(b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET"),
+            |_, font| format!("/A#20B 1 {}", font_resources(font)),
+        )
+    }
+
+    /// A one-page file whose content stream states its length as an object the file does not hold: the
+    /// walk cannot resolve it, so the stream is recovered from its own end marker, as the reference
+    /// recovers it.
+    fn indirect_length() -> Vec<u8> {
+        one_page(
+            build::PDF_FONT,
+            b"<< /Length 99 0 R >>\nstream\nBT /F1 24 Tf 72 760 Td (Page one text) Tj ET\nendstream",
+            |_, font| font_resources(font),
+        )
+    }
+
+    /// The same shape around an image: a page painting an XObject whose stream never states its end.
+    fn unterminated_picture() -> Vec<u8> {
+        one_page(
+            build::PDF_FONT,
+            stream_body(b"q 40 0 0 40 40 700 cm /Im0 Do Q"),
+            |pdf, font| {
+                let image = pdf.push(
+                    "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceRGB \
+                     /BitsPerComponent 8 /Length 3 >>\nstream\nabc",
+                );
+                format!("/Resources << /Font << /F1 {font} >> /XObject << /Im0 {image} >> >>")
+            },
+        )
     }
 
     /// A page of `document`: A4, the standard font, and `contents` as its content.
@@ -825,18 +1063,6 @@ mod tests {
             format!("BT /F1 18 Tf 72 760 Td ({text}) Tj ET").into_bytes(),
         ))
     }
-
-    /// An image XObject's dictionary. A `/Length` is what the parser leaves of a stream whose
-    /// stated length does not land on `endstream`.
-    fn image_dictionary() -> Dictionary {
-        Dictionary::from_iter([
-            ("Type".to_string(), Object::Name(b"XObject".to_vec())),
-            ("Subtype".to_string(), Object::Name(b"Image".to_vec())),
-            ("Width".to_string(), Object::Integer(1)),
-            ("Height".to_string(), Object::Integer(1)),
-        ])
-    }
-
     /// A page that reaches `object` through its resources, under `category` as `name`.
     fn page_naming(
         document: &mut Document,
@@ -866,11 +1092,6 @@ mod tests {
             .expect("a page")
             .set("Resources", Object::Dictionary(resources));
         page
-    }
-
-    /// A page that draws `picture`, which it reaches through its resources as `Pic`.
-    fn page_with_picture(document: &mut Document, picture: Object) -> ObjectId {
-        page_naming(document, "XObject", "Pic", picture)
     }
 
     /// Two pages that draw the same image object, and share one resource dictionary.
@@ -1103,9 +1324,9 @@ mod tests {
 
     #[test]
     fn a_page_the_page_tree_names_twice_is_two_page_objects() {
-        // One page object named by two `/Kids` entries is a page tree some readers refuse as a
-        // cycle. The reference copies the page once per name, and so does the crate: a split group of
-        // `[1, 1]`, and a merge of an input whose own tree repeats a page, each produce two page
+        // One page object named by two `/Kids` entries is a page tree that reads as two pages: the
+        // reference copies the page once per name, and so does the crate, so a split group of
+        // `[1, 1]` and a merge of an input whose own tree repeats a page each produce two page
         // objects. The comparison reads both pages the same either way, so only this pins it.
         let directory = scratch();
         let path = fixture(directory.path(), "twice.pdf", build::pdf_basic());
@@ -1119,16 +1340,11 @@ mod tests {
         let pages = page::page_ids(&part);
         assert_eq!(pages.len(), 2, "the group names two pages");
         assert_ne!(pages[0], pages[1], "one page object named twice is a cycle");
-        let body = reading(produced(&outcome), directory.path());
+        let body = reading(produced(&outcome), &directory.path().join("reading"));
         assert_eq!(body.matches("Page one text").count(), 2, "{body}");
 
         // The same shape through a merge: an input whose own `/Kids` names one page twice.
-        let mut document = page::fresh();
-        let content = text_stream(&mut document, "Repeated page text");
-        let page = a4_page(&mut document, Object::Reference(content));
-        page::add_page(&mut document, page).expect("a page");
-        page::add_page(&mut document, page).expect("the same page again");
-        let path = fixture(directory.path(), "repeated.pdf", written(document));
+        let path = fixture(directory.path(), "repeated.pdf", build::pdf_repeated_page());
         let outcome = run(
             directory.path(),
             "pdf_merge",
@@ -1139,6 +1355,71 @@ mod tests {
         let pages = page::page_ids(&merged);
         assert_eq!(pages.len(), 2, "the input's tree names two pages");
         assert_ne!(pages[0], pages[1], "one page object named twice is a cycle");
+    }
+
+    #[test]
+    fn a_page_the_tree_names_twice_is_turned_twice() {
+        // An in-place action reads and writes one page object once per name, as the reference does:
+        // the second read sees the turn the first write left, so the file states two quarter turns.
+        // A memo of where a page inherits its turn must not answer the second read with the state
+        // before the first write.
+        let directory = scratch();
+        let path = fixture(directory.path(), "repeated.pdf", build::pdf_repeated_page());
+        let outcome = run(
+            directory.path(),
+            "pdf_rotate",
+            json!({ "input": path.to_string_lossy(), "degrees": 90 }),
+            "rotated",
+        );
+        let rotated = parsed(produced(&outcome));
+        let pages = page::page_ids(&rotated);
+        assert_eq!(pages.len(), 2, "the tree still names two pages");
+        assert_eq!(pages[0], pages[1], "the tree still names one page object");
+        let turn = rotated
+            .get_dictionary(pages[0])
+            .expect("the page")
+            .get(b"Rotate")
+            .expect("a turn")
+            .as_i64()
+            .expect("a whole turn");
+        assert_eq!(turn, 180, "the second read sees the first write");
+    }
+
+    #[test]
+    fn an_ancestor_written_before_a_descendants_lookup_is_seen() {
+        // A malformed tree may make one page another page's `/Parent`. The second page's crop must
+        // inherit the box the first page's crop has just written, not the tree as it stood before:
+        // the memo is answered only after the node's own dictionary.
+        let directory = scratch();
+        let mut document = page::fresh();
+        let first = text_stream(&mut document, "First page text");
+        let first = a4_page(&mut document, Object::Reference(first));
+        let second = text_stream(&mut document, "Second page text");
+        let second = a4_page(&mut document, Object::Reference(second));
+        page::add_page(&mut document, first).expect("a page");
+        page::add_page(&mut document, second).expect("a page");
+        document
+            .get_dictionary_mut(second)
+            .expect("the second page")
+            .set("Parent", Object::Reference(first));
+        let path = fixture(directory.path(), "nested.pdf", written(document));
+        let outcome = run(
+            directory.path(),
+            "pdf_crop",
+            json!({
+                "input": path.to_string_lossy(),
+                "area": { "x": 0.25, "y": 0.25, "width": 0.5, "height": 0.5 },
+                "pages": [1, 2],
+            }),
+            "cropped",
+        );
+        let cropped = parsed(produced(&outcome));
+        let pages = page::page_ids(&cropped);
+        // The second page's box is the same fraction of the box the first page has just written.
+        assert_box(
+            &box_of(&cropped, pages[1], "CropBox"),
+            [223.125, 315.75, 371.875, 526.25],
+        );
     }
 
     #[test]
@@ -1239,9 +1520,6 @@ mod tests {
             .expect("a page tree");
         bytes[at + 1..at + 5].copy_from_slice(b"Kidx");
         let broken = fixture(directory.path(), "broken.pdf", bytes);
-        let expected = vocabulary()
-            .marks
-            .format("pdf_page_unparseable", &[("name", "broken.pdf")]);
         for (operation, values) in [
             (
                 "pdf_rotate",
@@ -1250,16 +1528,13 @@ mod tests {
             ("pdf_merge", json!({ "inputs": [broken.to_string_lossy()] })),
         ] {
             let outcome = run(directory.path(), operation, values, "out");
-            let failure = outcome.failure.expect("the tree does not resolve");
-            assert!(failure.is_usage(), "{operation}: {failure:?}");
-            assert_eq!(failure.reason, expected, "{operation}");
-            assert!(outcome.outputs.is_empty());
+            assert_usage_refusal(&outcome, "pdf_page_unparseable", &[("name", "broken.pdf")]);
         }
     }
 
     #[test]
     fn a_page_tree_kid_that_is_not_a_page_is_refused_rather_than_skipped() {
-        // Skipping a kid the parser could not read as a page would produce a file with that page
+        // Skipping a kid the walk could not read as a page would produce a file with that page
         // missing and say nothing about it, so the file is refused instead.
         let directory = scratch();
         let mut document = page::fresh();
@@ -1284,13 +1559,61 @@ mod tests {
             json!({ "inputs": [path.to_string_lossy()] }),
             "merged",
         );
-        let failure = outcome.failure.expect("the kid is not a page");
-        assert!(failure.is_usage(), "{failure:?}");
-        assert_eq!(
-            failure.reason,
-            vocabulary()
-                .marks
-                .format("pdf_page_unparseable", &[("name", "stray.pdf")])
+        assert_usage_refusal(&outcome, "pdf_page_unparseable", &[("name", "stray.pdf")]);
+    }
+
+    #[test]
+    fn a_pages_node_the_tree_names_twice_is_refused() {
+        // The reference walks a `/Pages` node named twice twice, producing the pages it holds twice.
+        // This walk keeps one set of nodes already walked, so it cannot tell that diamond from a tree
+        // that names a node under itself, and refuses the file rather than choose.
+        let directory = scratch();
+        let mut document = page::fresh();
+        let content = text_stream(&mut document, "Page text");
+        let page = a4_page(&mut document, Object::Reference(content));
+        page::add_page(&mut document, page).expect("a page");
+        let catalog = document.catalog().expect("a catalog").clone();
+        let root = catalog
+            .get(b"Pages")
+            .and_then(Object::as_reference)
+            .expect("a page tree");
+        let inner = document.add_object(Dictionary::from_iter([
+            ("Type".to_string(), Object::Name(b"Pages".to_vec())),
+            (
+                "Kids".to_string(),
+                Object::Array(vec![Object::Reference(page)]),
+            ),
+            ("Count".to_string(), Object::Integer(1)),
+        ]));
+        document
+            .get_object_mut(root)
+            .and_then(Object::as_dict_mut)
+            .expect("a page tree")
+            .set(
+                "Kids",
+                Object::Array(vec![Object::Reference(inner), Object::Reference(inner)]),
+            );
+        document
+            .get_object_mut(root)
+            .and_then(Object::as_dict_mut)
+            .expect("a page tree")
+            .set("Count", Object::Integer(2));
+        document
+            .get_object_mut(page)
+            .and_then(Object::as_dict_mut)
+            .expect("a page")
+            .set("Parent", Object::Reference(inner));
+        let path = fixture(directory.path(), "repeated.pdf", written(document));
+        let outcome = run(
+            directory.path(),
+            "pdf_rotate",
+            json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
+            "out",
+        );
+        assert_usage_refusal(
+            &outcome,
+            "pdf_page_unparseable",
+            &[("name", "repeated.pdf")],
         );
     }
 
@@ -1330,50 +1653,120 @@ mod tests {
             directory.path(),
             "pdf_rotate",
             json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
-            "turned",
+            "out",
         );
-        let failure = outcome.failure.expect("the tree is too deep");
-        assert!(!failure.is_usage(), "{failure:?}");
-        assert_eq!(
-            failure.reason,
-            vocabulary()
-                .marks
-                .format("pdf_page_tree_nested", &[("max", &max.to_string())])
+        assert_internal_refusal(
+            &outcome,
+            "pdf_page_tree_nested",
+            &[("max", &max.to_string())],
         );
     }
 
     #[test]
     fn an_object_nested_deeper_than_the_engine_copies_is_refused() {
-        let mut source = page::fresh();
-        let content = text_stream(&mut source, "Deep object text");
-        let page = a4_page(&mut source, Object::Reference(content));
+        let (source, page) = page_with_deep_object(vocabulary().engine.object_depth_max + 1);
         let max = vocabulary().engine.object_depth_max;
-        let mut deep = Object::Null;
-        for _ in 0..=max {
-            deep = Object::Array(vec![deep]);
-        }
-        source
-            .get_object_mut(page)
-            .and_then(Object::as_dict_mut)
-            .expect("a page")
-            .set("Deep", deep);
         let mut target = page::fresh();
-        let mut copier = page::Copier::new("source.pdf".to_string());
+        let chains = page::Chains::of(&source);
+        let ancestry = page::Ancestry::new();
+        let mut copier = page::Copier::new(
+            "source.pdf".to_string(),
+            BTreeSet::new(),
+            max,
+            &chains,
+            &ancestry,
+        );
         let failure = copier
             .copy_page(&source, &mut target, page)
             .expect_err("the object nests too deep");
-        assert!(!failure.is_usage(), "{failure:?}");
-        assert_eq!(
-            failure.reason,
-            vocabulary()
-                .marks
-                .format("pdf_page_object_nested", &[("max", &max.to_string())])
+        assert_internal(
+            &failure,
+            "pdf_page_object_nested",
+            &[("max", &max.to_string())],
+        );
+    }
+
+    #[test]
+    fn a_file_whose_page_reaches_a_deep_object_is_refused_by_the_copier() {
+        // The scan keeps the deep object unread and names it; the copier refuses it with the
+        // engine's own sentence when the page it copies reaches it.
+        let directory = scratch();
+        let (mut document, page) = page_with_deep_object(vocabulary().engine.object_depth_max + 1);
+        let max = vocabulary().engine.object_depth_max;
+        page::add_page(&mut document, page).expect("a page");
+        let path = fixture(directory.path(), "deep.pdf", written(document));
+        let outcome = run(
+            directory.path(),
+            "pdf_merge",
+            json!({ "inputs": [path.to_string_lossy()] }),
+            "merged",
+        );
+        assert_internal_refusal(
+            &outcome,
+            "pdf_page_object_nested",
+            &[("max", &max.to_string())],
+        );
+    }
+
+    #[test]
+    fn a_deep_object_no_page_reaches_does_not_refuse_a_merge() {
+        // The scan keeps an object nested past the bound unread and names it, and a page that never
+        // reaches it is copied as before, so the file still produces.
+        let directory = scratch();
+        let mut document = page::fresh();
+        let content = text_stream(&mut document, "Page one text");
+        let page = a4_page(&mut document, Object::Reference(content));
+        page::add_page(&mut document, page).expect("a page");
+        // An indirect object no page references: the scan keeps it unread and names it, and nothing
+        // copies it.
+        deep_object(&mut document, vocabulary().engine.object_depth_max + 1);
+        let path = fixture(directory.path(), "deep-unreached.pdf", written(document));
+        let outcome = run(
+            directory.path(),
+            "pdf_merge",
+            json!({ "inputs": [path.to_string_lossy()] }),
+            "merged",
+        );
+        let body = reading(produced(&outcome), &directory.path().join("reading"));
+        assert!(body.contains("Page one text"), "{body}");
+    }
+
+    #[test]
+    fn a_reference_a_copy_follows_that_names_no_object_is_refused() {
+        // The reference keeps a dangling reference in the copy, and the page draws nothing for what it
+        // named; this model cannot carry a reference to nothing, so a merge of a page whose resources
+        // name an object the file does not hold is refused rather than written without them.
+        let directory = scratch();
+        let mut document = page::fresh();
+        let content = text_stream(&mut document, "Page one text");
+        let page = a4_page(&mut document, Object::Reference(content));
+        document
+            .get_object_mut(page)
+            .and_then(Object::as_dict_mut)
+            .expect("a page")
+            .set("Resources", Object::Reference((999, 0)));
+        page::add_page(&mut document, page).expect("a page");
+        let path = fixture(
+            directory.path(),
+            "dangling-resources.pdf",
+            written(document),
+        );
+        let outcome = run(
+            directory.path(),
+            "pdf_merge",
+            json!({ "inputs": [path.to_string_lossy()] }),
+            "merged",
+        );
+        assert_usage_refusal(
+            &outcome,
+            "pdf_page_unparseable",
+            &[("name", "dangling-resources.pdf")],
         );
     }
 
     #[test]
     fn a_page_whose_content_names_no_object_is_refused() {
-        // A content reference the parser could not resolve is not content: writing the page would
+        // A content reference the walk could not resolve is not content: writing the page would
         // drop it silently, so the file is refused.
         let directory = scratch();
         let mut document = page::fresh();
@@ -1384,95 +1777,88 @@ mod tests {
             directory.path(),
             "pdf_rotate",
             json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
-            "turned",
+            "out",
         );
-        let failure = outcome.failure.expect("the content names no object");
-        assert!(failure.is_usage(), "{failure:?}");
-        assert_eq!(
-            failure.reason,
-            vocabulary()
-                .marks
-                .format("pdf_page_unparseable", &[("name", "dangling.pdf")])
+        assert_usage_refusal(
+            &outcome,
+            "pdf_page_unparseable",
+            &[("name", "dangling.pdf")],
         );
     }
 
     #[test]
-    fn a_stream_the_parser_never_read_is_refused() {
-        // A stream whose `/Length` the parser could not read keeps its start position and no
-        // content; writing it would emit an empty stream where the file held bytes.
+    fn a_name_the_file_escaped_is_written_escaped_again() {
+        // The reference decodes a name's `#xx` escapes and escapes the byte again when it writes the
+        // name back; the object model's writer escapes an irregular byte the same way, so a name the
+        // file escaped keeps its spelling.
         let directory = scratch();
-        let mut document = page::fresh();
-        let unread = document.add_object(Stream::with_position(Dictionary::new(), 0));
-        let page = a4_page(&mut document, Object::Reference(unread));
-        page::add_page(&mut document, page).expect("a page");
-        let path = fixture(directory.path(), "unread.pdf", written(document));
+        let path = fixture(directory.path(), "escaped.pdf", escaped_name());
         let outcome = run(
             directory.path(),
             "pdf_rotate",
             json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
-            "turned",
+            "out",
         );
-        let failure = outcome.failure.expect("the content was never read");
-        assert!(failure.is_usage(), "{failure:?}");
-        assert_eq!(
-            failure.reason,
-            vocabulary()
-                .marks
-                .format("pdf_page_unparseable", &[("name", "unread.pdf")])
+        let bytes = std::fs::read(produced(&outcome)).expect("the produced file");
+        assert!(
+            bytes
+                .windows(b"/A#20B".len())
+                .any(|window| window == b"/A#20B"),
+            "the name was written with a space in it"
+        );
+        let body = reading(produced(&outcome), &directory.path().join("reading"));
+        assert!(body.contains("Page one text"), "{body}");
+    }
+
+    #[test]
+    fn a_stream_whose_bytes_are_gone_is_refused() {
+        // A content stream that never states its end: the walk cannot find the bytes it holds, so the
+        // page's content is an object that was never read and writing the page would lose it.
+        let directory = scratch();
+        let path = fixture(directory.path(), "unterminated.pdf", unterminated_content());
+        let outcome = run(
+            directory.path(),
+            "pdf_rotate",
+            json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
+            "out",
+        );
+        assert_usage_refusal(
+            &outcome,
+            "pdf_page_unparseable",
+            &[("name", "unterminated.pdf")],
         );
     }
 
-    /// A merge and a rotation — crop and resize take the same path — must both refuse a page holding
-    /// `picture`, whichever shape the parser kept of it.
-    fn assert_picture_refused(name: &str, picture: Object) {
+    #[test]
+    fn a_picture_whose_bytes_are_gone_is_refused() {
+        // An image stream with no end marker: a merge would copy the picture empty, and a rotation
+        // would write the whole file back with it empty.
         let directory = scratch();
-        let mut document = page::fresh();
-        let page = page_with_picture(&mut document, picture);
-        page::add_page(&mut document, page).expect("a page");
-        let path = fixture(directory.path(), name, written(document));
+        let path = fixture(
+            directory.path(),
+            "unterminated-picture.pdf",
+            unterminated_picture(),
+        );
         let input = path.to_string_lossy();
         for (operation, values, base) in [
             ("pdf_merge", json!({ "inputs": [&*input] }), "merged"),
             (
                 "pdf_rotate",
                 json!({ "input": &*input, "degrees": 90, "pages": "all" }),
-                "turned",
+                "rotated",
             ),
         ] {
             let outcome = run(directory.path(), operation, values, base);
-            let failure = outcome
-                .failure
-                .unwrap_or_else(|| panic!("{operation}: the picture has no data"));
-            assert!(failure.is_usage(), "{operation}: {failure:?}");
-            assert_eq!(
-                failure.reason,
-                vocabulary()
-                    .marks
-                    .format("pdf_page_unparseable", &[("name", name)]),
-                "{operation}"
+            assert!(
+                outcome.failure.is_some(),
+                "{operation} did not refuse a picture whose bytes are gone"
             );
-            assert!(outcome.outputs.is_empty());
+            assert_usage_refusal(
+                &outcome,
+                "pdf_page_unparseable",
+                &[("name", "unterminated-picture.pdf")],
+            );
         }
-    }
-
-    #[test]
-    fn a_picture_the_parser_never_read_is_refused() {
-        // An image the parser never read: a merge would copy the picture empty, and a rotation would
-        // write the whole file back with it empty.
-        assert_picture_refused(
-            "unread.pdf",
-            Object::Stream(Stream::with_position(image_dictionary(), 0)),
-        );
-    }
-
-    #[test]
-    fn a_picture_the_parser_degraded_to_a_dictionary_is_refused() {
-        // A stream whose stated length does not land on `endstream` is left as its dictionary, with
-        // the bytes dropped: carrying it would lose the picture.
-        let mut picture = image_dictionary();
-        picture.set("Length", Object::Integer(5));
-        picture.set("Filter", Object::Name(b"FlateDecode".to_vec()));
-        assert_picture_refused("degraded.pdf", Object::Dictionary(picture));
     }
 
     #[test]
@@ -1508,7 +1894,7 @@ mod tests {
             directory.path(),
             "pdf_rotate",
             json!({ "input": &*input, "degrees": 90, "pages": "all" }),
-            "turned",
+            "out",
         );
         assert!(outcome.failure.is_none(), "{outcome:?}");
     }
@@ -1617,7 +2003,7 @@ mod tests {
             directory.path(),
             "pdf_rotate",
             json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
-            "turned",
+            "out",
         );
         let turned = parsed(produced(&outcome));
         assert_eq!(page::page_ids(&turned).len(), 1, "the blank page was added");
@@ -1639,9 +2025,9 @@ mod tests {
     }
 
     #[test]
-    fn a_page_whose_content_could_not_be_read_is_refused() {
-        // What the parser leaves of a stream whose `/Length` disagrees with its bytes: a plain
-        // dictionary. Writing that page would silently drop its content.
+    fn a_page_whose_content_is_not_a_stream_is_refused() {
+        // A page whose `/Contents` is a dictionary rather than a stream: there is nothing this writer
+        // can carry, and writing the page would drop it.
         let directory = scratch();
         let mut document = page::fresh();
         let contents = document.add_object(Dictionary::new());
@@ -1654,15 +2040,11 @@ mod tests {
             json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
             "out",
         );
-        let failure = outcome.failure.expect("the content cannot be read");
-        assert!(failure.is_usage());
-        assert_eq!(
-            failure.reason,
-            vocabulary()
-                .marks
-                .format("pdf_page_unparseable", &[("name", "unreadable.pdf")])
+        assert_usage_refusal(
+            &outcome,
+            "pdf_page_unparseable",
+            &[("name", "unreadable.pdf")],
         );
-        assert!(outcome.outputs.is_empty());
     }
 
     #[test]
@@ -1681,15 +2063,13 @@ mod tests {
             json!({ "inputs": [boxless.to_string_lossy()] }),
             "merged",
         );
-        let failure = outcome.failure.expect("the page has no area");
-        assert!(!failure.is_usage(), "{failure:?}");
-        assert!(outcome.outputs.is_empty());
+        assert_internal_refusal(&outcome, "engine_failed", &[]);
 
         let outcome = run(
             directory.path(),
             "pdf_rotate",
             json!({ "input": boxless.to_string_lossy(), "degrees": 90, "pages": "all" }),
-            "turned",
+            "out",
         );
         assert!(outcome.failure.is_none(), "{outcome:?}");
     }
@@ -1700,16 +2080,18 @@ mod tests {
         // not have is the caller's, and the two are not the same answer.
         let directory = scratch();
         let basic = fixture(directory.path(), "basic.pdf", build::pdf_basic());
-        for pages in [json!([1.5]), json!(["x"])] {
+        for (what, pages) in [
+            ("a fractional page number", json!([1.5])),
+            ("a page number that is not a number", json!(["x"])),
+        ] {
             let outcome = run(
                 directory.path(),
                 "pdf_rotate",
                 json!({ "input": basic.to_string_lossy(), "degrees": 90, "pages": pages }),
                 "out",
             );
-            let failure = outcome.failure.expect("the page list faults");
-            assert!(!failure.is_usage(), "{pages}: {failure:?}");
-            assert_eq!(failure.reason, crate::contained::engine_failed(), "{pages}");
+            assert!(outcome.failure.is_some(), "{what} faults");
+            assert_internal_refusal(&outcome, "engine_failed", &[]);
         }
     }
 
@@ -1733,12 +2115,9 @@ mod tests {
             directory.path(),
             "pdf_rotate",
             json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
-            "turned",
+            "out",
         );
-        let failure = outcome.failure.expect("the turn is not a quarter");
-        assert!(!failure.is_usage(), "{failure:?}");
-        assert_eq!(failure.reason, crate::contained::engine_failed());
-        assert!(outcome.outputs.is_empty());
+        assert_internal_refusal(&outcome, "engine_failed", &[]);
     }
 
     #[test]
@@ -1809,17 +2188,14 @@ mod tests {
             json!({ "input": path.to_string_lossy(), "width": 400, "height": 500, "pages": "all" }),
             "resized",
         );
-        let failure = outcome.failure.expect("the entry is not a list");
-        assert!(!failure.is_usage(), "{failure:?}");
-        assert_eq!(failure.reason, crate::contained::engine_failed());
-        assert!(outcome.outputs.is_empty());
+        assert_internal_refusal(&outcome, "engine_failed", &[]);
 
         // Only a resize normalises the page: a rotation and a crop of the same file carry it out.
         let outcome = run(
             directory.path(),
             "pdf_rotate",
             json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
-            "turned",
+            "out",
         );
         assert!(outcome.failure.is_none(), "{outcome:?}");
         let outcome = run(
@@ -1980,7 +2356,7 @@ mod tests {
             directory.path(),
             "pdf_rotate",
             json!({ "input": rich.to_string_lossy(), "degrees": 90, "pages": [1] }),
-            "rotated",
+            "out",
         );
         let rotated = parsed(produced(&outcome));
         let catalog = catalog(&rotated);
@@ -1998,8 +2374,16 @@ mod tests {
             );
         }
         let pages = page::page_ids(&rotated);
-        assert_eq!(page::rotation(&rotated, pages[0]), Some(90.0));
-        assert_eq!(page::rotation(&rotated, pages[1]), Some(0.0));
+        let chains = page::Chains::of(&rotated);
+        let ancestry = page::Ancestry::new();
+        assert_eq!(
+            page::rotation(&rotated, &chains, &ancestry, pages[0]),
+            Some(90.0)
+        );
+        assert_eq!(
+            page::rotation(&rotated, &chains, &ancestry, pages[1]),
+            Some(0.0)
+        );
         assert_eq!(annotations(&rotated, pages[0]).len(), 2);
         assert_eq!(annotations(&rotated, pages[1]).len(), 1);
         // The image and the form field are still reachable from the page and the catalog.
@@ -2248,16 +2632,13 @@ mod tests {
         let limit = usize::try_from(*vocabulary::max_pages_per_request()).expect("a page count");
         assert!(super::page_count_limit(limit).is_ok());
         let failure = super::page_count_limit(limit + 1).expect_err("the cap refuses");
-        assert!(failure.is_usage());
-        assert_eq!(
-            failure.reason,
-            vocabulary().marks.format(
-                "pdf_page_count_limit",
-                &[
-                    ("count", &(limit + 1).to_string()),
-                    ("limit", &limit.to_string())
-                ]
-            )
+        assert_usage(
+            &failure,
+            "pdf_page_count_limit",
+            &[
+                ("count", &(limit + 1).to_string()),
+                ("limit", &limit.to_string()),
+            ],
         );
     }
 
@@ -2287,13 +2668,10 @@ mod tests {
             limit,
         )
         .expect_err("the cap refuses");
-        assert!(failure.is_usage());
-        assert_eq!(
-            failure.reason,
-            vocabulary().marks.format(
-                "surface_merge_bytes_too_many",
-                &[("megabytes", "3"), ("limit_megabytes", "1")]
-            )
+        assert_usage(
+            &failure,
+            "surface_merge_bytes_too_many",
+            &[("megabytes", "3"), ("limit_megabytes", "1")],
         );
         // The same input under the vocabulary's own cap is not refused on its size.
         let bytes = build::pdf_basic();
@@ -2324,15 +2702,17 @@ mod tests {
                 Err(std::io::Error::other("the device is full"))
             })
             .expect_err("the write fails");
-        let expected = vocabulary().marks.format(
+        assert_internal(
+            &failure,
             "pdf_page_write_failed",
             &[("message", "the device is full")],
         );
-        assert_eq!(failure.reason, expected);
         let outcome = produced.fail(failure);
-        let failure = outcome.failure.expect("the call failed");
-        assert!(!failure.is_usage());
-        assert_eq!(failure.reason, expected);
+        assert_internal_refusal(
+            &outcome,
+            "pdf_page_write_failed",
+            &[("message", "the device is full")],
+        );
         assert!(
             !outputs[0].exists(),
             "the part written before the failure is left behind"
@@ -2377,18 +2757,772 @@ mod tests {
             directory.path(),
             "pdf_split",
             json!({ "input": path.to_string_lossy(), "groups": [[1], [2]] }),
-            "part",
+            "split",
         );
-        let failure = outcome.failure.expect("the second page states no area");
-        assert!(!failure.is_usage(), "{failure:?}");
-        assert!(outcome.outputs.is_empty());
+        assert_internal_refusal(&outcome, "engine_failed", &[]);
         assert!(
-            !directory.path().join("part_part1.pdf").exists(),
+            !directory.path().join("split_part1.pdf").exists(),
             "the part written before the failure stayed behind"
         );
     }
 
+    // ── a damaged index: the body is read the way the reference reads it ──────────────────────────
+
+    /// Run a merge and a rotation of `path`, requiring every one of `expected` in what each produced
+    /// file reads back as: the two paths a page takes, one copied and the whole file rewritten.
+    fn assert_text_survives(directory: &Path, path: &Path, expected: &[&str]) {
+        let input = path.to_string_lossy();
+        for (operation, values) in [
+            ("pdf_merge", json!({ "inputs": [&*input] })),
+            (
+                "pdf_rotate",
+                json!({ "input": &*input, "degrees": 90, "pages": "all" }),
+            ),
+        ] {
+            let directory = directory.join(operation);
+            std::fs::create_dir_all(&directory).expect("a directory");
+            let outcome = run(&directory, operation, values, "out");
+            let produced = produced(&outcome);
+            let body = reading(produced, &directory.join("reading"));
+            for text in expected {
+                assert!(body.contains(text), "{operation} lost {text}: {body}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_produced_file_states_a_classic_cross_reference_table() {
+        // The comparison normalises the index away, so nothing else would notice a produced file
+        // switching back to a cross-reference stream — which is what lopdf's writer states unless it
+        // is told otherwise, and what the reference's writer never states.
+        let directory = scratch();
+        let path = fixture(directory.path(), "table.pdf", build::pdf_basic());
+        let outcome = run(
+            directory.path(),
+            "pdf_rotate",
+            json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
+            "out",
+        );
+        let bytes = std::fs::read(produced(&outcome)).expect("a produced file");
+        assert!(
+            bytes.windows(5).any(|window| window == b"\nxref"),
+            "the produced file states no table"
+        );
+        assert!(
+            !bytes.windows(5).any(|window| window == b"/XRef"),
+            "the produced file states a cross-reference stream"
+        );
+    }
+
+    #[test]
+    fn a_file_whose_index_cannot_be_followed_is_read_from_its_body() {
+        // Every shape a damaged index takes — offsets shifted, no index at all, a pointer naming
+        // nothing, a root that is not a catalog — read on the two paths a page takes. What the
+        // comparison cannot see is that the recovered page still holds its content, which is what
+        // this pins.
+        for (name, bytes) in [
+            ("shifted.pdf", build::pdf_damaged_shifted()),
+            ("no-index.pdf", build::pdf_damaged_no_index()),
+            ("pointer.pdf", build::pdf_damaged_pointer()),
+            ("root.pdf", build::pdf_damaged_root()),
+        ] {
+            let directory = scratch();
+            let path = fixture(directory.path(), name, bytes);
+            assert_text_survives(directory.path(), &path, &["Page one text", "Page two text"]);
+        }
+    }
+
+    #[test]
+    fn a_root_the_file_states_inline_is_read() {
+        // The reference reads a catalog the trailer states inline, and this model reaches a catalog
+        // only through a reference: it is given a number of its own rather than refused.
+        let directory = scratch();
+        let path = fixture(
+            directory.path(),
+            "inline-root.pdf",
+            build::pdf_inline_root(),
+        );
+        assert_text_survives(directory.path(), &path, &["Page one text"]);
+    }
+
+    #[test]
+    fn a_stream_whose_stated_length_is_wrong_is_recovered() {
+        // A length that is short, long or absent: the reference recovers the stream from its own end
+        // marker, on the path that copies a page and on the path that rewrites the whole file.
+        for (name, bytes) in [
+            ("short.pdf", build::pdf_damaged_length_short()),
+            ("long.pdf", build::pdf_damaged_length_long()),
+            ("absent.pdf", build::pdf_damaged_length_absent()),
+        ] {
+            let directory = scratch();
+            let path = fixture(directory.path(), name, bytes);
+            assert_text_survives(directory.path(), &path, &["Page one text", "Page two text"]);
+        }
+    }
+
+    #[test]
+    fn a_stream_whose_length_names_no_object_is_recovered() {
+        // The reference resolves no length here — it only takes a number the stream states itself — so
+        // it recovers the stream from its own end marker, and so must this engine.
+        let directory = scratch();
+        let path = fixture(directory.path(), "indirect-length.pdf", indirect_length());
+        assert_text_survives(directory.path(), &path, &["Page one text"]);
+    }
+
+    #[test]
+    fn a_modern_file_with_a_damaged_index_is_read_from_its_containers() {
+        // The ordinary objects live in an object stream and the index is a cross-reference stream: a
+        // misplaced pointer, no index stream at all, a container whose own length is wrong, and one
+        // that decodes to far more than the file holds.
+        for (name, bytes) in [
+            ("object-stream.pdf", build::pdf_damaged_object_stream()),
+            ("index-stream.pdf", build::pdf_damaged_index_stream()),
+            (
+                "object-stream-length.pdf",
+                build::pdf_damaged_object_stream_length(),
+            ),
+            (
+                "object-stream-inflated.pdf",
+                build::pdf_object_stream_inflated(),
+            ),
+        ] {
+            let directory = scratch();
+            let path = fixture(directory.path(), name, bytes);
+            assert_text_survives(directory.path(), &path, &["Page one text", "Page two text"]);
+        }
+    }
+
+    #[test]
+    fn rotate_refuses_a_file_whose_font_lives_in_an_undecodable_container() {
+        // A container the walk cannot expand holds objects it cannot reach. Carrying it as an
+        // ordinary stream would write the file without them and report success; it is kept unread
+        // instead, so the in-place action that writes every object refuses the file.
+        let directory = scratch();
+        let path = fixture(
+            directory.path(),
+            "unreadable-container.pdf",
+            font_in_unreadable_container(),
+        );
+        let outcome = run(
+            directory.path(),
+            "pdf_rotate",
+            json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
+            "out",
+        );
+        assert_usage_refusal(
+            &outcome,
+            "pdf_page_unparseable",
+            &[("name", "unreadable-container.pdf")],
+        );
+    }
+
+    /// `bytes` with an object whose body does not parse appended after the file's own end, which the
+    /// walk reads as the next section.
+    fn with_unreadable_object(bytes: &[u8]) -> Vec<u8> {
+        let mut out = bytes.to_vec();
+        out.extend_from_slice(b"\n99 0 obj\n@@@ not an object body @@@\nendobj\n");
+        out
+    }
+
+    #[test]
+    fn rotate_refuses_a_file_with_an_object_the_walk_could_not_read() {
+        // A file whose body states an object the walk cannot parse: the walk keeps it as an unread
+        // stream, and an in-place action writes every object, so it refuses the file rather than
+        // write that object as the empty stream it kept.
+        let directory = scratch();
+        let mut document = page::fresh();
+        let content = text_stream(&mut document, "Page text");
+        let page = a4_page(&mut document, Object::Reference(content));
+        page::add_page(&mut document, page).expect("a page");
+        let path = fixture(
+            directory.path(),
+            "unreadable-object.pdf",
+            with_unreadable_object(&written(document)),
+        );
+        let outcome = run(
+            directory.path(),
+            "pdf_rotate",
+            json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
+            "out",
+        );
+        assert_usage_refusal(
+            &outcome,
+            "pdf_page_unparseable",
+            &[("name", "unreadable-object.pdf")],
+        );
+    }
+
+    #[test]
+    fn the_scan_bound_refuses_a_file_past_it() {
+        // The engine's own cap, not the reference's refusal: a file whose recovery would read its
+        // bytes more times over than the bound allows is refused with the engine's own sentence. One
+        // pass is not enough for twelve streams whose stated lengths all miss their end markers.
+        let directory = scratch();
+        let bytes = build::pdf_damaged_length_long_many();
+        let Err(failure) = page::open_with(
+            &bytes,
+            &directory.path().join("bounded.pdf"),
+            super::scan::Bounds {
+                passes: 1,
+                ..super::scan::Bounds::stated()
+            },
+        ) else {
+            panic!("the scan must refuse a file past its bound");
+        };
+        assert_internal(&failure, "pdf_page_scan_limit", &[("max", "1")]);
+    }
+
+    #[test]
+    fn the_depth_sentence_names_the_bound_the_scan_was_held_to() {
+        // The injected depth is what the refusal states on both paths: the scan refusing a file whose
+        // trailer nests past it, and an object it kept unread for its depth that a page reaches.
+        let directory = scratch();
+        let max = vocabulary().engine.object_depth_max;
+        let Err(failure) = page::open_with(
+            &trailer_nested(2),
+            &directory.path().join("nested-trailer.pdf"),
+            super::scan::Bounds {
+                depth: 1,
+                ..super::scan::Bounds::stated()
+            },
+        ) else {
+            panic!("the scan must refuse a trailer nested past its depth");
+        };
+        assert_internal(&failure, "pdf_page_object_nested", &[("max", "1")]);
+
+        let mut document = page::fresh();
+        let content = text_stream(&mut document, "Page text");
+        let page = a4_page(&mut document, Object::Reference(content));
+        page::add_page(&mut document, page).expect("a page");
+        deep_object(&mut document, max);
+        let path = directory.path().join("deep.pdf");
+        let opened = page::open_with(
+            &written(document),
+            &path,
+            super::scan::Bounds {
+                depth: max - 1,
+                ..super::scan::Bounds::stated()
+            },
+        )
+        .expect("the scan keeps the object unread");
+        let failure =
+            page::require_readable(&opened, &path).expect_err("an object the scan kept is refused");
+        assert_internal(
+            &failure,
+            "pdf_page_object_nested",
+            &[("max", &(max - 1).to_string())],
+        );
+    }
+
+    #[test]
+    fn the_shipped_scan_bound_reads_a_file_with_many_recovered_streams() {
+        // Twelve streams whose stated lengths all miss their end markers cost more than one pass over
+        // the file's bytes, and the bound the engine ships still reads them: the refusal above is
+        // reached only by the test's own lowered bound.
+        let directory = scratch();
+        let path = fixture(
+            directory.path(),
+            "many-lengths.pdf",
+            build::pdf_damaged_length_long_many(),
+        );
+        assert_text_survives(directory.path(), &path, &["Line 1", "Line 12"]);
+    }
+
+    #[test]
+    fn the_container_bound_refuses_a_file_past_it() {
+        // The engine's own ceiling on what a container may decode to: a file it declines to decode is
+        // refused with a sentence of its own, not the reference's "cannot read this as a PDF".
+        let directory = scratch();
+        let bytes = build::pdf_object_stream_stated();
+        let Err(failure) = page::open_with(
+            &bytes,
+            &directory.path().join("container.pdf"),
+            super::scan::Bounds {
+                decode: 8,
+                ..super::scan::Bounds::stated()
+            },
+        ) else {
+            panic!("the scan must refuse a container past its ceiling");
+        };
+        assert_internal(&failure, "pdf_page_container_limit", &[("max", "8")]);
+    }
+
+    #[test]
+    fn a_page_whose_content_is_kept_for_its_depth_is_refused_with_the_depths_sentence() {
+        // A page whose `/Contents` is the object the walk kept for its depth: the refusal names the
+        // depth rather than saying the file's bytes do not form a PDF.
+        let directory = scratch();
+        let max = vocabulary().engine.object_depth_max;
+        let mut document = page::fresh();
+        let deep = deep_object(&mut document, max + 1);
+        let page = a4_page(&mut document, Object::Reference(deep));
+        page::add_page(&mut document, page).expect("a page");
+        let path = fixture(directory.path(), "deep-content.pdf", written(document));
+        let outcome = run(
+            directory.path(),
+            "pdf_rotate",
+            json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
+            "out",
+        );
+        assert_internal_refusal(
+            &outcome,
+            "pdf_page_object_nested",
+            &[("max", &max.to_string())],
+        );
+    }
+
+    #[test]
+    fn a_content_array_holding_an_object_kept_for_its_depth_gets_the_depths_sentence() {
+        // The depth's sentence follows the page's own content through the array shape as through the
+        // single one: an array stated by an object of its own still names the object the walk kept
+        // unread for its depth, and a page naming anything else gets the reference's sentence.
+        let directory = scratch();
+        let max = vocabulary().engine.object_depth_max;
+        let mut document = page::fresh();
+        let deep = deep_object(&mut document, max + 1);
+        let array = document.add_object(Object::Array(vec![Object::Reference(deep)]));
+        let page = a4_page(&mut document, Object::Reference(array));
+        page::add_page(&mut document, page).expect("a page");
+        let path = fixture(directory.path(), "deep-array.pdf", written(document));
+        let outcome = run(
+            directory.path(),
+            "pdf_rotate",
+            json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
+            "out",
+        );
+        assert_internal_refusal(
+            &outcome,
+            "pdf_page_object_nested",
+            &[("max", &max.to_string())],
+        );
+    }
+
+    #[test]
+    fn a_page_whose_content_names_itself_is_refused() {
+        // A content graph that names itself would nest deeper than the file has objects, so following
+        // it would never end: the file is refused rather than the walk aborted.
+        let directory = scratch();
+        let mut document = page::fresh();
+        let array = document.add_object(Object::Array(Vec::new()));
+        *document.get_object_mut(array).expect("the array") =
+            Object::Array(vec![Object::Reference(array)]);
+        let page = a4_page(&mut document, Object::Reference(array));
+        page::add_page(&mut document, page).expect("a page");
+        let path = fixture(directory.path(), "cyclic-content.pdf", written(document));
+        let outcome = run(
+            directory.path(),
+            "pdf_rotate",
+            json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
+            "out",
+        );
+        assert_usage_refusal(
+            &outcome,
+            "pdf_page_unparseable",
+            &[("name", "cyclic-content.pdf")],
+        );
+    }
+
+    #[test]
+    fn a_content_chain_longer_than_the_stack_is_walked_without_recursing() {
+        // A page whose `/Contents` names a chain of arrays as long as the file has objects: the walk
+        // keeps its own stack, so the chain costs heap rather than the thread's. A recursive walk would
+        // exhaust this one, and a stack overflow is not an unwinding panic that containment could
+        // answer.
+        let directory = scratch();
+        let mut document = page::fresh();
+        let mut chain = document.add_object(Object::Null);
+        for _ in 0..40_000 {
+            chain = document.add_object(Object::Array(vec![Object::Reference(chain)]));
+        }
+        let page = a4_page(&mut document, Object::Reference(chain));
+        page::add_page(&mut document, page).expect("a page");
+        let bytes = written(document);
+        let path = directory.path().join("chain.pdf");
+        let walked = std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(move || page::open(&bytes, &path).map(|_| ()).map_err(|f| f.reason))
+            .expect("a thread")
+            .join()
+            .expect("the walk does not exhaust the stack");
+        assert!(walked.is_ok(), "{walked:?}");
+    }
+
+    #[test]
+    fn a_content_stream_named_twice_is_still_content() {
+        // The same stream named by two entries of one array is content, not a chain that names
+        // itself: the walk follows an object once and both mentions count as content.
+        let directory = scratch();
+        let mut document = page::fresh();
+        let content = text_stream(&mut document, "Page text");
+        let page = a4_page(
+            &mut document,
+            Object::Array(vec![Object::Reference(content), Object::Reference(content)]),
+        );
+        page::add_page(&mut document, page).expect("a page");
+        let path = fixture(directory.path(), "twice.pdf", written(document));
+        let outcome = run(
+            directory.path(),
+            "pdf_rotate",
+            json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
+            "out",
+        );
+        let body = reading(produced(&outcome), &directory.path().join("reading"));
+        assert!(body.contains("Page text"), "{body}");
+    }
+
+    #[test]
+    fn a_content_chain_that_names_the_next_object_twice_is_walked_once_per_object() {
+        // Every level of the chain names the next object twice, so re-reading what a reference names
+        // would cost two to the depth values: the walk follows each object once, so the file is read
+        // in the time its own length takes. The refused tail proves the walk reaches the end of the
+        // chain rather than stopping at the first branch.
+        for (name, lost) in [("twice.pdf", false), ("twice-lost.pdf", true)] {
+            let directory = scratch();
+            let mut document = page::fresh();
+            let mut tail = if lost {
+                document.add_object(Object::Dictionary(Dictionary::new()))
+            } else {
+                text_stream(&mut document, "Page text")
+            };
+            for _ in 0..40 {
+                tail = document.add_object(Object::Array(vec![
+                    Object::Reference(tail),
+                    Object::Reference(tail),
+                ]));
+            }
+            let page = a4_page(&mut document, Object::Reference(tail));
+            page::add_page(&mut document, page).expect("a page");
+            let path = fixture(directory.path(), name, written(document));
+            // The walk runs on its own thread, so it owns what it reads: the temporary directory
+            // stays here, and a regression fails the guard instead of hanging the suite.
+            let input = path.to_string_lossy().into_owned();
+            let destination = directory.path().to_path_buf();
+            let outcome = within(
+                5,
+                "the walk over a chain that names the next object twice",
+                move || {
+                    run(
+                        &destination,
+                        "pdf_rotate",
+                        json!({ "input": input, "degrees": 90, "pages": "all" }),
+                        "out",
+                    )
+                },
+            );
+            if lost {
+                assert_usage_refusal(&outcome, "pdf_page_unparseable", &[("name", name)]);
+            } else {
+                assert!(produced(&outcome).exists(), "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_content_walk_stays_linear_when_every_page_names_a_different_link() {
+        // A guard: every page names a different link of one long chain, and a walk that resolves the
+        // whole chain from each name would read it once per name — n²/2 links — so a crafted file
+        // would stall every page action. The deadline is what a quadratic walk meets, since it would
+        // not finish rather than answer wrongly. The document is built in memory, so the deadline has
+        // no fixture work to race on a loaded machine.
+        let mut document = page::fresh();
+        let mut chain = text_stream(&mut document, "Page text");
+        let links = 40_000;
+        let mut pages = Vec::with_capacity(links);
+        for _ in 0..links {
+            chain = document.add_object(Object::Reference(chain));
+            pages.push(document.add_object(Dictionary::from_iter([
+                ("Type".to_string(), Object::Name(b"Page".to_vec())),
+                ("Contents".to_string(), Object::Reference(chain)),
+            ])));
+        }
+        let carried = within(5, "the walk over the pages' content", move || {
+            matches!(
+                page::content_state(&document, &BTreeSet::new(), &pages),
+                page::Content::Carried
+            )
+        });
+        assert!(carried, "the walk must carry the chain");
+    }
+
+    #[test]
+    fn a_chain_named_from_every_page_is_followed_once_per_object() {
+        // A guard for the resize's per-page chain following: every page's `/Annots` names a different
+        // link of one long chain, so a follower that resolves the whole chain from each page reads it
+        // once per page — n²/2 links — and a crafted file stalls a resize. The deadline is what a
+        // quadratic follower meets.
+        let mut document = page::fresh();
+        let mut chain = document.add_object(Object::Array(Vec::new()));
+        let links = 40_000;
+        let mut pages = Vec::with_capacity(links);
+        for _ in 0..links {
+            chain = document.add_object(Object::Reference(chain));
+            pages.push(document.add_object(Dictionary::from_iter([
+                ("Type".to_string(), Object::Name(b"Page".to_vec())),
+                ("Annots".to_string(), Object::Reference(chain)),
+            ])));
+        }
+        let chains = page::Chains::of(&document);
+        let followed = within(5, "the pages' annotation walk", move || {
+            let mut followed = true;
+            for page in pages {
+                followed &= page::normalize_annots(&mut document, &chains, page).is_ok();
+            }
+            followed
+        });
+        assert!(followed, "every page's annotations are a list");
+    }
+
+    #[test]
+    fn a_parent_chain_named_from_every_page_is_walked_once_per_object() {
+        // A guard for the inherited entries a page reads: every page names a different link of one
+        // long `/Parent` chain, so a walk that follows the chain from each page reads it once per
+        // page — n²/2 links — and a crafted file stalls a crop or a resize. The deadline is what a
+        // quadratic walk meets.
+        let mut document = page::fresh();
+        let mut chain = document.add_object(Dictionary::from_iter([(
+            "MediaBox".to_string(),
+            Object::Array(vec![
+                Object::Integer(0),
+                Object::Integer(0),
+                Object::Integer(612),
+                Object::Integer(792),
+            ]),
+        )]));
+        let links = 40_000;
+        let mut pages = Vec::with_capacity(links);
+        for _ in 0..links {
+            chain = document.add_object(Dictionary::from_iter([(
+                "Parent".to_string(),
+                Object::Reference(chain),
+            )]));
+            pages.push(document.add_object(Dictionary::from_iter([
+                ("Type".to_string(), Object::Name(b"Page".to_vec())),
+                ("Parent".to_string(), Object::Reference(chain)),
+            ])));
+        }
+        let chains = page::Chains::of(&document);
+        let ancestry = page::Ancestry::new();
+        let framed = within(5, "the pages' parent walk", move || {
+            let mut framed = true;
+            for page in pages {
+                framed &= page::frame(&document, &chains, &ancestry, page).is_ok();
+            }
+            framed
+        });
+        assert!(framed, "every page inherits its box");
+    }
+
+    /// Two page nodes that name each other as `/Parent`, `first` stating `media_box` when it is
+    /// given.
+    fn parent_cycle(media_box: Option<[i64; 4]>) -> (Document, ObjectId, ObjectId) {
+        let mut document = page::fresh();
+        let first = document.add_object(Object::Null);
+        let second = document.add_object(Object::Null);
+        let mut entries = vec![("Type".to_string(), Object::Name(b"Page".to_vec()))];
+        if let Some([x0, y0, x1, y1]) = media_box {
+            entries.push((
+                "MediaBox".to_string(),
+                Object::Array(vec![
+                    Object::Integer(x0),
+                    Object::Integer(y0),
+                    Object::Integer(x1),
+                    Object::Integer(y1),
+                ]),
+            ));
+        }
+        entries.push(("Parent".to_string(), Object::Reference(second)));
+        document.set_object(first, Object::Dictionary(Dictionary::from_iter(entries)));
+        document.set_object(
+            second,
+            Object::Dictionary(Dictionary::from_iter([(
+                "Parent".to_string(),
+                Object::Reference(first),
+            )])),
+        );
+        (document, first, second)
+    }
+
+    #[test]
+    fn a_parent_cycle_ends_rather_than_hanging() {
+        // Two page nodes that name each other as `/Parent`, neither stating a box: the walk must
+        // end rather than follow the cycle forever. The deadline is what a non-terminating walk
+        // meets.
+        let (document, first, _) = parent_cycle(None);
+        let chains = page::Chains::of(&document);
+        let ancestry = page::Ancestry::new();
+        let failure = within(5, "the walk over a /Parent cycle", move || {
+            page::frame(&document, &chains, &ancestry, first).err()
+        });
+        let failure = failure.expect("a page with no box anywhere is the engine's own failure");
+        assert_internal(&failure, "engine_failed", &[]);
+    }
+
+    #[test]
+    fn a_parent_cycle_that_states_a_box_ends_at_it() {
+        // The same cycle with a box stated on one node: the walk ends at the node that states it
+        // rather than following the cycle, and the page reached through the cycle inherits the box.
+        let (document, _, second) = parent_cycle(Some([0, 0, 300, 400]));
+        let chains = page::Chains::of(&document);
+        let ancestry = page::Ancestry::new();
+        let frame = within(5, "the walk over a /Parent cycle", move || {
+            page::frame(&document, &chains, &ancestry, second)
+                .map(|frame| (frame.width, frame.height))
+        });
+        let (width, height) = frame.expect("the cycle's other node states a box");
+        assert_eq!((width, height), (300.0, 400.0));
+    }
+
+    #[test]
+    fn a_content_chain_that_ends_is_carried_by_a_resize() {
+        // `/Contents` names a reference that names the stream: this engine follows the chain and
+        // carries the content. The module documentation states that divergence by outcome.
+        let directory = scratch();
+        let mut document = page::fresh();
+        let content = text_stream(&mut document, "Page text");
+        let link = document.add_object(Object::Reference(content));
+        let page = a4_page(&mut document, Object::Reference(link));
+        page::add_page(&mut document, page).expect("a page");
+        let path = fixture(directory.path(), "chain.pdf", written(document));
+        let outcome = run(
+            directory.path(),
+            "pdf_resize",
+            json!({
+                "input": path.to_string_lossy(),
+                "width": 400,
+                "height": 500,
+                "pages": [1],
+            }),
+            "resized",
+        );
+        let body = reading(produced(&outcome), &directory.path().join("reading"));
+        assert!(body.contains("Page text"), "{body}");
+    }
+
+    #[test]
+    fn a_content_chain_ending_at_a_kept_object_states_the_depths_sentence() {
+        // A guard for the shape the walk's `Follow` step is written for: the depth's sentence follows
+        // the object the walk kept unread, not the name a page reached it by, so a caller can tell the
+        // engine's bound from a file it cannot read whatever shape the file has.
+        let directory = scratch();
+        let max = vocabulary().engine.object_depth_max;
+        let mut document = page::fresh();
+        let deep = deep_object(&mut document, max + 1);
+        let link = document.add_object(Object::Reference(deep));
+        let page = a4_page(&mut document, Object::Reference(link));
+        page::add_page(&mut document, page).expect("a page");
+        let path = fixture(directory.path(), "deep-chain.pdf", written(document));
+        let outcome = run(
+            directory.path(),
+            "pdf_rotate",
+            json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
+            "out",
+        );
+        assert_internal_refusal(
+            &outcome,
+            "pdf_page_object_nested",
+            &[("max", &max.to_string())],
+        );
+    }
+
+    #[test]
+    fn the_content_diagnosis_does_not_depend_on_page_order() {
+        // One page loses content the writer would drop, the other an object the walk kept for its
+        // depth: the reference's sentence answers either way, as `require_readable` answers for a
+        // document holding an unread object of its own.
+        let directory = scratch();
+        for (name, kept_first) in [("kept-first.pdf", true), ("lost-first.pdf", false)] {
+            let max = vocabulary().engine.object_depth_max;
+            let mut document = page::fresh();
+            let deep = deep_object(&mut document, max + 1);
+            let kept = a4_page(&mut document, Object::Reference(deep));
+            let lost = a4_page(&mut document, Object::Dictionary(Dictionary::new()));
+            for page in if kept_first {
+                [kept, lost]
+            } else {
+                [lost, kept]
+            } {
+                page::add_page(&mut document, page).expect("a page");
+            }
+            let path = fixture(directory.path(), name, written(document));
+            let outcome = run(
+                directory.path(),
+                "pdf_rotate",
+                json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
+                "out",
+            );
+            assert_usage_refusal(&outcome, "pdf_page_unparseable", &[("name", name)]);
+        }
+    }
+
+    #[test]
+    fn a_file_that_numbers_an_object_past_the_writer_is_refused() {
+        // The writer states one index entry per number up to the document's high-water mark: at the top
+        // of the range it would wrap to an empty table and report success over a file that lost its
+        // index, and below it the index would be larger than any file the harness holds.
+        let directory = scratch();
+        let path = fixture(
+            directory.path(),
+            "number.pdf",
+            build::pdf_object_number_overflow(),
+        );
+        let outcome = run(
+            directory.path(),
+            "pdf_merge",
+            json!({ "inputs": [path.to_string_lossy()] }),
+            "out",
+        );
+        assert_internal_refusal(
+            &outcome,
+            "pdf_page_object_limit",
+            &[("max", &vocabulary().engine.object_number_max.to_string())],
+        );
+    }
+
     // ── encryption ────────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn an_encrypted_file_with_a_damaged_index_still_needs_a_password() {
+        // The entry the file still carries decides, as it decides for the reference: a file that says
+        // it is encrypted is not processed as if it were not, whatever its index looks like.
+        let directory = scratch();
+        let path = fixture(
+            directory.path(),
+            "encrypted.pdf",
+            build::pdf_damaged_encrypted(),
+        );
+        let outcome = run(
+            directory.path(),
+            "pdf_rotate",
+            json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
+            "out",
+        );
+        assert_usage_refusal(&outcome, "pdf_page_encrypted", &[("name", "encrypted.pdf")]);
+    }
+
+    #[test]
+    fn an_encrypted_file_whose_containers_cannot_be_read_still_needs_a_password() {
+        // A modern encrypted file keeps its objects in an object stream, which is ciphertext and
+        // cannot be expanded. The encryption dictionary the index stream states is still in the
+        // clear, so the file is named as encrypted rather than as one this engine cannot read: an
+        // encrypted file is never processed as if it were not.
+        let directory = scratch();
+        let path = fixture(
+            directory.path(),
+            "encrypted-container.pdf",
+            build::pdf_damaged_encrypted_container(),
+        );
+        let outcome = run(
+            directory.path(),
+            "pdf_rotate",
+            json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
+            "out",
+        );
+        assert_usage_refusal(
+            &outcome,
+            "pdf_page_encrypted",
+            &[("name", "encrypted-container.pdf")],
+        );
+    }
 
     #[test]
     fn an_owner_password_only_document_is_refused() {
@@ -2434,16 +3568,12 @@ mod tests {
             directory.path(),
             "pdf_rotate",
             json!({ "input": path.to_string_lossy(), "degrees": 90, "pages": "all" }),
-            "rotated",
+            "out",
         );
-        let failure = outcome.failure.expect("the document is refused");
-        assert!(failure.is_usage());
-        assert_eq!(
-            failure.reason,
-            vocabulary()
-                .marks
-                .format("pdf_page_encrypted", &[("name", "permissions.pdf")])
+        assert_usage_refusal(
+            &outcome,
+            "pdf_page_encrypted",
+            &[("name", "permissions.pdf")],
         );
-        assert!(outcome.outputs.is_empty());
     }
 }

@@ -217,6 +217,15 @@ pub enum Effect {
         which: BoxKind,
         value: [f64; 4],
     },
+    /// A page's own annotation at zero-based `index`: its subtype and its `/Rect` as
+    /// `[x0, y0, x1, y1]`.
+    PageAnnot {
+        output: Option<&'static str>,
+        page: usize,
+        index: usize,
+        subtype: &'static str,
+        rect: [f64; 4],
+    },
     /// A page draws this text.
     PageText {
         output: Option<&'static str>,
@@ -591,16 +600,34 @@ impl Effect {
                     BoxKind::Crop => "crop",
                 };
                 let found = entry.get(key).and_then(box_value);
-                let matches = found.as_ref().is_some_and(|found| {
-                    found.len() == want.len()
-                        && found
-                            .iter()
-                            .zip(want.iter())
-                            .all(|(a, b)| (a - b).abs() < 1e-3)
-                });
+                let matches = close_box(found.as_deref(), &want);
                 expect(matches, || {
                     format!(
                         "page {}'s {key} box is {found:?}, expected {want:?}",
+                        page + 1
+                    )
+                })
+            }
+            Self::PageAnnot {
+                page,
+                index,
+                subtype,
+                rect: want,
+                ..
+            } => {
+                let entry = page_of(value, page)?;
+                let annot = entry
+                    .get("annots")
+                    .and_then(Value::as_array)
+                    .and_then(|annots| annots.get(index))
+                    .ok_or_else(|| format!("page {} has no annotation {index}", page + 1))?;
+                let found_subtype = annot.get("subtype").and_then(Value::as_str);
+                let found = annot.get("rect").and_then(box_value);
+                let matches = found_subtype == Some(subtype) && close_box(found.as_deref(), &want);
+                expect(matches, || {
+                    format!(
+                        "page {}'s annotation {index} is {found_subtype:?} at {found:?}, \
+                         expected {subtype:?} at {want:?}",
                         page + 1
                     )
                 })
@@ -695,6 +722,7 @@ impl Effect {
             | Self::PageCount { output, .. }
             | Self::PageRotate { output, .. }
             | Self::PageBox { output, .. }
+            | Self::PageAnnot { output, .. }
             | Self::PageText { output, .. }
             | Self::PageImages { output, .. }
             | Self::PageForms { output, .. }
@@ -822,6 +850,16 @@ impl Effect {
             Self::PageBox {
                 page, which, value, ..
             } => format!("page {} {which:?} box {value:?}", page + 1),
+            Self::PageAnnot {
+                page,
+                index,
+                subtype,
+                rect,
+                ..
+            } => format!(
+                "page {} annotation {index} is {subtype:?} at {rect:?}",
+                page + 1
+            ),
             Self::PageText { page, text, .. } => format!("page {} draws {text:?}", page + 1),
             Self::PageImages { page, count, .. } => {
                 format!("page {} paints {count} image(s)", page + 1)
@@ -1343,6 +1381,18 @@ fn page_of(value: &Value, page: usize) -> Result<&Value, String> {
     pages(value)?
         .get(page)
         .ok_or_else(|| format!("the PDF has no page {}", page + 1))
+}
+
+/// Whether `found` is the box `want` within `1e-3`: a comparison slack, looser than the model's
+/// four-decimal rounding.
+fn close_box(found: Option<&[f64]>, want: &[f64]) -> bool {
+    found.is_some_and(|found| {
+        found.len() == want.len()
+            && found
+                .iter()
+                .zip(want.iter())
+                .all(|(a, b)| (a - b).abs() < 1e-3)
+    })
 }
 
 fn box_value(value: &Value) -> Option<Vec<f64>> {

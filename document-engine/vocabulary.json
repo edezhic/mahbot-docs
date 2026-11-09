@@ -492,7 +492,11 @@
   "engine": {
     "paragraph_nesting_max": 1000,
     "page_tree_depth_max": 64,
-    "object_depth_max": 128
+    "object_depth_max": 128,
+    "pdf_scan_passes_max": 8,
+    "scan_look_bytes_max": 512,
+    "container_decode_max_bytes": 67108864,
+    "object_number_max": 1000000
   },
   "marks": {
     "block_annotations": {
@@ -2850,7 +2854,25 @@
       ]
     },
     "pdf_page_object_nested": {
-      "text": "an object the page reaches nests deeper than this engine copies (limit {max})",
+      "text": "an object in this file nests deeper than this engine follows (limit {max})",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_scan_limit": {
+      "text": "reading this file's body takes more passes than this engine scans (limit {max})",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_container_limit": {
+      "text": "a container in this file holds more than this engine decodes (limit {max})",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_object_limit": {
+      "text": "this file numbers an object past what this engine writes (limit {max})",
       "printed_by": [
         "writing"
       ]
@@ -3376,6 +3398,18 @@
       "writing"
     ],
     "paragraph_nesting_max": [
+      "writing"
+    ],
+    "pdf_scan_passes_max": [
+      "writing"
+    ],
+    "scan_look_bytes_max": [
+      "writing"
+    ],
+    "container_decode_max_bytes": [
+      "writing"
+    ],
+    "object_number_max": [
       "writing"
     ],
     "rules": [

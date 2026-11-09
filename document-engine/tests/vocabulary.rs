@@ -9,15 +9,17 @@
 //! A word or a number that the reader needs as *format knowledge* — a PDF field kind, an Info
 //! dictionary key, a Word part name, a BIFF format code, Excel's last column — is not a
 //! restatement of a mark or a bound. Those are named one by one in [`FORMAT_NAMES`] and
-//! [`SPEC_CONSTANTS`], each tied to the file it applies to with its reason, and a test proves
-//! every entry still collides with a vocabulary value so the list cannot rot into silence.
+//! [`SPEC_CONSTANTS`], each tied to the file it applies to with its reason and, for a number, how
+//! many occurrences of it the file states; a test proves every entry still collides with a
+//! vocabulary value and covers exactly what its file states, so the list cannot rot into silence and
+//! cannot mask a bound restated beside it.
 
 mod common;
 
 use document_engine::vocabulary::{Producer, vocabulary};
 use regex::Regex;
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -234,6 +236,13 @@ const FORMAT_NAMES: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "src/writing/pdf/scan.rs",
+        &[(
+            "null",
+            "the PDF keyword that states a null object, which the body walk matches rather than prints",
+        )],
+    ),
+    (
         "src/writing/pdf/page.rs",
         &[
             (
@@ -378,249 +387,333 @@ fn marks_for(path: &Path) -> Vec<String> {
 }
 
 /// Specification constants and implementation loop bounds the reader needs, each tied to the one
-/// file that states it, the value, and the reason it is not a restatement of a reading or `limits`
-/// bound.
+/// file that states it, the value, how many occurrences of it the file states, and the reason it is
+/// not a restatement of a reading or `limits` bound.
 ///
-/// The file and value are the scope: the same number in another file still fails the scan. There is
-/// no site or occurrence count, so a rename or a reformat never fails this gate. The number scan is
-/// a cheap heuristic; the guarantee that a bound the crate's own halves enforce is read from the
-/// vocabulary is [`every_bound_the_crate_enforces_is_read_from_the_vocabulary`].
-const SPEC_CONSTANTS: &[(&str, f64, &str)] = &[
+/// The file, the value and the count are the scope: a further occurrence of the same number in the
+/// same file is a finding until it is reviewed into the entry, and the same number in another file is
+/// a finding already. A rename or a reformat changes no count. Entries for one file and value are
+/// summed, so there is one exemption per file and value however many entries state it. The scope is
+/// the value rather than the purpose, so a literal that merely equals a reviewed value counts
+/// against the same exemption. The number scan is a cheap heuristic; the guarantee that a bound the
+/// crate's own halves enforce is read from the vocabulary is
+/// [`every_bound_the_crate_enforces_is_read_from_the_vocabulary`].
+const SPEC_CONSTANTS: &[(&str, f64, usize, &str)] = &[
     (
         "src/writing/pdf/mod.rs",
         4.0,
+        2,
         "a crop area's four sides — x, y, width and height",
     ),
     (
         "src/writing/pdf/page.rs",
         3.0,
-        "the quarter turns a page's turn is counted in — one, two or three — not a scale",
+        2,
+        "the quarter turns a page's turn is counted in — one, two or three — and the fourth index \
+         of a page box's four corners; not a scale",
     ),
     (
         "src/writing/pdf/date.rs",
         3.0,
+        1,
         "the three months the algorithm adds to a March-based month to reach the civil month from \
          March on",
     ),
     (
         "src/writing/pdf/date.rs",
         4.0,
+        1,
         "the leap year every fourth year in the algorithm's day-of-year correction",
     ),
     (
         "src/writing/pdf/date.rs",
         9.0,
+        1,
         "the nine months the algorithm subtracts for January and February, which belong to the year \
          before its March-based one",
     ),
     (
         "src/writing/pdf/date.rs",
         10.0,
+        1,
         "the ten March-based months from March to December, after which the month is January or \
          February",
     ),
     (
         "src/writing/pdf/date.rs",
         100.0,
+        1,
         "the century correction in the algorithm's day-of-year count, a century not being a leap year",
     ),
     (
         "src/writing/pdf/page.rs",
         4.0,
+        2,
         "a page box's four numbers and the four entries a page inherits",
+    ),
+    (
+        "src/writing/pdf/scan.rs",
+        3.0,
+        4,
+        "the most octal digits an escape sequence in a literal string states, the bits each one \
+         shifts into the byte, the three characters a `#xx` escape in a name states, and the step \
+         over them",
+    ),
+    (
+        "src/writing/pdf/scan.rs",
+        4.0,
+        5,
+        "the four bits one hexadecimal digit stands for, and the shift that places a nibble: once in \
+         a hex string, once in a name's `#xx` escape, and twice in ASCIIHexDecode, whose odd final \
+         digit is padded with a zero; and the bytes a decoded object stream needs to hold one entry \
+         of two numbers",
+    ),
+    (
+        "src/writing/pdf/scan.rs",
+        10.0,
+        3,
+        "the value the hexadecimal digits `a` to `f` stand for, ten through fifteen, and the radix \
+         the walk accumulates a number in",
     ),
     (
         "src/writing/mod.rs",
         0.5,
+        1,
         "the half JavaScript's `Math.round` adds before flooring, the rounding a negative half-tie \
          needs",
     ),
     (
         "src/writing/xml.rs",
         16.0,
+        1,
         "the radix of a hexadecimal character reference in XML text",
     ),
     (
         "src/operation.rs",
         3.0,
+        1,
         "the three template families `TEMPLATE_FORMATS` names",
     ),
     (
         "src/reading/marks.rs",
         8.0,
+        1,
         "the eight accents PDFDocEncoding places at `0x18..=0x1F`",
     ),
     (
         "src/reading/marks.rs",
         16.0,
+        1,
         "the `/Ff` bit 16 pushbutton flag (`1 << 16`)",
     ),
     (
         "src/reading/marks.rs",
         32.0,
+        1,
         "the `/F` bit 5 value 32, the annotation's not-shown flag",
     ),
     (
         "src/reading/mod.rs",
         0.5,
+        1,
         "the half-unit added before truncating a normalised PDF channel to a byte",
     ),
     (
         "src/reading/mod.rs",
         3.0,
+        12,
         "RGB's three samples per pixel, the PDF colour-space number 3 and its palette entries",
     ),
     (
         "src/reading/mod.rs",
         4.0,
+        7,
         "CMYK's four samples per pixel, the PDF colour-space number 4 and a 4-bit sample width",
     ),
     (
         "src/reading/mod.rs",
         8.0,
+        12,
         "a byte's bits, the default and declared 8-bit sample width and the byte stride of a row",
     ),
     (
         "src/reading/mod.rs",
         16.0,
+        3,
         "a PDF image's 16-bit sample width",
     ),
     (
         "src/reading/mod.rs",
         1000.0,
+        1,
         "the most suffixes the input-avoiding name tries, a loop bound rather than a reading limit",
     ),
     (
         "src/reading/mod.rs",
         255.0,
+        6,
         "a byte's maximum, the range a channel is clamped to and the alpha blend's divisor",
     ),
     (
         "src/reading/ooxml/docx.rs",
         9.0,
+        3,
         "Word's nine outline and heading levels",
     ),
     (
         "src/reading/ooxml/numfmt.rs",
         3.0,
+        9,
         "BIFF built-in format code 3, the third section of a three-part format and the civil-date month shift",
     ),
     (
         "src/reading/ooxml/numfmt.rs",
         4.0,
+        4,
         "BIFF built-in format code 4, the condition arm it shares with code 3 and the leap-year divisor",
     ),
     (
         "src/reading/ooxml/numfmt.rs",
         6.0,
+        2,
         "BIFF built-in format code 6 and the six comparison operators (`CONDITIONS`)",
     ),
     (
         "src/reading/ooxml/numfmt.rs",
         8.0,
+        1,
         "BIFF built-in format code 8",
     ),
     (
         "src/reading/ooxml/numfmt.rs",
         9.0,
+        3,
         "BIFF built-in format code 9 and the civil-date month shift",
     ),
     (
         "src/reading/ooxml/numfmt.rs",
         10.0,
+        4,
         "BIFF built-in format code 10, the decimal base in `checked_mul(10)` and the month phase",
     ),
     (
         "src/reading/ooxml/numfmt.rs",
         16.0,
+        1,
         "BIFF built-in format code 16 (`d-mmm`)",
     ),
     (
         "src/reading/ooxml/numfmt.rs",
         30.0,
+        1,
         "the decimal digits before a display is declined (`MAX_SCALED`)",
     ),
     (
         "src/reading/ooxml/numfmt.rs",
         100.0,
+        4,
         "a percentage's scale factor and the civil-date century divisor",
     ),
     (
         "src/reading/ooxml/numfmt.rs",
         1000.0,
+        2,
         "a number format's thousands scaling",
     ),
     (
         "src/reading/ooxml/xlsx.rs",
         16_384.0,
+        1,
         "Excel's last column (XFD), the grid limit a `<col>` range is clamped to",
     ),
     (
         "src/support.rs",
         4.0,
+        2,
         "the four spare bytes `one_line` reserves and the buffer `decode_html_entities` encodes a character into",
     ),
     (
         "src/vocabulary.rs",
         3.0,
+        1,
         "the three producers in `Producer::ALL`",
     ),
     (
         "src/vocabulary.rs",
         4.0,
+        1,
         "the four families in `Family::ALL`",
     ),
     (
         "src/writing/xlsx/mod.rs",
         3.0,
+        3,
         "a regular-expression capture-group index (the third group), not a bound",
     ),
     (
         "src/writing/xlsx/shift.rs",
         3.0,
+        7,
         "a regular-expression capture-group index (the third group), not a bound",
     ),
     (
         "src/writing/xlsx/shift.rs",
         4.0,
+        2,
         "a regular-expression capture-group index (the fourth group), not a bound",
     ),
     (
         "src/writing/xlsx/shift.rs",
         6.0,
+        1,
         "a regular-expression capture-group index (the sixth group), not a bound",
     ),
     (
         "src/writing/image.rs",
         4.0,
+        1,
         "a big-endian word's four bytes, the unit an image format's offsets are counted in",
     ),
     (
         "src/writing/image.rs",
         8.0,
+        2,
         "the eight bytes of two big-endian words, the unit an image format's offsets are counted in",
     ),
     (
         "src/writing/image.rs",
         3.0,
+        3,
         "an image format's own arithmetic: a VP8 key frame's three-byte frame tag and the three \
          bytes of start code the sides follow, and the three four-byte words a RIFF header holds",
     ),
     (
         "src/writing/xlsx/sheets.rs",
         3.0,
+        1,
         "a regular-expression capture-group index (the third group) in a merge rewrite",
     ),
 ];
 
-/// The exemptions one file gets: the values its reviewed entries cover.
-fn exemptions_for(path: &Path) -> Vec<f64> {
+/// The exemptions one file gets: each value its reviewed entries cover, with the occurrences of it
+/// they account for.
+fn exemptions_for(path: &Path) -> Vec<(f64, usize)> {
     let text = path.to_string_lossy().replace('\\', "/");
     SPEC_CONSTANTS
         .iter()
-        .filter(|(file, _, _)| text.ends_with(file))
-        .map(|(_, value, _)| *value)
+        .filter(|(file, _, _, _)| text.ends_with(file))
+        .map(|&(_, value, count, _)| (value, count))
         .collect()
+}
+
+/// The occurrences the reviewed entries account for, one per file and value: entries for one file and
+/// value are summed, as [`scan`] sums them.
+fn reviewed() -> BTreeMap<(&'static str, u64), usize> {
+    let mut counts = BTreeMap::new();
+    for &(file, value, count, _) in SPEC_CONSTANTS {
+        *counts.entry((file, value.to_bits())).or_default() += count;
+    }
+    counts
 }
 
 /// One string or char literal and the line it starts on.
@@ -896,9 +989,10 @@ fn test_module_start(text: &str) -> usize {
     text.len()
 }
 
-/// The restatements in one source text, as `line: what` findings. `exemptions` names the values
-/// the reviewed list covers in this file; any other literal that repeats a bound is a restatement.
-fn scan(text: &str, limits: &[f64], exemptions: &[f64], marks: &[String]) -> Vec<String> {
+/// The restatements in one source text, as `line: what` findings. `exemptions` names the values the
+/// reviewed list covers in this file, each with how many occurrences it accounts for; a further
+/// occurrence of an exempted value is a restatement, as is any literal that repeats a bound.
+fn scan(text: &str, limits: &[f64], exemptions: &[(f64, usize)], marks: &[String]) -> Vec<String> {
     // Test code exercises the data rather than shipping a second copy of it; it is also where a
     // mark is spelled to assert the formatter, so the scan stops at the test module.
     let (code, literals) = lex(&text[..test_module_start(text)]);
@@ -911,12 +1005,30 @@ fn scan(text: &str, limits: &[f64], exemptions: &[f64], marks: &[String]) -> Vec
     static NUMBER: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"\b\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?\b").expect("the number pattern")
     });
+    // How many times each bound's value has been stated so far, by its bits: two spellings of one
+    // value are one exemption, and the count is what keeps the exemption from covering a use the
+    // reviewed reason does not name.
+    let mut stated: BTreeMap<u64, usize> = BTreeMap::new();
+    // The reviewed occurrences of each value, summed so there is one exemption per value however
+    // many entries state it.
+    let exempted: BTreeMap<u64, usize> =
+        exemptions
+            .iter()
+            .fold(BTreeMap::new(), |mut sums, &(value, count)| {
+                *sums.entry(value.to_bits()).or_default() += count;
+                sums
+            });
     for (index, line) in code.lines().enumerate() {
         for literal in NUMBER.find_iter(line) {
             let Ok(value) = literal.as_str().replace('_', "").parse::<f64>() else {
                 continue;
             };
-            if limits.contains(&value) && !exemptions.contains(&value) {
+            if !limits.contains(&value) {
+                continue;
+            }
+            let count = stated.entry(value.to_bits()).or_default();
+            *count += 1;
+            if *count > exempted.get(&value.to_bits()).copied().unwrap_or(0) {
                 found.push(format!("{}: limit {value}", index + 1));
             }
         }
@@ -1065,7 +1177,7 @@ fn the_mark_check_leaves_format_knowledge_alone() {
 fn the_number_check_leaves_specification_constants_alone() {
     // The exemption is scoped to the file that states the literal: the same number in a file with
     // no entry is a restatement. A rename or a reformat inside the file changes nothing.
-    for &(file, value, _) in SPEC_CONSTANTS {
+    for &(file, value, _, _) in SPEC_CONSTANTS {
         let source = format!("fn specification() -> f64 {{ {value} }}\n");
         let exempt = scan(
             &source,
@@ -1083,6 +1195,32 @@ fn the_number_check_leaves_specification_constants_alone() {
                 .iter()
                 .any(|finding| finding.contains(&value.to_string())),
             "`{value}` outside `{file}` must be flagged: {elsewhere:?}"
+        );
+    }
+}
+
+#[test]
+fn the_exemption_covers_exactly_the_reviewed_occurrences() {
+    // A file's exemption is as wide as its entries say: the reviewed number of occurrences passes and
+    // one more is a restatement, so a bound restated beside a specification constant fails the scan
+    // rather than disappearing into the entry that already exempts the value. Entries for one file and
+    // value are summed, as the scan sums them.
+    for ((file, value), count) in reviewed() {
+        let value = f64::from_bits(value);
+        let source = |occurrences: usize| {
+            let uses = vec![value.to_string(); occurrences].join(" + ");
+            format!("fn specification() -> f64 {{ {uses} }}\n")
+        };
+        let exemptions = exemptions_for(Path::new(file));
+        assert!(
+            scan(&source(count), &all_bounds(), &exemptions, &[]).is_empty(),
+            "`{file}` must exempt {count} occurrence(s) of {value}"
+        );
+        assert_eq!(
+            scan(&source(count + 1), &all_bounds(), &exemptions, &[]).len(),
+            1,
+            "`{file}` must flag occurrence {} of {value}",
+            count + 1
         );
     }
 }
@@ -1118,7 +1256,7 @@ fn every_format_name_still_collides_with_a_vocabulary_mark() {
 #[test]
 fn every_specification_constant_still_collides_with_a_vocabulary_bound() {
     let bounds = all_bounds();
-    for &(file, value, reason) in SPEC_CONSTANTS {
+    for &(file, value, _, reason) in SPEC_CONSTANTS {
         assert!(
             !reason.is_empty(),
             "`{file}` `{value}` must state its reason"
@@ -1139,6 +1277,30 @@ fn every_specification_constant_still_collides_with_a_vocabulary_bound() {
             "`{file}` no longer states {value}; remove it from SPEC_CONSTANTS"
         );
     }
+}
+
+#[test]
+fn every_specification_constant_accounts_for_every_occurrence() {
+    // The count is the scope: an occurrence the entries do not account for is a restatement until it
+    // is reviewed, so a count that no longer matches the file is a finding in either direction. This is
+    // what keeps the list from masking a bound restated anywhere in a file it already exempts.
+    let mut findings = Vec::new();
+    for ((file, value), count) in reviewed() {
+        let value = f64::from_bits(value);
+        let text = std::fs::read_to_string(root().join(file))
+            .unwrap_or_else(|e| panic!("cannot read `{file}`: {e}"));
+        let stated = scan(&text, &[value], &[], &[]).len();
+        if stated != count {
+            findings.push(format!(
+                "`{file}` states {value} {stated} time(s); its entries say {count}"
+            ));
+        }
+    }
+    assert!(
+        findings.is_empty(),
+        "a reviewed count does not match its file:\n{}",
+        findings.join("\n")
+    );
 }
 
 #[test]

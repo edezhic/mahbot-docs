@@ -21,8 +21,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// A verdict's key: one family, one operation, and — for the three Office edit operations — the
-/// sub-operation the scenario exercises.
+/// A verdict's key: one family, one operation, and the sub-operation the scenario exercises.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Key {
     pub family: Family,

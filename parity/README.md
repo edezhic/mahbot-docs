@@ -26,7 +26,7 @@ crate the harness depends on. `cargo test -p document-engine` runs the crate's o
 its vocabulary restatement scan) without the harness.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 240 cases and 91 readings — takes about a minute; the whole
+managed runtime. A full pass — 277 cases and 91 readings — takes about a minute; the whole
 test suite, which runs the corpus twice for its determinism check, takes a couple of minutes.
 
 `parity --engine noop` runs the same corpus against the do-nothing engine. That engine exists only
@@ -348,18 +348,18 @@ change compares unequal at a named path.
 ## Effects
 
 Matching the baseline is not enough: an operation implemented as a no-op could match a baseline
-recorded from a no-op. Every produced case declares what it is supposed to change — text present
-or absent, a table cell, a formatting property, a sheet-name list, a merged range, a slide count and
-its titles, a page's rotation or box, a form field's value, a flattened form — and the gate checks
-it against the canonical model. The workbook's effects can also assert a cell's formula text, its
-number format (resolved through the styles part), a column's width, a row's height, the presence or
-absence of a part, and the workbook's defined names in order; a formula cell is never mistaken for
-an empty one, so `CellAbsent` cannot pass over a formula a call failed to remove. The Word effects
-also read a paragraph property's own attribute (`<w:ind w:left="400"/>`, `<w:spacing
-w:line="280"/>`, the `lineRule` beside it) and an attribute of its child (`<w:numPr><w:ilvl
-w:val="1"/>`), so an indent, a spacing and a list level are asserted as the value written rather
-than as a count; the attribute is named by its local name, so a strict document's `start` is read
-as the same effect a transitional `left` is.
+recorded from a no-op. Every produced case declares what it is supposed to change — text present or
+absent, a table cell, a formatting property, a sheet-name list, a merged range, a slide count and
+its titles, a page's rotation or box, a page annotation's subtype and rectangle, a form field's
+value, a flattened form — and the gate checks it against the canonical model. The workbook's effects
+can also assert a cell's formula text, its number format (resolved through the styles part), a
+column's width, a row's height, the presence or absence of a part, and the workbook's defined names
+in order; a formula cell is never mistaken for an empty one, so `CellAbsent` cannot pass over a
+formula a call failed to remove. The Word effects also read a paragraph property's own attribute
+(`<w:ind w:left="400"/>`, `<w:spacing w:line="280"/>`, the `lineRule` beside it) and an attribute of
+its child (`<w:numPr><w:ilvl w:val="1"/>`), so an indent, a spacing and a list level are asserted as
+the value written rather than as a count; the attribute is named by its local name, so a strict
+document's `start` is read as the same effect a transitional `left` is.
 `tests/gate.rs` proves the rule with the no-op engine.
 
 ## The arm's own two checks

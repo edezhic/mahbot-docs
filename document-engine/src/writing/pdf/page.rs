@@ -10,42 +10,63 @@
 //!
 //! - A page inherits `Resources`, `MediaBox`, `CropBox` and `Rotate` from the page tree. A copy
 //!   states them itself, so the produced page does not depend on a tree it no longer has; the walk
-//!   up the tree is bounded by the document's own object count, so a cycle in `/Parent` ends
-//!   rather than hanging.
+//!   marks the nodes it passes, so a cycle in `/Parent` ends rather than hanging.
 //! - A stream is copied with its dictionary and its bytes as they stand, so an image's encoded
 //!   samples are the ones the input held — never re-encoded. Only `/Length` is restated, because
 //!   it is the one entry the writer must agree with the bytes it writes.
 //!
-//! The object graph is trusted as the reading trusts its decoders: a malicious file can nest
-//! deeper than the stack holds, and no containment turns that into an answer. The walks over it
-//! here are the exception: the page tree is walked iteratively with the engine's own depth bound,
-//! and a copy reserves every reference before it writes one, so neither is as deep as a crafted file
-//! is long.
+//! The object graph is bounded where it is read: the body scan follows object syntax no deeper than
+//! `object_depth_max` and keeps an object nested past it unread and named, so a page that reaches it
+//! — or an in-place action that writes every object — refuses the file with the engine's own
+//! sentence. An in-place action refuses a document holding an object nested past the depth even when
+//! no page reaches it: over-refusal is the declared side of that line, because writing every object
+//! would write the one the walk never read. The walks over it here are iterative or reserve before
+//! they recurse — the page tree, the page's `/Contents` and its reference chain, and a copy that
+//! reserves every reference before it writes one — so none is as deep as a crafted file is long.
+//! Every reference chain is followed once per document, and every page's `/Parent` path is walked
+//! once per document and inherited entry, so a chain or a path named from every page costs the file's
+//! own length rather than its length times the number of pages.
 //!
-//! A file whose pages this model cannot read is refused rather than rewritten. That covers a page
-//! tree that does not resolve or that names a kid which is not a page or a pages node, a page whose
-//! content is not a stream the parser could read — one it left as a plain dictionary or never read
-//! — a stream anywhere in a file an in-place action rewrites, a reference a copy follows that names
-//! an object the file does not hold, and a file whose cross-reference table is too damaged to
-//! follow.
+//! Three further bounds are the engine's own and refuse a file the reference reads: what a container
+//! may decode to, how many times over its own length the scan may read a file, and the highest object
+//! number the writer can state in its index. Each answers with a sentence of its own rather than the
+//! reference's, because none is anything the file states.
 //!
-//! A stream the parser gave up on is recognised by what it kept: one it never read is an empty
-//! stream stating a length, and one it degraded to a dictionary still states a length beside a
-//! stream-only entry. Both are refused, so the damaged files this recognition catches lose nothing.
-//! It is a recognition and not a proof — a stream that degraded to a dictionary holding nothing but
-//! its length, an uncompressed font program say, is carried as the dictionary it became — and it is
-//! deliberately not widened: recovering the bytes of a stream whose stated length is wrong or
-//! missing is the recovery work's, not this writer's guess. The reference recovers both damaged
-//! files: its library reads a stream from `stream` to `endstream` whatever the length states, and
-//! rebuilds a damaged index. The crate's reading answers those files as well, so this refusal is
-//! the writer's own line rather than a consistency with the rest of the crate.
+//! A file whose pages this model cannot read is refused rather than rewritten. The body is read by
+//! [`super::scan`], which states how it is read, what it refuses and the bounds it is held to; this
+//! module adds the refusals of the copy itself: a page-tree kid that does not resolve to a page or a
+//! pages node, a `/Pages` node the tree names twice, a page whose content it cannot carry — a value
+//! that is not a stream, one that names an object the file does not hold, or one that names itself —
+//! a reference a copy follows that names an object the file does not hold, and an object whose body
+//! the walk could not read.
+//!
+//! In some malformed shapes the reference's resize faults inside its library or its split refuses,
+//! while this engine carries the file or refuses it rather than faulting; in others the reference
+//! produces a file that lost what the input held where this engine refuses. The harness judges only
+//! the shapes where both sides produce, so no produced file is compared across that line: each
+//! refusal this engine makes is stated where it is made, with the sentence and the class it carries,
+//! and none of them is a produced file that lost what the input held.
+//!
+//! A catalog the trailer states inline is read as well: the reference writes it back inline, which
+//! no reader can follow, while this engine gives the catalog a number of its own so that the produced
+//! file is a document.
+//!
+//! Encryption is decided by the entry the file still carries: a file whose trailer or index stream
+//! states an `/Encrypt` this engine can reach is refused as needing a password, and one whose index
+//! damage destroyed that very entry is read as the unencrypted file the reference reads. The
+//! reference names the password only after its page tree resolves, so a file whose body it cannot
+//! read is refused as unreadable instead; this engine names the password first, because an encrypted
+//! file is never processed as one that is not.
 
-use std::collections::{HashMap, HashSet};
+use std::cell::RefCell;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
+use lopdf::xref::XrefType;
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream, StringFormat};
 use serde_json::{Map, Value};
 
+use super::scan;
 use crate::operation::Failure;
 use crate::vocabulary::{self, vocabulary};
 use crate::writing::js_round;
@@ -128,6 +149,59 @@ pub(super) fn frame_rect(frame: &Frame, x: f64, y: f64, width: f64, height: f64)
 /// The entries a page may inherit from the page tree.
 const INHERITABLE: [&[u8]; 4] = [b"Resources", b"MediaBox", b"CropBox", b"Rotate"];
 
+/// Where each node's `/Parent` path first states an inheritable entry, per entry: filled as pages
+/// ask, so a path named from many pages is walked once per document and inherited entry.
+///
+/// A node's own dictionary is read on every lookup, so a page an action has just written states its
+/// new value to the next read; the memo answers only where a node that states no entry inherits it
+/// from, and it describes the tree as it was opened. An in-place action writes the pages it is given
+/// and never the tree above them, so a file whose pages are leaves cannot go stale; a malformed tree
+/// that makes a page another page's `/Parent` can answer with the tree as it stood before a write to
+/// the ancestor, when the descendant was read before that write.
+#[derive(Default)]
+pub(super) struct Ancestry(RefCell<HashMap<(ObjectId, usize), Option<ObjectId>>>);
+
+impl Ancestry {
+    pub(super) fn new() -> Self {
+        Self::default()
+    }
+
+    /// The nearest node on `page`'s `/Parent` path — `page` itself included — that states the
+    /// inheritable entry at `index`, or `None` when the path ends without one.
+    fn nearest(&self, document: &Document, page: ObjectId, index: usize) -> Option<ObjectId> {
+        let key = INHERITABLE[index];
+        let mut cache = self.0.borrow_mut();
+        let mut path = vec![page];
+        let mut current = page;
+        let found = loop {
+            let dictionary = document
+                .objects
+                .get(&current)
+                .and_then(|object| object.as_dict().ok());
+            if dictionary.is_some_and(|dictionary| dictionary.has(key)) {
+                break Some(current);
+            }
+            if let Some(&known) = cache.get(&(current, index)) {
+                break known;
+            }
+            let Some(parent) = dictionary
+                .and_then(|dictionary| dictionary.get(b"Parent").ok())
+                .and_then(|value| value.as_reference().ok())
+            else {
+                break None;
+            };
+            // Provisional, so a path that names a node under itself ends without an entry.
+            cache.insert((current, index), None);
+            current = parent;
+            path.push(current);
+        };
+        for id in path {
+            cache.insert((id, index), found);
+        }
+        found
+    }
+}
+
 /// A page box states its two corners as four numbers.
 const CORNERS: usize = 4;
 
@@ -151,23 +225,54 @@ pub(super) fn read(path: &Path) -> Result<Vec<u8>, Failure> {
 pub(super) struct Opened {
     pub(super) document: Document,
     pub(super) pages: Vec<ObjectId>,
+    /// The objects the scan kept unread because they nest past the engine's depth.
+    pub(super) nested: BTreeSet<ObjectId>,
+    /// The depth the scan was held to, so every refusal for an object it kept states that bound.
+    pub(super) depth: usize,
+    /// Where every reference chain ends, followed once when the file was opened.
+    pub(super) chains: Chains,
+    /// Where each page's `/Parent` path states an inherited entry, filled as pages ask.
+    pub(super) ancestry: Ancestry,
 }
 
-/// The file as a document. A parse failure, a file carrying an encryption dictionary, and a body
-/// whose page tree does not resolve are the three refusals the reference makes; the engine adds its
-/// own for a tree deeper than it walks and a page whose content it could not read, since writing
-/// either would lose what the file held. [`require_readable`] adds the rest of a file an in-place
-/// action rewrites. The dictionary is checked before the tree for two reasons:
-/// the parser removes `/Encrypt` once it has decrypted a file an empty password opens, and a file it
-/// cannot decrypt leaves no object table to read a page tree from — the reference refuses both as
-/// encrypted, which is what carrying the dictionary means.
+/// The file as a document, read from its body. The three refusals the reference makes are its own:
+/// bytes that do not form a document, a file carrying an encryption dictionary it can reach, and a
+/// body whose page tree it cannot walk (a catalog with no `/Pages` node, or a node with no `/Kids`
+/// array). The engine refuses more than the reference does: it answers with the reference's
+/// unparseable sentence where the file is what is wrong — a tree it cannot walk, a page whose content
+/// it cannot carry — and with a sentence of its own where one of its bounds is what refused: a tree
+/// deeper than it walks, a scan that would read the file more times over than the engine allows, a
+/// container that would decode to more than it decodes, an object number past what the writer can
+/// state in its index, and an object nested deeper than the scan follows, which is kept unread and
+/// refused only when a copy or an in-place action reaches it.
+///
+/// The password is named before the page tree is walked, so an encrypted file is never processed as
+/// one that is not. The reference resolves the tree first; the module documentation declares that
+/// divergence.
 pub(super) fn open(bytes: &[u8], path: &Path) -> Result<Opened, Failure> {
-    let document = Document::load_mem(bytes).map_err(|_| unparseable(&name(path)))?;
-    // The reference calls a document encrypted when its trailer states an encryption dictionary,
-    // whatever it would open with. The crate's reader opens an owner-password-only file, so
-    // deciding from a failed decryption would let this writer rewrite a permissions-only document
-    // the reference refuses.
-    if document.was_encrypted() || document.trailer.get(b"Encrypt").is_ok() {
+    open_with(bytes, path, scan::Bounds::stated())
+}
+
+/// [`open`] with the scan's bounds injected, so a test can prove a bound refuses a file the recovery
+/// would otherwise read or decode.
+pub(super) fn open_with(
+    bytes: &[u8],
+    path: &Path,
+    bounds: scan::Bounds,
+) -> Result<Opened, Failure> {
+    let scan::Scanned { document, nested } =
+        scan::document(bytes, bounds).map_err(|refusal| match refusal {
+            scan::Refusal::Unreadable => unparseable(&name(path)),
+            scan::Refusal::Bound => limit("pdf_page_scan_limit", bounds.passes),
+            scan::Refusal::Container => limit("pdf_page_container_limit", bounds.decode),
+            scan::Refusal::Number => limit("pdf_page_object_limit", bounds.number),
+            scan::Refusal::Nested => object_nested(bounds.depth),
+        })?;
+    // The reference calls a document encrypted when its trailer states an encryption dictionary it
+    // can resolve, whatever it would open with. The crate's reader opens an owner-password-only
+    // file, so deciding from a failed decryption would let this writer rewrite a permissions-only
+    // document the reference refuses.
+    if encrypted(&document) {
         return Err(Failure::usage(
             vocabulary()
                 .marks
@@ -176,15 +281,41 @@ pub(super) fn open(bytes: &[u8], path: &Path) -> Result<Opened, Failure> {
     }
     // The reference touches the page tree at load, so a file whose body it cannot flatten is
     // refused there rather than failing deep inside an operation.
-    let pages = match walk(&document) {
+    let chains = Chains::of(&document);
+    let pages = match walk(&document, &chains) {
         Tree::Pages(pages) => pages,
         Tree::Malformed => return Err(unparseable(&name(path))),
         Tree::TooDeep => return Err(tree_nested()),
     };
-    if pages.iter().any(|&page| !content_readable(&document, page)) {
-        return Err(unparseable(&name(path)));
+    // The depth's sentence when everything a page loses is an object the walk kept for its depth, the
+    // reference's when anything else is lost: a document answers the same way whatever order its
+    // pages are in, as [`require_readable`] answers for a document holding an unread object.
+    match content_state(&document, &nested, &pages) {
+        Content::Carried => {}
+        Content::KeptForDepth => return Err(object_nested(bounds.depth)),
+        Content::Lost => return Err(unparseable(&name(path))),
     }
-    Ok(Opened { document, pages })
+    Ok(Opened {
+        document,
+        pages,
+        nested,
+        depth: bounds.depth,
+        chains,
+        ancestry: Ancestry::new(),
+    })
+}
+
+/// Whether the file states an encryption dictionary the reference can reach: the entry itself, or
+/// the object it names. A damaged index that destroyed the entry leaves the file unencrypted as far
+/// as the reference is concerned, and this engine reads it the same way.
+fn encrypted(document: &Document) -> bool {
+    document
+        .trailer
+        .get(b"Encrypt")
+        .is_ok_and(|value| match value {
+            Object::Reference(id) => document.objects.contains_key(id),
+            _ => true,
+        })
 }
 
 /// The reference's sentence for a file whose pages this model cannot read.
@@ -196,28 +327,47 @@ fn unparseable(name: &str) -> Failure {
     )
 }
 
-/// Refuse a document holding a stream the parser never read. An in-place action writes every object
+/// The engine's own refusal for one of its bounds: `mark`'s sentence with the limit it states, in the
+/// class the engine's own refusals carry.
+fn limit(mark: &str, max: usize) -> Failure {
+    Failure::internal(
+        vocabulary()
+            .marks
+            .format(mark, &[("max", &max.to_string())]),
+    )
+}
+
+/// Refuse a document holding a stream the walk never read. An in-place action writes every object
 /// the file holds back out, so such a stream would be written empty while the answer reported
 /// success; a merge and a split copy only what their pages reach, and [`Copier::prepare`] refuses
 /// one of those the same way.
-pub(super) fn require_readable(document: &Document, path: &Path) -> Result<(), Failure> {
-    if document
-        .objects
-        .values()
-        .any(|object| unread(document, object))
-    {
-        return Err(unparseable(&name(path)));
+///
+/// Each cause answers with its own sentence and its own class: a body the walk could not parse is the
+/// file's own fault and the reference's sentence, and a document whose only unread objects are the
+/// ones the depth bound kept is the engine's own, naming the bound the scan was held to.
+pub(super) fn require_readable(opened: &Opened, path: &Path) -> Result<(), Failure> {
+    let mut kept = false;
+    for (&id, object) in &opened.document.objects {
+        if !unread(object) {
+            continue;
+        }
+        // A body the walk could not parse is the file's own fault, whatever else it holds.
+        if !opened.nested.contains(&id) {
+            return Err(unparseable(&name(path)));
+        }
+        kept = true;
+    }
+    if kept {
+        return Err(object_nested(opened.depth));
     }
     Ok(())
 }
 
 /// The engine's own refusal for a page tree deeper than it walks.
 fn tree_nested() -> Failure {
-    let max = vocabulary().engine.page_tree_depth_max;
-    Failure::internal(
-        vocabulary()
-            .marks
-            .format("pdf_page_tree_nested", &[("max", &max.to_string())]),
+    limit(
+        "pdf_page_tree_nested",
+        vocabulary().engine.page_tree_depth_max,
     )
 }
 
@@ -225,21 +375,24 @@ fn tree_nested() -> Failure {
 enum Tree {
     /// Every page, in page-tree order.
     Pages(Vec<ObjectId>),
-    /// The tree does not resolve: a node without a `/Kids` array, a kid that is not a page or a
-    /// pages node, or a node reached twice.
+    /// The tree does not resolve: a node without a `/Kids` array, a kid that is not a page or a pages
+    /// node, or a `/Pages` node reached twice. The file is what is wrong, so it answers with the
+    /// reference's unparseable sentence in its usage class.
     Malformed,
     /// The tree nests deeper than the engine's own bound follows.
     TooDeep,
 }
 
-/// Every page, in page-tree order. The tree resolves the way the reference requires: a catalog
-/// naming a `/Pages` node, every node stating a `/Kids` array, and no node reached twice. A kid that
-/// is not a page or a pages node refuses the file rather than being skipped: a skipped kid would
-/// leave a page out of a produced file with nothing said about it.
+/// Every page, in page-tree order. The tree resolves the way the reference reads it: a catalog naming
+/// a `/Pages` node, and every node stating a `/Kids` array. A kid that is not a page or a pages node
+/// refuses the file rather than being skipped: a skipped kid would leave a page out of a produced
+/// file with nothing said about it. A `/Pages` node reached twice is refused as malformed too — the
+/// reference walks it twice, while this walk keeps one set of nodes already walked rather than the
+/// path, so it cannot tell a diamond from a tree that names a node under itself.
 ///
 /// The walk keeps its own stack of kids arrays rather than recursing, so a deep tree costs heap
 /// rather than stack, and refuses one deeper than the engine's own bound.
-fn walk(document: &Document) -> Tree {
+fn walk(document: &Document, chains: &Chains) -> Tree {
     let Some(root) = document
         .catalog()
         .ok()
@@ -248,7 +401,7 @@ fn walk(document: &Document) -> Tree {
     else {
         return Tree::Malformed;
     };
-    let Some(root_kids) = kids(document, root) else {
+    let Some(root_kids) = kids(document, chains, root) else {
         return Tree::Malformed;
     };
     let max = vocabulary().engine.page_tree_depth_max;
@@ -276,7 +429,7 @@ fn walk(document: &Document) -> Tree {
                 if depth >= max {
                     return Tree::TooDeep;
                 }
-                let Some(child_kids) = kids(document, id) else {
+                let Some(child_kids) = kids(document, chains, id) else {
                     return Tree::Malformed;
                 };
                 stack.push((child_kids, 0, depth + 1));
@@ -288,97 +441,122 @@ fn walk(document: &Document) -> Tree {
 }
 
 /// The `/Kids` array of a page-tree node, resolved when the node references it.
-fn kids(document: &Document, node: ObjectId) -> Option<&[Object]> {
+fn kids<'a>(document: &'a Document, chains: &Chains, node: ObjectId) -> Option<&'a [Object]> {
     let kids = document.get_dictionary(node).ok()?.get(b"Kids").ok()?;
-    resolved(document, kids).as_array().ok().map(Vec::as_slice)
-}
-
-/// Whether the parser never read a stream's bytes. A stream it degraded to a plain dictionary —
-/// one whose stated length did not land on `endstream`, so the dictionary was kept and the bytes
-/// dropped — counts as unread too when [`degraded_stream`] recognises it: writing the dictionary
-/// back would lose them. A plain dictionary that happens to carry a length states nothing
-/// stream-only, and is carried as the dictionary it is.
-fn unread(document: &Document, object: &Object) -> bool {
-    match object {
-        Object::Stream(stream) => unread_stream(document, stream),
-        Object::Dictionary(dictionary) => degraded_stream(dictionary),
-        _ => false,
-    }
-}
-
-/// The keys only a stream states.
-const STREAM_KEYS: &[&[u8]] = &[
-    b"Filter",
-    b"DecodeParms",
-    b"DL",
-    b"Length1",
-    b"Length2",
-    b"Length3",
-];
-
-/// The `/Type` and `/Subtype` values only a stream states.
-const STREAM_TYPES: &[&[u8]] = &[b"EmbeddedFile"];
-const STREAM_SUBTYPES: &[&[u8]] = &[b"Image", b"Form", b"XML"];
-
-/// Whether a dictionary is a stream the parser gave up on, recognised by what it kept: it states a
-/// length and at least one entry a stream states and a plain dictionary does not. A recognition
-/// rather than a proof — a degraded stream that kept nothing but its length is not one — and not
-/// widened into one: recovering such a stream's bytes is the recovery work's.
-fn degraded_stream(dictionary: &Dictionary) -> bool {
-    dictionary.get(b"Length").is_ok()
-        && (STREAM_KEYS.iter().any(|key| dictionary.get(key).is_ok())
-            || states_name(dictionary, b"Type", STREAM_TYPES)
-            || states_name(dictionary, b"Subtype", STREAM_SUBTYPES))
-}
-
-/// Whether `dictionary` states `key` as one of `one_of`.
-fn states_name(dictionary: &Dictionary, key: &[u8], one_of: &[&[u8]]) -> bool {
-    dictionary
-        .get(key)
+    chains
+        .resolve(document, kids)
+        .as_array()
         .ok()
-        .and_then(|value| value.as_name().ok())
-        .is_some_and(|name| one_of.contains(&name))
+        .map(Vec::as_slice)
 }
 
-/// Whether the parser never read this stream's bytes. Such a stream keeps its start position and no
-/// content, and writing it would emit an empty stream where the file held bytes; a stream that
-/// really is empty states a length of zero and is not one of them.
-fn unread_stream(document: &Document, stream: &Stream) -> bool {
-    if !stream.content.is_empty() || stream.start_position.is_none() {
-        return false;
+/// Whether the walk never read an object's bytes: it kept a body it could not parse, or an object
+/// nested past its depth, as a stream that states where it began and holds nothing. Writing such a
+/// stream would emit an empty stream where the file held bytes, and nothing else in a document read
+/// from a body carries a start position, so the marker is the position alone.
+fn unread(object: &Object) -> bool {
+    object
+        .as_stream()
+        .is_ok_and(|stream| stream.start_position.is_some())
+}
+
+/// What the pages' `/Contents` mean for this writer.
+pub(super) enum Content {
+    /// Every value every page names is content the writer can carry, or the pages state none.
+    Carried,
+    /// The only loss is an object the walk kept unread for its depth — the one shape with a sentence
+    /// of its own.
+    KeptForDepth,
+    /// Content this model cannot carry: a value that is not a stream, a stream the walk never read, a
+    /// reference that names no object, or a chain that names itself. The module documentation states
+    /// the divergence from the reference; this engine refuses rather than report success over a page
+    /// that lost what the input held.
+    Lost,
+}
+
+/// Which sentence the pages' `/Contents` earn: whether every one of them is content this writer can
+/// carry, and which loss a document that cannot is refused for. The walk follows one reference per
+/// step, so an object is read once however many pages or branches name it. It keeps its own stack, so
+/// a chain may be as long as the file has objects without costing the process's stack.
+pub(super) fn content_state(
+    document: &Document,
+    nested: &BTreeSet<ObjectId>,
+    pages: &[ObjectId],
+) -> Content {
+    /// One step of the walk.
+    enum Step<'a> {
+        /// A value as it stands: a page's `/Contents` entry or an array element.
+        Value(&'a Object),
+        /// A reference to follow: the object it names.
+        Follow(ObjectId),
+        /// The object a `Follow` named has been read, so its id can leave the path.
+        Done(ObjectId),
     }
-    let stated = stream
-        .dict
-        .get(b"Length")
-        .ok()
-        .and_then(|value| resolved(document, value).as_float().ok());
-    stated != Some(0.0)
-}
-
-/// Whether the page's content is a stream, an array of streams, or nothing. A page whose content
-/// the parser could not read — one it left as a plain dictionary or as an unread stream — is not
-/// content this writer can carry, a reference that names no object is not content, and any other
-/// shape is not content either: writing one of them would drop what the file held.
-fn content_readable(document: &Document, page: ObjectId) -> bool {
-    let Ok(contents) = document
-        .get_dictionary(page)
-        .and_then(|dictionary| dictionary.get(b"Contents"))
-    else {
-        return true;
-    };
-    contents_readable(document, contents)
-}
-
-/// Whether `contents` is a content stream, an array of them, or nothing.
-fn contents_readable(document: &Document, contents: &Object) -> bool {
-    match resolved(document, contents) {
-        Object::Array(values) => values
-            .iter()
-            .all(|value| contents_readable(document, value)),
-        Object::Stream(stream) => !unread_stream(document, stream),
-        // A page that states no content has none to lose.
-        Object::Null => true,
-        _ => false,
+    let mut stack: Vec<Step> = pages
+        .iter()
+        .filter_map(|page| {
+            document
+                .get_dictionary(*page)
+                .and_then(|dictionary| dictionary.get(b"Contents"))
+                .ok()
+                .map(Step::Value)
+        })
+        .collect();
+    // The references whose subtree has been read, and the ones the path is inside.
+    let mut followed = BTreeSet::new();
+    let mut open = BTreeSet::new();
+    let mut kept_for_depth = false;
+    while let Some(step) = stack.pop() {
+        let value = match step {
+            Step::Done(id) => {
+                open.remove(&id);
+                followed.insert(id);
+                continue;
+            }
+            // One link per step: the object a reference names is read as the step after it.
+            Step::Follow(id) => {
+                if followed.contains(&id) {
+                    // Read already, and what it came to is counted.
+                    continue;
+                }
+                if !open.insert(id) {
+                    // Content that names itself: following it would never end.
+                    return Content::Lost;
+                }
+                stack.push(Step::Done(id));
+                let Some(object) = document.objects.get(&id) else {
+                    // A reference that names no object is not content.
+                    return Content::Lost;
+                };
+                // An object the walk kept unread earns the depth's sentence when the depth is why it
+                // was kept — decided by this object, whatever reference a page used to reach it.
+                // Nothing a page states inline carries a start position, so the shared match below
+                // never sees one.
+                if unread(object) {
+                    if !nested.contains(&id) {
+                        return Content::Lost;
+                    }
+                    kept_for_depth = true;
+                    continue;
+                }
+                object
+            }
+            Step::Value(value) => value,
+        };
+        match value {
+            Object::Reference(id) => stack.push(Step::Follow(*id)),
+            Object::Array(values) => {
+                stack.extend(values.iter().rev().map(Step::Value));
+            }
+            // A stream the walk read, or a page that states no content, is content.
+            Object::Stream(_) | Object::Null => {}
+            _ => return Content::Lost,
+        }
+    }
+    if kept_for_depth {
+        Content::KeptForDepth
+    } else {
+        Content::Carried
     }
 }
 
@@ -403,7 +581,7 @@ pub(super) fn fresh() -> Document {
 /// walk cannot resolve is a defect in what the test built, not a document to answer with no pages.
 #[cfg(test)]
 pub(super) fn page_ids(document: &Document) -> Vec<ObjectId> {
-    match walk(document) {
+    match walk(document, &Chains::of(document)) {
         Tree::Pages(pages) => pages,
         Tree::Malformed => panic!("the page tree does not resolve"),
         Tree::TooDeep => panic!("the page tree nests deeper than the walk follows"),
@@ -463,20 +641,38 @@ pub(super) fn add_page(document: &mut Document, page: ObjectId) -> Result<(), Fa
 /// The memo is the point: an object two copied pages share — an image, a font — is copied once, as
 /// the reference's own copier does for one copy call. One copier therefore belongs to one
 /// destination and one source; reusing it across destinations would name objects of the first.
-pub(super) struct Copier {
+pub(super) struct Copier<'a> {
     memo: HashMap<ObjectId, ObjectId>,
     /// The pages already placed in the tree this copier builds into.
     placed: HashSet<ObjectId>,
     /// The source's base name, as a refusal names it.
     name: String,
+    /// The source objects the scan kept unread because they nest too deep.
+    nested: BTreeSet<ObjectId>,
+    /// The depth the source was scanned to, so the copy's own guard and its refusals name that bound.
+    depth: usize,
+    /// Where the source's reference chains end, so a page's box is not re-followed per copy.
+    chains: &'a Chains,
+    /// Where each page's `/Parent` path states an inherited entry, filled as pages are copied.
+    ancestry: &'a Ancestry,
 }
 
-impl Copier {
-    pub(super) fn new(name: String) -> Self {
+impl<'a> Copier<'a> {
+    pub(super) fn new(
+        name: String,
+        nested: BTreeSet<ObjectId>,
+        depth: usize,
+        chains: &'a Chains,
+        ancestry: &'a Ancestry,
+    ) -> Self {
         Self {
             memo: HashMap::new(),
             placed: HashSet::new(),
             name,
+            nested,
+            depth,
+            chains,
+            ancestry,
         }
     }
 
@@ -484,10 +680,9 @@ impl Copier {
     /// copy of everything the page reaches, with the entries it inherits stated by the copy and
     /// `/Parent` dropped, since the copy belongs to another tree.
     ///
-    /// A tree that names the same page twice gets two page objects: one object named by two `/Kids`
-    /// entries is a page tree some readers refuse outright as a cycle, and the reference copies the
-    /// page once per name. The objects the page reaches stay shared, so the second copy is the first
-    /// one's dictionary again.
+    /// A tree that names the same page twice gets two page objects, one per name, because a copy
+    /// states what the page inherits and no two pages may share a dictionary. The objects the page
+    /// reaches stay shared, so the second copy is the first one's dictionary again.
     pub(super) fn copy_page(
         &mut self,
         source: &Document,
@@ -524,6 +719,8 @@ impl Copier {
         let internal = || Failure::internal(crate::contained::engine_failed());
         let dictionary = page_dictionary(
             source,
+            self.chains,
+            self.ancestry,
             page,
             source.get_dictionary(page).map_err(|_| internal())?,
         )?;
@@ -549,17 +746,19 @@ impl Copier {
     /// Give every object `dictionary` reaches an id in `document`, answering the source ids newly
     /// reserved with the object each is written from. Reserving first is what keeps the copy's
     /// recursion to the object's own syntax instead of following a reference chain, which a file may
-    /// make as long as it likes.
+    /// make as long as it likes. A file nested deeper than the guard here allows is refused by the
+    /// scan first; the guard is held to the depth that scan was, and covers an object assembled in
+    /// memory.
     fn reserve(
         &mut self,
         source: &Document,
         document: &mut Document,
         dictionary: &Dictionary,
     ) -> Result<Vec<(ObjectId, Object)>, Failure> {
-        let max = vocabulary().engine.object_depth_max;
+        let max = self.depth;
         let mut reserved = Vec::new();
         let mut pending = Vec::new();
-        references_of(dictionary, 0, max, &mut pending).ok_or_else(object_nested)?;
+        references_of(dictionary, 0, max, &mut pending).ok_or_else(|| object_nested(max))?;
         while let Some(id) = pending.pop() {
             if self.memo.contains_key(&id) {
                 continue;
@@ -571,7 +770,7 @@ impl Copier {
             };
             let object = self.prepare(source, id, object)?;
             self.memo.insert(id, document.add_object(Object::Null));
-            references(&object, 0, max, &mut pending).ok_or_else(object_nested)?;
+            references(&object, 0, max, &mut pending).ok_or_else(|| object_nested(max))?;
             reserved.push((id, object));
         }
         Ok(reserved)
@@ -579,15 +778,26 @@ impl Copier {
 
     /// The object as the copy writes it. A page reached through a link or a destination states the
     /// entries it inherits, since its copy no longer has a tree to inherit them from; an object the
-    /// parser never read is refused rather than written empty, which would lose what the input held.
+    /// walk never read is refused rather than written empty, which would lose what the input held.
+    /// One the scan kept unread because it nests too deep takes the engine's own sentence.
     fn prepare(&self, source: &Document, id: ObjectId, object: &Object) -> Result<Object, Failure> {
-        if unread(source, object) {
-            return Err(self.unparseable());
+        if unread(object) {
+            return Err(if self.nested.contains(&id) {
+                object_nested(self.depth)
+            } else {
+                self.unparseable()
+            });
         }
         if let Ok(dictionary) = object.as_dict()
             && is_page(dictionary)
         {
-            return Ok(Object::Dictionary(page_dictionary(source, id, dictionary)?));
+            return Ok(Object::Dictionary(page_dictionary(
+                source,
+                self.chains,
+                self.ancestry,
+                id,
+                dictionary,
+            )?));
         }
         Ok(object.clone())
     }
@@ -600,32 +810,31 @@ impl Copier {
 /// through a link.
 fn page_dictionary(
     source: &Document,
+    chains: &Chains,
+    ancestry: &Ancestry,
     page: ObjectId,
     dictionary: &Dictionary,
 ) -> Result<Dictionary, Failure> {
-    if media_box(source, page).is_none() {
+    if media_box(source, chains, ancestry, page).is_none() {
         return Err(Failure::internal(crate::contained::engine_failed()));
     }
-    let mut stated = dictionary.clone();
+    let mut dictionary = dictionary.clone();
     for key in INHERITABLE {
-        if !stated.has(key)
-            && let Some(value) = inherited(source, page, key)
+        if !dictionary.has(key)
+            && let Some(value) = inherited(source, ancestry, page, key)
         {
-            stated.set(key.to_vec(), value.clone());
+            dictionary.set(key.to_vec(), value.clone());
         }
     }
-    stated.remove(b"Parent");
-    Ok(stated)
+    dictionary.remove(b"Parent");
+    Ok(dictionary)
 }
 
-/// The engine's own refusal for an object graph deeper than it copies.
-fn object_nested() -> Failure {
-    let max = vocabulary().engine.object_depth_max;
-    Failure::internal(
-        vocabulary()
-            .marks
-            .format("pdf_page_object_nested", &[("max", &max.to_string())]),
-    )
+/// The engine's own refusal for an object nested deeper than `depth`, the bound the document was
+/// scanned to: the scan's own refusal, an object it kept unread, and a copy that reaches one all name
+/// the same value.
+fn object_nested(depth: usize) -> Failure {
+    limit("pdf_page_object_nested", depth)
 }
 
 /// Every reference a dictionary holds, or `None` when its syntax nests deeper than `max`.
@@ -652,9 +861,10 @@ fn is_page(dictionary: &Dictionary) -> bool {
     dictionary.get_type().is_ok_and(|kind| kind == b"Page")
 }
 
-/// Every reference `object` holds, however its own syntax nests it. The parser bounds that nesting,
-/// so this recursion is bounded where a walk over references would not be; `max` is the engine's own
-/// guard on top of the parser's.
+/// Every reference `object` holds, however its own syntax nests it. The walk that read the file
+/// bounds that nesting, so this recursion is bounded where a walk over references would not be;
+/// `max` is the copy's own bound, and the scan refuses a file nested past it first, with the same
+/// depth.
 fn references(object: &Object, depth: usize, max: usize, out: &mut Vec<ObjectId>) -> Option<()> {
     if depth > max {
         return None;
@@ -674,10 +884,10 @@ fn references(object: &Object, depth: usize, max: usize, out: &mut Vec<ObjectId>
 }
 
 /// One object with every reference it holds replaced by the id its copy was reserved. Only the
-/// object's own syntax is walked — the parser bounds it, and the walk that reserved the object's
+/// object's own syntax is walked — the scan bounds it, and the walk that reserved the object's
 /// references already refused one nested deeper than the engine copies — because references are
-/// rewritten by lookup rather than followed. Every reference in an object [`reserve`] accepted was
-/// reserved, so one that names no copy is a defect rather than a dangling id to write.
+/// rewritten by lookup rather than followed. Every reference in an object [`Copier::reserve`]
+/// accepted was reserved, so one that names no copy is a defect rather than a dangling id to write.
 fn rewrite(object: &Object, memo: &HashMap<ObjectId, ObjectId>) -> Option<Object> {
     Some(match object {
         Object::Reference(id) => Object::Reference(*memo.get(id)?),
@@ -713,44 +923,99 @@ fn rewrite_dictionary(
     Some(rewritten)
 }
 
-/// The object `object` resolves to, following references. A reference loop — which the format does
-/// not allow — stops at the document's own object count rather than running forever.
-fn resolved<'a>(document: &'a Document, mut object: &'a Object) -> &'a Object {
-    for _ in 0..document.objects.len() {
+/// Where every reference chain in a document ends: the object a reference resolves to, or `None`
+/// when the chain cannot be followed to one — it names nothing, or it names itself. Every chain is
+/// followed once per document.
+pub(super) struct Chains(HashMap<ObjectId, Option<ObjectId>>);
+
+impl Chains {
+    /// Follow every chain in `document`, once.
+    pub(super) fn of(document: &Document) -> Self {
+        let mut ends: HashMap<ObjectId, Option<ObjectId>> = HashMap::new();
+        for &start in document.objects.keys() {
+            if ends.contains_key(&start) {
+                continue;
+            }
+            // A non-reference resolves to itself, which [`resolve`](Self::resolve) answers without
+            // an entry.
+            if !matches!(document.objects.get(&start), Some(Object::Reference(_))) {
+                continue;
+            }
+            let mut path = vec![start];
+            let mut current = start;
+            let end = loop {
+                if let Some(&known) = ends.get(&current) {
+                    break known;
+                }
+                let Some(object) = document.objects.get(&current) else {
+                    break None;
+                };
+                let Object::Reference(next) = object else {
+                    break Some(current);
+                };
+                // Provisional, so a chain that names an object on its own path ends at a reference.
+                ends.insert(current, None);
+                current = *next;
+                path.push(current);
+            };
+            for id in path {
+                ends.insert(id, end);
+            }
+        }
+        Self(ends)
+    }
+
+    /// The object `object` resolves to, following references. An id the map does not know — a
+    /// reference the engine added after the chains were followed — ends at the object it names,
+    /// since the engine writes no chains.
+    pub(super) fn resolve<'a>(&self, document: &'a Document, object: &'a Object) -> &'a Object {
         let Object::Reference(id) = object else {
             return object;
         };
-        let Some(referenced) = document.objects.get(id) else {
-            return object;
+        let end = match self.0.get(id) {
+            Some(Some(end)) => *end,
+            Some(None) => return object,
+            None => *id,
         };
-        object = referenced;
+        document.objects.get(&end).unwrap_or(object)
     }
-    object
 }
 
-/// The value `page` states for `key`, or the nearest page-tree ancestor's.
-fn inherited<'a>(document: &'a Document, page: ObjectId, key: &[u8]) -> Option<&'a Object> {
-    let mut current = page;
-    for _ in 0..=document.objects.len() {
-        let dictionary = document.objects.get(&current)?.as_dict().ok()?;
-        if let Ok(value) = dictionary.get(key) {
-            return Some(value);
-        }
-        current = dictionary.get(b"Parent").ok()?.as_reference().ok()?;
-    }
-    None
+/// The value `page` states for `key`, or the nearest page-tree ancestor's. A path is walked once per
+/// entry and what it reached is remembered.
+fn inherited<'a>(
+    document: &'a Document,
+    ancestry: &Ancestry,
+    page: ObjectId,
+    key: &[u8],
+) -> Option<&'a Object> {
+    let index = INHERITABLE.iter().position(|entry| *entry == key)?;
+    let node = ancestry.nearest(document, page, index)?;
+    document.objects.get(&node)?.as_dict().ok()?.get(key).ok()
 }
 
 /// The page's media box, as the reference reads it: four numbers, inherited when the page states
 /// none. A page that states none anywhere is a document the reference faults on, so it is the
 /// engine's own failure here rather than a refusal.
-fn media_box(document: &Document, page: ObjectId) -> Option<Area> {
-    area(document, page, b"MediaBox")
+fn media_box(
+    document: &Document,
+    chains: &Chains,
+    ancestry: &Ancestry,
+    page: ObjectId,
+) -> Option<Area> {
+    area(document, chains, ancestry, page, b"MediaBox")
 }
 
 /// One four-number box the page states, inherited when it states none.
-fn area(document: &Document, page: ObjectId, key: &[u8]) -> Option<Area> {
-    let array = resolved(document, inherited(document, page, key)?)
+fn area(
+    document: &Document,
+    chains: &Chains,
+    ancestry: &Ancestry,
+    page: ObjectId,
+    key: &[u8],
+) -> Option<Area> {
+    let array = chains
+        .resolve(document, inherited(document, ancestry, page, key)?)
         .as_array()
         .ok()?;
     if array.len() != CORNERS {
@@ -758,7 +1023,7 @@ fn area(document: &Document, page: ObjectId, key: &[u8]) -> Option<Area> {
     }
     let mut numbers = [0.0; CORNERS];
     for (slot, value) in numbers.iter_mut().zip(array) {
-        *slot = resolved(document, value).as_float().ok()?;
+        *slot = chains.resolve(document, value).as_float().ok()?;
     }
     Some(Area {
         x: f64::from(numbers[0]),
@@ -770,10 +1035,15 @@ fn area(document: &Document, page: ObjectId, key: &[u8]) -> Option<Area> {
 
 /// The area the page shows and how it is displayed. A page with no media box anywhere is the
 /// engine's own failure; see [`media_box`].
-pub(super) fn frame(document: &Document, page: ObjectId) -> Result<Frame, Failure> {
-    let media = media_box(document, page)
+pub(super) fn frame(
+    document: &Document,
+    chains: &Chains,
+    ancestry: &Ancestry,
+    page: ObjectId,
+) -> Result<Frame, Failure> {
+    let media = media_box(document, chains, ancestry, page)
         .ok_or_else(|| Failure::internal(crate::contained::engine_failed()))?;
-    let crop = area(document, page, b"CropBox").unwrap_or(media);
+    let crop = area(document, chains, ancestry, page, b"CropBox").unwrap_or(media);
     let mut x0 = media.x.max(crop.x);
     let mut y0 = media.y.max(crop.y);
     let mut x1 = (media.x + media.width).min(crop.x + crop.width);
@@ -786,7 +1056,7 @@ pub(super) fn frame(document: &Document, page: ObjectId) -> Result<Frame, Failur
     }
     // A quarter turn, of which anything else — which the format does not allow — is read as the
     // nearest. A turn the format does not allow to be a number at all is the library's own fault.
-    let Some(rotation) = rotation(document, page) else {
+    let Some(rotation) = rotation(document, chains, ancestry, page) else {
         return Err(Failure::internal(crate::contained::engine_failed()));
     };
     let step = super::step();
@@ -828,11 +1098,16 @@ fn quarter_turns(turn: f64, step: f64) -> i64 {
 /// The page's own turn, inherited when it states none, or `None` when it states something the
 /// format does not allow to be a number: the reference's own type check faults on that, rather than
 /// reading it as no turn.
-pub(super) fn rotation(document: &Document, page: ObjectId) -> Option<f64> {
-    let Some(value) = inherited(document, page, b"Rotate") else {
+pub(super) fn rotation(
+    document: &Document,
+    chains: &Chains,
+    ancestry: &Ancestry,
+    page: ObjectId,
+) -> Option<f64> {
+    let Some(value) = inherited(document, ancestry, page, b"Rotate") else {
         return Some(0.0);
     };
-    match resolved(document, value) {
+    match chains.resolve(document, value) {
         // No number stated, or a reference that names none: the page states no turn.
         Object::Null | Object::Reference(_) => Some(0.0),
         value => value.as_float().ok().map(f64::from),
@@ -937,7 +1212,11 @@ const MOVED_KEYS: &[(&[u8], bool)] = &[
 /// the crate writes the same list in the same order into the page's own entry, which is the one
 /// structural difference and is invisible to a reader. A value of any other type is the library's own
 /// fault, which the reference lets out as an internal failure rather than writing over it.
-pub(super) fn normalize_annots(document: &mut Document, page: ObjectId) -> Result<(), Failure> {
+pub(super) fn normalize_annots(
+    document: &mut Document,
+    chains: &Chains,
+    page: ObjectId,
+) -> Result<(), Failure> {
     let entry = document
         .get_dictionary(page)
         .and_then(|dictionary| dictionary.get(b"Annots"))
@@ -945,7 +1224,7 @@ pub(super) fn normalize_annots(document: &mut Document, page: ObjectId) -> Resul
         .cloned();
     let annots = match entry {
         None | Some(Object::Null) => Vec::new(),
-        Some(entry) => match resolved(document, &entry) {
+        Some(entry) => match chains.resolve(document, &entry) {
             Object::Array(values) => values.clone(),
             // A reference that names no object is no list of annotations.
             Object::Reference(_) | Object::Null => Vec::new(),
@@ -966,6 +1245,7 @@ pub(super) fn normalize_annots(document: &mut Document, page: ObjectId) -> Resul
 /// would apply the move twice.
 pub(super) fn move_annotations(
     document: &mut Document,
+    chains: &Chains,
     page: ObjectId,
     scale: f64,
     tx: f64,
@@ -981,7 +1261,7 @@ pub(super) fn move_annotations(
     };
     let mut stuck = 0;
     for annotation in &mut annots {
-        if !move_annotation(document, annotation, scale, tx, ty) {
+        if !move_annotation(document, chains, annotation, scale, tx, ty) {
             stuck += 1;
         }
     }
@@ -993,13 +1273,14 @@ pub(super) fn move_annotations(
 /// dictionary as it stands and then written back to the same dictionary.
 fn move_annotation(
     document: &mut Document,
+    chains: &Chains,
     annotation: &mut Object,
     scale: f64,
     tx: f64,
     ty: f64,
 ) -> bool {
     let Some(updates) = dictionary_of(document, annotation)
-        .and_then(|dictionary| moved_entries(document, dictionary, scale, tx, ty))
+        .and_then(|dictionary| moved_entries(document, chains, dictionary, scale, tx, ty))
     else {
         return false;
     };
@@ -1023,6 +1304,7 @@ fn set_annots(document: &mut Document, page: ObjectId, annots: Vec<Object>) {
 /// move touches.
 fn moved_entries(
     document: &Document,
+    chains: &Chains,
     dictionary: &Dictionary,
     scale: f64,
     tx: f64,
@@ -1033,13 +1315,13 @@ fn moved_entries(
         let Ok(value) = dictionary.get(key) else {
             continue;
         };
-        let Some(numbers) = numbers_of(document, value) else {
+        let Some(numbers) = numbers_of(document, chains, value) else {
             continue;
         };
         let (tx, ty) = if shift { (tx, ty) } else { (0.0, 0.0) };
         updates.push((key, Object::Array(moved_points(&numbers, scale, tx, ty))));
     }
-    if let Some(strokes) = ink_strokes(document, dictionary, scale, tx, ty) {
+    if let Some(strokes) = ink_strokes(document, chains, dictionary, scale, tx, ty) {
         updates.push((b"InkList", Object::Array(strokes)));
     }
     (!updates.is_empty()).then_some(updates)
@@ -1048,6 +1330,7 @@ fn moved_entries(
 /// The ink annotation's strokes moved, or `None` when it states no stroke that is a number array.
 fn ink_strokes(
     document: &Document,
+    chains: &Chains,
     dictionary: &Dictionary,
     scale: f64,
     tx: f64,
@@ -1056,11 +1339,11 @@ fn ink_strokes(
     let strokes = dictionary
         .get(b"InkList")
         .ok()
-        .and_then(|value| resolved(document, value).as_array().ok())?;
+        .and_then(|value| chains.resolve(document, value).as_array().ok())?;
     let mut moved = Vec::with_capacity(strokes.len());
     let mut follows = false;
     for stroke in strokes {
-        match numbers_of(document, stroke) {
+        match numbers_of(document, chains, stroke) {
             Some(numbers) => {
                 moved.push(Object::Array(moved_points(&numbers, scale, tx, ty)));
                 follows = true;
@@ -1094,11 +1377,17 @@ fn dictionary_of_mut<'a>(
 }
 
 /// The numbers an array holds, or `None` when it is not an array or any element is not a number.
-fn numbers_of(document: &Document, object: &Object) -> Option<Vec<f64>> {
-    let array = resolved(document, object).as_array().ok()?;
+fn numbers_of(document: &Document, chains: &Chains, object: &Object) -> Option<Vec<f64>> {
+    let array = chains.resolve(document, object).as_array().ok()?;
     array
         .iter()
-        .map(|value| resolved(document, value).as_float().map(f64::from).ok())
+        .map(|value| {
+            chains
+                .resolve(document, value)
+                .as_float()
+                .map(f64::from)
+                .ok()
+        })
         .collect()
 }
 
@@ -1225,11 +1514,18 @@ fn utf16_be(text: &str) -> Vec<u8> {
 /// The document as the bytes to write, `has_pages` being whether the call leaves any page in it. A
 /// document left with none takes the page the reference's library gives a document it saves with
 /// none: a blank A4 page, so a merge of no inputs is a one-page document rather than an empty file.
+///
+/// The produced file states a classic cross-reference table. The object model's own writer states a
+/// cross-reference stream, which is not conformant below 1.5 and would change every produced file to
+/// serve the damaged ones; the reference's writer always states a table
+/// (`PDFWriter.computeBufferSize` calls `PDFCrossRefSection.create()`), and the comparison normalises
+/// the index away, so a table and a stream are one document.
 pub(super) fn save(mut document: Document, has_pages: bool) -> Result<Vec<u8>, Failure> {
     if !has_pages {
         let blank = blank_page(&mut document);
         add_page(&mut document, blank)?;
     }
+    document.reference_table.cross_reference_type = XrefType::CrossReferenceTable;
     let mut bytes = Vec::new();
     // A `Vec` cannot refuse a write, so a failure here is the object model's, not the file's.
     document
