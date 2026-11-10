@@ -105,6 +105,16 @@ pub(super) fn self_closing_tag_with(name: &str, middle: &str) -> String {
     format!("<{name}{middle}\\s*/>")
 }
 
+/// The two shapes a tag of `name` can take where a pattern is anchored at the start of a text: the
+/// element opens and closes itself, or it opens and its close tag follows.
+///
+/// The alternatives may overlap; where they do they match the same text, so their order in the
+/// alternation does not matter.
+#[must_use]
+pub(super) fn tag_shapes(name: &str) -> String {
+    format!("^(?:{}|{})", self_closing_tag(name), open_tag(name))
+}
+
 /// The close spelling of a tag of `name`, tolerating the whitespace XML allows before its `>`.
 #[must_use]
 pub(super) fn close_tag(name: &str) -> String {
@@ -332,7 +342,9 @@ pub(super) fn insert_ordered_child(
     let placed = rank(name, order);
     for (start, _, child) in any_element_spans(body) {
         if rank(&child, order) > placed {
-            return format!("{}{}{}", &body[..start], element, &body[start..]);
+            let mut out = body.to_string();
+            out.insert_str(start, element);
+            return out;
         }
     }
     format!("{body}{element}")
@@ -486,6 +498,12 @@ pub(super) fn xml_escape(value: &str) -> String {
         }
     }
     out
+}
+
+/// Whether `text` holds an entity reference, which a raw slot is escaped again for.
+#[must_use]
+pub(super) fn holds_entity(text: &str) -> bool {
+    ENTITY.is_match(text)
 }
 
 /// `text` with its entity references resolved, so a value is matched against the text a reader

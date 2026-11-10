@@ -139,11 +139,11 @@ const BUILTIN_STYLES: &[(&str, &str)] = &[
     ("заголовок3", "Heading3"),
 ];
 
+/// A paragraph's own `<w:pPr>`, in either shape it starts in.
+static PARAGRAPH_PROPERTIES_TAG: LazyLock<Arc<Regex>> =
+    LazyLock::new(|| xml::pattern(xml::tag_shapes("w:pPr")));
+
 /// The `<w:rPr>` a format request needs, from the run's own.
-#[expect(
-    clippy::too_many_lines,
-    reason = "the kit's own formattedRunProperties states every property in one place"
-)]
 fn formatted_run_properties(run_xml: &str, edit: &RunFormat) -> String {
     static REVISION: LazyLock<Arc<Regex>> = LazyLock::new(|| {
         xml::pattern(format!(
@@ -154,16 +154,9 @@ fn formatted_run_properties(run_xml: &str, edit: &RunFormat) -> String {
     });
     let current = text::run_properties(run_xml);
     let inner = current.as_deref().map_or_else(String::new, |current| {
-        static OPEN: LazyLock<Arc<Regex>> = LazyLock::new(|| {
-            xml::pattern(format!(
-                "^(?:{}|{})",
-                xml::self_closing_tag("w:rPr"),
-                xml::open_tag("w:rPr")
-            ))
-        });
         static CLOSE: LazyLock<Arc<Regex>> =
             LazyLock::new(|| xml::pattern(format!("{}$", xml::close_tag("w:rPr"))));
-        let opened = OPEN.replace(current, "");
+        let opened = text::RUN_PROPERTIES_TAG.replace(current, "");
         CLOSE.replace(&opened, "").into_owned()
     });
     let revision = REVISION.find(&inner).and_then(|found| {
@@ -354,7 +347,7 @@ pub(super) fn format_runs(
     let mut out = xml_text.to_string();
     let mut spans = Vec::new();
     for (start, end, piece, reached) in pieces {
-        out = format!("{}{}{}", &out[..start], piece, &out[end..]);
+        out = format!("{}{piece}{}", &out[..start], &out[end..]);
         spans.extend(reached);
     }
     Ok(Written { xml: out, spans })
@@ -371,19 +364,12 @@ pub(super) fn paragraph_properties_span(
     paragraph_xml: &str,
 ) -> Result<Option<(usize, usize)>, Failure> {
     static OPEN: LazyLock<Arc<Regex>> = LazyLock::new(|| xml::pattern(xml::open_tag("w:p")));
-    static STARTS: LazyLock<Arc<Regex>> = LazyLock::new(|| {
-        xml::pattern(format!(
-            "^(?:{}|{})",
-            xml::open_tag("w:pPr"),
-            xml::self_closing_tag("w:pPr")
-        ))
-    });
     let Some(open) = OPEN.find(paragraph_xml) else {
         return Ok(None);
     };
     let rest = &paragraph_xml[open.end()..];
     let lead = rest.len() - rest.trim_start().len();
-    if !STARTS.is_match(rest.trim_start()) {
+    if !PARAGRAPH_PROPERTIES_TAG.is_match(rest.trim_start()) {
         return Ok(None);
     }
     let at = open.end().saturating_add(lead);
@@ -800,10 +786,6 @@ fn cancelled_numbering(num_pr: &str) -> String {
 /// # Errors
 ///
 /// The paragraph holds `<w:pPr>` opened and never closed.
-#[expect(
-    clippy::too_many_lines,
-    reason = "the kit's own formattedParagraph keeps its property body and its spans together"
-)]
 fn formatted_paragraph(
     paragraph_xml: &str,
     props: &ParagraphProps,
@@ -816,14 +798,8 @@ fn formatted_paragraph(
         paragraph_xml[start..end].to_string()
     });
     let open = if own.is_some() {
-        static OPEN: LazyLock<Arc<Regex>> = LazyLock::new(|| {
-            xml::pattern(format!(
-                "^(?:{}|{})",
-                xml::self_closing_tag("w:pPr"),
-                xml::open_tag("w:pPr")
-            ))
-        });
-        OPEN.find(&element)
+        PARAGRAPH_PROPERTIES_TAG
+            .find(&element)
             .map_or(String::new(), |found| found.as_str().to_string())
     } else {
         String::new()

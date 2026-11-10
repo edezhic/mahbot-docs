@@ -171,6 +171,31 @@ fn all_marks() -> Vec<String> {
 /// second copy of the printed word.
 const FORMAT_NAMES: &[(&str, &[(&str, &str)])] = &[
     (
+        "src/writing/pptx/mod.rs",
+        &[
+            ("title", "the `title` value an `add_slide` names"),
+            ("text", "the `text` value an edit names"),
+        ],
+    ),
+    (
+        "src/writing/pptx/text.rs",
+        &[
+            ("text", "the `text` value an edit names"),
+            (
+                "underline",
+                "the `<a:rPr>` attribute a `format_text` toggle writes",
+            ),
+            (
+                "highlight",
+                "DrawingML's `CT_TextCharacterProperties` child name the fill order lists",
+            ),
+            (
+                "none",
+                "the `u` attribute value DrawingML writes for no underline",
+            ),
+        ],
+    ),
+    (
         "src/detect.rs",
         &[("text", "a plain-text extension the name is classified by")],
     ),
@@ -430,6 +455,37 @@ fn marks_for(path: &Path) -> Vec<String> {
 /// crate's own halves enforce is read from the vocabulary is
 /// [`every_bound_the_crate_enforces_is_read_from_the_vocabulary`].
 const SPEC_CONSTANTS: &[(&str, f64, usize, &str)] = &[
+    // ── the presentation edit's geometry ────────────────────────────────────────────────────────
+    (
+        "src/writing/pptx/draw.rs",
+        100.0,
+        1,
+        "DrawingML states a text size in hundredths of a point, not a bound the vocabulary names",
+    ),
+    (
+        "src/writing/pptx/draw.rs",
+        3.0,
+        1,
+        "the shape id the body placeholder of a generated slide takes, after the group's own id 1",
+    ),
+    (
+        "src/writing/pptx/mod.rs",
+        255.0,
+        1,
+        "the lowest `<p:sldId>` id a real deck uses, which a new entry steps past; not a bound",
+    ),
+    (
+        "src/writing/pptx/text.rs",
+        100.0,
+        1,
+        "DrawingML states a text size in hundredths of a point, not a bound the vocabulary names",
+    ),
+    (
+        "src/writing/pptx/text.rs",
+        6.0,
+        1,
+        "the six members of DrawingML's `EG_FillProperties` choice group",
+    ),
     // ── the embedded PDF font ────────────────────────────────────────────────────────────────────
     // An sfnt's own record sizes and field offsets: none is a bound the vocabulary states.
     (

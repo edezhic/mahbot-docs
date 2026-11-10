@@ -17,7 +17,7 @@ use super::super::image;
 use super::super::opc;
 use super::super::package::CONTENT_TYPES;
 use super::super::xml;
-use super::super::{edit_text, js_number, js_round, quoted};
+use super::super::{edit_text, js_number, js_round, quoted, scalar_text};
 use super::DOCX_DOCUMENT;
 use super::DOCX_MEDIA;
 use super::DOCX_TABLE;
@@ -545,20 +545,6 @@ fn docx_table_cell(value: &Value, header: bool) -> Result<String, Failure> {
         "<w:tc><w:p><w:r>{bold}<w:t xml:space=\"preserve\">{}</w:t></w:r></w:p></w:tc>",
         xml::xml_escape(&text)
     ))
-}
-
-/// A cell's value as the kit's `String()` renders it.
-fn scalar_text(value: &Value, what: &str) -> Result<String, Failure> {
-    match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::Number(number) => Ok(super::super::number_text(number)),
-        Value::Bool(value) => Ok(value.to_string()),
-        Value::Null | Value::Array(_) | Value::Object(_) => Err(Failure::usage(
-            vocabulary()
-                .marks
-                .format("edit_value_kind", &[("what", what)]),
-        )),
-    }
 }
 
 /// The kind of the body's own block that begins at or after `at`: a table no other table holds and

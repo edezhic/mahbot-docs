@@ -15,7 +15,7 @@ copy carries its licence beside it (`NotoSans-LICENSE.txt`).
 | `limits` | The reader and producer caps: the ZIP entry, XML depth, Word table/style/field/link, Excel range-probe, chart, number-format, PDF mark/field/catalogue, edit-work and multi-file bounds. Every entry is the reference's own number, read from its sources. |
 | `engine` | The bounds the engine states for itself, where the reference states none: the paragraph-nesting cap that keeps a Word edit's cost bounded on a deeply nested body, the page-tree and object-copy depth caps that keep the PDF writer's walks off the stack, the scan budget the PDF writer's body walk may spend on one file and on each object stream it expands, the bytes one look at what comes next may inspect, the bytes one PDF container may decode to, and the highest object number the writer can state in its index. Nothing here is the reference's number, so nothing here is pinned by the contract test. |
 | `marks` | The fixed words, labels, templates and note fragments a reading or an operation prints, by key, each with the producers that print it. `{name}` placeholders are replaced with `Marks::format`. A mark the `rules` section already states (a Word tracked-change or chart label, a peripheral part's kind, a PDF form word) is not repeated here: `src/vocabulary.rs` reads it from `rules` under its key. A note with no values ("the workbook declares no sheets") is a fixed sentence and lives here; one that interpolates values is composed at the reporting site from this section's fragments and marks. |
-| `derived_marks` | The `rules` sections whose values are printed marks (Word marks and their chart labels, slide labels, PDF form words and field kinds, metadata keys, and peripheral parts), each naming the producers that print them today. The Word marks and peripheral parts are printed by both halves — a reading labels them and a Word edit names them in a refusal — and the rest by the reading only, until their writing port prints one. They live in `rules` because the kit needs them as request vocabulary; this section says they are marks too. |
+| `derived_marks` | The `rules` sections whose values are printed marks (Word marks and their chart labels, slide labels, PDF form words and field kinds, metadata keys, and peripheral parts), each naming the producers that print them today. The Word marks and peripheral parts are printed by both halves — a reading labels them and a Word edit names them in a refusal — and so are the presentation marks and slide labels, which a presentation edit names in a refusal and prints for a slide it could not read. The PDF form words and field kinds and the metadata keys are the reading’s alone; a chart’s labels live in `docx_marks`, so both halves print them. They live in `rules` because the kit needs them as request vocabulary; this section says they are marks too. |
 | `enforced` | Who enforces each entry of `reading`, `limits` and `engine`: `reading`, `writing` or `caller`. An entry may name more than one, because one number can be enforced in more than one place. `rules` stands for the whole rules section, which is request vocabulary rather than a bound. |
 
 The four families are not in the file: `Family::ALL` is their one home, and every operation and
@@ -24,12 +24,12 @@ result names them through `Family::as_str`.
 One mark is interim: `reason_not_carried_out` is the engine's answer for a recognised operation it
 does not carry out. It is stated here rather than in code, and the operation's own reason replaces
 it once the dispatch carries the operation out. The writing half carries `docx_edit`, `xlsx_edit`,
-the five PDF page actions and the three PDF drawing actions (`pdf_text`, `pdf_image`,
-`pdf_form_fill`) out today, so that mark is the answer for `create`, `fill_template` and
-`pptx_edit` only.
+`pptx_edit`, the five PDF page actions and the three PDF drawing actions (`pdf_text`, `pdf_image`,
+`pdf_form_fill`) out today, so that mark is the answer for `create` and `fill_template` only.
 
 The writing half's marks have their own namespaces: a refusal or a value an edit names is an
-`edit_*` mark, a note or a loss it raises is a `note_*` mark, every sentence the request surface
+`edit_*` mark (a presentation edit's are `edit_pptx_*`; a sentence it shares with the Word edit keeps
+that family's key), a note or a loss it raises is a `note_*` mark, every sentence the request surface
 prints before an operation runs is a `surface_*` mark, a PDF page action's refusals and its one note
 are `pdf_page_*` marks, and the three drawing actions' own refusals are `pdf_text_*`, `pdf_image_*`
 and `pdf_form_*` marks (the image-size sentences are shared with the OOXML arms and live under
@@ -166,14 +166,16 @@ bound it covers:
 
 - `FORMAT_NAMES` — a plain-text extension, an Info dictionary key, a Word package part, an
   annotation subtype, an element name, a placeholder name (the `page` and `pages` a PDF sentence
-  interpolates). A name is an exact literal, so the file that matches the format is the scope; each
+  interpolates), a value or attribute name an edit's request states (`title`, `text`, `underline`,
+  `highlight`, `none`). A name is an exact literal, so the file that matches the format is the scope; each
   still collides with a vocabulary mark, and a test fails when an entry stops colliding, so the list
   cannot rot into silence;
 - `SPEC_CONSTANTS` — a PDF channel rounder, a number format's operator count, a sample width, a
   byte's maximum, a percentage's or a thousand's scale factor, Word's heading levels, a PDF flag
   bit, Excel's last column, a crop area's four sides, a page's quarter turns and a box's fourth
-  corner, and the constants of the date conversion a produced file's information dictionary is
-  dated with. Each names the one file and value it covers, how many occurrences of it the file
+  corner, DrawingML's hundredths of a point and the shape id a generated slide's body placeholder
+  takes, the lowest slide id a real deck uses, and the constants of the date conversion a produced
+  file's information dictionary is dated with. Each names the one file and value it covers, how many occurrences of it the file
   states, and why it is not a restatement; entries for one file and value are summed into one
   exemption.
 

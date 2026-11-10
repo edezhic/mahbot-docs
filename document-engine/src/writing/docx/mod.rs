@@ -3,7 +3,7 @@
 //! This is the kit's `docx_edit` arm, carried across function for function so the two can be read
 //! side by side: [`edit`] is `docxEdit`, [`apply`] is `applyDocxEdit`, and the modules below hold
 //! the paragraphs and text slots an edit addresses ([`text`]), the run and paragraph formatting
-//! ([`format`]), the numbering part a list is written to ([`numbering`]), the blocks an edit adds
+//! ([`mod@format`]), the numbering part a list is written to ([`numbering`]), the blocks an edit adds
 //! ([`blocks`]), the table of contents a heading is protected by ([`contents`]), the markup an edit
 //! reached without naming it ([`marks`]) and the reasons a miss states ([`find`]).
 //!
@@ -338,12 +338,7 @@ fn apply(editor: &mut Editor, xml_text: &str, edit: &Value) -> Result<String, Fa
     let mut spilled = false;
     let out = text::map_paragraphs(xml_text, &mut |element, excluded| {
         let runs = text::docx_runs(element, excluded);
-        let joined: String = runs
-            .slots
-            .iter()
-            .map(|slot| xml::xml_unescape(&slot.raw))
-            .collect();
-        let offsets = text::occurrences(&joined, &find);
+        let offsets = text::occurrences(&text::joined(&runs.slots), &find);
         if offsets.is_empty() {
             return Ok(None);
         }
@@ -358,7 +353,7 @@ fn apply(editor: &mut Editor, xml_text: &str, edit: &Value) -> Result<String, Fa
                 std::collections::HashMap::new();
             let mut walked = 0usize;
             for slot in &runs.slots {
-                let length = xml::xml_unescape(&slot.raw).chars().count();
+                let length = slot.chars();
                 extents
                     .entry(slot.run)
                     .and_modify(|extent| extent.1 = walked.saturating_add(length))
@@ -392,7 +387,7 @@ fn apply(editor: &mut Editor, xml_text: &str, edit: &Value) -> Result<String, Fa
             });
             return Ok(Some(formatted.xml));
         }
-        text::require_no_bridged_markup(element, &runs.slots, &offsets, &find)?;
+        text::require_no_bridged_markup(element, &runs.slots, &offsets, &find, text::Markup::Word)?;
         let written = text::replace_occurrences(
             element,
             &runs.runs,
@@ -400,6 +395,7 @@ fn apply(editor: &mut Editor, xml_text: &str, edit: &Value) -> Result<String, Fa
             &offsets,
             &replacement,
             &mut |message, loss| editor.note(message, loss),
+            text::Markup::Word,
         );
         marks::note_unnamed(element, &written.spans, &mut |message, loss| {
             editor.note(message, loss);
@@ -478,11 +474,12 @@ fn run_format(edit: &Value, op: &str) -> Result<format::RunFormat, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::scratch;
     use crate::vocabulary::Family;
 
     /// A Word document opened for an edit, with the directory that holds it kept alive.
     fn opened() -> (Editor, tempfile::TempDir) {
-        let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let directory = scratch();
         let path = directory.path().join("edit.docx");
         std::fs::write(&path, crate::test_support::build::docx_edit())
             .expect("a generated document");

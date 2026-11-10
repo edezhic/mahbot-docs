@@ -26,7 +26,7 @@ pub(super) const CONTENT_TYPES: &str = "[Content_Types].xml";
 ///
 /// The archive cannot be opened or an entry cannot be read. The message is the container library's
 /// own.
-pub(super) fn read_package(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
+pub(crate) fn read_package(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
     let mut archive =
         zip::ZipArchive::new(Cursor::new(bytes)).map_err(|error| error.to_string())?;
     let mut parts = Vec::with_capacity(archive.len());

@@ -98,10 +98,13 @@ file it reads.
 
 The writing half is landing family by family. For a package, `src/writing/` opens it, changes the
 parts an edit names and writes it back, carrying every part the edit does not name through with the
-content it had: `xlsx_edit` — the workbook edit, all fourteen sub-operations — and `docx_edit` —
-the Word edit, all nine — are carried out end to end. `mod.rs` holds the `Editor`, `package.rs` the
-archive, `xml.rs` the string surgery, `opc.rs` the packaging conventions every family's edit shares,
-`image.rs` the picture a placement embeds, `xlsx/` the workbook port and `docx/` the Word port.
+content it had: `xlsx_edit` — the workbook edit, all fourteen sub-operations — `docx_edit` — the
+Word edit, all nine — and `pptx_edit` — the presentation edit, all fourteen — are carried out end to
+end. `mod.rs` holds the `Editor`, `package.rs` the archive, `xml.rs` the string surgery, `opc.rs` the
+packaging conventions every family's edit shares, `image.rs` the picture a placement embeds, `text.rs`
+the paragraph machinery the Word and presentation edits share, `xlsx/` the workbook port, `docx/` the
+Word port and `pptx/` the presentation port (its slide text, and the slide, picture and table it
+writes).
 
 For a PDF, `src/writing/pdf/` is the object model the page actions build on (`lopdf`, which the
 crate's lockfile already resolved through `pdf-extract`): a page is deep-copied between documents
@@ -119,8 +122,8 @@ carried out end to end — `pdf_merge` and `pdf_split` build a fresh document ou
 `pdf_rotate`, `pdf_crop` and `pdf_resize` change what the pages they name show and keep everything
 else the file holds, and `pdf_text`, `pdf_image` and `pdf_form_fill` draw text, a placed picture or a
 filled form into the pages they name, with one embedded general-text font subset to the glyphs the
-call draws. `create`, `fill_template` and `pptx_edit` answer with the vocabulary's
-`reason_not_carried_out` until their port lands.
+call draws. `create` and `fill_template` answer with the vocabulary's `reason_not_carried_out` until
+their port lands.
 
 Every sentence the engine prints — an edit's refusals, notes and losses, the request surface's own
 shape refusals, a PDF action's refusals and its notes, a page-render refusal and the panic

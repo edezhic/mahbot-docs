@@ -13,20 +13,24 @@ use super::documents::{
     DAMAGED_LENGTH_ABSENT_PDF, DAMAGED_LENGTH_LONG_MANY_PDF, DAMAGED_LENGTH_LONG_PDF,
     DAMAGED_LENGTH_SHORT_PDF, DAMAGED_NO_INDEX_PDF, DAMAGED_OBJECT_STREAM_LENGTH_PDF,
     DAMAGED_OBJECT_STREAM_PDF, DAMAGED_POINTER_PDF, DAMAGED_ROOT_PDF, DAMAGED_SHIFTED_PDF,
-    DEGENERATE_PAGE_PDF, DOCX_BODYLESS, DOCX_BREAKS, DOCX_BROKEN, DOCX_COLUMNS, DOCX_EDIT,
-    DOCX_MACRO, DOCX_REVISIONS, DOCX_STRICT, EMPTY_CHOICE_FORM_PDF, ENCRYPTED_PDF, FORM_PDF,
-    LISTED_FIELD_FORM_PDF, MAX_LENGTH_FORM_PDF, MERGE_A_PDF, MERGE_B_PDF, MERGE_C_PDF,
+    DEGENERATE_PAGE_PDF, DIAGRAM_MEDIA_PPTX, DOCX_BODYLESS, DOCX_BREAKS, DOCX_BROKEN, DOCX_COLUMNS,
+    DOCX_EDIT, DOCX_MACRO, DOCX_REVISIONS, DOCX_STRICT, EMPTY_CHOICE_FORM_PDF, ENCRYPTED_PDF,
+    FORM_PDF, LISTED_FIELD_FORM_PDF, MAX_LENGTH_FORM_PDF, MERGE_A_PDF, MERGE_B_PDF, MERGE_C_PDF,
     MISPLACED_FORM_PDF, MULTILINE_FORM_PDF, NO_GEOMETRY_PDF, OBJECT_STREAM_ASCII_HEX_PDF,
     OBJECT_STREAM_INFLATED_PDF, OBJECT_STREAM_PDF, OPTION_FORM_PDF, PAIRED_OPTIONS_FORM_PDF,
     PAIRED_RADIO_FORM_PDF, PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_PDF, PICTURE_PNG,
-    PICTURE_STALE_CRC_PNG, PICTURE_WEBP, PUSHBUTTON_CAPTION_FORM_PDF, PUSHBUTTON_FORM_PDF,
-    RADIO_OPTIONS_FORM_PDF, RADIO_OUTRUN_FORM_PDF, RECTLESS_BUTTON_FORM_PDF,
+    PICTURE_STALE_CRC_PNG, PICTURE_WEBP, PPTX_ASSETS, PPTX_BOXES, PPTX_BROKEN_SLOT,
+    PPTX_LIST_DISAGREES, PPTX_LIST_REORDERED, PPTX_MACRO, PPTX_MISSING_NOTES,
+    PPTX_NO_CONTENT_TYPES, PPTX_NO_LAYOUT, PPTX_NO_NOTES_MASTER, PPTX_NO_SHAPE_TREE, PPTX_NO_SIZE,
+    PPTX_NO_SLIDE_LIST, PPTX_NOTES_NO_BODY, PPTX_NOTES_TWO, PPTX_RUNS, PPTX_SECTIONS, PPTX_SIGNED,
+    PPTX_SLIDE_OUTSIDE, PPTX_TABLE, PPTX_TWO_NOTES_MASTERS, PUSHBUTTON_CAPTION_FORM_PDF,
+    PUSHBUTTON_FORM_PDF, RADIO_OPTIONS_FORM_PDF, RADIO_OUTRUN_FORM_PDF, RECTLESS_BUTTON_FORM_PDF,
     RECTLESS_FLAT_FORM_PDF, RECTLESS_FORM_PDF, REPEATED_PAGE_ANNOTATED_PDF, REPEATED_PAGE_PDF,
-    RICH_PDF, ROTATED_PDF, SIGNATURE_FORM_PDF, STATE_APPEARANCE_FORM_PDF, STATED_SIZE_FORM_PDF,
-    TEMPLATE_DOCX, TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF, TRUNCATED_XLSX, TWO_CATALOGS_PDF,
-    XLSX_ALL_HIDDEN, XLSX_BAD_MERGE_REF, XLSX_BROKEN_MERGES, XLSX_EDIT, XLSX_MACRO,
-    XLSX_NO_CONTENT_TYPES, XLSX_NO_FAMILY, XLSX_ONE_VISIBLE, XLSX_ONLY_SHEET, XLSX_SELF_CLOSING,
-    XLSX_UNCLOSED_MERGE_CELL,
+    RICH_PDF, RICH_PPTX, ROTATED_PDF, SIGNATURE_FORM_PDF, STATE_APPEARANCE_FORM_PDF,
+    STATED_SIZE_FORM_PDF, TEMPLATE_DOCX, TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF,
+    TRUNCATED_XLSX, TWO_CATALOGS_PDF, XLSX_ALL_HIDDEN, XLSX_BAD_MERGE_REF, XLSX_BROKEN_MERGES,
+    XLSX_EDIT, XLSX_MACRO, XLSX_NO_CONTENT_TYPES, XLSX_NO_FAMILY, XLSX_ONE_VISIBLE,
+    XLSX_ONLY_SHEET, XLSX_SELF_CLOSING, XLSX_UNCLOSED_MERGE_CELL,
 };
 use super::effect::{BoxKind, Scalar, Scope};
 use super::{Case, Document, Effect, Expect, Reason};
@@ -3099,29 +3103,12 @@ fn xlsx_edit_cases() -> Vec<Case> {
 /// The first slide's own part, which the text, picture and table edits address.
 const SLIDE_ONE: &str = "ppt/slides/slide1.xml";
 
-/// One presentation edit against `basic.pptx` and whatever else the request names, written to
-/// `$out/edited.pptx`.
-fn pptx_edit(sub_operation: &'static str, edits: Value, effects: Vec<Effect>) -> Case {
-    produced(
-        Family::Pptx,
-        "pptx_edit",
-        Some(sub_operation),
-        inputs(sub_operation, BASIC_PPTX),
-        json!({
-            "op": "pptx_edit",
-            "input": "$in/basic.pptx",
-            "edits": edits,
-            "output": "$out/edited.pptx",
-        }),
-        vec!["edited.pptx"],
-        effects,
-    )
-}
-
 fn pptx_edit_cases() -> Vec<Case> {
     vec![
         pptx_edit(
             "replace_text",
+            None,
+            BASIC_PPTX,
             json!([{ "op": "replace_text", "slide": 1, "find": "Alpha", "replace": "Bravo" }]),
             vec![
                 Effect::SlideText {
@@ -3140,6 +3127,8 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "remove_text",
+            None,
+            BASIC_PPTX,
             json!([{ "op": "remove_text", "slide": 2, "find": "Beta" }]),
             vec![
                 Effect::SlideText {
@@ -3162,6 +3151,8 @@ fn pptx_edit_cases() -> Vec<Case> {
         // what the case can assert, and a copy of the input holds none.
         pptx_edit(
             "format_text",
+            None,
+            BASIC_PPTX,
             json!([{
                 "op": "format_text",
                 "slide": 1,
@@ -3186,6 +3177,8 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "add_paragraph",
+            None,
+            BASIC_PPTX,
             json!([{ "op": "add_paragraph", "slide": 1, "text": "Added line" }]),
             vec![Effect::SlideText {
                 output: None,
@@ -3199,6 +3192,8 @@ fn pptx_edit_cases() -> Vec<Case> {
         // call adds first, so the body still has a paragraph afterwards.
         pptx_edit(
             "remove_paragraph",
+            None,
+            BASIC_PPTX,
             json!([
                 { "op": "add_paragraph", "slide": 2, "text": "Kept line" },
                 { "op": "remove_paragraph", "slide": 2, "find": "Beta body" },
@@ -3220,6 +3215,8 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "add_image",
+            None,
+            BASIC_PPTX,
             json!([{
                 "op": "add_image",
                 "slide": 1,
@@ -3235,6 +3232,8 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "add_table",
+            None,
+            BASIC_PPTX,
             json!([{
                 "op": "add_table",
                 "slide": 1,
@@ -3250,6 +3249,8 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "add_slide",
+            None,
+            BASIC_PPTX,
             json!([{ "op": "add_slide", "after": 1, "title": "Inserted", "bullets": ["x", "y"] }]),
             vec![
                 Effect::SlideCount {
@@ -3270,6 +3271,8 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "delete_slide",
+            None,
+            BASIC_PPTX,
             json!([{ "op": "delete_slide", "slide": 2 }]),
             vec![
                 Effect::SlideCount {
@@ -3284,6 +3287,8 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "move_slide",
+            None,
+            BASIC_PPTX,
             json!([{ "op": "move_slide", "slide": 3, "to": 1 }]),
             vec![Effect::SlideTitles {
                 output: None,
@@ -3292,6 +3297,8 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "duplicate_slide",
+            None,
+            BASIC_PPTX,
             json!([{ "op": "duplicate_slide", "slide": 1 }]),
             vec![
                 Effect::SlideCount {
@@ -3306,6 +3313,8 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "replace_notes",
+            None,
+            BASIC_PPTX,
             json!([{ "op": "replace_notes", "slide": 1, "find": "Note", "replace": "Replaced" }]),
             vec![
                 Effect::NotesText {
@@ -3324,6 +3333,8 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "remove_notes",
+            None,
+            BASIC_PPTX,
             json!([{ "op": "remove_notes", "slide": 1, "find": "Note one" }]),
             vec![Effect::NotesText {
                 output: None,
@@ -3334,6 +3345,8 @@ fn pptx_edit_cases() -> Vec<Case> {
         ),
         pptx_edit(
             "add_notes",
+            None,
+            BASIC_PPTX,
             json!([{ "op": "add_notes", "slide": 2, "text": "Fresh notes" }]),
             vec![Effect::NotesText {
                 output: None,
@@ -3341,6 +3354,1149 @@ fn pptx_edit_cases() -> Vec<Case> {
                 text: "Fresh notes",
                 present: true,
             }],
+        ),
+    ]
+}
+
+// ── pptx_edit: the paths that carry the risk ─────────────────────────────────────────────────
+
+/// The request one presentation edit makes of `document`, and the output name it asks for: the
+/// engine keeps the input's own extension, so a macro-enabled deck is written as `.pptm`.
+fn pptx_request(document: Document, edits: Value) -> (Value, &'static str) {
+    let output = if document.name.ends_with(".pptm") {
+        "edited.pptm"
+    } else {
+        "edited.pptx"
+    };
+    (
+        json!({
+            "op": "pptx_edit",
+            "input": format!("$in/{}", document.name),
+            "edits": edits,
+            "output": format!("$out/{output}"),
+        }),
+        output,
+    )
+}
+
+/// One presentation edit against `document`, written to `$out/edited.<ext>`. `id` names the case
+/// where its sub-operation already has one.
+fn pptx_edit(
+    sub_operation: &'static str,
+    id: Option<&'static str>,
+    document: Document,
+    edits: Value,
+    effects: Vec<Effect>,
+) -> Case {
+    let (request, output) = pptx_request(document, edits);
+    let case = produced(
+        Family::Pptx,
+        "pptx_edit",
+        Some(sub_operation),
+        inputs(sub_operation, document),
+        request,
+        vec![output],
+        effects,
+    );
+    match id {
+        Some(id) => case.named(id),
+        None => case,
+    }
+}
+
+/// One refused presentation edit: the request a [`pptx_edit`] would carry, with the reason the
+/// engine must give.
+fn pptx_refusal_on(
+    sub_operation: &'static str,
+    id: &'static str,
+    document: Document,
+    edits: Value,
+    reason: Reason,
+) -> Case {
+    let (request, output) = pptx_request(document, edits);
+    declined(
+        Family::Pptx,
+        "pptx_edit",
+        Some(sub_operation),
+        inputs(sub_operation, document),
+        request,
+        vec![output],
+        Expect::Refused(reason),
+    )
+    .named(id)
+}
+
+/// The diagram text a reading showed for `diagram-media.pptx`'s first slide. A slide text op on a
+/// deck with a diagram is never given without it: the request carries what the reader reported, so
+/// a refusal can only name text a reading really showed.
+fn diagram_text() -> Value {
+    json!({ "ppt/slides/slide1.xml": ["North\nSouth"] })
+}
+
+/// `case` carrying `shown` — the diagram text a reading showed, keyed by slide part — in its
+/// request. The kit is handed the deck's diagram text by its caller rather than deriving it, so
+/// every case pairing a diagram-bearing deck with a slide-text operation states it.
+fn with_diagram_text(mut case: Case, shown: Value) -> Case {
+    case.request["diagram_text"] = shown;
+    case
+}
+
+/// The 201 edits one call may not carry: each is one the deck could take, so the count is what a
+/// refusal is about.
+fn too_many_edits() -> Value {
+    Value::Array(
+        (0..201)
+            .map(|_| json!({ "op": "replace_text", "slide": 1, "find": "Alpha", "replace": "Bravo" }))
+            .collect(),
+    )
+}
+
+/// The 101 bullets one slide may not hold.
+fn too_many_bullets() -> Value {
+    Value::Array((0..101).map(|_| json!("bullet")).collect())
+}
+
+fn pptx_edit_paths() -> Vec<Case> {
+    vec![
+        // ── a presentation that states no size ────────────────────────────────────────────────
+        // Every placement is read against the 10in × 7½in size a presentation without a
+        // `<p:sldSz>` is read at, and the same geometry a new slide's title is framed by.
+        pptx_edit(
+            "replace_text",
+            Some("no_size"),
+            PPTX_NO_SIZE,
+            json!([{ "op": "replace_text", "slide": 1, "find": "Alpha", "replace": "Bravo" }]),
+            vec![
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Bravo body",
+                    present: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Alpha",
+                    present: false,
+                },
+            ],
+        ),
+        pptx_edit(
+            "add_table",
+            Some("no_size"),
+            PPTX_NO_SIZE,
+            json!([{
+                "op": "add_table",
+                "slide": 1,
+                "headers": ["A", "B"],
+                "rows": [["1", "2"]],
+            }]),
+            vec![Effect::SlideHas {
+                output: None,
+                slide: 1,
+                element: "a:tbl",
+                on: true,
+            }],
+        ),
+        pptx_edit(
+            "add_slide",
+            Some("no_size"),
+            PPTX_NO_SIZE,
+            json!([{ "op": "add_slide", "after": 1, "title": "Inserted", "bullets": ["one"] }]),
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 3,
+                },
+                Effect::SlideTitles {
+                    output: None,
+                    titles: &["No size", "Inserted", "Second slide"],
+                },
+            ],
+        ),
+        // ── a deck with nothing to build a slide, a notes slide or a body on ──────────────────
+        pptx_refusal_on(
+            "add_slide",
+            "no_layout",
+            PPTX_NO_LAYOUT,
+            json!([{ "op": "add_slide", "after": 1, "title": "Inserted" }]),
+            Reason::contains("the presentation has no slide layout to build a new slide on"),
+        ),
+        pptx_refusal_on(
+            "add_notes",
+            "no_notes_master",
+            PPTX_NO_NOTES_MASTER,
+            json!([{ "op": "add_notes", "slide": 1, "text": "Fresh notes" }]),
+            Reason::contains(
+                "the presentation has no notes master, so a notes slide cannot be created for it",
+            ),
+        ),
+        // ── notes a slide declares and the package does not hold ──────────────────────────────
+        pptx_refusal_on(
+            "duplicate_slide",
+            "missing_notes",
+            PPTX_MISSING_NOTES,
+            json!([{ "op": "duplicate_slide", "slide": 1 }]),
+            Reason::contains(
+                "declares speaker notes (ppt/notesSlides/notesSlide1.xml) the presentation does not hold",
+            ),
+        ),
+        // The part is created at the very name the slide already declares, so the relationship it
+        // holds resolves again.
+        pptx_edit(
+            "add_notes",
+            Some("missing_notes"),
+            PPTX_MISSING_NOTES,
+            json!([{ "op": "add_notes", "slide": 1, "text": "Fresh notes" }]),
+            vec![
+                Effect::PartPresent {
+                    output: None,
+                    part: "ppt/notesSlides/notesSlide1.xml",
+                    present: true,
+                },
+                Effect::NotesText {
+                    output: None,
+                    slide: 1,
+                    text: "Fresh notes",
+                    present: true,
+                },
+            ],
+        ),
+        // The only-slide check runs before the number is validated, so a slide the deck does not
+        // have is still refused for the deck having no second slide to delete.
+        pptx_refusal_on(
+            "delete_slide",
+            "only_slide",
+            PPTX_MISSING_NOTES,
+            json!([{ "op": "delete_slide", "slide": 99 }]),
+            Reason::contains("the presentation's only slide cannot be deleted"),
+        ),
+        // ── a package without content types ───────────────────────────────────────────────────
+        pptx_refusal_on(
+            "replace_text",
+            "no_content_types",
+            PPTX_NO_CONTENT_TYPES,
+            json!([{ "op": "replace_text", "slide": 1, "find": "Alpha", "replace": "Bravo" }]),
+            Reason::contains(
+                "cannot edit no-content-types.pptx: it has no [Content_Types].xml part",
+            ),
+        ),
+        // The content-types check comes before the edit count is bounded: a call of 201 edits is
+        // refused for the part the package lacks, not for its length.
+        pptx_refusal_on(
+            "replace_text",
+            "content_types_before_edits_max",
+            PPTX_NO_CONTENT_TYPES,
+            too_many_edits(),
+            Reason::contains(
+                "cannot edit no-content-types.pptx: it has no [Content_Types].xml part",
+            ),
+        ),
+        // ── a slide list that disagrees with the reading ──────────────────────────────────────
+        // A position is a slide's number only while the list is the numbering the reading shows:
+        // four `<p:sldId>` entries with three inside the list are not.
+        pptx_refusal_on(
+            "move_slide",
+            "list_disagrees",
+            PPTX_LIST_DISAGREES,
+            json!([{ "op": "move_slide", "slide": 1, "to": 2 }]),
+            Reason::contains(
+                "does not number its slides the way the reader shows them, so a slide cannot be moved",
+            ),
+        ),
+        pptx_refusal_on(
+            "duplicate_slide",
+            "list_disagrees",
+            PPTX_LIST_DISAGREES,
+            json!([{ "op": "duplicate_slide", "slide": 1 }]),
+            Reason::contains(
+                "does not number its slides the way the reader shows them, so a slide cannot be duplicated",
+            ),
+        ),
+        pptx_refusal_on(
+            "add_slide",
+            "list_disagrees_after",
+            PPTX_LIST_DISAGREES,
+            json!([{ "op": "add_slide", "after": 1, "title": "Inserted" }]),
+            Reason::contains(
+                "a slide cannot be placed after slide 1: the presentation's slide list does not number its slides the way the reader shows them",
+            ),
+        ),
+        // Appending needs no such proof: the new slide is the deck's last whichever numbering the
+        // list is, so it goes at the list's end.
+        pptx_edit(
+            "add_slide",
+            Some("list_disagrees_append"),
+            PPTX_LIST_DISAGREES,
+            json!([{ "op": "add_slide", "title": "Appended", "bullets": ["one"] }]),
+            vec![
+                Effect::PartPresent {
+                    output: None,
+                    part: "ppt/slides/slide5.xml",
+                    present: true,
+                },
+                Effect::SlideCount {
+                    output: None,
+                    count: 5,
+                },
+            ],
+        ),
+        // The entry whose relationship resolves to the addressed slide goes, not the entry at the
+        // position: the list holds another slide there.
+        pptx_edit(
+            "delete_slide",
+            Some("list_disagrees"),
+            PPTX_LIST_DISAGREES,
+            json!([{ "op": "delete_slide", "slide": 2 }]),
+            vec![
+                Effect::PartPresent {
+                    output: None,
+                    part: "ppt/slides/slide2.xml",
+                    present: false,
+                },
+                Effect::SlideCount {
+                    output: None,
+                    count: 3,
+                },
+            ],
+        ),
+        // The fourth slide is numbered by the reading and named by no entry of the list.
+        pptx_refusal_on(
+            "delete_slide",
+            "list_disagrees_unnamed",
+            PPTX_LIST_DISAGREES,
+            json!([{ "op": "delete_slide", "slide": 4 }]),
+            Reason::contains(
+                "slide 4 cannot be deleted: the presentation's slide list does not name it",
+            ),
+        ),
+        // ── a slide list the reading and the writer both number by ────────────────────────────
+        // The list names the third slide's part first, so slide 1 is "Third slide" and moving it
+        // to the end leaves the parts in their file order.
+        pptx_edit(
+            "move_slide",
+            Some("list_reordered"),
+            PPTX_LIST_REORDERED,
+            json!([{ "op": "move_slide", "slide": 1, "to": 3 }]),
+            vec![Effect::SlideTitles {
+                output: None,
+                titles: &["First slide", "Second slide", "Third slide"],
+            }],
+        ),
+        pptx_edit(
+            "duplicate_slide",
+            Some("list_reordered"),
+            PPTX_LIST_REORDERED,
+            json!([{ "op": "duplicate_slide", "slide": 1 }]),
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 4,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "ppt/slides/slide4.xml",
+                    present: true,
+                },
+            ],
+        ),
+        // ── a presentation carrying a custom show and a section list ──────────────────────────
+        // Neither list is a slide an edit addresses, so a deletion of another slide leaves both
+        // exactly as they were — which the part-by-part comparison is what proves.
+        pptx_edit(
+            "delete_slide",
+            Some("sections"),
+            PPTX_SECTIONS,
+            json!([{ "op": "delete_slide", "slide": 2 }]),
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 2,
+                },
+                Effect::SlideTitles {
+                    output: None,
+                    titles: &["First slide", "Third slide"],
+                },
+            ],
+        ),
+        pptx_edit(
+            "replace_text",
+            Some("sections"),
+            PPTX_SECTIONS,
+            json!([{ "op": "replace_text", "slide": 1, "find": "Alpha", "replace": "Bravo" }]),
+            vec![Effect::SlideText {
+                output: None,
+                slide: 1,
+                text: "Bravo body",
+                present: true,
+            }],
+        ),
+        // ── a macro-enabled deck ──────────────────────────────────────────────────────────────
+        // The deck keeps its `.pptm` extension, and the new slide takes the ordinary slide content
+        // type the kit declares for a part it writes.
+        pptx_edit(
+            "add_slide",
+            Some("macro"),
+            PPTX_MACRO,
+            json!([{ "op": "add_slide", "after": 1, "title": "Inserted", "bullets": ["one"] }]),
+            vec![
+                Effect::PartPresent {
+                    output: None,
+                    part: "ppt/slides/slide3.xml",
+                    present: true,
+                },
+                Effect::SlideCount {
+                    output: None,
+                    count: 3,
+                },
+            ],
+        ),
+        pptx_edit(
+            "replace_text",
+            Some("macro"),
+            PPTX_MACRO,
+            json!([{ "op": "replace_text", "slide": 1, "find": "Alpha", "replace": "Bravo" }]),
+            vec![Effect::SlideText {
+                output: None,
+                slide: 1,
+                text: "Bravo body",
+                present: true,
+            }],
+        ),
+        // A notes part this call creates is declared with the plain notes content type, as the kit
+        // declares a part the package did not already know — the macro-enabled flavour it writes
+        // its slides under is not copied onto a part it adds.
+        pptx_edit(
+            "add_notes",
+            Some("macro_new_part"),
+            PPTX_MACRO,
+            json!([{ "op": "add_notes", "slide": 1, "text": "Fresh notes" }]),
+            vec![Effect::NotesText {
+                output: None,
+                slide: 1,
+                text: "Fresh notes",
+                present: true,
+            }],
+        ),
+        // ── a signed package ──────────────────────────────────────────────────────────────────
+        // The answer carries the one note a signed input is owed: the signature was carried through
+        // unchanged while the parts it signs changed.
+        pptx_edit(
+            "replace_text",
+            Some("signed"),
+            PPTX_SIGNED,
+            json!([{ "op": "replace_text", "slide": 1, "find": "Alpha", "replace": "Bravo" }]),
+            vec![Effect::SlideText {
+                output: None,
+                slide: 1,
+                text: "Bravo body",
+                present: true,
+            }],
+        ),
+        // A format request that states the bold the run already carries writes the bytes the run
+        // already has, so the file does not change and the signature is still the one it carried:
+        // no note is raised. The fragment covers part of the run, so the answer still carries the
+        // partial-run note — which is what tells this call from one that did nothing at all.
+        pptx_edit(
+            "format_text",
+            Some("signed_unchanged"),
+            PPTX_SIGNED,
+            json!([{ "op": "format_text", "slide": 1, "find": "Al", "bold": true }]),
+            vec![
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Alpha body",
+                    present: true,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "_xmlsignatures/sig1.xml",
+                    present: true,
+                },
+            ],
+        ),
+        // ── the parts a slide's deletion leaves behind and a copy shares ──────────────────────
+        // A deletion removes the slide, its relationships, its notes and its own declarations —
+        // nothing a chart, a picture, a comment or a diagram lives in. The picture's part is named
+        // by its content in the model, so the part-by-part comparison is what proves it survived.
+        pptx_edit(
+            "delete_slide",
+            Some("assets"),
+            PPTX_ASSETS,
+            json!([{ "op": "delete_slide", "slide": 1 }]),
+            vec![
+                Effect::PartPresent {
+                    output: None,
+                    part: "ppt/slides/slide1.xml",
+                    present: false,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "ppt/notesSlides/notesSlide1.xml",
+                    present: false,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "ppt/charts/chart1.xml",
+                    present: true,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "ppt/comments/comment1.xml",
+                    present: true,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "ppt/diagrams/data1.xml",
+                    present: true,
+                },
+                Effect::SlideCount {
+                    output: None,
+                    count: 2,
+                },
+            ],
+        ),
+        // A copy carries the source's own notes and shares everything else the slide drew.
+        pptx_edit(
+            "duplicate_slide",
+            Some("assets"),
+            PPTX_ASSETS,
+            json!([{ "op": "duplicate_slide", "slide": 1 }]),
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 4,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "ppt/notesSlides/notesSlide2.xml",
+                    present: true,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "ppt/charts/chart1.xml",
+                    present: true,
+                },
+                Effect::SlideHas {
+                    output: None,
+                    slide: 2,
+                    element: "p:pic",
+                    on: true,
+                },
+            ],
+        ),
+        // ── text across differently formatted runs ────────────────────────────────────────────
+        // The replacement takes the formatting of the run it starts in, and the answer says so as a
+        // loss: the record of the note is the transcript.
+        pptx_edit(
+            "replace_text",
+            Some("formatting_loss"),
+            PPTX_RUNS,
+            json!([{ "op": "replace_text", "slide": 1, "find": "AlphaBeta", "replace": "X" }]),
+            vec![
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "XGamma",
+                    present: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "AlphaBeta",
+                    present: false,
+                },
+            ],
+        ),
+        // A fragment inside one run spans no formatting, so nothing is lost.
+        pptx_edit(
+            "replace_text",
+            Some("single_run"),
+            PPTX_RUNS,
+            json!([{ "op": "replace_text", "slide": 1, "find": "Beta", "replace": "Y" }]),
+            vec![
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "AlphaYGamma",
+                    present: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Beta",
+                    present: false,
+                },
+            ],
+        ),
+        // A fragment covering part of a run formats the whole run, and an alignment is the whole
+        // paragraph's: the answer carries both notes.
+        pptx_edit(
+            "format_text",
+            Some("partial_run"),
+            PPTX_RUNS,
+            json!([{
+                "op": "format_text",
+                "slide": 1,
+                "find": "Al",
+                "bold": true,
+                "align": "center",
+            }]),
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: SLIDE_ONE,
+                    element: "a:pPr",
+                    count: 1,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "AlphaBetaGamma",
+                    present: true,
+                },
+            ],
+        ),
+        // ── paragraphs inside a table ─────────────────────────────────────────────────────────
+        // A paragraph added to the slide's own text cannot be anchored on text a table holds.
+        pptx_refusal_on(
+            "add_paragraph",
+            "in_table",
+            PPTX_TABLE,
+            json!([{ "op": "add_paragraph", "slide": 1, "text": "Added line", "after": "Cell A" }]),
+            Reason::contains(
+                "the text \"Cell A\" is inside a table on slide 1: add_paragraph writes into the slide's own text, not into a table",
+            ),
+        ),
+        // A paragraph inside a cell is addressed like any other, as long as the cell keeps one.
+        pptx_edit(
+            "remove_paragraph",
+            Some("table_cell"),
+            PPTX_TABLE,
+            json!([{ "op": "remove_paragraph", "slide": 1, "find": "Cell A2" }]),
+            vec![
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Cell A2",
+                    present: false,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Cell A",
+                    present: true,
+                },
+            ],
+        ),
+        pptx_refusal_on(
+            "remove_paragraph",
+            "shape_last",
+            PPTX_TABLE,
+            json!([{ "op": "remove_paragraph", "slide": 1, "find": "Body line" }]),
+            Reason::contains(
+                "removing \"Body line\" would leave the shape's text body with no paragraph — a text body must keep one",
+            ),
+        ),
+        pptx_refusal_on(
+            "remove_paragraph",
+            "table_cell_last",
+            PPTX_TABLE,
+            json!([{ "op": "remove_paragraph", "slide": 1, "find": "Cell B" }]),
+            Reason::contains(
+                "removing \"Cell B\" would leave the table cell's text body with no paragraph — a text body must keep one",
+            ),
+        ),
+        // Every paragraph holding the fragment is rewritten, so the cell's second paragraph — which
+        // holds "Cell A" inside "Cell A2" — is rewritten with the first.
+        pptx_edit(
+            "replace_text",
+            Some("table_cell"),
+            PPTX_TABLE,
+            json!([{ "op": "replace_text", "slide": 1, "find": "Cell A", "replace": "Cell Z" }]),
+            vec![
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Cell Z2",
+                    present: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Cell A",
+                    present: false,
+                },
+            ],
+        ),
+        // ── shapes placed past the slide's edge ──────────────────────────────────────────────
+        // A place the caller names verbatim may put the shape partly outside the slide; the answer
+        // says so rather than reporting a plain success.
+        pptx_edit(
+            "add_image",
+            Some("past_edge"),
+            PPTX_BOXES,
+            json!([{
+                "op": "add_image",
+                "slide": 1,
+                "image": "$in/picture.png",
+                "x_fraction": 1.0,
+            }]),
+            vec![Effect::SlideHas {
+                output: None,
+                slide: 1,
+                element: "p:pic",
+                on: true,
+            }],
+        ),
+        // The height the call names gives the table the width its own proportions ask for, which is
+        // wider than the slide: the table's note is the answer's own record of it.
+        pptx_edit(
+            "add_table",
+            Some("past_edge"),
+            PPTX_BOXES,
+            json!([{
+                "op": "add_table",
+                "slide": 1,
+                "headers": ["A"],
+                "rows": [["1"]],
+                "height_fraction": 1.0,
+            }]),
+            vec![Effect::SlideHas {
+                output: None,
+                slide: 1,
+                element: "a:tbl",
+                on: true,
+            }],
+        ),
+        // A fraction outside the rule's span is refused rather than clamped: the placement a
+        // caller computed is not silently moved.
+        pptx_refusal_on(
+            "add_image",
+            "fraction",
+            PPTX_BOXES,
+            json!([{
+                "op": "add_image",
+                "slide": 1,
+                "image": "$in/picture.png",
+                "x_fraction": 2.0,
+            }]),
+            Reason::contains("x_fraction must be between 0 and 1, got: 2"),
+        ),
+        // A find the slide's own speaker notes hold names them: the notes ops edit that text, a
+        // slide text op does not.
+        pptx_refusal_on(
+            "replace_text",
+            "notes_text",
+            BASIC_PPTX,
+            json!([{ "op": "replace_text", "slide": 1, "find": "Note one", "replace": "Other" }]),
+            Reason::contains(
+                "the text \"Note one\" is in the speaker notes of slide 1, which a slide text op \
+                 does not edit (replace_notes and remove_notes do)",
+            ),
+        ),
+        // ── slides with no shape tree and no text body ───────────────────────────────────────
+        pptx_refusal_on(
+            "add_image",
+            "no_shape_tree",
+            PPTX_NO_SHAPE_TREE,
+            json!([{
+                "op": "add_image",
+                "slide": 1,
+                "image": "$in/picture.png",
+            }]),
+            Reason::contains("the slide has no shape tree to place an image in"),
+        ),
+        pptx_refusal_on(
+            "add_table",
+            "no_shape_tree",
+            PPTX_NO_SHAPE_TREE,
+            json!([{ "op": "add_table", "slide": 1, "headers": ["A"], "rows": [["1"]] }]),
+            Reason::contains("the slide has no shape tree to place a table in"),
+        ),
+        // A slide whose shape tree holds only a table has no text body of its own to add to.
+        pptx_refusal_on(
+            "add_paragraph",
+            "no_text_body",
+            PPTX_NO_SHAPE_TREE,
+            json!([{ "op": "add_paragraph", "slide": 2, "text": "Added line" }]),
+            Reason::contains("the slide has no text body to add a paragraph to"),
+        ),
+        // ── notes without a body ─────────────────────────────────────────────────────────────
+        pptx_refusal_on(
+            "add_notes",
+            "no_body",
+            PPTX_NOTES_NO_BODY,
+            json!([{ "op": "add_notes", "slide": 1, "text": "More notes" }]),
+            Reason::contains("the notes of slide 1 have no body to add a paragraph to"),
+        ),
+        // ── a slide stored outside `ppt/slides/` ─────────────────────────────────────────────
+        // A copy is written among the presentation's own slides, where the source's relationships
+        // would not resolve, so it is refused rather than written.
+        pptx_refusal_on(
+            "duplicate_slide",
+            "outside",
+            PPTX_SLIDE_OUTSIDE,
+            json!([{ "op": "duplicate_slide", "slide": 1 }]),
+            Reason::contains(
+                "slide 1 is stored outside ppt/slides/, so a copy of it cannot be placed among the presentation's other slides",
+            ),
+        ),
+        pptx_edit(
+            "delete_slide",
+            Some("outside"),
+            PPTX_SLIDE_OUTSIDE,
+            json!([{ "op": "delete_slide", "slide": 1 }]),
+            vec![
+                Effect::PartPresent {
+                    output: None,
+                    part: "ppt/slides2/slide1.xml",
+                    present: false,
+                },
+                Effect::SlideCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::SlideTitles {
+                    output: None,
+                    titles: &["Second slide"],
+                },
+            ],
+        ),
+        // ── a slide entry naming a part the package does not hold ────────────────────────────
+        pptx_refusal_on(
+            "replace_text",
+            "unreadable_slot",
+            PPTX_BROKEN_SLOT,
+            json!([{ "op": "replace_text", "slide": 2, "find": "Alpha", "replace": "Bravo" }]),
+            Reason::contains("slide 2 could not be read"),
+        ),
+        // ── the text a slide does not hold ───────────────────────────────────────────────────
+        // A fragment copied across two paragraphs is one the reading printed, not text the file
+        // keeps as one paragraph.
+        pptx_refusal_on(
+            "replace_text",
+            "across_paragraphs",
+            BASIC_PPTX,
+            json!([{ "op": "replace_text", "slide": 1, "find": "First slide\nAlpha body", "replace": "x" }]),
+            Reason::contains(
+                "the text \"First slide\\nAlpha body\" is not on slide 1: the fragment reaches across a paragraph boundary, and a slide text op addresses one paragraph at a time",
+            ),
+        ),
+        // The reading indents a block's text; the file holds no such space.
+        pptx_refusal_on(
+            "replace_text",
+            "indent",
+            BASIC_PPTX,
+            json!([{ "op": "replace_text", "slide": 1, "find": " Alpha body", "replace": "x" }]),
+            Reason::contains(
+                "the text \" Alpha body\" is not on slide 1: the fragment's leading whitespace is either the indentation the reader prints under a block or whitespace the file's text does not hold — search for \"Alpha body\"",
+            ),
+        ),
+        pptx_refusal_on(
+            "replace_text",
+            "label",
+            BASIC_PPTX,
+            json!([{ "op": "replace_text", "slide": 1, "find": "Slide 1:", "replace": "x" }]),
+            Reason::contains(
+                "the text \"Slide 1:\" is not on slide 1: \"Slide 1:\" is a label the reader prints, not text on the slide",
+            ),
+        ),
+        // A tab the reading shows is markup of its own in the file, never text a slide op addresses.
+        pptx_refusal_on(
+            "replace_text",
+            "break",
+            BASIC_PPTX,
+            json!([{ "op": "replace_text", "slide": 1, "find": "Alpha\tbody", "replace": "x" }]),
+            Reason::contains(
+                "the fragment holds a tab or a line break, and the file keeps it as markup of its own (<a:tab/>, <a:br/>) or as a paragraph of its own (<a:p>), not as text — name a fragment on one side of it",
+            ),
+        ),
+        pptx_refusal_on(
+            "replace_text",
+            "empty_find",
+            BASIC_PPTX,
+            json!([{ "op": "replace_text", "slide": 1, "find": "", "replace": "x" }]),
+            Reason::contains("find must not be empty"),
+        ),
+        // ── the request's own bounds ─────────────────────────────────────────────────────────
+        pptx_refusal_on(
+            "add_paragraph",
+            "empty_after",
+            BASIC_PPTX,
+            json!([{ "op": "add_paragraph", "slide": 1, "text": "Added line", "after": "" }]),
+            Reason::contains("after must not be empty"),
+        ),
+        pptx_refusal_on(
+            "add_paragraph",
+            "level",
+            BASIC_PPTX,
+            json!([{ "op": "add_paragraph", "slide": 1, "text": "Added line", "level": 9 }]),
+            Reason::contains("level must be a whole number from 0 to 8, got: 9"),
+        ),
+        pptx_refusal_on(
+            "format_text",
+            "no_property",
+            BASIC_PPTX,
+            json!([{ "op": "format_text", "slide": 1, "find": "Alpha" }]),
+            Reason::contains(
+                "format_text needs at least one of bold, italic, underline, strike, size, color or align",
+            ),
+        ),
+        pptx_refusal_on(
+            "format_text",
+            "size",
+            BASIC_PPTX,
+            json!([{ "op": "format_text", "slide": 1, "find": "Alpha", "size": 5000 }]),
+            Reason::contains("size must be between 1 and 4000 points, got: 5000"),
+        ),
+        pptx_refusal_on(
+            "format_text",
+            "align",
+            BASIC_PPTX,
+            json!([{ "op": "format_text", "slide": 1, "find": "Alpha", "align": "middle" }]),
+            Reason::contains("align must be left, center, right or justify, got: \"middle\""),
+        ),
+        pptx_refusal_on(
+            "format_text",
+            "color",
+            BASIC_PPTX,
+            json!([{ "op": "format_text", "slide": 1, "find": "Alpha", "color": "12" }]),
+            Reason::contains("color must be 6 hex digits, with an optional leading \"#\", got: 12"),
+        ),
+        pptx_refusal_on(
+            "add_slide",
+            "bullets_many",
+            BASIC_PPTX,
+            json!([{ "op": "add_slide", "after": 1, "title": "Inserted", "bullets": too_many_bullets() }]),
+            Reason::contains("a slide may hold at most 100 bullets, got: 101"),
+        ),
+        pptx_refusal_on(
+            "add_slide",
+            "bullets_not_list",
+            BASIC_PPTX,
+            json!([{ "op": "add_slide", "after": 1, "title": "Inserted", "bullets": "one" }]),
+            Reason::contains("bullets must be a list"),
+        ),
+        pptx_refusal_on(
+            "add_slide",
+            "after_missing",
+            BASIC_PPTX,
+            json!([{ "op": "add_slide", "after": 99, "title": "Inserted" }]),
+            Reason::contains("no slide 99: this presentation has 3 slide(s)"),
+        ),
+        // Appending is what reaches the missing list: a named position is refused earlier, for the
+        // list that is there not being the numbering the reading shows.
+        pptx_refusal_on(
+            "add_slide",
+            "no_slide_list",
+            PPTX_NO_SLIDE_LIST,
+            json!([{ "op": "add_slide", "title": "Inserted" }]),
+            Reason::contains("the presentation has no slide list to add a slide to"),
+        ),
+        pptx_refusal_on(
+            "replace_text",
+            "no_slide",
+            BASIC_PPTX,
+            json!([{ "op": "replace_text", "slide": 99, "find": "Alpha", "replace": "Bravo" }]),
+            Reason::contains("no slide 99: this presentation has 3 slide(s)"),
+        ),
+        pptx_refusal_on(
+            "move_slide",
+            "no_position",
+            BASIC_PPTX,
+            json!([{ "op": "move_slide", "slide": 1, "to": 99 }]),
+            Reason::contains("no position 99: this presentation has 3 slide(s)"),
+        ),
+        pptx_refusal_on(
+            "move_slide",
+            "already_there",
+            BASIC_PPTX,
+            json!([{ "op": "move_slide", "slide": 2, "to": 2 }]),
+            Reason::contains(
+                "slide 2 is already at position 2 — moving it there would change nothing",
+            ),
+        ),
+        pptx_refusal_on(
+            "add_table",
+            "empty",
+            BASIC_PPTX,
+            json!([{ "op": "add_table", "slide": 1 }]),
+            Reason::contains(
+                "the table states no rows and no headers — hint: give it at least one row or one header",
+            ),
+        ),
+        pptx_refusal_on(
+            "add_table",
+            "rows_not_arrays",
+            BASIC_PPTX,
+            json!([{ "op": "add_table", "slide": 1, "rows": ["not an array"] }]),
+            Reason::contains("a table's rows must be arrays of cells"),
+        ),
+        // ── the notes a slide does not hold ──────────────────────────────────────────────────
+        pptx_refusal_on(
+            "replace_notes",
+            "no_notes",
+            BASIC_PPTX,
+            json!([{ "op": "replace_notes", "slide": 2, "find": "Note", "replace": "Replaced" }]),
+            Reason::contains("slide 2 has no speaker notes to replace text in"),
+        ),
+        pptx_refusal_on(
+            "remove_notes",
+            "no_notes",
+            BASIC_PPTX,
+            json!([{ "op": "remove_notes", "slide": 2, "find": "Note" }]),
+            Reason::contains("slide 2 has no speaker notes to remove text from"),
+        ),
+        // The notes are one paragraph per line, so a fragment copied across two of them reaches
+        // across a paragraph boundary exactly as a slide's does.
+        pptx_refusal_on(
+            "replace_notes",
+            "across",
+            PPTX_NOTES_TWO,
+            json!([{ "op": "replace_notes", "slide": 1, "find": "Note\none", "replace": "x" }]),
+            Reason::contains(
+                "the text \"Note\\none\" is not in the speaker notes of slide 1: the fragment reaches across a paragraph boundary, and a notes edit addresses one paragraph at a time",
+            ),
+        ),
+        pptx_refusal_on(
+            "replace_notes",
+            "indent",
+            BASIC_PPTX,
+            json!([{ "op": "replace_notes", "slide": 1, "find": " Note one", "replace": "x" }]),
+            Reason::contains(
+                "the text \" Note one\" is not in the speaker notes of slide 1: the fragment's leading whitespace is either the indentation the reader prints under a block or whitespace the file's text does not hold — search for \"Note one\"",
+            ),
+        ),
+        pptx_refusal_on(
+            "replace_notes",
+            "label",
+            BASIC_PPTX,
+            json!([{ "op": "replace_notes", "slide": 1, "find": "Slide 1 notes:", "replace": "x" }]),
+            Reason::contains(
+                "the text \"Slide 1 notes:\" is not in the speaker notes of slide 1: \"Slide 1 notes:\" is a label the reader prints, not text in the notes",
+            ),
+        ),
+        // A slide that already holds notes gains the paragraph at the end of its notes body.
+        pptx_edit(
+            "add_notes",
+            Some("existing_notes"),
+            PPTX_NOTES_TWO,
+            json!([{ "op": "add_notes", "slide": 1, "text": "Second note" }]),
+            vec![
+                Effect::NotesText {
+                    output: None,
+                    slide: 1,
+                    text: "Second note",
+                    present: true,
+                },
+                Effect::NotesText {
+                    output: None,
+                    slide: 1,
+                    text: "Note",
+                    present: true,
+                },
+            ],
+        ),
+        // A notes slide a deck's declared master is not the first one it holds: the part is wired to
+        // the master the presentation names, which the part-by-part comparison proves.
+        pptx_edit(
+            "add_notes",
+            Some("declared_master"),
+            PPTX_TWO_NOTES_MASTERS,
+            json!([{ "op": "add_notes", "slide": 2, "text": "Fresh notes" }]),
+            vec![
+                Effect::PartPresent {
+                    output: None,
+                    part: "ppt/notesSlides/notesSlide1.xml",
+                    present: true,
+                },
+                Effect::NotesText {
+                    output: None,
+                    slide: 2,
+                    text: "Fresh notes",
+                    present: true,
+                },
+            ],
+        ),
+        // ── the text a diagram and a comment hold ────────────────────────────────────────────
+        // A diagram's text is what a reading showed and no presentation edit changes, so a find of
+        // it is refused for what it really is.
+        with_diagram_text(
+            pptx_refusal_on(
+                "replace_text",
+                "diagram",
+                DIAGRAM_MEDIA_PPTX,
+                json!([{ "op": "replace_text", "slide": 1, "find": "North", "replace": "South" }]),
+                Reason::contains(
+                    "the text \"North\" is inside a diagram on slide 1, whose text a presentation edit does not change",
+                ),
+            ),
+            diagram_text(),
+        ),
+        // The same refusal on the deck whose first slide carries a chart, a picture and a comment
+        // beside its diagram: the map is derived from the whole package and keyed by the part the
+        // writer addressed, so a part it mis-keys would be missed here.
+        with_diagram_text(
+            pptx_refusal_on(
+                "replace_text",
+                "assets_diagram",
+                PPTX_ASSETS,
+                json!([{ "op": "replace_text", "slide": 1, "find": "Chart flow", "replace": "Flow" }]),
+                Reason::contains(
+                    "the text \"Chart flow\" is inside a diagram on slide 1, whose text a presentation edit does not change",
+                ),
+            ),
+            json!({ "ppt/slides/slide1.xml": ["Chart flow"] }),
+        ),
+        // The copy is a new part with no diagram text of its own: the same find on it is a plain
+        // miss rather than the diagram's own refusal.
+        with_diagram_text(
+            pptx_refusal_on(
+                "duplicate_slide",
+                "diagram_then_find",
+                DIAGRAM_MEDIA_PPTX,
+                json!([
+                    { "op": "duplicate_slide", "slide": 1 },
+                    { "op": "replace_text", "slide": 2, "find": "North", "replace": "South" },
+                ]),
+                Reason::contains("the text \"North\" is not on slide 2"),
+            ),
+            diagram_text(),
+        ),
+        // A comment's text is never named as the slide's, so a find of it is a plain miss.
+        pptx_refusal_on(
+            "replace_text",
+            "comment",
+            RICH_PPTX,
+            json!([{ "op": "replace_text", "slide": 2, "find": "needs a citation", "replace": "x" }]),
+            Reason::contains("the text \"needs a citation\" is not on slide 2"),
+        ),
+        // A slide text op on a deck with a diagram carries the diagram text even when its find is
+        // the slide's own title.
+        with_diagram_text(
+            pptx_edit(
+                "replace_text",
+                Some("diagram_deck"),
+                DIAGRAM_MEDIA_PPTX,
+                json!([{ "op": "replace_text", "slide": 1, "find": "Diagram", "replace": "Flow" }]),
+                vec![
+                    Effect::SlideText {
+                        output: None,
+                        slide: 1,
+                        text: "Flow",
+                        present: true,
+                    },
+                    Effect::SlideText {
+                        output: None,
+                        slide: 1,
+                        text: "Diagram",
+                        present: false,
+                    },
+                ],
+            ),
+            diagram_text(),
         ),
     ]
 }
@@ -6127,6 +7283,7 @@ pub fn all() -> Vec<Case> {
     cases.extend(docx_edit_cases());
     cases.extend(xlsx_edit_cases());
     cases.extend(pptx_edit_cases());
+    cases.extend(pptx_edit_paths());
     cases.extend(pdf_cases());
     cases.extend(failure_cases());
     cases

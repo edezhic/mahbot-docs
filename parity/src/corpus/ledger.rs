@@ -13,6 +13,7 @@ use crate::engine::Key;
 pub const CRATE_WRITER: &[&str] = &[
     "docx_edit",
     "xlsx_edit",
+    "pptx_edit",
     "pdf_merge",
     "pdf_split",
     "pdf_rotate",
@@ -24,7 +25,7 @@ pub const CRATE_WRITER: &[&str] = &[
 ];
 
 /// The operations the writing half does not deliver. Every unjudged corpus case must name one.
-pub const NOT_YET_DELIVERED: &[&str] = &["create", "fill_template", "pptx_edit"];
+pub const NOT_YET_DELIVERED: &[&str] = &["create", "fill_template"];
 
 /// Whether the crate's writer implements the operation a case exercises.
 #[must_use]
@@ -57,11 +58,12 @@ mod tests {
         for (family, operation, sub_operation) in [
             (Family::Xlsx, "xlsx_edit", Some("merge_cells")),
             (Family::Docx, "docx_edit", Some("add_table")),
+            (Family::Pptx, "pptx_edit", Some("add_table")),
         ] {
             let key = Key::new(family, operation, sub_operation);
             assert!(crate_writer_covers(&key), "{key} is covered");
         }
-        let other = Key::new(Family::Pptx, "pptx_edit", Some("merge_cells"));
+        let other = Key::new(Family::Pptx, "create", None);
         assert!(!crate_writer_covers(&other));
     }
 

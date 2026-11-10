@@ -308,6 +308,115 @@ pub const MANY_PICTURES_PPTX: Document = Document {
     build: build::pptx_with_many_pictures,
 };
 
+// ── pptx: the writer's own inputs, whose readings are deliberately not recorded ──────────────
+
+/// Two slides whose presentation states no `<p:sldSz>`.
+pub const PPTX_NO_SIZE: Document = Document {
+    name: "no-size.pptx",
+    build: build::pptx_no_size,
+};
+/// Two slides naming no layout, in a package that holds none.
+pub const PPTX_NO_LAYOUT: Document = Document {
+    name: "no-layout.pptx",
+    build: build::pptx_no_layout,
+};
+/// Two slides in a package holding no notes master.
+pub const PPTX_NO_NOTES_MASTER: Document = Document {
+    name: "no-notes-master.pptx",
+    build: build::pptx_no_notes_master,
+};
+/// The deck's only slide, declaring speaker notes the package does not hold.
+pub const PPTX_MISSING_NOTES: Document = Document {
+    name: "missing-notes.pptx",
+    build: build::pptx_missing_notes,
+};
+/// The two-slide deck without its `[Content_Types].xml`.
+pub const PPTX_NO_CONTENT_TYPES: Document = Document {
+    name: "no-content-types.pptx",
+    build: build::pptx_no_content_types,
+};
+/// Four slides whose slide list names three of them.
+pub const PPTX_LIST_DISAGREES: Document = Document {
+    name: "list-disagrees.pptx",
+    build: build::pptx_list_disagrees,
+};
+/// Three slides whose slide list names them in another order than their parts are named in.
+pub const PPTX_LIST_REORDERED: Document = Document {
+    name: "list-reordered.pptx",
+    build: build::pptx_list_reordered,
+};
+/// Three slides beside a custom show and a section list.
+pub const PPTX_SECTIONS: Document = Document {
+    name: "sections.pptx",
+    build: build::pptx_sections,
+};
+/// A macro-enabled deck with a `vbaProject.bin` part.
+pub const PPTX_MACRO: Document = Document {
+    name: "macro.pptm",
+    build: build::pptx_macro,
+};
+/// Two slides beside the signature part a signed package carries.
+pub const PPTX_SIGNED: Document = Document {
+    name: "signed.pptx",
+    build: build::pptx_signed,
+};
+/// Three slides whose first draws a chart, a picture, a comment thread and a diagram, and holds
+/// speaker notes.
+pub const PPTX_ASSETS: Document = Document {
+    name: "assets.pptx",
+    build: build::pptx_assets,
+};
+/// Two slides whose first body holds differently formatted runs.
+pub const PPTX_RUNS: Document = Document {
+    name: "runs.pptx",
+    build: build::pptx_runs,
+};
+/// Two slides whose first holds a body of one paragraph and a table.
+pub const PPTX_TABLE: Document = Document {
+    name: "table.pptx",
+    build: build::pptx_table_deck,
+};
+/// Two slides with a title and a body each, for a shape placed past the slide's edge.
+pub const PPTX_BOXES: Document = Document {
+    name: "boxes.pptx",
+    build: build::pptx_boxes,
+};
+/// Three slides: one with no shape tree, one holding only a table, one normal.
+pub const PPTX_NO_SHAPE_TREE: Document = Document {
+    name: "no-shape-tree.pptx",
+    build: build::pptx_no_shape_tree,
+};
+/// Two slides whose first holds notes without a body placeholder.
+pub const PPTX_NOTES_NO_BODY: Document = Document {
+    name: "notes-no-body.pptx",
+    build: build::pptx_notes_no_body,
+};
+/// Two slides whose first is stored at `ppt/slides2/slide1.xml`.
+pub const PPTX_SLIDE_OUTSIDE: Document = Document {
+    name: "slide-outside.pptx",
+    build: build::pptx_slide_outside,
+};
+/// Three slide entries whose middle one names a part the package does not hold.
+pub const PPTX_BROKEN_SLOT: Document = Document {
+    name: "broken-slot.pptx",
+    build: build::pptx_broken_slot,
+};
+/// Two slides a presentation names through its relationships, and no slide list at all.
+pub const PPTX_NO_SLIDE_LIST: Document = Document {
+    name: "no-slide-list.pptx",
+    build: build::pptx_no_slide_list,
+};
+/// Two slides beside two notes masters, the second the one the presentation declares.
+pub const PPTX_TWO_NOTES_MASTERS: Document = Document {
+    name: "two-notes-masters.pptx",
+    build: build::pptx_two_notes_masters,
+};
+/// Two slides whose first holds speaker notes of two paragraphs.
+pub const PPTX_NOTES_TWO: Document = Document {
+    name: "notes-two.pptx",
+    build: build::pptx_notes_two,
+};
+
 /// The PDF: two A4 pages, each drawing its own line.
 pub const BASIC_PDF: Document = Document {
     name: "basic.pdf",
@@ -1085,5 +1194,26 @@ pub fn writer_documents() -> Vec<Document> {
         PICTURE_BROKEN_PNG,
         PICTURE_STALE_CRC_PNG,
         PICTURE_WEBP,
+        PPTX_NO_SIZE,
+        PPTX_NO_LAYOUT,
+        PPTX_NO_NOTES_MASTER,
+        PPTX_MISSING_NOTES,
+        PPTX_NO_CONTENT_TYPES,
+        PPTX_LIST_DISAGREES,
+        PPTX_LIST_REORDERED,
+        PPTX_SECTIONS,
+        PPTX_MACRO,
+        PPTX_SIGNED,
+        PPTX_ASSETS,
+        PPTX_RUNS,
+        PPTX_TABLE,
+        PPTX_BOXES,
+        PPTX_NO_SHAPE_TREE,
+        PPTX_NOTES_NO_BODY,
+        PPTX_SLIDE_OUTSIDE,
+        PPTX_BROKEN_SLOT,
+        PPTX_NO_SLIDE_LIST,
+        PPTX_NOTES_TWO,
+        PPTX_TWO_NOTES_MASTERS,
     ]
 }

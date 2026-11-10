@@ -1112,7 +1112,8 @@
     "note_slide_unreadable": {
       "text": "slide {n} could not be read",
       "printed_by": [
-        "reading"
+        "reading",
+        "writing"
       ]
     },
     "note_xlsx_cells_lost": {
@@ -3389,6 +3390,258 @@
       "printed_by": [
         "writing"
       ]
+    },
+    "edit_pptx_find_absent": {
+      "text": "the text {find} is not {where}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_find_across": {
+      "text": "the text {find} is not {where}: the fragment reaches across a paragraph boundary, and {what} addresses one paragraph at a time",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_find_indent": {
+      "text": "the text {find} is not {where}: the fragment's leading whitespace is either the indentation the reader prints under a block or whitespace the file's text does not hold — search for {trimmed}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_find_label": {
+      "text": "the text {find} is not {where}: {label} is a label the reader prints, not {not_text}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_find_break": {
+      "text": "the text {find} is not {where}: {reason}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_find_diagram": {
+      "text": "the text {find} is inside a diagram on slide {slide}, whose text a presentation edit does not change",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_find_notes": {
+      "text": "the text {find} is in the speaker notes of slide {slide}, which a slide text op does not edit (replace_notes and remove_notes do)",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_miss_where_slide": {
+      "text": "on slide {slide}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_miss_where_notes": {
+      "text": "in the speaker notes of slide {slide}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_miss_what_slide": {
+      "text": "a slide text op",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_miss_what_notes": {
+      "text": "a notes edit",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_miss_not_text_slide": {
+      "text": "text on the slide",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_miss_not_text_notes": {
+      "text": "text in the notes",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_after_table": {
+      "text": "the text {find} is inside a table on slide {slide}: add_paragraph writes into the slide's own text, not into a table",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_no_text_body": {
+      "text": "the slide has no text body to add a paragraph to",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_remove_last": {
+      "text": "removing {find} would leave the {holder}'s text body with no paragraph — a text body must keep one",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_format_no_property": {
+      "text": "format_text needs at least one of bold, italic, underline, strike, size, color or align",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_pptx_partial_run": {
+      "text": "[the named text is part of a longer run, so the formatting also applied to the rest of that run]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_pptx_paragraph_align": {
+      "text": "[a paragraph's alignment is the whole paragraph's, so the text beside the named fragment was aligned too]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_no_slide": {
+      "text": "no slide {number}: this presentation has {count} slide(s)",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_no_position": {
+      "text": "no position {to}: this presentation has {count} slide(s)",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_no_layout": {
+      "text": "the presentation has no slide layout to build a new slide on",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_no_slide_list": {
+      "text": "the presentation has no slide list to add a slide to",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_bullets_not_list": {
+      "text": "bullets must be a list",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_bullets_many": {
+      "text": "a slide may hold at most {max} bullets, got: {count}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_add_after_unlisted": {
+      "text": "a slide cannot be placed after slide {after}: the presentation's slide list does not number its slides the way the reader shows them",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_only_slide": {
+      "text": "the presentation's only slide cannot be deleted",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_delete_unlisted": {
+      "text": "slide {slide} cannot be deleted: the presentation's slide list does not name it",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_already_there": {
+      "text": "slide {slide} is already at position {to} — moving it there would change nothing",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_move_unlisted": {
+      "text": "the presentation's slide list does not number its slides the way the reader shows them, so a slide cannot be moved",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_copy_outside": {
+      "text": "slide {slide} is stored outside {directory}, so a copy of it cannot be placed among the presentation's other slides",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_duplicate_unlisted": {
+      "text": "the presentation's slide list does not number its slides the way the reader shows them, so a slide cannot be duplicated",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_notes_missing": {
+      "text": "slide {slide} declares speaker notes ({part}) the presentation does not hold, so a copy of it cannot have notes of its own",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_no_notes_master": {
+      "text": "the presentation has no notes master, so a notes slide cannot be created for it",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_notes_no_body": {
+      "text": "the notes of slide {slide} have no body to add a paragraph to",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_no_notes": {
+      "text": "slide {slide} has no speaker notes to {action}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_no_shape_tree_image": {
+      "text": "the slide has no shape tree to place an image in",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_no_shape_tree_table": {
+      "text": "the slide has no shape tree to place a table in",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_rows_not_arrays": {
+      "text": "a table's rows must be arrays of cells",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_table_empty": {
+      "text": "the table states no rows and no headers — hint: give it at least one row or one header",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_unknown": {
+      "text": "unknown pptx edit: {op}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "edit_pptx_fraction": {
+      "text": "{name} must be {bounds}, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
     }
   },
   "derived_marks": {
@@ -3401,10 +3654,12 @@
       "writing"
     ],
     "ppt_marks": [
-      "reading"
+      "reading",
+      "writing"
     ],
     "ppt_slide_labels": [
-      "reading"
+      "reading",
+      "writing"
     ],
     "pdf_field_kinds": [
       "reading"

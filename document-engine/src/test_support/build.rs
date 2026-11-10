@@ -2475,6 +2475,34 @@ fn escape(text: &str) -> String {
     escaped
 }
 
+/// One slide per title: a title placeholder and a body of one paragraph, the shape most of the
+/// decks here are built from.
+fn pptx_titled_slides(titles: &[&str]) -> Vec<String> {
+    titles
+        .iter()
+        .map(|title| {
+            format!(
+                "{}{}",
+                pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, title),
+                pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Alpha body"),
+            )
+        })
+        .collect()
+}
+
+/// `parts` with each of `slides` written into it under its own part name, with `slide_rels` as its
+/// relationships.
+fn pptx_push_slides(parts: &mut Vec<(String, Vec<u8>)>, slides: &[String], slide_rels: &str) {
+    for (index, shapes) in slides.iter().enumerate() {
+        let number = index + 1;
+        parts.extend(pptx_slide_parts(
+            &format!("ppt/slides/slide{number}.xml"),
+            &pptx_slide(shapes),
+            slide_rels,
+        ));
+    }
+}
+
 /// One slide part: its shapes, in the order the reader shows them.
 fn pptx_slide(shapes: &str) -> String {
     format!(
@@ -2641,6 +2669,21 @@ fn pptx_slide_rels(notes: bool) -> String {
 /// The notes slide of the first slide: the slide-image and notes-body placeholders every notes
 /// slide holds, the body carrying `text`.
 fn pptx_notes_slide(text: &str) -> String {
+    pptx_notes_slide_of(&[text])
+}
+
+/// The notes slide of the first slide with one paragraph per text: the slide-image and notes-body
+/// placeholders every notes slide holds, the body carrying the paragraphs in order.
+fn pptx_notes_slide_of(texts: &[&str]) -> String {
+    let paragraphs = texts
+        .iter()
+        .map(|text| {
+            format!(
+                r#"<a:p><a:r><a:rPr lang="en-US"/><a:t>{}</a:t></a:r></a:p>"#,
+                escape(text)
+            )
+        })
+        .collect::<String>();
     format!(
         concat!(
             "{}<p:notes {}><p:cSld><p:spTree>{}",
@@ -2650,15 +2693,10 @@ fn pptx_notes_slide(text: &str) -> String {
             r#"<p:sp><p:nvSpPr><p:cNvPr id="3" name="Notes Placeholder 2"/>"#,
             r#"<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>"#,
             r#"<p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:spPr/>"#,
-            r#"<p:txBody><a:bodyPr/><a:lstStyle/>"#,
-            r#"<a:p><a:r><a:rPr lang="en-US"/><a:t>{}</a:t></a:r></a:p>"#,
-            r#"</p:txBody></p:sp>"#,
+            r#"<p:txBody><a:bodyPr/><a:lstStyle/>{}</p:txBody></p:sp>"#,
             "</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:notes>",
         ),
-        DECLARATION,
-        PPTX_NAMESPACES,
-        PPTX_EMPTY_TREE,
-        escape(text),
+        DECLARATION, PPTX_NAMESPACES, PPTX_EMPTY_TREE, paragraphs,
     )
 }
 
@@ -3310,6 +3348,1123 @@ pub fn pptx_with_many_pictures() -> Vec<u8> {
         .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
         .collect();
     pptx_deck(&[slide], "", "", &refs)
+}
+
+// ── pptx: the writer's own decks ────────────────────────────────────────────────────────────
+//
+// These decks exist for `pptx_edit` alone: no reading is recorded for them, so each states the one
+// thing a writer case needs it to be — a presentation with no size, a package that has lost its
+// content types, a slide list that disagrees with the reading — and nothing else.
+
+/// The slide and notes sizes the corpus decks state: the size a created deck gets when the request
+/// names none (`rules.pptx_default_size`), and the 4:3 notes page.
+const PPTX_SIZES: &str =
+    r#"<p:sldSz cx="9144000" cy="5143500"/><p:notesSz cx="6858000" cy="9144000"/>"#;
+/// The notes size alone, for a presentation that states no slide size of its own.
+const PPTX_NOTES_SIZE: &str = r#"<p:notesSz cx="6858000" cy="9144000"/>"#;
+/// The relationships of a slide that names no layout: a part declaring none at all.
+const PPTX_NO_RELS: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+    r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#,
+);
+/// The content type of a deck's own presentation part.
+const PPTX_PRESENTATION_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml";
+/// The content type of a slide layout.
+const PPTX_LAYOUT_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml";
+/// The content type of a slide master.
+const PPTX_MASTER_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml";
+/// The content type of a notes master.
+const PPTX_NOTES_MASTER_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml";
+/// The content type of a theme.
+const PPTX_THEME_TYPE: &str = "application/vnd.openxmlformats-officedocument.theme+xml";
+
+/// A relationships part from the `(id, kind, target)` entries given, in the order a reader sees
+/// them: `kind` is a relationship kind under the officeDocument namespace, or a full type URL when
+/// it names a namespace of its own (see [`pptx_rel`]).
+fn pptx_rels_of(entries: &[(&str, &str, &str)]) -> String {
+    let mut rels = String::from(concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#,
+    ));
+    for (id, kind, target) in entries {
+        rels.push_str(&pptx_rel(id, kind, target));
+    }
+    rels.push_str("</Relationships>");
+    rels
+}
+
+/// The `.rels` part that belongs to `part`, by the OPC convention every family follows.
+fn pptx_rels_part(part: &str) -> String {
+    match part.rsplit_once('/') {
+        Some((directory, name)) => format!("{directory}/_rels/{name}.rels"),
+        None => format!("_rels/{part}.rels"),
+    }
+}
+
+/// One slide's two parts: its own, under `part`, and the relationships it declares.
+fn pptx_slide_parts(part: &str, xml: &str, rels: &str) -> Vec<(String, Vec<u8>)> {
+    vec![
+        (part.to_owned(), xml.as_bytes().to_vec()),
+        (pptx_rels_part(part), rels.as_bytes().to_vec()),
+    ]
+}
+
+/// A deck's `[Content_Types].xml`: the two defaults every package states, then the presentation's
+/// own type and `slide` for each of `slide_parts`, then `extra` — one `(part, content type)` pair
+/// each. `layout` and `notes_master` say whether the deck holds those parts.
+fn pptx_deck_types(
+    presentation: &str,
+    slide: &str,
+    slide_parts: &[&str],
+    layout: bool,
+    notes_master: bool,
+    extra: &[(&str, &str)],
+) -> String {
+    let mut overrides: Vec<(&str, &str)> = vec![("ppt/presentation.xml", presentation)];
+    if layout {
+        overrides.push(("ppt/slideLayouts/slideLayout1.xml", PPTX_LAYOUT_TYPE));
+    }
+    overrides.push(("ppt/slideMasters/slideMaster1.xml", PPTX_MASTER_TYPE));
+    if notes_master {
+        overrides.push(("ppt/notesMasters/notesMaster1.xml", PPTX_NOTES_MASTER_TYPE));
+    }
+    overrides.push(("ppt/theme/theme1.xml", PPTX_THEME_TYPE));
+    for part in slide_parts {
+        overrides.push((part, slide));
+    }
+    overrides.extend_from_slice(extra);
+    let mut types = String::from(concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">"#,
+        r#"<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"#,
+        r#"<Default Extension="xml" ContentType="application/xml"/>"#,
+    ));
+    for (part, content_type) in overrides {
+        types.push_str(&format!(
+            r#"<Override PartName="/{part}" ContentType="{content_type}"/>"#
+        ));
+    }
+    types.push_str("</Types>");
+    types
+}
+
+/// The parts a deck's shell holds whatever its slides: the package's own relationships, the
+/// master, the theme and — when `layout` — the layout the master draws through, each with the
+/// relationships it declares.
+fn pptx_shell_parts(layout: bool) -> Vec<(String, Vec<u8>)> {
+    let root_rels = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#,
+        r#"<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>"#,
+        r#"</Relationships>"#,
+    );
+    let mut master_rels = vec![("rId2", "theme", "../theme/theme1.xml")];
+    if layout {
+        master_rels.insert(
+            0,
+            ("rId1", "slideLayout", "../slideLayouts/slideLayout1.xml"),
+        );
+    }
+    let mut parts: Vec<(String, Vec<u8>)> = vec![
+        ("_rels/.rels".to_owned(), root_rels.as_bytes().to_vec()),
+        (
+            "ppt/slideMasters/slideMaster1.xml".to_owned(),
+            PPTX_MASTER.as_bytes().to_vec(),
+        ),
+        (
+            "ppt/slideMasters/_rels/slideMaster1.xml.rels".to_owned(),
+            pptx_rels_of(&master_rels).into_bytes(),
+        ),
+        (
+            "ppt/theme/theme1.xml".to_owned(),
+            PPTX_THEME.as_bytes().to_vec(),
+        ),
+    ];
+    if layout {
+        parts.push((
+            "ppt/slideLayouts/slideLayout1.xml".to_owned(),
+            PPTX_LAYOUT.as_bytes().to_vec(),
+        ));
+        parts.push((
+            "ppt/slideLayouts/_rels/slideLayout1.xml.rels".to_owned(),
+            pptx_rels_of(&[("rId1", "slideMaster", "../slideMasters/slideMaster1.xml")])
+                .into_bytes(),
+        ));
+    }
+    parts
+}
+
+/// The notes master a deck needs before a notes slide can be created for one of its slides, and the
+/// theme it draws through.
+fn pptx_notes_master_parts() -> Vec<(String, Vec<u8>)> {
+    vec![
+        (
+            "ppt/notesMasters/notesMaster1.xml".to_owned(),
+            PPTX_NOTES_MASTER.as_bytes().to_vec(),
+        ),
+        (
+            "ppt/notesMasters/_rels/notesMaster1.xml.rels".to_owned(),
+            pptx_rels_of(&[("rId1", "theme", "../theme/theme1.xml")]).into_bytes(),
+        ),
+    ]
+}
+
+/// The presentation part around `slide_ids`, with the notes-master list `notes_master` names a
+/// relationship for and `body` — whatever the deck states after its slide list, its `<p:sldSz>`
+/// among it.
+fn pptx_presentation_of(slide_ids: &str, notes_master: Option<&str>, body: &str) -> String {
+    let notes = notes_master.map_or_else(String::new, |id| {
+        format!(r#"<p:notesMasterIdLst><p:notesMasterId r:id="{id}"/></p:notesMasterIdLst>"#)
+    });
+    format!(
+        concat!(
+            "{}<p:presentation {}>",
+            "<p:sldMasterIdLst><p:sldMasterId id=\"2147483648\" r:id=\"rId1\"/></p:sldMasterIdLst>",
+            "{}<p:sldIdLst>{}</p:sldIdLst>{}",
+            "</p:presentation>",
+        ),
+        DECLARATION, PPTX_NAMESPACES, notes, slide_ids, body,
+    )
+}
+
+/// A presentation part's relationships: the master, the theme, the notes master when the deck has
+/// one, then one entry per slide part in the order the slide list names them — `rId3` upwards, so
+/// the notes master's `rId6` is left to it and a deck of four or more slides states none.
+fn pptx_presentation_rels_of(slides: &[&str], notes_master: bool) -> String {
+    let mut entries: Vec<(String, &str, String)> = vec![
+        (
+            "rId1".to_owned(),
+            "slideMaster",
+            "slideMasters/slideMaster1.xml".to_owned(),
+        ),
+        ("rId2".to_owned(), "theme", "theme/theme1.xml".to_owned()),
+    ];
+    if notes_master {
+        entries.push((
+            "rId6".to_owned(),
+            "notesMaster",
+            "notesMasters/notesMaster1.xml".to_owned(),
+        ));
+    }
+    for (index, part) in slides.iter().enumerate() {
+        entries.push((format!("rId{}", index + 3), "slide", (*part).to_owned()));
+    }
+    let borrowed: Vec<(&str, &str, &str)> = entries
+        .iter()
+        .map(|(id, kind, target)| (id.as_str(), *kind, target.as_str()))
+        .collect();
+    pptx_rels_of(&borrowed)
+}
+
+/// The package around `parts`, in the order given, with `content_types` first when the package has
+/// a `[Content_Types].xml` at all.
+fn pptx_package_of(content_types: Option<&str>, parts: Vec<(String, Vec<u8>)>) -> Vec<u8> {
+    let mut owned: Vec<(String, Vec<u8>)> = Vec::new();
+    if let Some(types) = content_types {
+        owned.push(("[Content_Types].xml".to_owned(), types.as_bytes().to_vec()));
+    }
+    owned.extend(parts);
+    let entries: Vec<(&str, &[u8])> = owned
+        .iter()
+        .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+        .collect();
+    package(&entries)
+}
+
+/// The `p:pic` a slide draws the media part its relationship `rel` names in.
+fn pptx_picture(id: u32, rel: &str) -> String {
+    format!(
+        concat!(
+            r#"<p:pic><p:nvPicPr><p:cNvPr id="{}" name="Picture"/>"#,
+            r#"<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>"#,
+            r#"<p:blipFill><a:blip r:embed="{}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>"#,
+            r#"<p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1000000" cy="500000"/></a:xfrm>"#,
+            r#"<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>"#,
+        ),
+        id, rel,
+    )
+}
+
+/// The `a:tbl` of the `table.pptx` deck: two rows of two cells, the last holding two paragraphs so
+/// a paragraph inside a cell can be addressed without emptying the cell.
+fn pptx_table_with_two_paragraphs() -> String {
+    fn cell(paragraphs: &[&str]) -> String {
+        let mut body = String::new();
+        for text in paragraphs {
+            body.push_str(&format!(
+                r#"<a:p><a:r><a:rPr lang="en-US"/><a:t>{}</a:t></a:r></a:p>"#,
+                escape(text)
+            ));
+        }
+        format!("<a:tc><a:txBody><a:bodyPr/><a:lstStyle/>{body}</a:txBody><a:tcPr/></a:tc>")
+    }
+    format!(
+        concat!(
+            r#"<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="10" name="Table"/>"#,
+            r#"<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>"#,
+            r#"<p:xfrm><a:off x="0" y="0"/><a:ext cx="4000000" cy="2000000"/></p:xfrm>"#,
+            r#"<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">"#,
+            r#"<a:tbl><a:tblGrid><a:gridCol w="2000000"/><a:gridCol w="2000000"/></a:tblGrid>"#,
+            r#"<a:tr h="370840">{}{}</a:tr><a:tr h="370840">{}{}</a:tr>"#,
+            "</a:tbl></a:graphicData></a:graphic></p:graphicFrame>",
+        ),
+        cell(&["Cell B"]),
+        cell(&["Cell C"]),
+        cell(&["Cell D"]),
+        cell(&["Cell A", "Cell A2"]),
+    )
+}
+
+/// A deck whose presentation states no `<p:sldSz>`, so every placement is read against the
+/// 10in × 7½in size a presentation without one is read at.
+#[must_use]
+pub fn pptx_no_size() -> Vec<u8> {
+    let slides = pptx_titled_slides(&["No size", "Second slide"]);
+    let presentation = pptx_presentation_of(
+        r#"<p:sldId id="256" r:id="rId3"/><p:sldId id="257" r:id="rId4"/>"#,
+        Some("rId6"),
+        PPTX_NOTES_SIZE,
+    );
+    let presentation_rels =
+        pptx_presentation_rels_of(&["slides/slide1.xml", "slides/slide2.xml"], true);
+    let types = pptx_deck_types(
+        PPTX_PRESENTATION_TYPE,
+        PPTX_SLIDE_TYPE,
+        &["ppt/slides/slide1.xml", "ppt/slides/slide2.xml"],
+        true,
+        true,
+        &[],
+    );
+    let mut parts = pptx_shell_parts(true);
+    parts.extend(pptx_notes_master_parts());
+    parts.push(("ppt/presentation.xml".to_owned(), presentation.into_bytes()));
+    parts.push((
+        "ppt/_rels/presentation.xml.rels".to_owned(),
+        presentation_rels.into_bytes(),
+    ));
+    pptx_push_slides(&mut parts, &slides, &pptx_slide_rels_with(false, ""));
+    pptx_package_of(Some(&types), parts)
+}
+
+/// A deck whose slides name no layout and whose package holds none, so a new slide has nothing to
+/// be built on.
+#[must_use]
+pub fn pptx_no_layout() -> Vec<u8> {
+    let slides = pptx_titled_slides(&["No layout", "Second slide"]);
+    let presentation = pptx_presentation_of(
+        r#"<p:sldId id="256" r:id="rId3"/><p:sldId id="257" r:id="rId4"/>"#,
+        Some("rId6"),
+        PPTX_SIZES,
+    );
+    let presentation_rels =
+        pptx_presentation_rels_of(&["slides/slide1.xml", "slides/slide2.xml"], true);
+    let types = pptx_deck_types(
+        PPTX_PRESENTATION_TYPE,
+        PPTX_SLIDE_TYPE,
+        &["ppt/slides/slide1.xml", "ppt/slides/slide2.xml"],
+        false,
+        true,
+        &[],
+    );
+    let mut parts = pptx_shell_parts(false);
+    parts.extend(pptx_notes_master_parts());
+    parts.push(("ppt/presentation.xml".to_owned(), presentation.into_bytes()));
+    parts.push((
+        "ppt/_rels/presentation.xml.rels".to_owned(),
+        presentation_rels.into_bytes(),
+    ));
+    pptx_push_slides(&mut parts, &slides, PPTX_NO_RELS);
+    pptx_package_of(Some(&types), parts)
+}
+
+/// A deck holding no notes master and naming none, so no notes slide can be created for a slide
+/// that has no notes.
+#[must_use]
+pub fn pptx_no_notes_master() -> Vec<u8> {
+    let slides = pptx_titled_slides(&["No notes master", "Second slide"]);
+    let presentation = pptx_presentation_of(
+        r#"<p:sldId id="256" r:id="rId3"/><p:sldId id="257" r:id="rId4"/>"#,
+        None,
+        PPTX_SIZES,
+    );
+    let presentation_rels =
+        pptx_presentation_rels_of(&["slides/slide1.xml", "slides/slide2.xml"], false);
+    let types = pptx_deck_types(
+        PPTX_PRESENTATION_TYPE,
+        PPTX_SLIDE_TYPE,
+        &["ppt/slides/slide1.xml", "ppt/slides/slide2.xml"],
+        true,
+        false,
+        &[],
+    );
+    let mut parts = pptx_shell_parts(true);
+    parts.push(("ppt/presentation.xml".to_owned(), presentation.into_bytes()));
+    parts.push((
+        "ppt/_rels/presentation.xml.rels".to_owned(),
+        presentation_rels.into_bytes(),
+    ));
+    pptx_push_slides(&mut parts, &slides, &pptx_slide_rels_with(false, ""));
+    pptx_package_of(Some(&types), parts)
+}
+
+/// Two slides beside two notes masters, the presentation declaring the second: a notes slide
+/// created for a slide that has none is wired to the declared master, not the first the package
+/// holds.
+#[must_use]
+pub fn pptx_two_notes_masters() -> Vec<u8> {
+    let slides = pptx_titled_slides(&["First slide", "Second slide"]);
+    let presentation = pptx_presentation_of(
+        r#"<p:sldId id="256" r:id="rId3"/><p:sldId id="257" r:id="rId4"/>"#,
+        Some("rId7"),
+        PPTX_SIZES,
+    );
+    let presentation_rels = pptx_rels_of(&[
+        ("rId1", "slideMaster", "slideMasters/slideMaster1.xml"),
+        ("rId2", "theme", "theme/theme1.xml"),
+        ("rId3", "slide", "slides/slide1.xml"),
+        ("rId4", "slide", "slides/slide2.xml"),
+        ("rId6", "notesMaster", "notesMasters/notesMaster1.xml"),
+        ("rId7", "notesMaster", "notesMasters/notesMaster2.xml"),
+    ]);
+    let types = pptx_deck_types(
+        PPTX_PRESENTATION_TYPE,
+        PPTX_SLIDE_TYPE,
+        &["ppt/slides/slide1.xml", "ppt/slides/slide2.xml"],
+        true,
+        true,
+        &[("ppt/notesMasters/notesMaster2.xml", PPTX_NOTES_MASTER_TYPE)],
+    );
+    let mut parts = pptx_shell_parts(true);
+    parts.push(("ppt/presentation.xml".to_owned(), presentation.into_bytes()));
+    parts.push((
+        "ppt/_rels/presentation.xml.rels".to_owned(),
+        presentation_rels.into_bytes(),
+    ));
+    parts.extend(pptx_notes_master_parts());
+    parts.push((
+        "ppt/notesMasters/notesMaster2.xml".to_owned(),
+        PPTX_NOTES_MASTER.as_bytes().to_vec(),
+    ));
+    parts.push((
+        "ppt/notesMasters/_rels/notesMaster2.xml.rels".to_owned(),
+        pptx_rels_of(&[("rId1", "theme", "../theme/theme1.xml")]).into_bytes(),
+    ));
+    pptx_push_slides(&mut parts, &slides, &pptx_slide_rels_with(false, ""));
+    pptx_package_of(Some(&types), parts)
+}
+
+/// One slide whose own relationships declare speaker notes the package does not hold: the deck's
+/// only slide, so it is also the one a deletion is refused.
+#[must_use]
+pub fn pptx_missing_notes() -> Vec<u8> {
+    let slide = PptxSlide::new(pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Only slide"),
+        pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Alpha body"),
+    )))
+    .with_rels(pptx_rel(
+        "rId2",
+        "notesSlide",
+        "../notesSlides/notesSlide1.xml",
+    ));
+    pptx_deck(&[slide], "", "", &[])
+}
+
+/// The basic two-slide deck without its `[Content_Types].xml`, which no edit of this family can
+/// name a part without.
+#[must_use]
+pub fn pptx_no_content_types() -> Vec<u8> {
+    let slides = pptx_titled_slides(&["No content types", "Second slide"]);
+    let presentation = pptx_presentation_of(
+        r#"<p:sldId id="256" r:id="rId3"/><p:sldId id="257" r:id="rId4"/>"#,
+        Some("rId6"),
+        PPTX_SIZES,
+    );
+    let presentation_rels =
+        pptx_presentation_rels_of(&["slides/slide1.xml", "slides/slide2.xml"], true);
+    let mut parts = pptx_shell_parts(true);
+    parts.extend(pptx_notes_master_parts());
+    parts.push(("ppt/presentation.xml".to_owned(), presentation.into_bytes()));
+    parts.push((
+        "ppt/_rels/presentation.xml.rels".to_owned(),
+        presentation_rels.into_bytes(),
+    ));
+    pptx_push_slides(&mut parts, &slides, &pptx_slide_rels_with(false, ""));
+    pptx_package_of(None, parts)
+}
+
+/// Four slides whose `<p:sldIdLst>` holds three entries and whose fourth `<p:sldId>` sits outside
+/// it: a reading numbers four slides while the list numbers three.
+#[must_use]
+pub fn pptx_list_disagrees() -> Vec<u8> {
+    let slides =
+        pptx_titled_slides(&["First slide", "Second slide", "Third slide", "Fourth slide"]);
+    let presentation = pptx_presentation_of(
+        concat!(
+            r#"<p:sldId id="256" r:id="rId3"/><p:sldId id="257" r:id="rId4"/>"#,
+            r#"<p:sldId id="258" r:id="rId5"/>"#,
+        ),
+        None,
+        concat!(
+            r#"<p:sldId id="259" r:id="rId6"/>"#,
+            r#"<p:sldSz cx="9144000" cy="5143500"/><p:notesSz cx="6858000" cy="9144000"/>"#,
+        ),
+    );
+    let presentation_rels = pptx_presentation_rels_of(
+        &[
+            "slides/slide1.xml",
+            "slides/slide2.xml",
+            "slides/slide3.xml",
+            "slides/slide4.xml",
+        ],
+        false,
+    );
+    let types = pptx_deck_types(
+        PPTX_PRESENTATION_TYPE,
+        PPTX_SLIDE_TYPE,
+        &[
+            "ppt/slides/slide1.xml",
+            "ppt/slides/slide2.xml",
+            "ppt/slides/slide3.xml",
+            "ppt/slides/slide4.xml",
+        ],
+        true,
+        false,
+        &[],
+    );
+    let mut parts = pptx_shell_parts(true);
+    parts.push(("ppt/presentation.xml".to_owned(), presentation.into_bytes()));
+    parts.push((
+        "ppt/_rels/presentation.xml.rels".to_owned(),
+        presentation_rels.into_bytes(),
+    ));
+    pptx_push_slides(&mut parts, &slides, &pptx_slide_rels_with(false, ""));
+    pptx_package_of(Some(&types), parts)
+}
+
+/// Three slides whose slide list names them in another order than their file names do: a list the
+/// reading and the writer both number by, so a move or a copy has a position to take.
+#[must_use]
+pub fn pptx_list_reordered() -> Vec<u8> {
+    let slides = pptx_titled_slides(&["First slide", "Second slide", "Third slide"]);
+    let presentation = pptx_presentation_of(
+        concat!(
+            r#"<p:sldId id="256" r:id="rId5"/><p:sldId id="257" r:id="rId3"/>"#,
+            r#"<p:sldId id="258" r:id="rId4"/>"#,
+        ),
+        Some("rId6"),
+        PPTX_SIZES,
+    );
+    let presentation_rels = pptx_presentation_rels_of(
+        &[
+            "slides/slide1.xml",
+            "slides/slide2.xml",
+            "slides/slide3.xml",
+        ],
+        true,
+    );
+    let types = pptx_deck_types(
+        PPTX_PRESENTATION_TYPE,
+        PPTX_SLIDE_TYPE,
+        &[
+            "ppt/slides/slide1.xml",
+            "ppt/slides/slide2.xml",
+            "ppt/slides/slide3.xml",
+        ],
+        true,
+        true,
+        &[],
+    );
+    let mut parts = pptx_shell_parts(true);
+    parts.extend(pptx_notes_master_parts());
+    parts.push(("ppt/presentation.xml".to_owned(), presentation.into_bytes()));
+    parts.push((
+        "ppt/_rels/presentation.xml.rels".to_owned(),
+        presentation_rels.into_bytes(),
+    ));
+    pptx_push_slides(&mut parts, &slides, &pptx_slide_rels_with(false, ""));
+    pptx_package_of(Some(&types), parts)
+}
+
+/// Three slides whose presentation carries a custom show and a section list, neither of which any
+/// edit changes.
+#[must_use]
+pub fn pptx_sections() -> Vec<u8> {
+    let slides = pptx_titled_slides(&["First slide", "Second slide", "Third slide"]);
+    // The section list is a `p14` extension, so the root declares the namespace the element
+    // carries rather than leaving it to a prefix the part never binds.
+    let presentation = format!(
+        concat!(
+            "{}<p:presentation {} ",
+            r#"xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main">"#,
+            "<p:sldMasterIdLst><p:sldMasterId id=\"2147483648\" r:id=\"rId1\"/></p:sldMasterIdLst>",
+            "<p:notesMasterIdLst><p:notesMasterId r:id=\"rId6\"/></p:notesMasterIdLst>",
+            "<p:sldIdLst>{}</p:sldIdLst>",
+            "{}",
+            r#"<p:custShowLst><p:custShow name="Show 1" id="0">"#,
+            r#"<p:sldLst><p:sld r:id="rId3"/></p:sldLst></p:custShow></p:custShowLst>"#,
+            "<p:extLst><p:ext uri=\"{{521415D9-36F7-43E2-AB2F-B90AF26B5E84}}\">",
+            "<p14:sectionLst>",
+            r#"<p14:section name="Section One" id="{{6A1B2C3D-0000-0000-0000-000000000001}}">"#,
+            r#"<p14:sldIdLst><p14:sldId id="256"/><p14:sldId id="257"/></p14:sldIdLst>"#,
+            "</p14:section></p14:sectionLst></p:ext></p:extLst>",
+            "</p:presentation>",
+        ),
+        DECLARATION,
+        PPTX_NAMESPACES,
+        concat!(
+            r#"<p:sldId id="256" r:id="rId3"/><p:sldId id="257" r:id="rId4"/>"#,
+            r#"<p:sldId id="258" r:id="rId5"/>"#,
+        ),
+        PPTX_SIZES,
+    );
+    let presentation_rels = pptx_presentation_rels_of(
+        &[
+            "slides/slide1.xml",
+            "slides/slide2.xml",
+            "slides/slide3.xml",
+        ],
+        true,
+    );
+    let types = pptx_deck_types(
+        PPTX_PRESENTATION_TYPE,
+        PPTX_SLIDE_TYPE,
+        &[
+            "ppt/slides/slide1.xml",
+            "ppt/slides/slide2.xml",
+            "ppt/slides/slide3.xml",
+        ],
+        true,
+        true,
+        &[],
+    );
+    let mut parts = pptx_shell_parts(true);
+    parts.extend(pptx_notes_master_parts());
+    parts.push(("ppt/presentation.xml".to_owned(), presentation.into_bytes()));
+    parts.push((
+        "ppt/_rels/presentation.xml.rels".to_owned(),
+        presentation_rels.into_bytes(),
+    ));
+    pptx_push_slides(&mut parts, &slides, &pptx_slide_rels_with(false, ""));
+    pptx_package_of(Some(&types), parts)
+}
+
+/// A macro-enabled deck: its presentation and slides carry the macro-enabled content types, and a
+/// `vbaProject.bin` part is declared beside the presentation's relationship to it.
+#[must_use]
+pub fn pptx_macro() -> Vec<u8> {
+    let slides = pptx_titled_slides(&["First slide", "Second slide"]);
+    let presentation = pptx_presentation_of(
+        r#"<p:sldId id="256" r:id="rId3"/><p:sldId id="257" r:id="rId4"/>"#,
+        Some("rId6"),
+        PPTX_SIZES,
+    );
+    // The macros the package holds: the one relationship a macro-enabled deck states past its
+    // slides, under the namespace Microsoft keeps its own relationships in.
+    let presentation_rels = pptx_rels_of(&[
+        ("rId1", "slideMaster", "slideMasters/slideMaster1.xml"),
+        ("rId2", "theme", "theme/theme1.xml"),
+        ("rId6", "notesMaster", "notesMasters/notesMaster1.xml"),
+        ("rId3", "slide", "slides/slide1.xml"),
+        ("rId4", "slide", "slides/slide2.xml"),
+        (
+            "rId7",
+            "http://schemas.microsoft.com/office/2006/relationships/vbaProject",
+            "vbaProject.bin",
+        ),
+    ]);
+    let types = pptx_deck_types(
+        "application/vnd.ms-powerpoint.presentation.macroEnabled.main+xml",
+        "application/vnd.ms-powerpoint.slide.macroEnabled+xml",
+        &["ppt/slides/slide1.xml", "ppt/slides/slide2.xml"],
+        true,
+        true,
+        &[("ppt/vbaProject.bin", "application/vnd.ms-office.vbaProject")],
+    );
+    let mut parts = pptx_shell_parts(true);
+    parts.extend(pptx_notes_master_parts());
+    parts.push(("ppt/presentation.xml".to_owned(), presentation.into_bytes()));
+    parts.push((
+        "ppt/_rels/presentation.xml.rels".to_owned(),
+        presentation_rels.into_bytes(),
+    ));
+    pptx_push_slides(&mut parts, &slides, &pptx_slide_rels_with(false, ""));
+    parts.push((
+        "ppt/vbaProject.bin".to_owned(),
+        b"the project a macro-enabled deck holds".to_vec(),
+    ));
+    pptx_package_of(Some(&types), parts)
+}
+
+/// Two slides and the signature part a signed package carries, which an edit changes the meaning
+/// of without being able to change the signature.
+#[must_use]
+pub fn pptx_signed() -> Vec<u8> {
+    // The first slide's body holds a run that is already bold: a format request that states bold
+    // again writes the bytes the run already has, so a call can succeed without changing the file —
+    // which is what proves the signature note is raised only for a change.
+    let first = PptxSlide::new(pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "First slide"),
+        concat!(
+            r#"<p:sp><p:nvSpPr><p:cNvPr id="3" name="Body"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>"#,
+            r#"<p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:spPr/>"#,
+            r#"<p:txBody><a:bodyPr/><a:lstStyle/>"#,
+            r#"<a:p><a:r><a:rPr lang="en-US" b="1"/><a:t>Alpha</a:t></a:r>"#,
+            r#"<a:r><a:rPr lang="en-US"/><a:t> body</a:t></a:r></a:p>"#,
+            r#"</p:txBody></p:sp>"#,
+        ),
+    )));
+    let second = PptxSlide::new(pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Second slide"),
+        pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Beta body"),
+    )));
+    let slides = [first, second];
+    let signature = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo/></Signature>"#,
+    );
+    pptx_deck(
+        &slides,
+        "",
+        concat!(
+            r#"<Override PartName="/_xmlsignatures/sig1.xml" "#,
+            r#"ContentType="application/vnd.openxmlformats-package.digital-signature-xmlsignature+xml"/>"#,
+        ),
+        &[("_xmlsignatures/sig1.xml", signature.as_bytes())],
+    )
+}
+
+/// Three slides whose first carries a chart, a picture, a comment thread and a diagram — the parts
+/// a slide's deletion leaves behind and a copy shares — and speaker notes.
+#[must_use]
+pub fn pptx_assets() -> Vec<u8> {
+    let first = PptxSlide::new(pptx_slide(&format!(
+        "{}{}{}{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Assets"),
+        pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Alpha body"),
+        pptx_chart_frame("rId3"),
+        pptx_picture(20, "rId4"),
+        pptx_diagram_frame("rId6"),
+    )))
+    .with_rels(format!(
+        "{}{}{}{}",
+        pptx_rel("rId3", "chart", "../charts/chart1.xml"),
+        pptx_rel("rId4", "image", "../media/image1.png"),
+        pptx_rel("rId5", "comments", "../comments/comment1.xml"),
+        pptx_rel("rId6", "diagramData", "../diagrams/data1.xml"),
+    ))
+    .with_notes("First slide notes");
+    let second = PptxSlide::new(pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Second slide"),
+        pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Beta body"),
+    )));
+    let third = PptxSlide::new(pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Third slide"),
+        pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Gamma body"),
+    )));
+    let chart = docx_chart_part();
+    let comments = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<p:cmLst xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">"#,
+        r#"<p:cm authorId="0" idx="1"><p:pos x="1" y="2"/><p:text>Comment on the first slide</p:text></p:cm>"#,
+        r#"</p:cmLst>"#,
+    );
+    let diagram = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<dgm:dataModel xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" "#,
+        r#"xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">"#,
+        r#"<dgm:ptLst><dgm:pt type="node"><dgm:t><a:p><a:r><a:t>Chart flow</a:t></a:r></a:p></dgm:t></dgm:pt>"#,
+        r#"</dgm:ptLst></dgm:dataModel>"#,
+    );
+    let picture = png();
+    let content_extra = format!(
+        concat!(
+            r#"<Override PartName="/ppt/charts/chart1.xml" ContentType="{chart}"/>"#,
+            r#"<Override PartName="/ppt/comments/comment1.xml" ContentType="{comments}"/>"#,
+            r#"<Override PartName="/ppt/diagrams/data1.xml" ContentType="{diagram}"/>"#,
+            r#"<Override PartName="/ppt/media/image1.png" ContentType="image/png"/>"#,
+        ),
+        chart = PPTX_CHART_TYPE,
+        comments = PPTX_LEGACY_COMMENTS_TYPE,
+        diagram = "application/vnd.openxmlformats-officedocument.drawingml.diagramData+xml",
+    );
+    pptx_deck(
+        &[first, second, third],
+        "",
+        &content_extra,
+        &[
+            ("ppt/charts/chart1.xml", &chart),
+            ("ppt/comments/comment1.xml", comments.as_bytes()),
+            ("ppt/diagrams/data1.xml", diagram.as_bytes()),
+            ("ppt/media/image1.png", &picture),
+        ],
+    )
+}
+
+/// Two slides whose first body holds a paragraph of three differently formatted runs beside one
+/// paragraph of a single run.
+#[must_use]
+pub fn pptx_runs() -> Vec<u8> {
+    let first = pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Runs"),
+        concat!(
+            r#"<p:sp><p:nvSpPr><p:cNvPr id="3" name="Body"/>"#,
+            r#"<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>"#,
+            r#"<p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr>"#,
+            r#"<p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>"#,
+            r#"<a:p><a:r><a:rPr b="1"/><a:t>Alpha</a:t></a:r>"#,
+            r#"<a:r><a:rPr i="1"/><a:t>Beta</a:t></a:r>"#,
+            r#"<a:r><a:t>Gamma</a:t></a:r></a:p>"#,
+            r#"<a:p><a:r><a:t>Tail</a:t></a:r></a:p>"#,
+            r#"</p:txBody></p:sp>"#,
+        ),
+    ));
+    let second = pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Second slide"),
+        pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Beta body"),
+    ));
+    pptx_deck(
+        &[PptxSlide::new(first), PptxSlide::new(second)],
+        "",
+        "",
+        &[],
+    )
+}
+
+/// One slide whose body holds a paragraph of a single run beside a paragraph whose run holds
+/// another: a part DrawingML does not produce, and the one a rewrite's second range can start past
+/// what its first left. The outer run's fill is long, so formatting it shortens the part.
+///
+/// No parity case can carry this deck: the reference's own answer has an unclosed `<a:p>`, which no
+/// package model can read. The test that witnesses the operation's bytes instead is
+/// `writing::pptx`'s `a_part_whose_runs_nest_is_formatted_where_the_reference_formats_it`.
+#[must_use]
+pub fn pptx_nested_runs() -> Vec<u8> {
+    let slide = pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Deck"),
+        concat!(
+            r#"<p:sp><p:nvSpPr><p:cNvPr id="3" name="Body"/>"#,
+            r#"<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>"#,
+            r#"<p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr>"#,
+            r#"<p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>"#,
+            r#"<a:p><a:r><a:rPr lang="en-US"/><a:t>Plain</a:t></a:r></a:p>"#,
+            r#"<a:p><a:r><a:r><a:rPr lang="en-US"><a:solidFill>"#,
+            r#"<a:schemeClr val="accent1"><a:lumMod val="75000"/><a:lumOff val="25000"/></a:schemeClr>"#,
+            r#"</a:solidFill></a:rPr><a:t>Nested</a:t></a:r></a:r></a:p>"#,
+            r#"</p:txBody></p:sp>"#,
+        ),
+    ));
+    pptx_deck(&[PptxSlide::new(slide)], "", "", &[])
+}
+
+/// Two slides whose first holds a title, a body of one paragraph and a table whose last cell holds
+/// two paragraphs.
+#[must_use]
+pub fn pptx_table_deck() -> Vec<u8> {
+    let first = pptx_slide(&format!(
+        "{}{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Table slide"),
+        pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Body line"),
+        pptx_table_with_two_paragraphs(),
+    ));
+    let second = pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Second slide"),
+        pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Beta body"),
+    ));
+    pptx_deck(
+        &[PptxSlide::new(first), PptxSlide::new(second)],
+        "",
+        "",
+        &[],
+    )
+}
+
+/// Two slides with a title and a body each, the shape a picture or a table placed past the slide's
+/// edge is added to.
+#[must_use]
+pub fn pptx_boxes() -> Vec<u8> {
+    let slides = ["First slide", "Second slide"].map(|title| {
+        PptxSlide::new(pptx_slide(&format!(
+            "{}{}",
+            pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, title),
+            pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Alpha body"),
+        )))
+    });
+    pptx_deck(&slides, "", "", &[])
+}
+
+/// Three slides: one whose `<p:cSld>` holds no shape tree, one whose shape tree holds only a table,
+/// and one a reading and an edit both read.
+#[must_use]
+pub fn pptx_no_shape_tree() -> Vec<u8> {
+    let bare = format!(
+        "{DECLARATION}<p:sld {PPTX_NAMESPACES}><p:cSld/><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>"
+    );
+    let table_only = format!(
+        "{DECLARATION}<p:sld {PPTX_NAMESPACES}><p:cSld><p:spTree>{PPTX_EMPTY_TREE}{}</p:spTree></p:cSld>\
+         <p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>",
+        pptx_table([["A1", "B1"], ["A2", "B2"]]),
+    );
+    let normal = pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Third slide"),
+        pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Gamma body"),
+    ));
+    pptx_deck(
+        &[
+            PptxSlide::new(bare),
+            PptxSlide::new(table_only),
+            PptxSlide::new(normal),
+        ],
+        "",
+        "",
+        &[],
+    )
+}
+
+/// Two slides whose first declares and holds notes whose only shape is the slide image, so the
+/// notes have no body for a paragraph to go in.
+#[must_use]
+pub fn pptx_notes_no_body() -> Vec<u8> {
+    let first = PptxSlide::new(pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "First slide"),
+        pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Alpha body"),
+    )))
+    .with_rels(pptx_rel(
+        "rId2",
+        "notesSlide",
+        "../notesSlides/notesSlide1.xml",
+    ));
+    let second = PptxSlide::new(pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Second slide"),
+        pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Beta body"),
+    )));
+    let notes = format!(
+        concat!(
+            "{}<p:notes {}><p:cSld><p:spTree>{}",
+            r#"<p:sp><p:nvSpPr><p:cNvPr id="2" name="Slide Image Placeholder 1"/>"#,
+            r#"<p:cNvSpPr><a:spLocks noGrp="1" noRot="1" noChangeAspect="1"/></p:cNvSpPr>"#,
+            r#"<p:nvPr><p:ph type="sldImg"/></p:nvPr></p:nvSpPr><p:spPr/></p:sp>"#,
+            "</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:notes>",
+        ),
+        DECLARATION, PPTX_NAMESPACES, PPTX_EMPTY_TREE,
+    );
+    let notes_rels = pptx_rels_of(&[
+        ("rId1", "slide", "../slides/slide1.xml"),
+        ("rId2", "notesMaster", "../notesMasters/notesMaster1.xml"),
+    ]);
+    let content_extra = format!(
+        r#"<Override PartName="/ppt/notesSlides/notesSlide1.xml" ContentType="{PPTX_NOTES_TYPE}"/>"#
+    );
+    pptx_deck(
+        &[first, second],
+        "",
+        &content_extra,
+        &[
+            ("ppt/notesSlides/notesSlide1.xml", notes.as_bytes()),
+            (
+                "ppt/notesSlides/_rels/notesSlide1.xml.rels",
+                notes_rels.as_bytes(),
+            ),
+        ],
+    )
+}
+
+/// Two slides whose first is stored at `ppt/slides2/slide1.xml`, outside the folder the
+/// presentation's other slides are copied into.
+#[must_use]
+pub fn pptx_slide_outside() -> Vec<u8> {
+    let outside = pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Outside"),
+        pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Alpha body"),
+    ));
+    let inside = pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Second slide"),
+        pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Beta body"),
+    ));
+    let presentation = pptx_presentation_of(
+        r#"<p:sldId id="256" r:id="rId3"/><p:sldId id="257" r:id="rId4"/>"#,
+        Some("rId6"),
+        PPTX_SIZES,
+    );
+    let presentation_rels =
+        pptx_presentation_rels_of(&["slides2/slide1.xml", "slides/slide2.xml"], true);
+    let types = pptx_deck_types(
+        PPTX_PRESENTATION_TYPE,
+        PPTX_SLIDE_TYPE,
+        &["ppt/slides2/slide1.xml", "ppt/slides/slide2.xml"],
+        true,
+        true,
+        &[],
+    );
+    let mut parts = pptx_shell_parts(true);
+    parts.extend(pptx_notes_master_parts());
+    parts.push(("ppt/presentation.xml".to_owned(), presentation.into_bytes()));
+    parts.push((
+        "ppt/_rels/presentation.xml.rels".to_owned(),
+        presentation_rels.into_bytes(),
+    ));
+    parts.extend(pptx_slide_parts(
+        "ppt/slides2/slide1.xml",
+        &outside,
+        &pptx_slide_rels_with(false, ""),
+    ));
+    parts.extend(pptx_slide_parts(
+        "ppt/slides/slide2.xml",
+        &inside,
+        &pptx_slide_rels_with(false, ""),
+    ));
+    pptx_package_of(Some(&types), parts)
+}
+
+/// Three slide entries whose middle one names a part the package does not hold, beside the parts of
+/// the first and third slides.
+#[must_use]
+pub fn pptx_broken_slot() -> Vec<u8> {
+    let first = pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "First slide"),
+        pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Alpha body"),
+    ));
+    let third = pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Third slide"),
+        pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Gamma body"),
+    ));
+    let presentation = pptx_presentation_of(
+        concat!(
+            r#"<p:sldId id="256" r:id="rId3"/><p:sldId id="257" r:id="rId4"/>"#,
+            r#"<p:sldId id="258" r:id="rId5"/>"#,
+        ),
+        Some("rId6"),
+        PPTX_SIZES,
+    );
+    let presentation_rels = pptx_presentation_rels_of(
+        &[
+            "slides/slide1.xml",
+            "slides/slide9.xml",
+            "slides/slide3.xml",
+        ],
+        true,
+    );
+    let types = pptx_deck_types(
+        PPTX_PRESENTATION_TYPE,
+        PPTX_SLIDE_TYPE,
+        &["ppt/slides/slide1.xml", "ppt/slides/slide3.xml"],
+        true,
+        true,
+        &[],
+    );
+    let mut parts = pptx_shell_parts(true);
+    parts.extend(pptx_notes_master_parts());
+    parts.push(("ppt/presentation.xml".to_owned(), presentation.into_bytes()));
+    parts.push((
+        "ppt/_rels/presentation.xml.rels".to_owned(),
+        presentation_rels.into_bytes(),
+    ));
+    parts.extend(pptx_slide_parts(
+        "ppt/slides/slide1.xml",
+        &first,
+        &pptx_slide_rels_with(false, ""),
+    ));
+    parts.extend(pptx_slide_parts(
+        "ppt/slides/slide3.xml",
+        &third,
+        &pptx_slide_rels_with(false, ""),
+    ));
+    pptx_package_of(Some(&types), parts)
+}
+
+/// Two slides a presentation names through its relationships and no slide list at all.
+#[must_use]
+pub fn pptx_no_slide_list() -> Vec<u8> {
+    let slides = pptx_titled_slides(&["First slide", "Second slide"]);
+    let presentation = format!(
+        concat!(
+            "{}<p:presentation {}>",
+            "<p:sldMasterIdLst><p:sldMasterId id=\"2147483648\" r:id=\"rId1\"/></p:sldMasterIdLst>",
+            "<p:notesMasterIdLst><p:notesMasterId r:id=\"rId6\"/></p:notesMasterIdLst>",
+            "{}",
+            "</p:presentation>",
+        ),
+        DECLARATION, PPTX_NAMESPACES, PPTX_SIZES,
+    );
+    let presentation_rels =
+        pptx_presentation_rels_of(&["slides/slide1.xml", "slides/slide2.xml"], true);
+    let types = pptx_deck_types(
+        PPTX_PRESENTATION_TYPE,
+        PPTX_SLIDE_TYPE,
+        &["ppt/slides/slide1.xml", "ppt/slides/slide2.xml"],
+        true,
+        true,
+        &[],
+    );
+    let mut parts = pptx_shell_parts(true);
+    parts.extend(pptx_notes_master_parts());
+    parts.push(("ppt/presentation.xml".to_owned(), presentation.into_bytes()));
+    parts.push((
+        "ppt/_rels/presentation.xml.rels".to_owned(),
+        presentation_rels.into_bytes(),
+    ));
+    pptx_push_slides(&mut parts, &slides, &pptx_slide_rels_with(false, ""));
+    pptx_package_of(Some(&types), parts)
+}
+
+/// Two slides whose first holds speaker notes of two paragraphs, so a fragment copied across the
+/// notes' lines is one the notes really hold.
+#[must_use]
+pub fn pptx_notes_two() -> Vec<u8> {
+    let first = PptxSlide::new(pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "First slide"),
+        pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Alpha body"),
+    )))
+    .with_rels(pptx_rel(
+        "rId2",
+        "notesSlide",
+        "../notesSlides/notesSlide1.xml",
+    ));
+    let second = PptxSlide::new(pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Second slide"),
+        pptx_text_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, "Beta body"),
+    )));
+    let notes = pptx_notes_slide_of(&["Note", "one"]);
+    let notes_rels = pptx_rels_of(&[
+        ("rId1", "slide", "../slides/slide1.xml"),
+        ("rId2", "notesMaster", "../notesMasters/notesMaster1.xml"),
+    ]);
+    let content_extra = format!(
+        r#"<Override PartName="/ppt/notesSlides/notesSlide1.xml" ContentType="{PPTX_NOTES_TYPE}"/>"#
+    );
+    pptx_deck(
+        &[first, second],
+        "",
+        &content_extra,
+        &[
+            ("ppt/notesSlides/notesSlide1.xml", notes.as_bytes()),
+            (
+                "ppt/notesSlides/_rels/notesSlide1.xml.rels",
+                notes_rels.as_bytes(),
+            ),
+        ],
+    )
 }
 
 // ── pdf ─────────────────────────────────────────────────────────────────────────────────────

@@ -13,46 +13,11 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use super::super::Editor;
-use super::super::code_units;
-use super::super::quoted;
-use super::super::xml;
+use super::super::text::{Markup, break_reason, without_indent};
+use super::super::{Editor, code_units, quoted, xml};
 use super::text;
 use crate::operation::Failure;
-use crate::vocabulary::docx_marks;
-use crate::vocabulary::docx_peripheral_parts;
-use crate::vocabulary::vocabulary;
-
-/// A `find` copied out of a reading carries the reader's indentation, so a find is compared with it
-/// trimmed away by the refusal.
-pub(super) fn without_indent(text: &str) -> String {
-    text.split('\n')
-        .map(js_trim_start)
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// `text` without its leading whitespace, as ECMAScript's `trimStart` strips it: its WhiteSpace
-/// and LineTerminator sets differ from Rust's `char::is_whitespace` at U+0085 (Rust strips it,
-/// JavaScript does not) and U+FEFF (JavaScript strips it, Rust does not).
-fn js_trim_start(text: &str) -> &str {
-    text.trim_start_matches(|character: char| {
-        matches!(
-            character,
-            '\u{9}'..='\u{d}'
-                | '\u{20}'
-                | '\u{a0}'
-                | '\u{1680}'
-                | '\u{2000}'..='\u{200a}'
-                | '\u{2028}'
-                | '\u{2029}'
-                | '\u{202f}'
-                | '\u{205f}'
-                | '\u{3000}'
-                | '\u{feff}'
-        )
-    })
-}
+use crate::vocabulary::{docx_marks, docx_peripheral_parts, vocabulary};
 
 /// The longest mark `text` carries — the reader's label a miss names, or `None` when it names none.
 pub(super) fn named_docx_mark(text: &str) -> Option<String> {
@@ -230,22 +195,13 @@ pub(super) fn docx_find_refusal(
     {
         return Ok(marks.format(
             "edit_docx_find_break",
-            &[("find", &found), ("reason", &break_reason())],
+            &[("find", &found), ("reason", &break_reason(Markup::Word))],
         ));
     }
     Ok(marks.format(
         "edit_docx_find_absent",
         &[("find", &found), ("addressed", addressed)],
     ))
-}
-
-/// The sentence a miss states for a fragment holding a tab or a line break the reading shows.
-pub(super) fn break_reason() -> String {
-    let markup = ["<w:tab/>", "<w:br/>", "<w:cr/>"].join(", ");
-    vocabulary().marks.format(
-        "edit_break_reason",
-        &[("markup", &markup), ("paragraph", "<w:p>")],
-    )
 }
 
 /// The parts a document's own relationships name for the relationship type whose tail is `suffix`,
@@ -296,15 +252,6 @@ pub(super) fn document_part(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_find_is_trimmed_the_way_javascript_trims_it() {
-        // U+FEFF is ECMAScript whitespace and U+0085 is not, where Rust's own `trim_start`
-        // disagrees on both.
-        assert_eq!(js_trim_start("\u{feff} text"), "text");
-        assert_eq!(js_trim_start("\u{85}text"), "\u{85}text");
-        assert_eq!(without_indent("  first\n\t second"), "first\nsecond");
-    }
 
     #[test]
     fn the_longest_label_a_text_carries_is_the_one_named() {

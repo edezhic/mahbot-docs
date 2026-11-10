@@ -253,10 +253,6 @@ pub(crate) fn convert_pptx(bytes: &[u8], out_dir: &Path) -> DocOutcome {
 /// read as lost, one whose diagrams show no text, and one whose part cannot be read are
 /// absent from the map. Best effort: a package that is not a presentation, or whose
 /// bytes do not open, yields an empty map.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the producing half reads a deck's diagram text")
-)]
 pub(crate) fn pptx_diagram_text(bytes: &[u8]) -> HashMap<String, Vec<String>> {
     let Ok(mut archive) = ZipArchive::new(Cursor::new(bytes)) else {
         return HashMap::new();

@@ -2006,6 +2006,215 @@ pub const WRITING_WITNESSES: &[WritingWitness] = &[
         case: "pdf/pdf_form_fill/structure@refused_structure",
         witness: "the value for \"name\" must be text, a number or a boolean, not a structure",
     },
+    // ── the presentation edit ──────────────────────────────────────────────────────────────────
+    // The sentences a miss is composed from (`edit_pptx_miss_*`) are witnessed by the sentence that
+    // carries them; a mark that names the same sentence the Word family prints keeps that family's
+    // witness rather than gaining a second one.
+    WritingWitness {
+        mark: "edit_pptx_add_after_unlisted",
+        case: "pptx/pptx_edit/add_slide@list_disagrees_after",
+        witness: "a slide cannot be placed after slide 1: the presentation's slide list does not number its slides the way the reader shows them",
+    },
+    WritingWitness {
+        mark: "edit_pptx_after_table",
+        case: "pptx/pptx_edit/add_paragraph@in_table",
+        witness: "the text \"Cell A\" is inside a table on slide 1: add_paragraph writes into the slide's own text, not into a table",
+    },
+    WritingWitness {
+        mark: "edit_pptx_already_there",
+        case: "pptx/pptx_edit/move_slide@already_there",
+        witness: "slide 2 is already at position 2 — moving it there would change nothing",
+    },
+    WritingWitness {
+        mark: "edit_pptx_bullets_many",
+        case: "pptx/pptx_edit/add_slide@bullets_many",
+        witness: "a slide may hold at most 100 bullets, got: 101",
+    },
+    WritingWitness {
+        mark: "edit_pptx_bullets_not_list",
+        case: "pptx/pptx_edit/add_slide@bullets_not_list",
+        witness: "bullets must be a list",
+    },
+    WritingWitness {
+        mark: "edit_pptx_copy_outside",
+        case: "pptx/pptx_edit/duplicate_slide@outside",
+        witness: "slide 1 is stored outside ppt/slides/, so a copy of it cannot be placed among the presentation's other slides",
+    },
+    WritingWitness {
+        mark: "edit_pptx_delete_unlisted",
+        case: "pptx/pptx_edit/delete_slide@list_disagrees_unnamed",
+        witness: "slide 4 cannot be deleted: the presentation's slide list does not name it",
+    },
+    WritingWitness {
+        mark: "edit_pptx_duplicate_unlisted",
+        case: "pptx/pptx_edit/duplicate_slide@list_disagrees",
+        witness: "the presentation's slide list does not number its slides the way the reader shows them, so a slide cannot be duplicated",
+    },
+    WritingWitness {
+        mark: "edit_pptx_find_absent",
+        case: "pptx/pptx_edit/replace_text@comment",
+        witness: "the text \"needs a citation\" is not on slide 2",
+    },
+    WritingWitness {
+        mark: "edit_pptx_find_across",
+        case: "pptx/pptx_edit/replace_text@across_paragraphs",
+        witness: "the text \"First slide\\nAlpha body\" is not on slide 1: the fragment reaches across a paragraph boundary, and a slide text op addresses one paragraph at a time",
+    },
+    WritingWitness {
+        mark: "edit_pptx_find_break",
+        case: "pptx/pptx_edit/replace_text@break",
+        witness: "the text \"Alpha\\tbody\" is not on slide 1: the fragment holds a tab or a line break, and the file keeps it as markup of its own (<a:tab/>, <a:br/>) or as a paragraph of its own (<a:p>), not as text — name a fragment on one side of it",
+    },
+    WritingWitness {
+        mark: "edit_pptx_find_diagram",
+        case: "pptx/pptx_edit/replace_text@diagram",
+        witness: "the text \"North\" is inside a diagram on slide 1, whose text a presentation edit does not change",
+    },
+    WritingWitness {
+        mark: "edit_pptx_find_indent",
+        case: "pptx/pptx_edit/replace_text@indent",
+        witness: "the text \" Alpha body\" is not on slide 1: the fragment's leading whitespace is either the indentation the reader prints under a block or whitespace the file's text does not hold — search for \"Alpha body\"",
+    },
+    WritingWitness {
+        mark: "edit_pptx_find_label",
+        case: "pptx/pptx_edit/replace_text@label",
+        witness: "the text \"Slide 1:\" is not on slide 1: \"Slide 1:\" is a label the reader prints, not text on the slide",
+    },
+    WritingWitness {
+        mark: "edit_pptx_find_notes",
+        case: "pptx/pptx_edit/replace_text@notes_text",
+        witness: "the text \"Note one\" is in the speaker notes of slide 1, which a slide text op does not edit (replace_notes and remove_notes do)",
+    },
+    WritingWitness {
+        mark: "edit_pptx_format_no_property",
+        case: "pptx/pptx_edit/format_text@no_property",
+        witness: "format_text needs at least one of bold, italic, underline, strike, size, color or align",
+    },
+    WritingWitness {
+        mark: "edit_pptx_fraction",
+        case: "pptx/pptx_edit/add_image@fraction",
+        witness: "x_fraction must be between 0 and 1, got: 2",
+    },
+    WritingWitness {
+        mark: "edit_pptx_miss_not_text_notes",
+        case: "pptx/pptx_edit/replace_notes@label",
+        witness: "\"Slide 1 notes:\" is a label the reader prints, not text in the notes",
+    },
+    WritingWitness {
+        mark: "edit_pptx_miss_not_text_slide",
+        case: "pptx/pptx_edit/replace_text@label",
+        witness: "\"Slide 1:\" is a label the reader prints, not text on the slide",
+    },
+    WritingWitness {
+        mark: "edit_pptx_miss_what_notes",
+        case: "pptx/pptx_edit/replace_notes@across",
+        witness: "a notes edit addresses one paragraph at a time",
+    },
+    WritingWitness {
+        mark: "edit_pptx_miss_what_slide",
+        case: "pptx/pptx_edit/replace_text@across_paragraphs",
+        witness: "a slide text op addresses one paragraph at a time",
+    },
+    WritingWitness {
+        mark: "edit_pptx_miss_where_notes",
+        case: "pptx/pptx_edit/replace_notes@across",
+        witness: "is not in the speaker notes of slide 1",
+    },
+    WritingWitness {
+        mark: "edit_pptx_miss_where_slide",
+        case: "pptx/pptx_edit/replace_text@across_paragraphs",
+        witness: "is not on slide 1",
+    },
+    WritingWitness {
+        mark: "edit_pptx_move_unlisted",
+        case: "pptx/pptx_edit/move_slide@list_disagrees",
+        witness: "the presentation's slide list does not number its slides the way the reader shows them, so a slide cannot be moved",
+    },
+    WritingWitness {
+        mark: "edit_pptx_no_layout",
+        case: "pptx/pptx_edit/add_slide@no_layout",
+        witness: "the presentation has no slide layout to build a new slide on",
+    },
+    WritingWitness {
+        mark: "edit_pptx_no_notes",
+        case: "pptx/pptx_edit/replace_notes@no_notes",
+        witness: "slide 2 has no speaker notes to replace text in",
+    },
+    WritingWitness {
+        mark: "edit_pptx_no_notes_master",
+        case: "pptx/pptx_edit/add_notes@no_notes_master",
+        witness: "the presentation has no notes master, so a notes slide cannot be created for it",
+    },
+    WritingWitness {
+        mark: "edit_pptx_no_position",
+        case: "pptx/pptx_edit/move_slide@no_position",
+        witness: "no position 99: this presentation has 3 slide(s)",
+    },
+    WritingWitness {
+        mark: "edit_pptx_no_shape_tree_image",
+        case: "pptx/pptx_edit/add_image@no_shape_tree",
+        witness: "the slide has no shape tree to place an image in",
+    },
+    WritingWitness {
+        mark: "edit_pptx_no_shape_tree_table",
+        case: "pptx/pptx_edit/add_table@no_shape_tree",
+        witness: "the slide has no shape tree to place a table in",
+    },
+    WritingWitness {
+        mark: "edit_pptx_no_slide",
+        case: "pptx/pptx_edit/replace_text@no_slide",
+        witness: "no slide 99: this presentation has 3 slide(s)",
+    },
+    WritingWitness {
+        mark: "edit_pptx_no_slide_list",
+        case: "pptx/pptx_edit/add_slide@no_slide_list",
+        witness: "the presentation has no slide list to add a slide to",
+    },
+    WritingWitness {
+        mark: "edit_pptx_no_text_body",
+        case: "pptx/pptx_edit/add_paragraph@no_text_body",
+        witness: "the slide has no text body to add a paragraph to",
+    },
+    WritingWitness {
+        mark: "edit_pptx_notes_missing",
+        case: "pptx/pptx_edit/duplicate_slide@missing_notes",
+        witness: "slide 1 declares speaker notes (ppt/notesSlides/notesSlide1.xml) the presentation does not hold, so a copy of it cannot have notes of its own",
+    },
+    WritingWitness {
+        mark: "edit_pptx_notes_no_body",
+        case: "pptx/pptx_edit/add_notes@no_body",
+        witness: "the notes of slide 1 have no body to add a paragraph to",
+    },
+    WritingWitness {
+        mark: "edit_pptx_only_slide",
+        case: "pptx/pptx_edit/delete_slide@only_slide",
+        witness: "the presentation's only slide cannot be deleted",
+    },
+    WritingWitness {
+        mark: "edit_pptx_remove_last",
+        case: "pptx/pptx_edit/remove_paragraph@shape_last",
+        witness: "removing \"Body line\" would leave the shape's text body with no paragraph — a text body must keep one",
+    },
+    WritingWitness {
+        mark: "edit_pptx_rows_not_arrays",
+        case: "pptx/pptx_edit/add_table@rows_not_arrays",
+        witness: "a table's rows must be arrays of cells",
+    },
+    WritingWitness {
+        mark: "edit_pptx_table_empty",
+        case: "pptx/pptx_edit/add_table@empty",
+        witness: "the table states no rows and no headers — hint: give it at least one row or one header",
+    },
+    WritingWitness {
+        mark: "note_pptx_paragraph_align",
+        case: "pptx/pptx_edit/format_text@partial_run",
+        witness: "[a paragraph's alignment is the whole paragraph's, so the text beside the named fragment was aligned too]",
+    },
+    WritingWitness {
+        mark: "note_pptx_partial_run",
+        case: "pptx/pptx_edit/format_text@partial_run",
+        witness: "[the named text is part of a longer run, so the formatting also applied to the rest of that run]",
+    },
 ];
 
 pub const WRITING_UNREACHED: &[Unreached] = &[
@@ -2019,7 +2228,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
     },
     Unreached {
         reason: "the reference prints it for an edit sub-operation it does not know, and the crate's request surface refuses that name before dispatch, so a case carrying one would rest on that surface divergence rather than on the writer",
-        marks: &["edit_docx_unknown"],
+        marks: &["edit_docx_unknown", "edit_pptx_unknown"],
     },
     Unreached {
         reason: "the reference has no nesting bound and never refuses on this ground: the cap that stops a deeply nested part is the crate's own (`engine.paragraph_nesting_max`), with no counterpart in the reference",
@@ -2283,7 +2492,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         marks: &["surface_merge_bytes_too_many"],
     },
     Unreached {
-        reason: "printed only for the six operations the writing half does not carry out; the recorded reference carries every one of them out, so no recorded answer prints it",
+        reason: "printed only for the two operations the writing half does not carry out, create and fill_template; the recorded reference carries every one of them out, so no recorded answer prints it",
         marks: &["reason_not_carried_out"],
     },
 ];

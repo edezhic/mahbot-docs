@@ -1773,6 +1773,7 @@ mod tests {
     use std::path::Path;
 
     use crate::operation::{Destination, Outcome, Request, execute};
+    use crate::testing::scratch;
     use serde_json::json;
 
     /// A value as a request carries it.
@@ -1786,7 +1787,7 @@ mod tests {
         book: Vec<u8>,
         edits: impl FnOnce(&Path) -> Value,
     ) -> (Outcome, tempfile::TempDir) {
-        let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let directory = scratch();
         let input = directory.path().join("book.xlsx");
         std::fs::write(&input, book).expect("a workbook");
         let outcome = execute(&Request {
@@ -1826,15 +1827,9 @@ mod tests {
         bytes
     }
 
-    /// One part of the package a call produced.
+    /// One part of the workbook a call produced.
     fn part(directory: &tempfile::TempDir, name: &str) -> String {
-        let bytes = std::fs::read(directory.path().join("edited.xlsx")).expect("the output");
-        let parts = crate::writing::package::read_package(&bytes).expect("a package");
-        let (_, content) = parts
-            .into_iter()
-            .find(|(part, _)| part == name)
-            .unwrap_or_else(|| panic!("the package holds {name}"));
-        String::from_utf8_lossy(&content).into_owned()
+        crate::testing::part(&directory.path().join("edited.xlsx"), name)
     }
 
     /// The reason a call failed.
@@ -2246,7 +2241,7 @@ mod tests {
         let types = part(&directory, "[Content_Types].xml");
         assert!(!types.contains("sheet2.xml"), "{types}");
         let bytes = std::fs::read(directory.path().join("edited.xlsx")).expect("the output");
-        let parts = crate::writing::package::read_package(&bytes).expect("a package");
+        let parts = crate::writing::read_package(&bytes).expect("a package");
         assert!(
             !parts
                 .iter()
@@ -2257,9 +2252,8 @@ mod tests {
 
     #[test]
     fn the_workbooks_only_sheet_is_never_removed() {
-        let parts =
-            crate::writing::package::read_package(&crate::test_support::build::xlsx_basic())
-                .expect("a workbook");
+        let parts = crate::writing::read_package(&crate::test_support::build::xlsx_basic())
+            .expect("a workbook");
         let trimmed: Vec<(String, Vec<u8>)> = parts
             .into_iter()
             .filter(|(part, _)| part != "xl/worksheets/sheet2.xml")
@@ -2353,7 +2347,7 @@ mod tests {
         assert_eq!(address_label("A1"), "the cell A1");
         assert_eq!(address_label("#7"), "the row 7");
 
-        let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let directory = scratch();
         let path = directory.path().join("book.xlsx");
         std::fs::write(&path, crate::test_support::build::xlsx_basic()).expect("a workbook");
         let mut editor = Editor::open(&path, crate::vocabulary::Family::Xlsx).expect("a workbook");

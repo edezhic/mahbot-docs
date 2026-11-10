@@ -14,9 +14,9 @@
 //!   content it had, so a chart, a comment, a macro or a media file the caller never mentioned
 //!   survives. A PDF page action builds a document out of the pages a merge or a split names, changes
 //!   the box or the turn of the pages it names, or draws text, a picture or a filled form into them,
-//!   and keeps everything else the file holds. The Word and workbook edits, the five PDF page actions
-//!   and the three PDF drawing actions are the operations the writing half carries out; `create`,
-//!   `fill_template` and `pptx_edit` answer with the vocabulary's `reason_not_carried_out` until
+//!   and keeps everything else the file holds. The Word, workbook and presentation edits, the five
+//!   PDF page actions and the three PDF drawing actions are the operations the writing half carries
+//!   out; `create` and `fill_template` answer with the vocabulary's `reason_not_carried_out` until
 //!   their port lands.
 //! - [`vocabulary`]: every reading bound the engine enforces, every mark it prints, who enforces
 //!   and who prints each one, the enumerations it shares between reading and producing, and the
@@ -59,6 +59,10 @@ pub mod reading;
 mod support;
 pub mod vocabulary;
 mod writing;
+
+/// The scaffolding the crate's own tests share.
+#[cfg(test)]
+mod testing;
 
 /// The generated corpus documents, shared by the crate's tests and the parity harness.
 #[cfg(any(test, feature = "test-support"))]

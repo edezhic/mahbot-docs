@@ -169,6 +169,74 @@ pub(super) fn rels_writable(rels: Option<&str>) -> bool {
     rels.is_some_and(|rels| RELATIONSHIPS_CLOSE.is_match(rels))
 }
 
+/// The relationship id of an element that refers to a part (`r:id="rId1"`): the prefixed `id`,
+/// never the element's own unprefixed one, the way the reader's own scan picks it out.
+#[must_use]
+pub(super) fn relationship_id(tag: &str) -> Option<&str> {
+    static REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"\b[A-Za-z0-9_]+:id="([^"]*)""#)
+            .expect("a relationship reference must be a pattern")
+    });
+    REFERENCE
+        .captures(tag)
+        .and_then(|captures| captures.get(1))
+        .map(|found| found.as_str())
+}
+
+/// The name of the numerically first `<base>N.xml` part a package holds, or `None` when it holds
+/// none. A package that numbers with a leading zero (`slideLayout01.xml`) holds no
+/// `slideLayout1.xml`, so the name answered is the one the package really has.
+#[must_use]
+pub(super) fn first_part_name(names: &[String], base: &str) -> Option<String> {
+    numbered_parts(names, base)
+        .into_iter()
+        .min_by_key(|(number, name)| (*number, name.clone()))
+        .map(|(_, name)| name)
+}
+
+/// `rels` with the `Target` of every relationship whose type `matches` replaced by `target`; every
+/// other relationship keeps its own bytes. A match compares the LAST segment of a type, because a
+/// strict package spells the same relationship under another namespace.
+#[must_use]
+pub(super) fn with_relationship_target(
+    rels: &str,
+    matches: &dyn Fn(&str) -> bool,
+    target: &str,
+) -> String {
+    let mut out = String::with_capacity(rels.len());
+    let mut cursor = 0usize;
+    for found in RELATIONSHIP_ELEMENT.find_iter(rels) {
+        out.push_str(&rels[cursor..found.start()]);
+        let element = found.as_str();
+        let rel_type = xml::attribute_value(element, "Type").unwrap_or_default();
+        if matches(rel_type) {
+            out.push_str(&replace_attribute(element, "Target", target));
+        } else {
+            out.push_str(element);
+        }
+        cursor = found.end();
+    }
+    out.push_str(&rels[cursor..]);
+    out
+}
+
+/// `element` with the FIRST `name="…"` attribute replaced by `name="value"`, or `element` unchanged
+/// when it states none. The kit's own `replace` rule, kept verbatim: an ASCII word boundary wherever
+/// the attribute starts — with no space before it, and past a `>` in the element's own text — one
+/// occurrence, and the character before it left alone. `xml::set_xml_attribute` is the writer for a
+/// tag this engine states, not a transliteration of that rule.
+fn replace_attribute(element: &str, name: &str, value: &str) -> String {
+    let pattern = xml::pattern(format!(r#"(?-u:\b){}="[^"]*""#, regex::escape(name)));
+    let Some(found) = pattern.find(element) else {
+        return element.to_string();
+    };
+    format!(
+        "{}{name}=\"{value}\"{}",
+        &element[..found.start()],
+        &element[found.end()..]
+    )
+}
+
 /// Add a relationship of `rel_type` to `part`'s own relationships, naming the package path
 /// `target`, and answer with the fresh id it took. The relationship part is created when the
 /// package has none.
@@ -390,4 +458,42 @@ pub(super) fn image_type(path: &Path) -> Result<(&'static str, &'static str), Fa
         "webp" => ("webp", "image/webp"),
         _ => ("jpg", "image/jpeg"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_relationship_target_is_replaced_the_way_the_kit_replaces_it() {
+        // The first occurrence only, and the character before it kept as it was written.
+        assert_eq!(
+            replace_attribute(
+                "<Relationship Id=\"rId1\" Target=\"a.xml\" Target=\"b.xml\"/>",
+                "Target",
+                "c.xml"
+            ),
+            "<Relationship Id=\"rId1\" Target=\"c.xml\" Target=\"b.xml\"/>"
+        );
+        // A non-ASCII word character is not a word character to the kit's ASCII boundary, and the
+        // name needs no whitespace before it.
+        assert_eq!(
+            replace_attribute("<Relationship éTarget=\"a.xml\"/>", "Target", "c.xml"),
+            "<Relationship éTarget=\"c.xml\"/>"
+        );
+        assert_eq!(
+            replace_attribute("<Relationship\tTarget=\"a.xml\"/>", "Target", "c.xml"),
+            "<Relationship\tTarget=\"c.xml\"/>"
+        );
+        // A target holding a `>` is still the attribute the rule replaces.
+        assert_eq!(
+            replace_attribute("<Relationship Target=\"a>b.xml\"/>", "Target", "c.xml"),
+            "<Relationship Target=\"c.xml\"/>"
+        );
+        // An element stating none is left alone rather than given one.
+        assert_eq!(
+            replace_attribute("<Relationship Id=\"rId1\"/>", "Target", "c.xml"),
+            "<Relationship Id=\"rId1\"/>"
+        );
+    }
 }

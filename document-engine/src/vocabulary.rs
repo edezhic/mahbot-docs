@@ -571,6 +571,14 @@ pub struct PptSlideLabels {
     pub comments: String,
 }
 
+/// A deck's own size in EMU, as `rules.pptx_default_size` and `rules.pptx_sizes` state it.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SlideSize {
+    pub width_emu: u64,
+    pub height_emu: u64,
+}
+
 /// The word a form list prints for each field kind.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -703,6 +711,46 @@ rule_view!(
     Vec<String>,
     "scalar_kinds",
     "The JSON kinds a form or template value may be."
+);
+
+// The presentation edit's rules: the bounds, lists and geometry `writing/pptx` reads a request and
+// a deck against. The geometry is the reference's own, so a slide this engine adds is placed by the
+// same inches a created deck lays its content out in.
+rule_view!(
+    pub(crate) pptx_default_size,
+    SlideSize,
+    "pptx_default_size",
+    "The size a created deck gets when the request names none, which every self-placed measurement is drawn on."
+);
+rule_view!(
+    pub(crate) slide_alignments,
+    Vec<[String; 2]>,
+    "slide_alignments",
+    "The words a slide text's alignment may name, and the `algn` value each writes."
+);
+rule_view!(
+    pub(crate) slide_text_size_points,
+    Span,
+    "slide_text_size_points",
+    "The sizes a slide text's formatting may state."
+);
+rule_view!(
+    pub(crate) slide_position_fraction,
+    Span,
+    "slide_position_fraction",
+    "The fractions of a slide a placed shape's position may name."
+);
+rule_view!(
+    pub(crate) slide_size_fraction,
+    Span,
+    "slide_size_fraction",
+    "The fractions of a slide a placed shape's size may name."
+);
+rule_view!(
+    pub(crate) bullets_max,
+    u64,
+    "bullets_max",
+    "The most bullets a slide this engine adds may hold."
 );
 
 // The workbook edits' rules: the bounds and lists `writing/xlsx` validates a request against.

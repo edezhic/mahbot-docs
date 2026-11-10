@@ -715,21 +715,10 @@ mod tests {
     use crate::operation::{Destination, Failure, Outcome, Request, execute};
     use crate::reading::{Reading, read};
     use crate::test_support::build;
+    use crate::testing::{fixture, scratch};
     use crate::vocabulary::{self, vocabulary};
 
     // ── the harness ────────────────────────────────────────────────────────────────────────────────
-
-    /// A temporary directory for one test.
-    fn scratch() -> tempfile::TempDir {
-        tempfile::TempDir::new().expect("a temporary directory")
-    }
-
-    /// `bytes` written into `directory` under `name`, answering its path.
-    fn fixture(directory: &Path, name: &str, bytes: Vec<u8>) -> PathBuf {
-        let path = directory.join(name);
-        std::fs::write(&path, bytes).expect("a fixture");
-        path
-    }
 
     /// Carry out `operation` with `values`, writing into `directory` as `base`.
     #[expect(

@@ -26,7 +26,7 @@ crate the harness depends on. `cargo test -p document-engine` runs the crate's o
 its vocabulary restatement scan) without the harness.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 327 cases and 91 readings — takes about a minute; the whole
+managed runtime. A full pass — 405 cases and 91 readings — takes about a minute; the whole
 test suite, which runs the corpus twice for its determinism check, takes a couple of minutes.
 
 `parity --engine noop` runs the same corpus against the do-nothing engine. That engine exists only
@@ -58,7 +58,7 @@ shown as `SKIP`, not failed, and a run that judged no case at all is not a pass.
 | `tests/engine_contract.rs` | The engine crate's contract, proved from here: its vocabulary is the reference's data, its result shapes carry every recorded field, its closed operation set holds every corpus operation and edit, the reference copies are byte-for-byte the product's, and the host's media tables are the product's own. |
 | `tests/coverage.rs` | The corpus's depth: every reading mark is witnessed by a recorded reading or recorded as unproducible with its reason, every mark only the writing half prints is witnessed by a recorded case's answer or recorded unreached with its reason, neither ledger's "not produced" side names a mark a recorded answer really prints, every per-family failure verdict is witnessed, and every corpus document is in the baseline. |
 | `tests/teeth.rs` | The comparison has teeth: a reading or a produced case altered in any single compared field — a picture dropped, a note or a loss reworded, an output renamed, a produced file's content changed, a status flipped — fails it, and so does a detection answer changed for one input. |
-| `baseline/baseline.json` | The recorded reference (about 6.9 MB of canonical documents). |
+| `baseline/baseline.json` | The recorded reference (about 8.8 MB of canonical documents). |
 | `src/bin/parity.rs`, `src/bin/record-baseline.rs` | The gate and the deliberate recorder. |
 
 The reader sources are **copies** under `src/reference_sources/`, byte for byte those of
@@ -247,6 +247,34 @@ builders have one home in `document_engine::test_support`, which the crate's own
   table at the column bound; one whose text sits beside a page break and beside a text box that
   ends a section; one whose own markup is broken where a call writes (a paragraph's properties, a
   run's and the numbering part's root each opened and never closed); and one with no body at all;
+- the presentation edit in depth, since it is another action the crate's writer carries out: one
+  case per sub-operation against a plain deck, and a case with its own identifier for each
+  behaviour the action promises — a deck stating no slide size, read at the four-by-three default
+  a reading uses rather than the size a created deck gets, and the title frame and table column
+  placed by that geometry; a deck with no slide layout, one with no notes master, one whose slide
+  declares a notes part the package does not hold, and one with no `[Content_Types].xml`, whose
+  refusal comes before the edit-count bound; a slide list that does not number the slides the
+  reader shows, where a move, a copy and a placement after a slide are refused while an append and
+  a deletion resolved by relationship target are carried out; a list ordered differently from the
+  file names and still accepted; a section list and custom shows carried through untouched; a
+  macro-enabled deck whose copy keeps its extension and whose new slide states the plain slide
+  content type; a signed deck, whose note is raised for a call that changed the file and not for
+  one that wrote the bytes a run already had; a deck holding a chart, a picture, a comment and a
+  diagram, so a deletion leaves those parts behind and a copy shares them while gaining its own
+  notes part; a paragraph of differently formatted runs and the replacement loss it raises; the
+  partial-run and whole-paragraph notes a formatting request raises; table cells addressed by the
+  text ops and refused to `add_paragraph`; the last-paragraph refusal of a shape's body and of a
+  table cell's; a picture and a table placed past the slide's edge; slides with no shape tree and
+  no text body; a notes part with no body; a slide stored outside `ppt/slides/`; a slide slot the
+  package cannot resolve; and the find refusals — a fragment across a paragraph boundary, the
+  reader's indentation, its label, a tab, a diagram's text and a comment's text. Its inputs are
+  generated for the purpose: one deck per promise (no size, no layout, no notes master, a missing
+  notes part, no content types, a list that disagrees and one reordered, sections and custom shows,
+  a macro project, a signature part, the chart-picture-comment-diagram deck, a body of mixed runs,
+  a table whose cell holds two paragraphs, decks with no shape tree or no text body, a notes part
+  with no body, a slide outside the slides folder and a slot that resolves to nothing), and the
+  diagram-bearing deck the reading corpus already holds, whose diagram text a case supplies to the
+  reference so its refusal names the diagram while the crate derives the same text itself;
 - the eight PDF actions, with form filling over every field kind a form can hold and flattening
   both on and off;
 - the five PDF page actions in depth, since they are the actions the crate's writer carries out

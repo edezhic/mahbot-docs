@@ -2,13 +2,12 @@
 //! the PDF page actions, which share this module's write path and value rendering but work through
 //! their own object model rather than a package.
 //!
-//! The engine writes files; the caller owns the tool interface. A caller hands in one
-//! [`Request`](crate::operation::Request) with the operation's values and a
-//! [`Destination`](crate::operation::Destination), and receives an
-//! [`Outcome`](crate::operation::Outcome) naming the files the engine wrote. The model-facing
-//! description, the argument schema, the answer rendered around a result and the reserving of
-//! unique output names are the caller's; the engine's own refusals, notes and losses are the
-//! engine's, and every one of them is read from the vocabulary.
+//! The engine writes files; the caller owns the tool interface. A caller hands in one [`Request`]
+//! with the operation's values and a [`Destination`](crate::operation::Destination), and receives
+//! an [`Outcome`] naming the files the engine wrote. The model-facing description, the argument
+//! schema, the answer rendered around a result and the reserving of unique output names are the
+//! caller's; the engine's own refusals, notes and losses are the engine's, and every one of them is
+//! read from the vocabulary.
 //!
 //! An edit changes a package part by part instead of rewriting it through a writer library: every
 //! part an edit does not name is carried into the output with the exact content it had, which keeps
@@ -26,6 +25,7 @@
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde_json::Value;
 
@@ -37,8 +37,14 @@ mod image;
 mod opc;
 mod package;
 pub(crate) mod pdf;
+mod pptx;
+mod text;
 mod xlsx;
 mod xml;
+
+/// The package reader, for the test scaffolding that reads a produced part the way the engine does.
+#[cfg(test)]
+pub(crate) use package::read_package;
 
 // ── values as the kit renders them ────────────────────────────────────────────────────────────
 
@@ -130,6 +136,36 @@ pub(super) fn js_number(value: f64) -> String {
     }
 }
 
+/// `text` without the whitespace ECMAScript's `trim` strips from both ends.
+pub(super) fn js_trim(text: &str) -> &str {
+    text.trim_matches(is_js_whitespace)
+}
+
+/// `text` without its leading whitespace, as ECMAScript's `trimStart` strips it.
+pub(super) fn js_trim_start(text: &str) -> &str {
+    text.trim_start_matches(is_js_whitespace)
+}
+
+/// Whether a character is one ECMAScript's `trim` strips. Its WhiteSpace and LineTerminator sets
+/// differ from Rust's `char::is_whitespace` at U+0085 (Rust strips it, JavaScript does not) and
+/// U+FEFF (JavaScript strips it, Rust does not).
+fn is_js_whitespace(character: char) -> bool {
+    matches!(
+        character,
+        '\u{9}'..='\u{d}'
+            | '\u{20}'
+            | '\u{a0}'
+            | '\u{1680}'
+            | '\u{2000}'..='\u{200a}'
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{202f}'
+            | '\u{205f}'
+            | '\u{3000}'
+            | '\u{feff}'
+    )
+}
+
 /// Whether `value` is a finite number inside `span`, a bound a family's rule states.
 #[must_use]
 pub(super) fn in_span(value: f64, span: &Span) -> bool {
@@ -185,6 +221,25 @@ pub(super) fn edit_text(value: Option<&Value>, what: &str) -> Result<String, Fai
         )));
     }
     Ok(text.to_string())
+}
+
+/// One value an edit names, as the kit's `String()` renders it: text as it stands, a number as its
+/// own spelling, a boolean as `true`/`false`. A structure has no such rendering, so it is refused.
+///
+/// # Errors
+///
+/// The value is not text, a number or a boolean.
+pub(super) fn scalar_text(value: &Value, what: &str) -> Result<String, Failure> {
+    match value {
+        Value::String(text) => Ok(text.clone()),
+        Value::Number(number) => Ok(number_text(number)),
+        Value::Bool(value) => Ok(value.to_string()),
+        Value::Null | Value::Array(_) | Value::Object(_) => Err(Failure::usage(
+            vocabulary()
+                .marks
+                .format("edit_value_kind", &[("what", what)]),
+        )),
+    }
 }
 
 /// The digits a colour must have, taken once from the shared rules.
@@ -243,6 +298,11 @@ pub(crate) struct Editor {
     work: u64,
     /// Whether the input carries a digital signature part.
     signed: bool,
+    /// The file's own bytes, kept only for a presentation: a slide text op's refusal names the text
+    /// a reading showed for a diagram, and that derivation reads the package as it was opened. No
+    /// other family reads the archive again. Held behind an `Arc` so the derivation can outlive a
+    /// borrow of the editor.
+    source: Option<Arc<Vec<u8>>>,
 }
 
 impl Editor {
@@ -253,8 +313,8 @@ impl Editor {
     /// The file cannot be read, its archive cannot be opened, it is another family's package, or it
     /// holds no family part at all. A digital signature is recorded rather than refused: the note is
     /// added at [`Editor::finish`] when the file changed. A package with no `[Content_Types].xml` is
-    /// opened rather than refused here, because the reference asks for it only where a part's type
-    /// is declared — see [`Editor::require_content_types`].
+    /// opened rather than refused here; [`Editor::require_content_types`] states when a family asks
+    /// for one.
     pub(crate) fn open(input: &Path, family: Family) -> Result<Self, Failure> {
         let marks = &vocabulary().marks;
         let name = crate::support::file_name_or_path(&input.to_string_lossy()).to_string();
@@ -311,6 +371,7 @@ impl Editor {
             touched: false,
             work: 0,
             signed,
+            source: (family == Family::Pptx).then(|| Arc::new(bytes)),
         })
     }
 
@@ -326,13 +387,34 @@ impl Editor {
         package::part_exists(&self.parts, name)
     }
 
+    /// The file's own bytes, for a family that derives something from the package as it was opened;
+    /// `None` for every other family, which keeps nothing.
+    #[must_use]
+    pub(crate) fn source(&self) -> Option<Arc<Vec<u8>>> {
+        self.source.clone()
+    }
+
+    /// A part's text without charging the walk over it. The reference's presentation arms read the
+    /// slide, notes and presentation parts off the archive this way — their work is not charged — so
+    /// the budget is short of the work they do, exactly as the reference's is. A part an edit
+    /// rewrites is read and charged by [`Editor::part_edit`]; this is only for the parts an
+    /// addressing helper looks at.
+    #[must_use]
+    pub(crate) fn peek(&self, part: &str) -> Option<String> {
+        let (_, bytes) = self.parts.iter().find(|(name, _)| name == part)?;
+        Some(String::from_utf8_lossy(bytes).into_owned())
+    }
+
     /// Refuse a package that states no `[Content_Types].xml`, which is the only part that can
     /// declare another part's type.
     ///
     /// The reference asks this where a part's type is declared rather than when the package is
     /// opened: [`Editor::add`] asks before it adds a part, and the workbook's styles path asks
-    /// before it declares the styles part, even one the package already holds. An edit that
-    /// declares nothing therefore still runs on such a package.
+    /// before it declares the styles part, even one the package already holds. An edit of the Word
+    /// or workbook family that declares nothing therefore still runs on such a package.
+    ///
+    /// The presentation arm is the exception: the reference asks it before the edit list is bounded,
+    /// so [`run_edit`] asks up front and no presentation edit runs on a package stating none.
     ///
     /// # Errors
     ///
@@ -384,10 +466,26 @@ impl Editor {
         part: &str,
         change: impl FnOnce(&str) -> Result<String, Failure>,
     ) -> Result<(), Failure> {
+        self.part_edit_with(part, |text, _| change(text))
+    }
+
+    /// [`Editor::part_edit`] with the editor itself handed to the change, for a family whose notes
+    /// and refusals are decided while the part is in hand. The part is read and charged once, and
+    /// the text the change wrote is not charged again: the reference's own `editor.part` charges
+    /// only the read.
+    ///
+    /// # Errors
+    ///
+    /// The walk takes the call past its work budget, or the change itself refuses.
+    pub(crate) fn part_edit_with(
+        &mut self,
+        part: &str,
+        change: impl FnOnce(&str, &mut Self) -> Result<String, Failure>,
+    ) -> Result<(), Failure> {
         let Some(text) = self.read(part)? else {
             return Ok(());
         };
-        let written = change(&text)?;
+        let written = change(&text, self)?;
         self.rewrite(part, &text, &written);
         Ok(())
     }
@@ -472,6 +570,12 @@ impl Editor {
         if self.parts.len() != before {
             self.changed = true;
         }
+    }
+
+    /// The work this call has been charged, in UTF-16 code units.
+    #[cfg(test)]
+    pub(crate) fn work(&self) -> u64 {
+        self.work
     }
 
     /// Charge one walk over a part's text against the call's budget. The budget bounds the work a
@@ -600,7 +704,8 @@ fn run_edit(request: &Request, family: Family, output: &Path) -> Result<Finished
     let port: fn(&mut Editor, &[Value]) -> Result<(), Failure> = match family {
         Family::Docx => docx::edit,
         Family::Xlsx => xlsx::edit,
-        Family::Pptx | Family::Pdf => {
+        Family::Pptx => pptx::edit,
+        Family::Pdf => {
             return Err(Failure::internal(crate::operation::not_carried_out(
                 &request.operation,
             )));
@@ -620,6 +725,11 @@ fn run_edit(request: &Request, family: Family, output: &Path) -> Result<Finished
     // The package is opened before the edit list is bounded, as the reference does: a request wrong
     // in both ways answers what is wrong with the input.
     let mut editor = Editor::open(Path::new(input), family)?;
+    // The presentation arm asks for the content types before the edit list is bounded; the other
+    // families ask later — see [`Editor::require_content_types`].
+    if family == Family::Pptx {
+        editor.require_content_types()?;
+    }
     let max = *crate::vocabulary::edits_max();
     if u64::try_from(edits.len()).unwrap_or(u64::MAX) > max {
         return Err(Failure::usage(marks.format(
@@ -730,11 +840,33 @@ pub(super) fn remove_and(created: &[&Path], failure: Failure) -> Failure {
 mod tests {
     use super::*;
     use crate::operation::{Destination, execute};
+    use crate::testing::scratch;
     use serde_json::json;
 
-    /// A temporary directory for one test.
-    fn scratch() -> tempfile::TempDir {
-        tempfile::TempDir::new().expect("a temporary directory")
+    #[test]
+    fn a_peek_is_uncharged_and_a_part_edit_charges_its_read_once() {
+        // The reference charges the walk that takes a part into hand and not the one that looks:
+        // the presentation's slide list and a slide's relationships are read with `peek`. A
+        // divergence would surface only on a document near the edit-work budget.
+        let directory = scratch();
+        let input = workbook(directory.path(), "book.xlsx");
+        let mut editor = Editor::open(&input, Family::Xlsx).expect("the workbook opens");
+        let part = "xl/workbook.xml";
+        let units = code_units(&editor.peek(part).expect("the part"));
+        assert_eq!(editor.work(), 0, "a peek is not charged");
+        editor
+            .part_edit(part, |xml| Ok(format!("{xml} ")))
+            .expect("a walk");
+        assert_eq!(editor.work(), units as u64, "the read is charged once");
+    }
+
+    #[test]
+    fn javascript_trim_strips_its_own_whitespace() {
+        // U+FEFF is ECMAScript whitespace and U+0085 is not, where Rust's own `trim_start`
+        // disagrees on both.
+        assert_eq!(js_trim_start("\u{feff} text"), "text");
+        assert_eq!(js_trim_start("\u{85}text"), "\u{85}text");
+        assert_eq!(js_trim("\u{a0} padded \u{3000}"), "padded");
     }
 
     /// `xlsx_basic` written into `directory` under `name`, answering its path.
@@ -816,15 +948,13 @@ mod tests {
     fn a_workbook_opens_and_every_part_round_trips_byte_for_byte() {
         let directory = scratch();
         let path = workbook(directory.path(), "book.xlsx");
-        let original =
-            crate::writing::package::read_package(&crate::test_support::build::xlsx_basic())
-                .expect("a workbook");
+        let original = read_package(&crate::test_support::build::xlsx_basic()).expect("a workbook");
         let editor = Editor::open(&path, Family::Xlsx).expect("a workbook");
         assert_eq!(editor.input(), path);
         assert!(editor.part_names().contains(&"xl/workbook.xml".to_string()));
         let finished = editor.finish().expect("a written workbook");
         assert_eq!(
-            crate::writing::package::read_package(&finished.bytes).expect("the written workbook"),
+            read_package(&finished.bytes).expect("the written workbook"),
             original,
             "every part's content survives the open and finish"
         );
@@ -887,8 +1017,7 @@ mod tests {
     fn the_signature_note_is_added_only_when_the_file_changed() {
         let directory = scratch();
         let mut parts =
-            crate::writing::package::read_package(&crate::test_support::build::xlsx_basic())
-                .expect("a workbook");
+            read_package(&crate::test_support::build::xlsx_basic()).expect("a workbook");
         parts.push(("_xmlsignatures/sig1.xml".to_string(), b"<sig/>".to_vec()));
         let signed = crate::writing::package::write_package(&parts).expect("a signed workbook");
         let path = directory.path().join("signed.xlsx");

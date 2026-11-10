@@ -24,7 +24,7 @@
 //! |---|---|
 //! | `create` | `format`, `content` or `sheets`, `size` (`PowerPoint`), `header`/`footer` (Word), `metadata` (PDF) |
 //! | `fill_template` | `template`, `format`, `values` |
-//! | `docx_edit`, `xlsx_edit`, `pptx_edit` | `input`, `edits` (`pptx_edit` also `diagram_text`) |
+//! | `docx_edit`, `xlsx_edit`, `pptx_edit` | `input`, `edits` |
 //! | `pdf_merge` | `inputs`, `metadata` |
 //! | `pdf_split` | `input`, `groups`, `metadata` |
 //! | `pdf_rotate` | `input`, `degrees`, `pages`, `metadata` |
@@ -38,9 +38,9 @@
 //! sub-operation takes (an `add_image`'s `image`) travels inside that object.
 //!
 //! Which operations are carried out is the writing half's business, not this surface's:
-//! `docx_edit`, `xlsx_edit`, the five PDF page actions (`pdf_merge`, `pdf_split`, `pdf_rotate`,
-//! `pdf_crop`, `pdf_resize`) and the three PDF drawing actions (`pdf_text`, `pdf_image`,
-//! `pdf_form_fill`) are, and every other operation answers with the vocabulary's
+//! `docx_edit`, `xlsx_edit`, `pptx_edit`, the five PDF page actions (`pdf_merge`, `pdf_split`,
+//! `pdf_rotate`, `pdf_crop`, `pdf_resize`) and the three PDF drawing actions (`pdf_text`,
+//! `pdf_image`, `pdf_form_fill`) are, and every other operation answers with the vocabulary's
 //! `reason_not_carried_out` until its port lands. The surface's own checks run first either way,
 //! so a request refused here is refused before any file is opened.
 
@@ -216,10 +216,9 @@ fn dispatch(request: &Request) -> Outcome {
             ),
         );
     }
-    // The edits the writing half carries out so far. The edit opens the package, proves its family
-    // from the content, and writes a copy of it; the destination is still the engine's to name, and
-    // the write is create-new.
-    if let Some(family @ (Family::Docx | Family::Xlsx)) = operation.edit_family() {
+    // The edit opens the package, proves its family from the content, and writes a copy of it; the
+    // destination is still the engine's to name, and the write is create-new.
+    if let Some(family @ (Family::Docx | Family::Xlsx | Family::Pptx)) = operation.edit_family() {
         return crate::writing::edit_operation(request, family, &outputs[0]);
     }
     match operation {
@@ -605,13 +604,9 @@ fn checked_base(base: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::scratch;
     use serde_json::json;
     use std::collections::BTreeSet;
-
-    /// A temporary destination directory for one test.
-    fn scratch() -> tempfile::TempDir {
-        tempfile::TempDir::new().expect("a temporary directory")
-    }
 
     /// A request for `operation` with `values`, writing into `directory`.
     #[expect(

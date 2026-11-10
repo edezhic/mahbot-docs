@@ -827,10 +827,11 @@ pub(super) fn add_image(editor: &mut Editor, edit: &Value) -> Result<(), Failure
 mod tests {
     use super::*;
     use crate::operation::Failure;
+    use crate::testing::scratch;
 
     /// A workbook opened for a reading, with the directory that holds it kept alive.
     fn opened(book: Vec<u8>) -> (Editor, tempfile::TempDir) {
-        let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let directory = scratch();
         let path = directory.path().join("book.xlsx");
         std::fs::write(&path, book).expect("a workbook");
         let editor =
