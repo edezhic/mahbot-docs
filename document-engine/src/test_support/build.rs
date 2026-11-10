@@ -71,6 +71,82 @@ pub fn broken_png() -> Vec<u8> {
     bytes
 }
 
+/// The same picture with one byte of its image chunk's checksum flipped: a damaged file the
+/// reference's decoder embeds and a checksum-checking one refuses, which is why the writer
+/// recomputes the checksums before it decodes.
+#[must_use]
+pub fn stale_crc_png() -> Vec<u8> {
+    let mut bytes = png();
+    if let Some((_, end)) = png_idat(&bytes)
+        && let Some(crc) = bytes.get_mut(end)
+    {
+        *crc ^= 0xff;
+    }
+    bytes
+}
+
+/// The same picture whose image chunk declares only half its data: the chunk structure is whole, so
+/// the reference's decoder inflates what it can and embeds the partial samples, while a decoder that
+/// validates the stream refuses. Only the writer refuses this one.
+#[must_use]
+pub fn short_data_png() -> Vec<u8> {
+    let mut bytes = png();
+    if let Some((start, end)) = png_idat(&bytes) {
+        let kept = start + (end - start) / 2;
+        let mut shorter = bytes[..kept].to_vec();
+        shorter.extend_from_slice(&bytes[end..]);
+        // The chunk's own length field, four bytes before its type.
+        shorter[start - 8..start - 4].copy_from_slice(
+            &u32::try_from(kept - start)
+                .unwrap_or(u32::MAX)
+                .to_be_bytes(),
+        );
+        // The shortened chunk's own checksum, over its type and data.
+        let crc = png_crc(&shorter[start - 4..kept]);
+        shorter[kept..kept + 4].copy_from_slice(&crc.to_be_bytes());
+        bytes = shorter;
+    }
+    bytes
+}
+
+/// The CRC-32 a PNG chunk carries, computed here so the fixture is built independently of the
+/// writer that reads it: a shared bug would otherwise leave both sides agreeing on a wrong value.
+fn png_crc(bytes: &[u8]) -> u32 {
+    /// The polynomial CRC-32 is computed with.
+    const POLYNOMIAL: u32 = 0xedb8_8320;
+    /// The bits one byte holds.
+    const BITS: u32 = 8;
+    let mut crc = u32::MAX;
+    for &byte in bytes {
+        crc ^= u32::from(byte);
+        for _ in 0..BITS {
+            crc = if crc & 1 == 0 {
+                crc >> 1
+            } else {
+                POLYNOMIAL ^ (crc >> 1)
+            };
+        }
+    }
+    !crc
+}
+
+/// A PNG's first image chunk: where its data starts and ends, past the signature and the chunk
+/// header. Chunks are length(4) + type(4) + data(length) + crc(4).
+fn png_idat(bytes: &[u8]) -> Option<(usize, usize)> {
+    let mut offset = 8;
+    while let Some(header) = bytes.get(offset..offset + 12) {
+        let length = usize::try_from(u32::from_be_bytes([
+            header[0], header[1], header[2], header[3],
+        ]))
+        .unwrap_or(usize::MAX);
+        if &header[4..8] == b"IDAT" {
+            return Some((offset + 8, offset + 8 + length));
+        }
+        offset += 12 + length;
+    }
+    None
+}
+
 /// A valid small JPEG of the same picture, so a case can exercise the one embedded format the
 /// reader passes through instead of re-encoding.
 #[must_use]
@@ -88,7 +164,24 @@ pub fn jpeg() -> Vec<u8> {
     bytes
 }
 
-// ── packages ──────────────────────────────────────────────────────────────────────────────────
+/// A minimal WebP: the RIFF container and one lossless chunk stating a 1x1 picture. Nothing decodes
+/// it — a PDF refuses WebP before it embeds — so the header is the whole fixture.
+#[must_use]
+pub fn webp() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    // Everything after the eight RIFF bytes: the form, one chunk header, its data and its pad.
+    bytes.extend_from_slice(&18_u32.to_le_bytes());
+    bytes.extend_from_slice(b"WEBP");
+    bytes.extend_from_slice(b"VP8L");
+    bytes.extend_from_slice(&5_u32.to_le_bytes());
+    // The lossless signature, then 14 bits of width and 14 of height, each one less than its side.
+    bytes.extend_from_slice(&[0x2f, 0, 0, 0, 0]);
+    bytes.push(0);
+    bytes
+}
+
+// ── packages ────────────────────────────────────────────────────────────────────────────────────
 
 /// A ZIP package from its parts, in the order given. Every part is DEFLATEd, the shape an OOXML
 /// producer writes and the one the kit's `pizzip` and the reader's `zip` both open.
@@ -4139,6 +4232,57 @@ pub fn pdf_form() -> Vec<u8> {
     form_document(false)
 }
 
+/// A form whose text field states a normal appearance that is a state dictionary rather than a
+/// stream: the reference regenerates it when the field is filled, so the value is drawn.
+#[must_use]
+pub fn pdf_state_appearance_form() -> Vec<u8> {
+    text_form_with("", "/Helv 0 Tf 0 g", true)
+}
+
+/// A form whose checkbox states a single normal appearance stream rather than a state dictionary:
+/// the reference regenerates it into a dictionary when the box is set.
+#[must_use]
+pub fn pdf_stream_appearance_form() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let helvetica = pdf.push(PDF_FONT);
+    let content = pdf.stream(
+        "",
+        b"BT /F1 14 Tf 72 780 Td (A form whose checkbox states one appearance stream) Tj ET",
+    );
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let acroform = pdf.reserve();
+    let appearance = "/DA (/Helv 0 Tf 0 g)";
+    let mark = pdf.stream(
+        "/Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >>",
+        b"",
+    );
+    let agree = pdf.push(format!(
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (agree) /Rect [72 660 86 674] \
+         /F 4 /P {page} {appearance} /V /Off /AS /Off /AP << /N {mark} >> >>"
+    ));
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {helvetica} >> >> /Contents {content} \
+             /Annots [{agree}] >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    pdf.set(
+        &acroform,
+        format!("<< /Fields [{agree}] {appearance} /DR << /Font << /Helv {helvetica} >> >> >>"),
+    );
+    let catalog = pdf.push(format!(
+        "<< /Type /Catalog /Pages {pages} /AcroForm {acroform} >>"
+    ));
+    pdf.finish(&catalog, "")
+}
+
 /// A PDF whose catalog names an `/AcroForm` that is not a dictionary: a document the format
 /// forbids and a PDF library refuses, for the failure side of the corpus.
 #[must_use]
@@ -4203,7 +4347,7 @@ fn form_document(broken: bool) -> Vec<u8> {
     let colour = pdf.push(format!(
         "<< /Type /Annot /Subtype /Widget /FT /Ch /Ff {} /T (colour) \
          /Rect [72 560 220 584] /F 4 /P {page} {appearance} \
-         /Opt [(red) (green) (blue)] /V (red) >>",
+         /Opt [(red) (green) (blue)] /V (red) /I [0] >>",
         1 << 17
     ));
     pdf.set(
@@ -4231,6 +4375,422 @@ fn form_document(broken: bool) -> Vec<u8> {
         "<< /Type /Catalog /Pages {pages} /AcroForm {acroform} >>"
     ));
     pdf.finish(&catalog, "")
+}
+
+/// One A4 page carrying an AcroForm with an option list and a text field. The option list offers
+/// two choices and holds one; selecting a value outside its list is the refusal this document is
+/// the input for.
+#[must_use]
+pub fn pdf_option_form() -> Vec<u8> {
+    form_page("A form with an option list", |pdf, page| {
+        let note = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (note) /Rect [72 700 272 724] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        let fruit = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Ch /T (fruit) /Rect [72 660 220 684] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) /Opt [(apple) (pear)] /V (apple) /I [0] >>"
+        ));
+        vec![note, fruit]
+    })
+}
+
+/// One A4 page carrying an AcroForm whose option list offers no choice at all: filling it is the
+/// refusal this document is the input for.
+#[must_use]
+pub fn pdf_empty_choice_form() -> Vec<u8> {
+    form_page("A form with no choice", |pdf, page| {
+        let note = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (note) /Rect [72 700 272 724] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        let fruit = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Ch /T (fruit) /Rect [72 660 220 684] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        vec![note, fruit]
+    })
+}
+
+/// One A4 page carrying an option list whose `/Opt` entries are `[value, display]` pairs: the
+/// appearance lists each pair's display name rather than its value.
+#[must_use]
+pub fn pdf_paired_options_form() -> Vec<u8> {
+    form_page("A form with paired options", |pdf, page| {
+        let choice = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Ch /T (choice) /Rect [72 660 220 684] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) /Opt [[(one) (One)] [(two) (Two)]] >>"
+        ));
+        vec![choice]
+    })
+}
+
+/// One A4 page whose option list states a pair with a number where the display name goes: reading
+/// the options is the library's own failure.
+#[must_use]
+pub fn pdf_broken_pair_options_form() -> Vec<u8> {
+    form_page("A form with a malformed option pair", |pdf, page| {
+        let choice = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Ch /T (choice) /Rect [72 660 220 684] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) /Opt [[(one) 2 (Two)]] >>"
+        ));
+        vec![choice]
+    })
+}
+
+/// One A4 page whose text widget states no `/Rect`: the library reads the widget's rectangle before
+/// it lays the value out, so filling the field is its own failure.
+#[must_use]
+pub fn pdf_rectless_form() -> Vec<u8> {
+    form_page(
+        "A form with a widget that states no rectangle",
+        |pdf, page| {
+            let field = pdf.push(format!(
+                "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /F 4 /P {page} \
+             /DA (/Helv 0 Tf 0 g) >>"
+            ));
+            vec![field]
+        },
+    )
+}
+
+/// One A4 page carrying a checkbox whose `/V` names a state its `/AS` does not, beside a text
+/// field: a flatten paints the state the field's own value names, so the box is drawn rather than
+/// the empty state the widget shows. Only the crate's own test fills it.
+#[must_use]
+pub fn pdf_state_disagreement_form() -> Vec<u8> {
+    form_page("A form whose box shows the wrong state", |pdf, page| {
+        let on = pdf.stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >>",
+            b"q 0 0 0 rg 4 4 6 6 re f Q",
+        );
+        let off = pdf.stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >>",
+            b"",
+        );
+        let agree = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Btn /T (agree) /Rect [72 660 86 674] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) /V /Yes /AS /Off \
+             /AP << /N << /Yes {on} /Off {off} >> >> >>"
+        ));
+        let name = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /Rect [72 700 272 724] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        vec![agree, name]
+    })
+}
+
+/// One A4 page carrying a signature widget and a text field: a signature's appearance is never
+/// regenerated, so flattening the form is the reference's own failure — it reads the appearance of
+/// every widget it paints, and this one states none.
+#[must_use]
+pub fn pdf_signature_form() -> Vec<u8> {
+    form_page("A form with a signature field", |pdf, page| {
+        let sign = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Sig /T (sign) /Rect [72 600 172 640] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        let name = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /Rect [72 700 272 724] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        vec![sign, name]
+    })
+}
+
+/// One A4 page whose annotation list carries a field's own dictionary beside the widget it owns: the
+/// reference removes the field's reference as well as each widget's, so a flattened page lists
+/// neither.
+#[must_use]
+pub fn pdf_listed_field_form() -> Vec<u8> {
+    form_page_with("A form whose field is also an annotation", |pdf, page| {
+        let field = pdf.reserve();
+        let widget = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /Parent {field} /Rect [72 700 272 724] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        pdf.set(&field, format!("<< /FT /Tx /T (name) /Kids [{widget}] >>"));
+        (vec![field.clone(), widget], vec![field])
+    })
+}
+
+/// One A4 page carrying a text widget whose `/P` names an object that is not a page: the reference
+/// falls back to the page whose annotations list the widget, so a flatten reaches the real page
+/// rather than the object the widget names.
+#[must_use]
+pub fn pdf_misplaced_form() -> Vec<u8> {
+    form_page("A form whose widget names no page", |pdf, _page| {
+        let elsewhere = pdf.push("<< /Type /Nowhere >>".to_string());
+        let name = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /Rect [72 700 272 724] \
+             /F 4 /P {elsewhere} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        vec![name]
+    })
+}
+
+/// One A4 page carrying one multi-line text widget: the wrapping a fill's appearance lays out.
+#[must_use]
+pub fn pdf_multiline_form() -> Vec<u8> {
+    text_form("/Ff 4096", "/Helv 0 Tf 0 g")
+}
+
+/// The same widget stating its own 9-point appearance size: a fill draws at that size rather than
+/// fitting one, so the value wraps where the stated size puts it.
+#[must_use]
+pub fn pdf_stated_size_form() -> Vec<u8> {
+    text_form("/Ff 4096", "/Helv 9 Tf 0 g")
+}
+
+/// One A4 page carrying a text widget with `/MaxLen 3`: a longer value is the library's own
+/// failure rather than a refusal.
+#[must_use]
+pub fn pdf_max_length_form() -> Vec<u8> {
+    text_form("/MaxLen 3", "/Helv 0 Tf 0 g")
+}
+
+/// One A4 page carrying a combed text widget with `/MaxLen 5`: its appearance draws one character
+/// per cell rather than the value as one line.
+#[must_use]
+pub fn pdf_combed_form() -> Vec<u8> {
+    text_form("/Ff 16777216 /MaxLen 5", "/Helv 0 Tf 0 g")
+}
+
+/// One A4 page carrying a combed widget whose own value is wider than its `/MaxLen`, beside a
+/// second field a request can fill: regenerating the combed appearance is the reference's own
+/// layout failure.
+#[must_use]
+pub fn pdf_combed_overflow_form() -> Vec<u8> {
+    form_page("A form with an over-long combed value", |pdf, page| {
+        let combed = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (combed) /Rect [72 700 172 760] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) /Ff 16777216 /MaxLen 3 /V (abcd) >>"
+        ));
+        let other = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (other) /Rect [72 660 172 690] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        vec![combed, other]
+    })
+}
+
+/// One A4 page carrying a button that states no rectangle and no appearance: regenerating its
+/// appearance is the reference's own failure, because its appearance provider reads the rectangle
+/// before it draws the mark.
+#[must_use]
+pub fn pdf_rectless_button_form() -> Vec<u8> {
+    form_page("A form whose button states no rectangle", |pdf, page| {
+        let field = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Btn /T (agree) /F 4 /P {page} \
+             /DA (/Helv 0 Tf 0 g) /V /Off /AS /Off >>"
+        ));
+        vec![field]
+    })
+}
+
+/// One A4 page carrying a button that states no rectangle but does carry a state dictionary, beside
+/// a text field a request can fill: the button's appearance is not regenerated, so only the flatten's
+/// own rectangle read is the reference's failure.
+#[must_use]
+pub fn pdf_rectless_flat_form() -> Vec<u8> {
+    form_page("A form whose button states no rectangle", |pdf, page| {
+        let on = pdf.stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >>",
+            b"q 0 0 0 rg 4 4 6 6 re f Q",
+        );
+        let off = pdf.stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >>",
+            b"",
+        );
+        let agree = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Btn /T (agree) /F 4 /P {page} \
+             /DA (/Helv 0 Tf 0 g) /V /Off /AS /Off /AP << /N << /Yes {on} /Off {off} >> >> >>"
+        ));
+        let name = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /Rect [72 700 172 724] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        vec![agree, name]
+    })
+}
+
+/// One A4 page carrying a right-aligned text widget with a three-point border, a second widget
+/// stating neither, and a right-aligned dropdown: the appearance box's inset and alignment are only
+/// visible in where the line sits, which the comparison does not read. Only the crate's own test
+/// fills it, so it is not a writer case's input.
+#[must_use]
+pub fn pdf_aligned_form() -> Vec<u8> {
+    form_page("A form with an aligned field", |pdf, page| {
+        let aligned = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /Rect [72 700 172 760] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) /Q 2 /BS << /W 3 >> >>"
+        ));
+        let plain = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (plain) /Rect [72 660 172 720] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        // A choice field stating the same `/Q`: the reference's dropdown provider ignores it.
+        let choice = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Ch /Ff {} /T (choice) /Rect [72 600 172 650] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) /Q 2 /Opt [(a) (b)] >>",
+            1 << 17
+        ));
+        vec![aligned, plain, choice]
+    })
+}
+
+/// One A4 page carrying a text field and a push button whose caption the reference draws into the
+/// button's own appearance on every fill.
+#[must_use]
+pub fn pdf_pushbutton_caption_form() -> Vec<u8> {
+    form_page("A form with a captioned button", |pdf, page| {
+        let name = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /Rect [72 700 172 730] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        let button = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Btn /Ff {} /T (send) /Rect [72 650 172 680] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) /MK << /CA (Send) >> >>",
+            1 << 16
+        ));
+        vec![name, button]
+    })
+}
+
+/// One A4 page whose title is `title`, carrying the widgets `widgets` writes once the page's own
+/// reference is known, each of them also the `/AcroForm` field it belongs to.
+fn form_page(title: &str, widgets: impl FnOnce(&mut PdfObjects, &str) -> Vec<String>) -> Vec<u8> {
+    form_page_with(title, |pdf, page| {
+        let widgets = widgets(pdf, page);
+        (widgets.clone(), widgets)
+    })
+}
+
+/// The same page whose annotations and `/AcroForm` fields differ: a radio group's widgets sit on the
+/// page while the group itself is the field.
+fn form_page_with(
+    title: &str,
+    lists: impl FnOnce(&mut PdfObjects, &str) -> (Vec<String>, Vec<String>),
+) -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let helvetica = pdf.push(PDF_FONT);
+    let content = pdf.stream(
+        "",
+        format!("BT /F1 14 Tf 72 780 Td ({title}) Tj ET").as_bytes(),
+    );
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let acroform = pdf.reserve();
+    let (annots, fields) = lists(&mut pdf, &page);
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {helvetica} >> >> /Contents {content} \
+             /Annots [{}] >>",
+            annots.join(" ")
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    pdf.set(
+        &acroform,
+        format!(
+            "<< /Fields [{}] /DA (/Helv 0 Tf 0 g) \
+             /DR << /Font << /Helv {helvetica} >> >> >>",
+            fields.join(" ")
+        ),
+    );
+    let catalog = pdf.push(format!(
+        "<< /Type /Catalog /Pages {pages} /AcroForm {acroform} >>"
+    ));
+    pdf.finish(&catalog, "")
+}
+
+/// One A4 page carrying a text widget whose own entries are `flags` and whose `/DA` is `da`.
+fn text_form(flags: &str, da: &str) -> Vec<u8> {
+    text_form_with(flags, da, false)
+}
+
+/// One A4 page carrying a text widget whose own entries are `flags` and whose `/DA` is `da`; a
+/// widget whose normal appearance is a state dictionary rather than a stream is one the reference
+/// regenerates when the field is filled.
+fn text_form_with(flags: &str, da: &str, state_appearance: bool) -> Vec<u8> {
+    form_page("A form with one text field", |pdf, page| {
+        let normal = if state_appearance {
+            let empty = pdf.stream(
+                "/Type /XObject /Subtype /Form /BBox [0 0 100 60] /Resources << >>",
+                b"",
+            );
+            format!("/AP << /N << /Off {empty} >> >>")
+        } else {
+            String::new()
+        };
+        let field = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /Rect [72 700 172 760] \
+             /F 4 /P {page} /DA ({da}) {flags} {normal} >>"
+        ));
+        vec![field]
+    })
+}
+
+/// One A4 page carrying a radio group whose `/Opt` states `options` and whose two widgets declare
+/// the on-states `0` and `1`: an export value names an option, and the state a widget shows is the
+/// on-state at the same index.
+#[must_use]
+pub fn pdf_radio_options_form() -> Vec<u8> {
+    radio_form("(One) (Two)")
+}
+
+/// The same radio group with one more export value than it has on-states: the reference refuses
+/// the option that outruns them.
+#[must_use]
+pub fn pdf_radio_outrun_form() -> Vec<u8> {
+    radio_form("(One) (Two) (Three)")
+}
+
+/// The same radio group whose `/Opt` entries are `[value, display]` pairs: the reference's own
+/// export-value reader takes only top-level strings, so the group offers no option to select.
+#[must_use]
+pub fn pdf_paired_radio_form() -> Vec<u8> {
+    radio_form("[(one) (One)] [(two) (Two)]")
+}
+
+fn radio_form(options: &str) -> Vec<u8> {
+    form_page_with("A form with a radio group", |pdf, page| {
+        let appearance = "/DA (/Helv 0 Tf 0 g)";
+        let field = pdf.reserve();
+        let mut widgets = Vec::new();
+        for (index, y) in [700, 680].into_iter().enumerate() {
+            let on = pdf.stream(
+                "/Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >>",
+                b"q 0 0 0 rg 4 4 6 6 re f Q",
+            );
+            let off = pdf.stream(
+                "/Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >>",
+                b"",
+            );
+            widgets.push(pdf.push(format!(
+                "<< /Type /Annot /Subtype /Widget /Parent {field} /Rect [72 {y} 86 {}] \
+                 /F 4 /P {page} {appearance} /AS /Off \
+                 /AP << /N << /{index} {on} /Off {off} >> >> >>",
+                y + 14
+            )));
+        }
+        pdf.set(
+            &field,
+            format!(
+                "<< /FT /Btn /Ff {} /T (choice) {appearance} /V /Off /Opt [{options}] \
+                 /Kids [{}] >>",
+                1 << 15,
+                widgets.join(" ")
+            ),
+        );
+        (widgets, vec![field])
+    })
 }
 
 /// One A4 page drawing a line and carrying a `/Text` annotation whose `/Contents` is `A note` and

@@ -41,7 +41,7 @@ pub(super) fn list_num_id(
 ) -> Result<u64, Failure> {
     let Some(format) = list_format(kind) else {
         // The surface validated the kind against the same rule; reaching this is a defect.
-        return Err(Failure::internal(crate::contained::engine_failed()));
+        return Err(Failure::engine());
     };
     let name = document_part(editor, "/numbering", DOCX_NUMBERING)?
         .unwrap_or_else(|| DOCX_NUMBERING.to_string());

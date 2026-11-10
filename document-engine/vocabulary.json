@@ -484,6 +484,8 @@
     "pdf_fields_max": 1000,
     "pdf_field_options_max": 100,
     "pdf_field_depth_max": 32,
+    "pdf_catalogue_max": 1000,
+    "pdf_catalogue_chars_max": 4000,
     "edit_work_max_code_units": 4294967296,
     "merge_inputs_max": 50,
     "merge_bytes_max": 209715200,
@@ -2745,6 +2747,24 @@
         "writing"
       ]
     },
+    "surface_values_missing": {
+      "text": "the pdf_form_fill operation needs a \"values\" object",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_text_missing": {
+      "text": "the pdf_text operation needs \"text\" to be a string",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "surface_image_missing": {
+      "text": "the pdf_image operation needs \"image\" to be a file path",
+      "printed_by": [
+        "writing"
+      ]
+    },
     "surface_merge_inputs_too_many": {
       "text": "the pdf_merge operation takes at most {max} inputs",
       "printed_by": [
@@ -2843,6 +2863,120 @@
     },
     "pdf_page_write_failed": {
       "text": "the produced PDF could not be written: {message}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_point": {
+      "text": "\"{name}\" must be within ±{max} points, got {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_text_size": {
+      "text": "\"size\" must be {bounds} points, got {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_text_opacity": {
+      "text": "\"opacity\" must be {bounds}, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_image_webp": {
+      "text": "a PDF cannot embed {name}: a PDF holds a picture as PNG or JPEG — convert the WebP picture first",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_image_unreadable": {
+      "text": "cannot read {name} as an image: {message}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_form_value_kind": {
+      "text": "the value for \"{name}\" must be text, a number or a boolean, not a structure",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_form_no_field": {
+      "text": "no such form field: {name}; this document has: {catalogue}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_form_catalogue_none": {
+      "text": "no fillable fields",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_form_catalogue_field": {
+      "text": "{name} ({kind})",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_form_catalogue_options": {
+      "text": "{name} ({kind}; options: {options})",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_form_catalogue_more": {
+      "text": ", and more",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_form_checkbox_value": {
+      "text": "form field \"{name}\" is a checkbox and takes true or false, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_form_no_choice": {
+      "text": "form field \"{name}\" offers no choice to select; this document has: {catalogue}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_form_option": {
+      "text": "form field \"{name}\" takes one of: {options}; got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_form_option_failed": {
+      "text": "form field \"{name}\" cannot take \"{value}\": Attempted to set invalid field value",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_form_max_length": {
+      "text": "Attempted to set text with length={length} for TextField with maxLength={max} and name={name}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_form_combed_layout": {
+      "text": "Failed to layout combed text as lineLength={length} is greater than cellCount={cells}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_form_not_fillable": {
+      "text": "form field \"{name}\" cannot take a value — it is not a fillable field; this document has: {catalogue}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_pdf_past_area": {
+      "text": "[the {what}'s box reaches past the visible area of {named} — the part beyond is not shown on it]",
       "printed_by": [
         "writing"
       ]
@@ -3378,6 +3512,12 @@
     ],
     "pdf_field_depth_max": [
       "reading"
+    ],
+    "pdf_catalogue_max": [
+      "writing"
+    ],
+    "pdf_catalogue_chars_max": [
+      "writing"
     ],
     "edit_work_max_code_units": [
       "writing"

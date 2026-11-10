@@ -80,6 +80,8 @@ pub fn reference_limits() -> Limits {
         pdf_fields_max: integer(pdf_marks, "MAX_FIELDS") as usize,
         pdf_field_options_max: integer(pdf_marks, "MAX_FIELD_OPTIONS") as usize,
         pdf_field_depth_max: integer(pdf_marks, "MAX_FIELD_DEPTH") as usize,
+        pdf_catalogue_max: integer(kit, "CATALOGUE_MAX") as usize,
+        pdf_catalogue_chars_max: integer(kit, "CATALOGUE_MAX_CHARS") as usize,
         edit_work_max_code_units: integer(kit, "EDIT_WORK_MAX"),
         merge_inputs_max: integer(document_tool, "MAX_MERGE_INPUTS") as usize,
         merge_bytes_max: integer(document_tool, "MAX_MERGE_BYTES"),

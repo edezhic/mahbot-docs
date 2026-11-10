@@ -103,19 +103,30 @@ pub(super) fn number_text(value: &serde_json::Number) -> String {
     if let Some(whole) = value.as_u64() {
         return whole.to_string();
     }
-    let float = value.as_f64().unwrap_or_default();
-    if float.is_finite() && float.fract() == 0.0 && float.abs() < 1e21 {
-        return format!("{float:.0}");
-    }
-    format!("{float}")
+    js_number(value.as_f64().unwrap_or_default())
 }
 
-/// A number as the kit's `${value}` renders it: a whole-valued double carries no fraction.
+/// A number as the kit's `${value}` renders it: a whole-valued double carries no fraction, a
+/// negative zero prints as `0`, and a magnitude below `1e-6` or at least `1e21` uses the exponent
+/// form JavaScript switches to, with the exponent's sign and no padding.
 pub(super) fn js_number(value: f64) -> String {
-    if value.fract() == 0.0 && value.abs() < 1e21 {
-        format!("{value:.0}")
-    } else {
-        format!("{value}")
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    let magnitude = value.abs();
+    if (1e-6..1e21).contains(&magnitude) {
+        return if value.fract() == 0.0 {
+            format!("{value:.0}")
+        } else {
+            format!("{value}")
+        };
+    }
+    let text = format!("{value:e}");
+    match text.split_once('e') {
+        Some((mantissa, exponent)) if !exponent.starts_with('-') => {
+            format!("{mantissa}e+{exponent}")
+        }
+        _ => text,
     }
 }
 
@@ -598,7 +609,7 @@ fn run_edit(request: &Request, family: Family, output: &Path) -> Result<Finished
     let Some(edits) = request.values.get("edits").and_then(Value::as_array) else {
         // The operation surface refuses a request without an "edits" array before dispatch, so
         // reaching this is an engine defect.
-        return Err(Failure::internal(crate::contained::engine_failed()));
+        return Err(Failure::engine());
     };
     let Some(input) = request.values.get("input").and_then(Value::as_str) else {
         return Err(Failure::usage(marks.format(
@@ -769,6 +780,22 @@ mod tests {
             min_exclusive: false,
         };
         assert_eq!(span_bounds(&span), "between -2000 and 2000");
+    }
+
+    #[test]
+    fn a_number_is_the_one_javascript_prints() {
+        assert_eq!(js_number(2.0), "2");
+        assert_eq!(js_number(2.5), "2.5");
+        assert_eq!(js_number(0.0), "0");
+        // JavaScript prints a negative zero as `0`, which a zero turn's sine would otherwise break.
+        assert_eq!(js_number(-0.0), "0");
+        // Below 1e-6 and at or above 1e21 JavaScript switches to the exponent form.
+        assert_eq!(
+            js_number(6.123_233_995_736_766e-17),
+            "6.123233995736766e-17"
+        );
+        assert_eq!(js_number(1e-7), "1e-7");
+        assert_eq!(js_number(1e21), "1e+21");
     }
 
     #[test]

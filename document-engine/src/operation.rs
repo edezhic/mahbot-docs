@@ -38,8 +38,9 @@
 //! sub-operation takes (an `add_image`'s `image`) travels inside that object.
 //!
 //! Which operations are carried out is the writing half's business, not this surface's:
-//! `docx_edit`, `xlsx_edit` and the five PDF page actions (`pdf_merge`, `pdf_split`, `pdf_rotate`,
-//! `pdf_crop`, `pdf_resize`) are, and every other operation answers with the vocabulary's
+//! `docx_edit`, `xlsx_edit`, the five PDF page actions (`pdf_merge`, `pdf_split`, `pdf_rotate`,
+//! `pdf_crop`, `pdf_resize`) and the three PDF drawing actions (`pdf_text`, `pdf_image`,
+//! `pdf_form_fill`) are, and every other operation answers with the vocabulary's
 //! `reason_not_carried_out` until its port lands. The surface's own checks run first either way,
 //! so a request refused here is refused before any file is opened.
 
@@ -155,6 +156,15 @@ impl Failure {
             reason: reason.into(),
         }
     }
+
+    /// A defect inside the engine: a state its own request surface should have made unreachable, an
+    /// object graph it built that it cannot write, or a shape the reference's own library faults on
+    /// rather than refusing — a malformed document it cannot read, or a value it cannot coerce. The
+    /// reference reports all of them as `internal`, and so does the engine, with its own sentence
+    /// rather than the library's, which is not the product's.
+    pub(crate) fn engine() -> Self {
+        Self::internal(crate::contained::engine_failed())
+    }
 }
 
 /// Carry out one operation.
@@ -218,6 +228,9 @@ fn dispatch(request: &Request) -> Outcome {
         Operation::PdfRotate => crate::writing::pdf::rotate(request, &outputs[0]),
         Operation::PdfCrop => crate::writing::pdf::crop(request, &outputs[0]),
         Operation::PdfResize => crate::writing::pdf::resize(request, &outputs[0]),
+        Operation::PdfText => crate::writing::pdf::draw_text(request, &outputs[0]),
+        Operation::PdfImage => crate::writing::pdf::place_image(request, &outputs[0]),
+        Operation::PdfFormFill => crate::writing::pdf::fill_form(request, &outputs[0]),
         _ => Outcome::failed(INTERNAL, not_carried_out(operation.name())),
     }
 }
@@ -432,6 +445,15 @@ fn validate(request: &Request, operation: Operation) -> Result<(), String> {
                 ));
             }
         }
+        Operation::PdfFormFill if !request.values.get("values").is_some_and(Value::is_object) => {
+            return Err(marks.get("surface_values_missing").to_string());
+        }
+        Operation::PdfText if !request.values.get("text").is_some_and(Value::is_string) => {
+            return Err(marks.get("surface_text_missing").to_string());
+        }
+        Operation::PdfImage if !request.values.get("image").is_some_and(Value::is_string) => {
+            return Err(marks.get("surface_image_missing").to_string());
+        }
         _ => {}
     }
     Ok(())
@@ -636,7 +658,7 @@ mod tests {
             ("pdf_rotate", json!({ "input": "a.pdf", "degrees": 180 })),
             ("pdf_crop", json!({ "input": "a.pdf" })),
             ("pdf_resize", json!({ "input": "a.pdf" })),
-            ("pdf_text", json!({ "input": "a.pdf" })),
+            ("pdf_text", json!({ "input": "a.pdf", "text": "x" })),
             ("pdf_image", json!({ "input": "a.pdf", "image": "x.png" })),
             ("pdf_form_fill", json!({ "input": "a.pdf", "values": {} })),
         ];

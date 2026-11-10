@@ -438,7 +438,7 @@ fn canonical_rels(name: &str, bytes: &[u8], media: &BTreeMap<String, String>) ->
         }
         children.push(json!({ "name": "Relationship", "attrs": attrs }));
     }
-    children.sort_by_key(|child| child.to_string());
+    children.sort_by_key(sorted_string);
     Ok(json!({ "kind": "xml", "tree": { "name": "Relationships", "children": children } }))
 }
 
@@ -622,8 +622,14 @@ fn rewrite_part_names(node: &mut Value, media: &BTreeMap<String, String>) {
 /// Sort an element's children, for the parts whose members are a set.
 fn sort_children(node: &mut Value) {
     if let Some(children) = node.get_mut("children").and_then(Value::as_array_mut) {
-        children.sort_by_key(|child| child.to_string());
+        children.sort_by_key(sorted_string);
     }
+}
+
+/// A value's text with object keys in sorted order: the sort key for a set whose members are
+/// objects, so the map's own iteration order cannot decide the record.
+fn sorted_string(value: &Value) -> String {
+    serde_json::to_string(&crate::transcript::sorted_value(value)).unwrap_or_default()
 }
 
 /// The local name of a possibly prefixed XML name.

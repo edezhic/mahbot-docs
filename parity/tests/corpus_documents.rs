@@ -309,13 +309,7 @@ fn the_samples_are_documents_of_the_corpus() {
     // document may be sampled twice. The rest of the corpus is covered by the recorded baseline
     // and by `tests/coverage.rs`, which needs no hand-written expectation.
     //
-    // The recorded reader corpus and the writer-only documents beside it, so neither list has to be
-    // repeated here.
-    let corpus: std::collections::BTreeSet<&str> = document_parity::corpus::reader_documents()
-        .into_iter()
-        .chain(document_parity::corpus::writer_documents())
-        .map(|document| document.name)
-        .collect();
+    let corpus = corpus_names();
     let mut sampled = std::collections::BTreeSet::new();
     for sample in SAMPLES {
         assert!(
@@ -328,6 +322,33 @@ fn the_samples_are_documents_of_the_corpus() {
             "{} is sampled twice",
             sample.document.name
         );
+    }
+}
+
+/// Every document the corpus holds: the reader corpus and the writer-only documents beside it, so
+/// neither list has to be repeated where one set of names is wanted.
+fn corpus_names() -> std::collections::BTreeSet<&'static str> {
+    document_parity::corpus::reader_documents()
+        .into_iter()
+        .chain(document_parity::corpus::writer_documents())
+        .map(|document| document.name)
+        .collect()
+}
+
+#[test]
+fn every_writer_case_document_is_in_the_corpus() {
+    // `writer_documents()` states the inputs a writer case builds. A document a case adds without
+    // joining one of the two lists would leave the sample check unable to name it, and a future
+    // sample naming it would fail as 'sampled but is not in the corpus'.
+    let corpus = corpus_names();
+    for case in document_parity::corpus::writer_cases() {
+        for document in &case.documents {
+            assert!(
+                corpus.contains(document.name),
+                "{} is built by a writer case but is in neither document list",
+                document.name
+            );
+        }
     }
 }
 

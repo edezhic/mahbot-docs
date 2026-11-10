@@ -18,17 +18,13 @@ pub const CRATE_WRITER: &[&str] = &[
     "pdf_rotate",
     "pdf_crop",
     "pdf_resize",
-];
-
-/// The operations the writing half does not deliver. Every unjudged corpus case must name one.
-pub const NOT_YET_DELIVERED: &[&str] = &[
-    "create",
-    "fill_template",
-    "pptx_edit",
     "pdf_text",
     "pdf_image",
     "pdf_form_fill",
 ];
+
+/// The operations the writing half does not deliver. Every unjudged corpus case must name one.
+pub const NOT_YET_DELIVERED: &[&str] = &["create", "fill_template", "pptx_edit"];
 
 /// Whether the crate's writer implements the operation a case exercises.
 #[must_use]

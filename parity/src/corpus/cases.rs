@@ -7,16 +7,22 @@
 //! produced document: an effect that only a no-op could satisfy is not a check.
 
 use super::documents::{
-    BASIC_DOCX, BASIC_PDF, BASIC_PPTX, BASIC_XLSX, BROKEN_FORM_PDF, DAMAGED_BODY_PDF,
-    DAMAGED_ENCRYPTED_PDF, DAMAGED_INCREMENTAL_PDF, DAMAGED_INDEX_STREAM_PDF,
-    DAMAGED_INDEX_SYNTAX_PDF, DAMAGED_LENGTH_ABSENT_PDF, DAMAGED_LENGTH_LONG_MANY_PDF,
-    DAMAGED_LENGTH_LONG_PDF, DAMAGED_LENGTH_SHORT_PDF, DAMAGED_NO_INDEX_PDF,
-    DAMAGED_OBJECT_STREAM_LENGTH_PDF, DAMAGED_OBJECT_STREAM_PDF, DAMAGED_POINTER_PDF,
-    DAMAGED_ROOT_PDF, DAMAGED_SHIFTED_PDF, DEGENERATE_PAGE_PDF, DOCX_BODYLESS, DOCX_BREAKS,
-    DOCX_BROKEN, DOCX_COLUMNS, DOCX_EDIT, DOCX_MACRO, DOCX_REVISIONS, DOCX_STRICT, ENCRYPTED_PDF,
-    FORM_PDF, MERGE_A_PDF, MERGE_B_PDF, MERGE_C_PDF, NO_GEOMETRY_PDF, OBJECT_STREAM_ASCII_HEX_PDF,
-    OBJECT_STREAM_INFLATED_PDF, OBJECT_STREAM_PDF, PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_PDF,
-    PICTURE_PNG, REPEATED_PAGE_ANNOTATED_PDF, REPEATED_PAGE_PDF, RICH_PDF, ROTATED_PDF,
+    BASIC_DOCX, BASIC_PDF, BASIC_PPTX, BASIC_XLSX, BROKEN_FORM_PDF, BROKEN_PAIR_OPTIONS_FORM_PDF,
+    COMBED_FORM_PDF, COMBED_OVERFLOW_FORM_PDF, DAMAGED_BODY_PDF, DAMAGED_ENCRYPTED_PDF,
+    DAMAGED_INCREMENTAL_PDF, DAMAGED_INDEX_STREAM_PDF, DAMAGED_INDEX_SYNTAX_PDF,
+    DAMAGED_LENGTH_ABSENT_PDF, DAMAGED_LENGTH_LONG_MANY_PDF, DAMAGED_LENGTH_LONG_PDF,
+    DAMAGED_LENGTH_SHORT_PDF, DAMAGED_NO_INDEX_PDF, DAMAGED_OBJECT_STREAM_LENGTH_PDF,
+    DAMAGED_OBJECT_STREAM_PDF, DAMAGED_POINTER_PDF, DAMAGED_ROOT_PDF, DAMAGED_SHIFTED_PDF,
+    DEGENERATE_PAGE_PDF, DOCX_BODYLESS, DOCX_BREAKS, DOCX_BROKEN, DOCX_COLUMNS, DOCX_EDIT,
+    DOCX_MACRO, DOCX_REVISIONS, DOCX_STRICT, EMPTY_CHOICE_FORM_PDF, ENCRYPTED_PDF, FORM_PDF,
+    LISTED_FIELD_FORM_PDF, MAX_LENGTH_FORM_PDF, MERGE_A_PDF, MERGE_B_PDF, MERGE_C_PDF,
+    MISPLACED_FORM_PDF, MULTILINE_FORM_PDF, NO_GEOMETRY_PDF, OBJECT_STREAM_ASCII_HEX_PDF,
+    OBJECT_STREAM_INFLATED_PDF, OBJECT_STREAM_PDF, OPTION_FORM_PDF, PAIRED_OPTIONS_FORM_PDF,
+    PAIRED_RADIO_FORM_PDF, PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_PDF, PICTURE_PNG,
+    PICTURE_STALE_CRC_PNG, PICTURE_WEBP, PUSHBUTTON_CAPTION_FORM_PDF, PUSHBUTTON_FORM_PDF,
+    RADIO_OPTIONS_FORM_PDF, RADIO_OUTRUN_FORM_PDF, RECTLESS_BUTTON_FORM_PDF,
+    RECTLESS_FLAT_FORM_PDF, RECTLESS_FORM_PDF, REPEATED_PAGE_ANNOTATED_PDF, REPEATED_PAGE_PDF,
+    RICH_PDF, ROTATED_PDF, SIGNATURE_FORM_PDF, STATE_APPEARANCE_FORM_PDF, STATED_SIZE_FORM_PDF,
     TEMPLATE_DOCX, TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF, TRUNCATED_XLSX, TWO_CATALOGS_PDF,
     XLSX_ALL_HIDDEN, XLSX_BAD_MERGE_REF, XLSX_BROKEN_MERGES, XLSX_EDIT, XLSX_MACRO,
     XLSX_NO_CONTENT_TYPES, XLSX_NO_FAMILY, XLSX_ONE_VISIBLE, XLSX_ONLY_SHEET, XLSX_SELF_CLOSING,
@@ -4182,15 +4188,36 @@ fn pdf_cases() -> Vec<Case> {
                     field: "agree",
                     value: "Yes",
                 },
+                Effect::FormState {
+                    output: None,
+                    field: "agree",
+                    state: "Yes",
+                },
                 Effect::FormValue {
                     output: None,
                     field: "choice",
                     value: "two",
                 },
+                Effect::FormState {
+                    output: None,
+                    field: "choice",
+                    state: "two",
+                },
                 Effect::FormValue {
                     output: None,
                     field: "colour",
                     value: "green",
+                },
+                // What the appearance draws is the value, read through the font the file states.
+                Effect::FormAppearance {
+                    output: None,
+                    field: "name",
+                    text: "Ada",
+                },
+                Effect::FormAppearance {
+                    output: None,
+                    field: "colour",
+                    text: "green",
                 },
             ],
         ),
@@ -4221,8 +4248,1123 @@ fn pdf_cases() -> Vec<Case> {
                     page: 0,
                     count: 5,
                 },
+                // The drawn text is what a flattened form is judged by.
+                Effect::PageAppearanceText {
+                    output: None,
+                    page: 0,
+                    text: "Ada",
+                },
+                Effect::PageAppearanceText {
+                    output: None,
+                    page: 0,
+                    text: "green",
+                },
             ],
         ),
+        // ── drawing text into a page ────────────────────────────────────────────────────────────
+        produced(
+            Family::Pdf,
+            "pdf_text",
+            Some("stamp"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_text",
+                "input": "$in/basic.pdf",
+                "text": "AVATAR",
+                "pages": [1],
+                "x": 100,
+                "y": 200,
+                "size": 24,
+                "color": "FF0000",
+                "rotate": 0,
+                "stamp": true,
+                "output": "$out/stamped.pdf",
+            }),
+            vec!["stamped.pdf"],
+            vec![
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "AVATAR",
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 1,
+                    text: "Page two text",
+                },
+            ],
+        )
+        .named("stamp"),
+        produced(
+            Family::Pdf,
+            "pdf_text",
+            Some("defaults"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_text",
+                "input": "$in/basic.pdf",
+                "text": "Привет Ω",
+                "pages": [1],
+                "output": "$out/text.pdf",
+            }),
+            vec!["text.pdf"],
+            vec![Effect::PageText {
+                output: None,
+                page: 0,
+                text: "Привет Ω",
+            }],
+        )
+        .named("defaults"),
+        produced(
+            Family::Pdf,
+            "pdf_text",
+            Some("missing_glyphs"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_text",
+                "input": "$in/basic.pdf",
+                "text": "AB漢CD",
+                "pages": [1],
+                "x": 100,
+                "y": 200,
+                "output": "$out/text.pdf",
+            }),
+            vec!["text.pdf"],
+            vec![Effect::PageText {
+                output: None,
+                page: 0,
+                text: "AB",
+            }],
+        )
+        .named("missing_glyphs"),
+        produced(
+            Family::Pdf,
+            "pdf_text",
+            Some("off_page"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_text",
+                "input": "$in/basic.pdf",
+                "text": "Off the page",
+                "pages": [1],
+                "x": -100,
+                "y": 100,
+                "size": 24,
+                "output": "$out/text.pdf",
+            }),
+            vec!["text.pdf"],
+            vec![Effect::PageText {
+                output: None,
+                page: 0,
+                text: "Off the page",
+            }],
+        )
+        .named("off_page"),
+        produced(
+            Family::Pdf,
+            "pdf_text",
+            Some("described"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_text",
+                "input": "$in/basic.pdf",
+                "text": "Hello",
+                "pages": [1],
+                "x": 100,
+                "y": 200,
+                "metadata": {
+                    "title": "Stamped",
+                    "author": "Ada",
+                    "subject": "Text",
+                    "keywords": "stamp",
+                },
+                "output": "$out/text.pdf",
+            }),
+            vec!["text.pdf"],
+            vec![
+                Effect::Info { output: None, key: "title", value: "Stamped" },
+                Effect::Info { output: None, key: "author", value: "Ada" },
+                Effect::Info { output: None, key: "subject", value: "Text" },
+                Effect::Info { output: None, key: "keywords", value: "stamp" },
+            ],
+        )
+        .named("described"),
+        declined(
+            Family::Pdf,
+            "pdf_text",
+            Some("size"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_text",
+                "input": "$in/basic.pdf",
+                "text": "Hello",
+                "pages": [1],
+                "size": 0,
+                "output": "$out/text.pdf",
+            }),
+            vec!["text.pdf"],
+            Expect::Refused(Reason::contains(
+                "\"size\" must be greater than 0 and at most 20000 points, got 0",
+            )),
+        )
+        .named("refused_size"),
+        declined(
+            Family::Pdf,
+            "pdf_text",
+            Some("color"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_text",
+                "input": "$in/basic.pdf",
+                "text": "Hello",
+                "pages": [1],
+                "color": "red",
+                "output": "$out/text.pdf",
+            }),
+            vec!["text.pdf"],
+            Expect::Refused(Reason::contains(
+                "color must be 6 hex digits, with an optional leading \"#\", got: red",
+            )),
+        )
+        .named("refused_color"),
+        declined(
+            Family::Pdf,
+            "pdf_text",
+            Some("opacity"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_text",
+                "input": "$in/basic.pdf",
+                "text": "Hello",
+                "pages": [1],
+                "opacity": 0,
+                "output": "$out/text.pdf",
+            }),
+            vec!["text.pdf"],
+            Expect::Refused(Reason::contains(
+                "\"opacity\" must be greater than 0 and at most 1, got: 0",
+            )),
+        )
+        .named("refused_opacity"),
+        declined(
+            Family::Pdf,
+            "pdf_text",
+            Some("point"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_text",
+                "input": "$in/basic.pdf",
+                "text": "Hello",
+                "pages": [1],
+                "x": 20001,
+                "output": "$out/text.pdf",
+            }),
+            vec!["text.pdf"],
+            Expect::Refused(Reason::contains(
+                "\"x\" must be within ±20000 points, got 20001",
+            )),
+        )
+        .named("refused_point"),
+        // ── placing a picture ───────────────────────────────────────────────────────────────────
+        produced(
+            Family::Pdf,
+            "pdf_image",
+            Some("png_fitted"),
+            vec![PICTURE_PDF, PICTURE_PNG],
+            json!({
+                "op": "pdf_image",
+                "input": "$in/picture.pdf",
+                "image": "$in/picture.png",
+                "pages": [1],
+                "output": "$out/drawn.pdf",
+            }),
+            vec!["drawn.pdf"],
+            vec![Effect::PageImages {
+                output: None,
+                page: 0,
+                count: 2,
+            }],
+        )
+        .named("png_fitted"),
+        // The same picture with one byte of its image chunk's checksum flipped: the reference's
+        // decoder never checks one, so the writer embeds it rather than refusing a damaged file.
+        produced(
+            Family::Pdf,
+            "pdf_image",
+            Some("stale_crc"),
+            vec![PICTURE_PDF, PICTURE_STALE_CRC_PNG],
+            json!({
+                "op": "pdf_image",
+                "input": "$in/picture.pdf",
+                "image": "$in/stale-crc.png",
+                "pages": [1],
+                "output": "$out/drawn.pdf",
+            }),
+            vec!["drawn.pdf"],
+            vec![Effect::PageImages {
+                output: None,
+                page: 0,
+                count: 2,
+            }],
+        )
+        .named("stale_crc"),
+        produced(
+            Family::Pdf,
+            "pdf_image",
+            Some("png_sized"),
+            vec![PICTURE_PDF, PICTURE_PNG],
+            json!({
+                "op": "pdf_image",
+                "input": "$in/picture.pdf",
+                "image": "$in/picture.png",
+                "pages": [1],
+                "x": 50,
+                "y": 50,
+                "width": 120,
+                "output": "$out/drawn.pdf",
+            }),
+            vec!["drawn.pdf"],
+            vec![
+                Effect::PageImages {
+                    output: None,
+                    page: 0,
+                    count: 2,
+                },
+                Effect::ImagePlacement {
+                    output: None,
+                    page: 0,
+                    index: 1,
+                    matrix: [120.0, 0.0, 0.0, 60.0, 50.0, 50.0],
+                },
+            ],
+        )
+        .named("png_sized"),
+        produced(
+            Family::Pdf,
+            "pdf_image",
+            Some("turned"),
+            vec![ROTATED_PDF, PICTURE_PNG],
+            json!({
+                "op": "pdf_image",
+                "input": "$in/rotated.pdf",
+                "image": "$in/picture.png",
+                "pages": [1],
+                "output": "$out/drawn.pdf",
+            }),
+            vec!["drawn.pdf"],
+            vec![
+                Effect::PageImages {
+                    output: None,
+                    page: 0,
+                    count: 1,
+                },
+                Effect::PageRotate {
+                    output: None,
+                    page: 0,
+                    degrees: 90,
+                },
+                Effect::ImagePlacement {
+                    output: None,
+                    page: 0,
+                    index: 0,
+                    matrix: [0.0, 3.0, -1.5, 0.0, 57.5, 56.0],
+                },
+            ],
+        )
+        .named("turned"),
+        produced(
+            Family::Pdf,
+            "pdf_image",
+            Some("off_page"),
+            vec![PICTURE_PDF, PICTURE_PNG],
+            json!({
+                "op": "pdf_image",
+                "input": "$in/picture.pdf",
+                "image": "$in/picture.png",
+                "pages": [1],
+                "x": -50,
+                "y": 50,
+                "width": 120,
+                "output": "$out/drawn.pdf",
+            }),
+            vec!["drawn.pdf"],
+            vec![Effect::PageImages {
+                output: None,
+                page: 0,
+                count: 2,
+            }],
+        )
+        .named("off_page"),
+        produced(
+            Family::Pdf,
+            "pdf_image",
+            Some("described"),
+            vec![PICTURE_PDF, PICTURE_JPEG],
+            json!({
+                "op": "pdf_image",
+                "input": "$in/picture.pdf",
+                "image": "$in/picture.jpg",
+                "pages": [1],
+                "width": 100,
+                "height": 50,
+                "metadata": { "title": "Placed", "author": "Ada" },
+                "output": "$out/drawn.pdf",
+            }),
+            vec!["drawn.pdf"],
+            vec![
+                Effect::Info { output: None, key: "title", value: "Placed" },
+                Effect::Info { output: None, key: "author", value: "Ada" },
+            ],
+        )
+        .named("described"),
+        declined(
+            Family::Pdf,
+            "pdf_image",
+            Some("webp"),
+            vec![PICTURE_PDF, PICTURE_WEBP],
+            json!({
+                "op": "pdf_image",
+                "input": "$in/picture.pdf",
+                "image": "$in/picture.webp",
+                "pages": [1],
+                "output": "$out/drawn.pdf",
+            }),
+            vec!["drawn.pdf"],
+            Expect::Refused(Reason::contains(
+                "a PDF cannot embed picture.webp: a PDF holds a picture as PNG or JPEG — convert the WebP picture first",
+            )),
+        )
+        .named("refused_webp"),
+        declined(
+            Family::Pdf,
+            "pdf_image",
+            Some("broken_png"),
+            vec![PICTURE_PDF, PICTURE_BROKEN_PNG],
+            json!({
+                "op": "pdf_image",
+                "input": "$in/picture.pdf",
+                "image": "$in/broken.png",
+                "pages": [1],
+                "output": "$out/drawn.pdf",
+            }),
+            vec!["drawn.pdf"],
+            Expect::Refused(Reason::contains(
+                "cannot embed broken.png as a PNG image: the file's bytes are not a whole PNG image",
+            )),
+        )
+        .named("refused_broken_png"),
+        declined(
+            Family::Pdf,
+            "pdf_image",
+            Some("side"),
+            vec![PICTURE_PDF, PICTURE_PNG],
+            json!({
+                "op": "pdf_image",
+                "input": "$in/picture.pdf",
+                "image": "$in/picture.png",
+                "pages": [1],
+                "width": 0,
+                "output": "$out/drawn.pdf",
+            }),
+            vec!["drawn.pdf"],
+            Expect::Refused(Reason::contains(
+                "an image's width and height must be greater than 0 and at most 20000 points, got: 0",
+            )),
+        )
+        .named("refused_side"),
+        declined(
+            Family::Pdf,
+            "pdf_image",
+            Some("implied_side"),
+            vec![PICTURE_PDF, PICTURE_PNG],
+            json!({
+                "op": "pdf_image",
+                "input": "$in/picture.pdf",
+                "image": "$in/picture.png",
+                "pages": [1],
+                "height": 20000,
+                "output": "$out/drawn.pdf",
+            }),
+            vec!["drawn.pdf"],
+            Expect::Refused(Reason::contains(
+                "an image's width implied by its height must be greater than 0 and at most 20000 points, got: 40000",
+            )),
+        )
+        .named("refused_implied_side"),
+        // ── filling a form ──────────────────────────────────────────────────────────────────────
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("greek"),
+            vec![FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/form.pdf",
+                "values": { "name": "Привет Ω" },
+                "flatten": false,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![
+                Effect::FormValue { output: None, field: "name", value: "Привет Ω" },
+                Effect::FormAppearance { output: None, field: "name", text: "Привет Ω" },
+            ],
+        )
+        .named("greek"),
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("undrawable"),
+            vec![FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/form.pdf",
+                "values": { "name": "漢字" },
+                "flatten": false,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![Effect::FormValue {
+                output: None,
+                field: "name",
+                value: "漢字",
+            }],
+        )
+        .named("undrawable"),
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("buttons"),
+            vec![FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/form.pdf",
+                "values": { "agree": false, "choice": "one" },
+                "flatten": false,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![
+                Effect::FormValue { output: None, field: "agree", value: "Off" },
+                Effect::FormState { output: None, field: "agree", state: "Off" },
+                Effect::FormValue { output: None, field: "choice", value: "one" },
+                Effect::FormState { output: None, field: "choice", state: "one" },
+            ],
+        )
+        .named("buttons"),
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("flatten_greek"),
+            vec![FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/form.pdf",
+                "values": {
+                    "name": "Привет Ω",
+                    "agree": true,
+                    "choice": "two",
+                    "colour": "green",
+                },
+                "flatten": true,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![
+                Effect::FormFlattened { output: None },
+                Effect::PageForms { output: None, page: 0, count: 5 },
+                Effect::PageAppearanceText { output: None, page: 0, text: "Привет Ω" },
+            ],
+        )
+        .named("flatten_greek"),
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("described"),
+            vec![FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/form.pdf",
+                "values": { "name": "Ada" },
+                "flatten": false,
+                "metadata": { "title": "Filled", "subject": "Form" },
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![
+                Effect::Info { output: None, key: "title", value: "Filled" },
+                Effect::Info { output: None, key: "subject", value: "Form" },
+            ],
+        )
+        .named("described"),
+        declined(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("missing_field"),
+            vec![FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/form.pdf",
+                "values": { "nope": "x" },
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            Expect::Refused(Reason::contains(
+                "no such form field: nope; this document has: name (text), agree (checkbox), \
+                 choice (radio; options: one, two), colour (choice; options: red, green, blue)",
+            )),
+        )
+        .named("refused_missing_field"),
+        declined(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("unfillable"),
+            vec![PUSHBUTTON_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/pushbutton-form.pdf",
+                "values": { "button": "x" },
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            Expect::Refused(Reason::contains(
+                "form field \"button\" cannot take a value — it is not a fillable field; \
+                 this document has: no fillable fields",
+            )),
+        )
+        .named("refused_unfillable"),
+        declined(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("option"),
+            vec![OPTION_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/option-form.pdf",
+                "values": { "fruit": "plum" },
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            Expect::Refused(Reason::contains(
+                "form field \"fruit\" takes one of: apple, pear; got: plum",
+            )),
+        )
+        .named("refused_option"),
+        declined(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("no_choice"),
+            vec![EMPTY_CHOICE_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/empty-choice-form.pdf",
+                "values": { "fruit": "apple" },
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            Expect::Refused(Reason::contains(
+                "form field \"fruit\" offers no choice to select; this document has: note (text)",
+            )),
+        )
+        .named("refused_no_choice"),
+        declined(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("checkbox_state"),
+            vec![FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/form.pdf",
+                "values": { "agree": "Yes" },
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            Expect::Refused(Reason::contains(
+                "form field \"agree\" is a checkbox and takes true or false, got: \"Yes\"",
+            )),
+        )
+        .named("refused_checkbox_state"),
+        declined(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("structure"),
+            vec![FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/form.pdf",
+                "values": { "name": { "first": "Ada" } },
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            Expect::Refused(Reason::contains(
+                "the value for \"name\" must be text, a number or a boolean, not a structure",
+            )),
+        )
+        .named("refused_structure"),
+        // ── the shapes a fill's appearance lays out ──────────────────────────────────────────────
+        // A multi-line field wraps its value at the size the reference's fitter chooses: the
+        // appearance is an array of runs, so the split itself is part of the record.
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("multiline"),
+            vec![MULTILINE_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/multiline-form.pdf",
+                "values": { "name": "the quick brown fox jumps over the lazy dog" },
+                "flatten": false,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![
+                Effect::FormValue {
+                    output: None,
+                    field: "name",
+                    value: "the quick brown fox jumps over the lazy dog",
+                },
+                Effect::FormAppearance {
+                    output: None,
+                    field: "name",
+                    text: "the quick brown",
+                },
+            ],
+        )
+        .named("multiline"),
+        // A single-line field merges its value's line breaks: the whole value is drawn on one line.
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("newline"),
+            vec![FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/form.pdf",
+                "values": { "name": "line one\nline two" },
+                "flatten": false,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![Effect::FormAppearance {
+                output: None,
+                field: "name",
+                text: "line one line two",
+            }],
+        )
+        .named("newline"),
+        // A text field whose normal appearance is a state dictionary rather than a stream: the
+        // reference regenerates it, so the value is what the appearance draws.
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("state_appearance"),
+            vec![STATE_APPEARANCE_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/state-appearance-form.pdf",
+                "values": { "name": "Ada" },
+                "flatten": false,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![Effect::FormAppearance {
+                output: None,
+                field: "name",
+                text: "Ada",
+            }],
+        )
+        .named("state_appearance"),
+        // The same field stating a 9-point size: the value wraps where that size puts it, which is
+        // a different split from the fitted one.
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("stated_size"),
+            vec![STATED_SIZE_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/stated-size-form.pdf",
+                "values": { "name": "the quick brown fox jumps over the lazy dog" },
+                "flatten": false,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![Effect::FormAppearance {
+                output: None,
+                field: "name",
+                text: "the quick brown fox",
+            }],
+        )
+        .named("stated_size"),
+        // A value past the field's own `/MaxLen`: the library's own failure, in its own words.
+        declined(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("max_length"),
+            vec![MAX_LENGTH_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/max-length-form.pdf",
+                "values": { "name": "longer" },
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            Expect::Failed(Reason::contains(
+                "Attempted to set text with length=6 for TextField with maxLength=3 and name=name",
+            )),
+        )
+        .named("refused_max_length"),
+        // A combed field draws one character per cell: the appearance is one run per character,
+        // not the value as one line.
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("combed"),
+            vec![COMBED_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/combed-form.pdf",
+                "values": { "name": "abc" },
+                "flatten": false,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![
+                Effect::FormValue {
+                    output: None,
+                    field: "name",
+                    value: "abc",
+                },
+                Effect::FormAppearance {
+                    output: None,
+                    field: "name",
+                    text: "c",
+                },
+            ],
+        )
+        .named("combed"),
+        // A combed value wider than its `/MaxLen` cells: the reference's own layout failure, in
+        // its own words, raised while the call regenerates the field's appearance.
+        declined(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("combed_overflow"),
+            vec![COMBED_OVERFLOW_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/combed-overflow-form.pdf",
+                "values": { "other": "ok" },
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            Expect::Failed(Reason::contains(
+                "Failed to layout combed text as lineLength=4 is greater than cellCount=3",
+            )),
+        )
+        .named("refused_combed_overflow"),
+        // A push button's caption is drawn into its appearance on every fill.
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("pushbutton"),
+            vec![PUSHBUTTON_CAPTION_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/pushbutton-caption-form.pdf",
+                "values": { "name": "Ada" },
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![
+                Effect::FormValue {
+                    output: None,
+                    field: "name",
+                    value: "Ada",
+                },
+                Effect::FormAppearance {
+                    output: None,
+                    field: "send",
+                    text: "Send",
+                },
+            ],
+        )
+        .named("pushbutton_caption"),
+        // An option list's appearance draws every option it offers, not only the selected one.
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("option_list"),
+            vec![OPTION_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/option-form.pdf",
+                "values": { "fruit": "pear" },
+                "flatten": false,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![
+                Effect::FormValue {
+                    output: None,
+                    field: "fruit",
+                    value: "pear",
+                },
+                Effect::FormAppearance {
+                    output: None,
+                    field: "fruit",
+                    text: "apple",
+                },
+                Effect::FormAppearance {
+                    output: None,
+                    field: "fruit",
+                    text: "pear",
+                },
+            ],
+        )
+        .named("option_list"),
+        // An option list whose `/Opt` entries are `[value, display]` pairs: the appearance lists
+        // each pair's display name, not the value the fill was given.
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("paired_options"),
+            vec![PAIRED_OPTIONS_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/paired-options-form.pdf",
+                "values": { "choice": "Two" },
+                "flatten": false,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![
+                Effect::FormValue {
+                    output: None,
+                    field: "choice",
+                    value: "Two",
+                },
+                Effect::FormAppearance {
+                    output: None,
+                    field: "choice",
+                    text: "One",
+                },
+                Effect::FormAppearance {
+                    output: None,
+                    field: "choice",
+                    text: "Two",
+                },
+            ],
+        )
+        .named("paired_options"),
+        // A pair whose second entry is a number rather than text: the library faults while it reads
+        // the options, so the sentence is its own and the case asserts the class alone.
+        declined(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("broken_pair_options"),
+            vec![BROKEN_PAIR_OPTIONS_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/broken-pair-options-form.pdf",
+                "values": { "choice": "two" },
+                "flatten": false,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            Expect::Failed(Reason::third_party()),
+        ),
+        // A radio group whose `/Opt` entries are pairs: the library's export-value reader takes
+        // only top-level strings, so the group offers no option to select and the fill is refused.
+        declined(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("paired_radio"),
+            vec![PAIRED_RADIO_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/paired-radio-form.pdf",
+                "values": { "choice": "One" },
+                "flatten": false,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            Expect::Refused(Reason::contains("offers no choice to select")),
+        ),
+        // A widget that states no rectangle: the library reads it before it lays the value out, so
+        // the fill faults and leaves nothing behind.
+        declined(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("rectless"),
+            vec![RECTLESS_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/rectless-form.pdf",
+                "values": { "name": "Ada" },
+                "flatten": false,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            Expect::Failed(Reason::third_party()),
+        ),
+        // The same shape for a button: its appearance provider reads the rectangle before it draws
+        // the mark, so setting the box faults rather than drawing one in a box the file never
+        // stated.
+        declined(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("rectless_button"),
+            vec![RECTLESS_BUTTON_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/rectless-button-form.pdf",
+                "values": { "agree": true },
+                "flatten": false,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            Expect::Failed(Reason::third_party()),
+        ),
+        // A button that carries an appearance but no rectangle is not regenerated, so the fault is
+        // the flatten's own rectangle read rather than the fill's.
+        declined(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("rectless_flatten"),
+            vec![RECTLESS_FLAT_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/rectless-flat-form.pdf",
+                "values": { "name": "Ada" },
+                "flatten": true,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            Expect::Failed(Reason::third_party()),
+        ),
+        // A signature field's appearance is never regenerated, so the flatten's own appearance read
+        // is what faults: a widget it cannot resolve is not one it skips.
+        declined(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("signature"),
+            vec![SIGNATURE_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/signature-form.pdf",
+                "values": { "name": "Ada" },
+                "flatten": true,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            Expect::Failed(Reason::third_party()),
+        ),
+        // A field listed as an annotation beside the widget it owns is removed from the list as
+        // well, so a flattened page lists neither.
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("listed_field"),
+            vec![LISTED_FIELD_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/listed-field-form.pdf",
+                "values": { "name": "Ada" },
+                "flatten": true,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![
+                Effect::PageForms {
+                    output: None,
+                    page: 0,
+                    count: 1,
+                },
+                Effect::PageAppearanceText {
+                    output: None,
+                    page: 0,
+                    text: "Ada",
+                },
+            ],
+        )
+        .named("listed_field"),
+        // A widget whose `/P` names an object that is not a page: the page it is painted on is the
+        // one whose annotations list it, as the reference's own fallback finds it.
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("misplaced"),
+            vec![MISPLACED_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/misplaced-form.pdf",
+                "values": { "name": "Ada" },
+                "flatten": true,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![
+                Effect::PageForms {
+                    output: None,
+                    page: 0,
+                    count: 1,
+                },
+                Effect::PageAppearanceText {
+                    output: None,
+                    page: 0,
+                    text: "Ada",
+                },
+            ],
+        )
+        .named("misplaced"),
+        // A radio group's `/Opt` names the option; the state its widget shows is the on-state at
+        // the same index, and `/V` names that state rather than the export value.
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("radio_options"),
+            vec![RADIO_OPTIONS_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/radio-options-form.pdf",
+                "values": { "choice": "Two" },
+                "flatten": false,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![
+                Effect::FormValue {
+                    output: None,
+                    field: "choice",
+                    value: "1",
+                },
+                Effect::FormState {
+                    output: None,
+                    field: "choice",
+                    state: "1",
+                },
+            ],
+        )
+        .named("radio_options"),
+        // The export value that outruns the group's on-states: the reference refuses it with the
+        // library's own message, and nothing is written.
+        declined(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("radio_outrun"),
+            vec![RADIO_OUTRUN_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/radio-outrun-form.pdf",
+                "values": { "choice": "Three" },
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            Expect::Refused(Reason::template(
+                "form field \"choice\" cannot take \"Three\": {}",
+            )),
+        )
+        .named("refused_radio_outrun"),
     ];
     // A file whose body is intact and whose index is not: the reference never consults the index, so
     // all five actions answer from the body alone, and the produced file must hold both pages.

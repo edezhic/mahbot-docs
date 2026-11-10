@@ -26,7 +26,7 @@ crate the harness depends on. `cargo test -p document-engine` runs the crate's o
 its vocabulary restatement scan) without the harness.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 277 cases and 91 readings — takes about a minute; the whole
+managed runtime. A full pass — 327 cases and 91 readings — takes about a minute; the whole
 test suite, which runs the corpus twice for its determinism check, takes a couple of minutes.
 
 `parity --engine noop` runs the same corpus against the do-nothing engine. That engine exists only
@@ -58,7 +58,7 @@ shown as `SKIP`, not failed, and a run that judged no case at all is not a pass.
 | `tests/engine_contract.rs` | The engine crate's contract, proved from here: its vocabulary is the reference's data, its result shapes carry every recorded field, its closed operation set holds every corpus operation and edit, the reference copies are byte-for-byte the product's, and the host's media tables are the product's own. |
 | `tests/coverage.rs` | The corpus's depth: every reading mark is witnessed by a recorded reading or recorded as unproducible with its reason, every mark only the writing half prints is witnessed by a recorded case's answer or recorded unreached with its reason, neither ledger's "not produced" side names a mark a recorded answer really prints, every per-family failure verdict is witnessed, and every corpus document is in the baseline. |
 | `tests/teeth.rs` | The comparison has teeth: a reading or a produced case altered in any single compared field — a picture dropped, a note or a loss reworded, an output renamed, a produced file's content changed, a status flipped — fails it, and so does a detection answer changed for one input. |
-| `baseline/baseline.json` | The recorded reference (about 6.8 MB of canonical documents). |
+| `baseline/baseline.json` | The recorded reference (about 6.9 MB of canonical documents). |
 | `src/bin/parity.rs`, `src/bin/record-baseline.rs` | The gate and the deliberate recorder. |
 
 The reader sources are **copies** under `src/reference_sources/`, byte for byte those of
@@ -260,6 +260,28 @@ builders have one home in `document_engine::test_support`, which the crate's own
   area of the wrong shape, outside the page or degenerate, a side a page cannot be fitted into, a
   description value that is not text, an encrypted file, a page with no visible area, a page the
   document does not have and an input that is a PDF by its magic bytes alone;
+- the three PDF drawing actions: text drawn with defaults, with Greek and Cyrillic, with a
+  character the font lacks (the answer lists it), inside a stamp, and off the page (the note names
+  the page); a picture fitted whole, sized by one side, placed off the page and turned with a
+  rotated page, and one whose image chunk carries a damaged checksum (the reference embeds it, so
+  the writer does too); a picture refused as WebP or as a broken PNG, and a side or implied side
+  outside the rule; a form filled and kept, filled and flattened (with its appearance text read),
+  with a Greek-and-Cyrillic value, with a value the font cannot draw, with a checkbox and a radio
+  set by their states, with a radio whose export value names its widget's on-state and one whose
+  option outruns the states it has, with a field listed as an annotation beside the widget it owns
+  (the flatten removes both references), with a widget whose `/P` names no page (the flatten
+  reaches the page whose annotations list it), with a multi-line field wrapped at the fitted size
+  and another wrapped at the size it states, with a value past the field's own `/MaxLen`, with a
+  combed field drawn one character per cell, with an option list drawing every option it offers,
+  with one whose `/Opt` entries are value-and-display pairs (the appearance lists the display
+  name), with a push button whose caption is drawn into its appearance, and described; and the
+  form refusals — a missing field with its catalogue, a pushbutton, an option outside the list, an
+  option list with no choice, a checkbox given a state name, a structured value, a combed value
+  wider than its cells (the reference's own layout failure), a pair whose display entry is not
+  text, a text widget that states no rectangle, a button that states none and is regenerated, and
+  a button that states none while flattening, a signature field whose appearance is never
+  regenerated (the library's own failures), and a radio group whose `/Opt` entries are pairs, which
+  names no export value and so offers no choice;
 - the failure side: requests the engine refuses as the caller's to fix, and one it accepts and
   fails to carry out (a PDF whose `/AcroForm` is not a dictionary).
 
@@ -304,9 +326,11 @@ each compared field in turn:
 - **what is compared**: for an OOXML package, the part names and, per part, an XML tree (element
   names, attributes, text in document order) or a binary digest; for a PDF, page boxes, rotation,
   the text each page draws (resolved through the font's `ToUnicode` map where it has one), the
-  images it paints (by the digest of their decoded samples), the form XObjects it paints (by the
-  digest of their decoded content — a flattened field's appearance is one), a digest of its vector
-  operators, its annotations, its description, its form fields and its attachments.
+  images it paints (by the digest of their decoded samples and the transform each is painted
+  under, so its size, place and turn are compared), how many form XObjects it paints, the text
+  those forms draw (a flattened field's value), a digest of its vector operators, its annotations,
+  its description, its form fields (value, options, shown appearance state and the text each
+  appearance draws) and its attachments.
 - **what is normalised away**: archive entry order, timestamps and compression; Word's `w:rsid*`,
   `w:paraId`/`w:textId`/`w:tblId` and the `w14:`/`wp14:` spellings; relationship ids (references
   are rewritten to the relationship's own key); generated media file names (replaced by a name
@@ -314,7 +338,8 @@ each compared field in turn:
   `dcterms:created`/`dcterms:modified` and `cp:revision`; `docProps/app.xml` and
   `docProps/custom.xml` entirely; whitespace-only text between elements; entity spelling; in a PDF,
   object numbers, the cross-reference layout, `/Length`, stream compression, the trailer `/ID`,
-  `/CreationDate`, `/ModDate`, `/Creator`, `/Producer` and every appearance stream.
+  `/CreationDate`, `/ModDate`, `/Creator`, `/Producer`, an appearance's own operators and font
+  identity, and the form content a page paints.
 - **what is compared byte for byte**: an embedded binary part, by SHA-256 and length.
 
 A comparison that cannot decide says so instead of passing: a document the model cannot canonicalise
@@ -334,8 +359,13 @@ change compares unequal at a named path.
 - A page's text is what its own content stream draws. A document that draws its text as vector
   outlines reads as a page with no text and reports a text difference — a difference, never a
   pass.
-- A form XObject's content is not walked into; the page's own operators are, and a painted form is
-  recorded by the digest of its content.
+- A form XObject's own operators are not compared; a page that paints a form is counted, and the
+  text the form draws is read through the font its resources state. A form that draws only vector
+  marks is therefore told apart from one that draws nothing, but not from a different vector mark.
+- An appearance's text is decoded through the character map the file states, and a code that map
+  does not name contributes nothing; the font must carry an embedded program. The blind spot is
+  stated: an appearance that declares consistent characters and draws the wrong outlines is not
+  detected, because no glyph outline is compared.
 - A drawn string is decoded through its font's `ToUnicode` map as two-byte codes (the Identity-H
   encoding every engine in this corpus writes). A one-byte font with such a map would decode its
   codes pairwise; the model states the assumption rather than guessing per font.

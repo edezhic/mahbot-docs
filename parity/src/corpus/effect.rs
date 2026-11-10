@@ -244,6 +244,32 @@ pub enum Effect {
         page: usize,
         count: usize,
     },
+    /// The text a form XObject the page paints draws, as the model reads an appearance: the
+    /// characters its stated map names. A flattened field's value is drawn this way.
+    PageAppearanceText {
+        output: Option<&'static str>,
+        page: usize,
+        text: &'static str,
+    },
+    /// The transform one of a page's painted images is drawn under, as `[a, b, c, d, e, f]`.
+    ImagePlacement {
+        output: Option<&'static str>,
+        page: usize,
+        index: usize,
+        matrix: [f64; 6],
+    },
+    /// A form field's shown appearance state: the `/AS` of a checkbox or a radio.
+    FormState {
+        output: Option<&'static str>,
+        field: &'static str,
+        state: &'static str,
+    },
+    /// The text a form field's appearance draws.
+    FormAppearance {
+        output: Option<&'static str>,
+        field: &'static str,
+        text: &'static str,
+    },
     /// The PDF's description: `title`, `author`, `subject` or `keywords`.
     Info {
         output: Option<&'static str>,
@@ -653,10 +679,65 @@ impl Effect {
                 let entry = page_of(value, page)?;
                 let found = entry
                     .get("forms")
-                    .and_then(Value::as_array)
-                    .map_or(0, Vec::len);
+                    .and_then(Value::as_u64)
+                    .map_or(0, |n| usize::try_from(n).unwrap_or(usize::MAX));
                 expect(found == count, || {
                     format!("page {} paints {found} forms, expected {count}", page + 1)
+                })
+            }
+            Self::PageAppearanceText { page, text, .. } => {
+                let entry = page_of(value, page)?;
+                let found = entry
+                    .get("appearance_text")
+                    .and_then(Value::as_array)
+                    .map(|runs| {
+                        runs.iter()
+                            .filter_map(Value::as_str)
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .unwrap_or_default();
+                expect(found.contains(text), || {
+                    format!(
+                        "page {} draws no appearance text {text:?} (it draws {found:?})",
+                        page + 1
+                    )
+                })
+            }
+            Self::ImagePlacement {
+                page,
+                index,
+                matrix,
+                ..
+            } => {
+                let entry = page_of(value, page)?;
+                let found = entry
+                    .get("images")
+                    .and_then(Value::as_array)
+                    .and_then(|images| images.get(index))
+                    .and_then(|image| image.get("placement"))
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                let wanted = Value::from(matrix.to_vec());
+                expect(found == wanted, || {
+                    format!(
+                        "page {} image {index} is placed {found}, expected {wanted}",
+                        page + 1
+                    )
+                })
+            }
+            Self::FormState { field, state, .. } => {
+                let found = form_field_part(value, field, "state")?;
+                expect(found == state, || {
+                    format!("form field {field:?} shows state {found:?}, expected {state:?}")
+                })
+            }
+            Self::FormAppearance { field, text, .. } => {
+                let found = form_field_part(value, field, "appearance")?;
+                expect(found.contains(text), || {
+                    format!(
+                        "form field {field:?} draws no appearance text {text:?} (it draws {found:?})"
+                    )
                 })
             }
             Self::Info {
@@ -726,8 +807,12 @@ impl Effect {
             | Self::PageText { output, .. }
             | Self::PageImages { output, .. }
             | Self::PageForms { output, .. }
+            | Self::PageAppearanceText { output, .. }
+            | Self::ImagePlacement { output, .. }
             | Self::Info { output, .. }
             | Self::FormValue { output, .. }
+            | Self::FormState { output, .. }
+            | Self::FormAppearance { output, .. }
             | Self::FormFlattened { output }
             | Self::ParagraphAttribute { output, .. }
             | Self::ImageParts { output, .. } => output,
@@ -867,8 +952,23 @@ impl Effect {
             Self::PageForms { page, count, .. } => {
                 format!("page {} paints {count} form(s)", page + 1)
             }
+            Self::PageAppearanceText { page, text, .. } => {
+                format!("page {} draws appearance text {text:?}", page + 1)
+            }
+            Self::ImagePlacement {
+                page,
+                index,
+                matrix,
+                ..
+            } => format!("page {} image {index} is placed {matrix:?}", page + 1),
             Self::Info { key, value, .. } => format!("{key} = {value:?}"),
             Self::FormValue { field, value, .. } => format!("form field {field:?} = {value:?}"),
+            Self::FormState { field, state, .. } => {
+                format!("form field {field:?} shows {state:?}")
+            }
+            Self::FormAppearance { field, text, .. } => {
+                format!("form field {field:?} draws {text:?}")
+            }
             Self::FormFlattened { .. } => "form flattened".to_string(),
             Self::ImageParts { count, .. } => format!("{count} media part(s)"),
         }
@@ -1434,6 +1534,28 @@ fn form_field(value: &Value, name: &str) -> Result<String, String> {
         .to_string())
 }
 
+/// One part of a form field's model value, by field name: its `value`, `state` or the text its
+/// `appearance` draws.
+fn form_field_part(value: &Value, name: &str, part: &str) -> Result<String, String> {
+    let fields = value
+        .get("form")
+        .and_then(|form| form.get("fields"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| "the PDF has no form".to_string())?;
+    let field = fields
+        .iter()
+        .find(|field| field.get("name").and_then(Value::as_str) == Some(name))
+        .ok_or_else(|| format!("the form has no field {name:?}"))?;
+    match field.get(part) {
+        Some(Value::String(text)) => Ok(text.clone()),
+        Some(Value::Array(runs)) => Ok(runs
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join("\n")),
+        _ => Ok(String::new()),
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

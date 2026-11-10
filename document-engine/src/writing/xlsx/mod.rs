@@ -190,7 +190,7 @@ pub(super) fn edit(editor: &mut Editor, edits: &[Value]) -> Result<(), Failure> 
             _ => {
                 // The operation surface refuses an unknown edit name before dispatch, so reaching
                 // this is an engine defect.
-                return Err(Failure::internal(crate::contained::engine_failed()));
+                return Err(Failure::engine());
             }
         }
     }

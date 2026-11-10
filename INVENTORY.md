@@ -114,18 +114,20 @@ at the wrong place changes nothing. `scan.rs` states what the walk recovers, wha
 engine's own bounds on it; `page.rs` states the shapes the page model refuses rather than write what
 it cannot carry, and the divergence from the reference by outcome: where the reference's own code
 refuses or produces a file that lost what the input held, this engine either carries the file or
-refuses it. The harness judges only the shapes where both sides produce. The five page actions are
+refuses it. The harness judges only the shapes where both sides produce. The eight PDF actions are
 carried out end to end — `pdf_merge` and `pdf_split` build a fresh document out of the pages,
 `pdf_rotate`, `pdf_crop` and `pdf_resize` change what the pages they name show and keep everything
-else the file holds. The three operations that draw into a page (`pdf_text`, `pdf_image`,
-`pdf_form_fill`), `create`, `fill_template` and `pptx_edit` answer with the vocabulary's
+else the file holds, and `pdf_text`, `pdf_image` and `pdf_form_fill` draw text, a placed picture or a
+filled form into the pages they name, with one embedded general-text font subset to the glyphs the
+call draws. `create`, `fill_template` and `pptx_edit` answer with the vocabulary's
 `reason_not_carried_out` until their port lands.
 
 Every sentence the engine prints — an edit's refusals, notes and losses, the request surface's own
-shape refusals, a PDF page action's refusals and its note, a page-render refusal and the panic
-fallback — is a vocabulary mark (`edit_*`, `surface_*`, `pdf_page_*`, `render_*`, `engine_failed`),
-not a sentence in code, and `src/test_support/coverage.rs` records every writing mark as witnessed
-by a corpus case or as unreached with its reason.
+shape refusals, a PDF action's refusals and its notes, a page-render refusal and the panic
+fallback — is a vocabulary mark (`edit_*`, `surface_*`, `pdf_page_*`, `pdf_text_*`, `pdf_image_*`,
+`pdf_form_*`, `note_*`, `render_*`, `engine_failed`), not a sentence in code, and
+`src/test_support/coverage.rs` records every writing mark as witnessed by a corpus case or as
+unreached with its reason.
 
 The document builders live in the crate's `test_support`, the one home shared by the crate's tests
 and the harness. `tests/standalone.rs` builds and tests the crate in a temporary copy with no

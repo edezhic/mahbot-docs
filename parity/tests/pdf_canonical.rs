@@ -406,12 +406,14 @@ fn hex(digest: impl AsRef<[u8]>) -> String {
     })
 }
 
-/// What the model must say about the fixture's one image: the digest of its samples.
+/// What the model must say about the fixture's one image: the digest of its samples, the pixel size
+/// they decode to, and the transform the fixture paints it under.
 fn image_value() -> Value {
     json!({
         "sha256": hex(Sha256::digest(SAMPLES.as_bytes())),
         "width": 4,
         "height": 2,
+        "placement": [10.0, 0.0, 0.0, 10.0, 20.0, 20.0],
     })
 }
 
@@ -435,7 +437,8 @@ fn the_model_reads_what_the_fixture_states() {
             "rotate": 0,
             "text": ["Hello page"],
             "images": [image_value()],
-            "forms": [],
+            "forms": 0,
+            "appearance_text": [],
             "vector": { "count": 3, "sha256": value["pages"][0]["vector"]["sha256"].clone() },
             "annots": [
                 { "subtype": "Text", "rect": [10.0, 10.0, 40.0, 40.0], "contents": "A note" },
@@ -449,9 +452,47 @@ fn the_model_reads_what_the_fixture_states() {
     );
     assert_eq!(
         value["form"]["fields"],
-        json!([{ "name": "full.name", "kind": "text", "value": "Ada", "options": [] }])
+        json!([{
+            "name": "full.name",
+            "kind": "text",
+            "value": "Ada",
+            "options": [],
+            "state": null,
+            "appearance": [],
+        }])
     );
     assert_eq!(value["attachments"], json!(["report.txt"]));
+}
+
+/// An option pair is `[value display]`: both engines read the display as the second entry, so a
+/// three-entry pair names the second and not the last, and a pair with one entry (or a null second)
+/// names its first.
+#[test]
+fn an_option_pair_names_its_second_entry() {
+    let value = model_of(&Variant {
+        field_type: "/Ch",
+        field_options: "[[(a) (b) (c)] [(one)] [(two) null]]",
+        ..Variant::default()
+    });
+    assert_eq!(
+        value["form"]["fields"][0]["options"],
+        json!(["b", "one", "two"])
+    );
+}
+
+#[test]
+fn a_button_reads_only_top_level_option_strings() {
+    // A button's `/Opt` is its export values, which a pair never names, so a group or a box whose
+    // entries are all pairs offers no option at all.
+    for (field_flags, kind) in [(1 << 15, "a radio group"), (0, "a checkbox")] {
+        let value = model_of(&Variant {
+            field_type: "/Btn",
+            field_flags,
+            field_options: "[[(one) (One)] [(two) (Two)]]",
+            ..Variant::default()
+        });
+        assert_eq!(value["form"]["fields"][0]["options"], json!([]), "{kind}");
+    }
 }
 
 /// A one-page PDF whose content paints the form XObject holding `drawing` — or, with `painted`
@@ -487,13 +528,14 @@ fn pdf_with_form(drawing: &str, painted: bool) -> Vec<u8> {
     assemble(&objects, "")
 }
 
-/// A page that paints a form records the form by its content, so a flattened field's appearance
-/// is a difference from a page that simply dropped the field.
+/// A page that paints a form is told apart from one that paints none, while the form's own
+/// operators are not compared: two different drawings are one page, because a library's generated
+/// drawing operations are an engine's choice, not the document's meaning.
 #[test]
-fn a_painted_form_is_recorded_by_its_content() {
+fn a_painted_form_is_counted_and_its_drawing_is_not_compared() {
     let first = canonical(&pdf_with_form("0 0 m 10 10 l S", true)).expect("a readable PDF");
     assert_eq!(
-        first["pages"][0]["forms"].as_array().map(Vec::len),
+        first["pages"][0]["forms"].as_u64(),
         Some(1),
         "the page paints one form"
     );
@@ -504,20 +546,263 @@ fn a_painted_form_is_recorded_by_its_content() {
     );
     let other = canonical(&pdf_with_form("0 0 m 20 20 l S", true)).expect("a readable PDF");
     assert!(
-        !compare(&first, &other).is_same(),
-        "a different form content is a difference"
+        compare(&first, &other).is_same(),
+        "a form's generated operators are normalised away, not compared"
     );
     // A form the page holds but does not paint is not a form the page shows.
     let unpainted = canonical(&pdf_with_form("0 0 m 10 10 l S", false)).expect("a readable PDF");
     assert_eq!(
-        unpainted["pages"][0]["forms"].as_array().map(Vec::len),
+        unpainted["pages"][0]["forms"].as_u64(),
         Some(0),
-        "an unpainted form is not recorded"
+        "an unpainted form is not counted"
     );
     assert!(
         !compare(&first, &unpainted).is_same(),
         "a page that paints no form is a difference"
     );
+}
+
+/// A form the page paints states the text it draws, decoded through the font its own resources
+/// name. A flattened field's value is read this way.
+#[test]
+fn a_painted_form_states_the_text_it_draws() {
+    let cmap = "\
+/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+1 beginbfchar
+<0001> <0048>
+<0002> <0069>
+endbfchar
+endcmap
+end end";
+    let pdf = pdf_with_text_form("BT /F1 12 Tf 10 10 Td <00010002> Tj ET", cmap, true);
+    let value = canonical(&pdf).expect("a readable PDF");
+    assert_eq!(value["pages"][0]["appearance_text"], json!(["Hi"]));
+    assert_eq!(
+        value["pages"][0]["text"],
+        json!([]),
+        "the page's own text is separate"
+    );
+}
+
+/// A form whose text is drawn with a font the file does not embed states no text: an appearance
+/// must carry the font that draws it.
+#[test]
+fn an_appearance_drawn_with_an_unembedded_font_states_nothing() {
+    let cmap = "\
+/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+1 beginbfchar
+<0001> <0048>
+endbfchar
+endcmap
+end end";
+    let pdf = pdf_with_text_form("BT /F1 12 Tf 10 10 Td <0001> Tj ET", cmap, false);
+    let value = canonical(&pdf).expect("a readable PDF");
+    assert_eq!(value["pages"][0]["appearance_text"], json!([]));
+}
+
+/// The font `/F1` and the appearance stream that draws `drawing` with it: a Type0 font carrying
+/// `cmap` as its `/ToUnicode` map and, when `embedded`, a font program on its descriptor.
+fn appearance_font(drawing: &str, cmap: &str, embedded: bool, bbox: &str) -> Vec<Object> {
+    let descriptor = if embedded {
+        " /FontDescriptor << /Type /FontDescriptor /FontName /Sub /Flags 4 /FontFile2 {program} >>"
+    } else {
+        ""
+    };
+    vec![
+        Object::new(
+            "font",
+            "<< /Type /Font /Subtype /Type0 /BaseFont /Sub /Encoding /Identity-H \
+             /DescendantFonts [{descendant}] /ToUnicode {tounicode} >>",
+        ),
+        Object::new(
+            "descendant",
+            format!("<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Sub {descriptor} >>"),
+        ),
+        Object::new("program", stream(&[], b"not really a font", false)),
+        Object::new("tounicode", stream(&[], cmap.as_bytes(), false)),
+        Object::new(
+            "appearance",
+            stream(
+                &[
+                    ("Type", "/XObject".to_string()),
+                    ("Subtype", "/Form".to_string()),
+                    ("BBox", bbox.to_string()),
+                    ("Resources", "<< /Font << /F1 {font} >> >>".to_string()),
+                ],
+                drawing.as_bytes(),
+                false,
+            ),
+        ),
+    ]
+}
+
+/// A form XObject whose text form draws `drawing`, with a Type0 font `/F1` carrying `cmap` as its
+/// `/ToUnicode` map and, when `embedded`, a font program on its descriptor.
+fn pdf_with_text_form(drawing: &str, cmap: &str, embedded: bool) -> Vec<u8> {
+    let mut objects = vec![
+        Object::new("catalog", "<< /Type /Catalog /Pages {pages} >>"),
+        Object::new("pages", "<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+        Object::new(
+            "page",
+            "<< /Type /Page /Parent {pages} /MediaBox [0 0 200 100] \
+             /Resources << /XObject << /Fm1 {appearance} >> >> /Contents {content} >>",
+        ),
+        Object::new("content", stream(&[], b"q /Fm1 Do Q", false)),
+    ];
+    objects.extend(appearance_font(drawing, cmap, embedded, "[0 0 50 50]"));
+    assemble(&objects, "")
+}
+
+/// The gate has teeth on a filled form: an appearance that draws the value passes, while one that
+/// draws nothing, draws the wrong characters, or is drawn with a font the file does not embed is a
+/// difference. This is the property the comparison rests on, proved rather than assumed.
+#[test]
+fn an_appearance_that_is_blank_garbled_or_unrenderable_fails() {
+    let correct = canonical(&pdf_with_filled_field(
+        "BT /F1 12 Tf 2 2 Td <000100020003> Tj ET",
+        "1 begincodespacerange\n<0000><ffff>\nendcodespacerange\n3 beginbfchar\n<0001> <0041>\n<0002> <0064>\n<0003> <0061>\nendbfchar",
+        true,
+    ))
+    .expect("a readable PDF");
+    assert_eq!(
+        correct["form"]["fields"][0]["appearance"],
+        json!(["Ada"]),
+        "the appearance draws the value it holds"
+    );
+    for (what, drawing, cmap, embedded) in [
+        (
+            "blank",
+            "q Q",
+            "1 begincodespacerange\n<0000><ffff>\nendcodespacerange\n3 beginbfchar\n<0001> <0041>\n<0002> <0064>\n<0003> <0061>\nendbfchar",
+            true,
+        ),
+        (
+            "garbled",
+            "BT /F1 12 Tf 2 2 Td <000100020003> Tj ET",
+            "1 begincodespacerange\n<0000><ffff>\nendcodespacerange\n3 beginbfchar\n<0001> <0041>\n<0002> <0064>\n<0003> <0078>\nendbfchar",
+            true,
+        ),
+        (
+            "unrenderable",
+            "BT /F1 12 Tf 2 2 Td <000100020003> Tj ET",
+            "1 begincodespacerange\n<0000><ffff>\nendcodespacerange\n3 beginbfchar\n<0001> <0041>\n<0002> <0064>\n<0003> <0061>\nendbfchar",
+            false,
+        ),
+    ] {
+        let wrong =
+            canonical(&pdf_with_filled_field(drawing, cmap, embedded)).expect("a readable PDF");
+        assert!(
+            !compare(&correct, &wrong).is_same(),
+            "a {what} appearance passed the comparison"
+        );
+    }
+}
+
+/// A one-page PDF holding one text field named `name` whose value is `Ada` and whose normal
+/// appearance draws `drawing` with a Type0 font whose map is `cmap`, embedded when `embedded`.
+fn pdf_with_filled_field(drawing: &str, cmap: &str, embedded: bool) -> Vec<u8> {
+    let mut objects = vec![
+        Object::new(
+            "catalog",
+            "<< /Type /Catalog /Pages {pages} /AcroForm << /Fields [{field}] >> >>",
+        ),
+        Object::new("pages", "<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+        Object::new(
+            "page",
+            "<< /Type /Page /Parent {pages} /MediaBox [0 0 200 100] \
+             /Resources << >> /Contents {content} /Annots [{field}] >>",
+        ),
+        Object::new("content", stream(&[], b"q Q", false)),
+        Object::new(
+            "field",
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /Rect [10 10 110 30] \
+             /V (Ada) /AP << /N {appearance} >> >>",
+        ),
+    ];
+    objects.extend(appearance_font(drawing, cmap, embedded, "[0 0 100 20]"));
+    assemble(&objects, "")
+}
+
+/// A checkbox's shown state is the appearance state its widget names, not its `/V`.
+#[test]
+fn a_checkbox_state_is_the_appearance_state_it_shows() {
+    let objects = vec![
+        Object::new(
+            "catalog",
+            "<< /Type /Catalog /Pages {pages} /AcroForm << /Fields [{field}] >> >>",
+        ),
+        Object::new("pages", "<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+        Object::new(
+            "page",
+            "<< /Type /Page /Parent {pages} /MediaBox [0 0 200 100] /Resources << >> \
+             /Contents {content} /Annots [{field}] >>",
+        ),
+        Object::new("content", stream(&[], b"q Q", false)),
+        Object::new(
+            "field",
+            "<< /Type /Annot /Subtype /Widget /FT /Btn /T (agree) /Rect [10 10 24 24] \
+             /V /Yes /AS /Yes >>",
+        ),
+    ];
+    let value = canonical(&assemble(&objects, "")).expect("a readable PDF");
+    assert_eq!(value["form"]["fields"][0]["value"], json!("Yes"));
+    assert_eq!(value["form"]["fields"][0]["state"], json!("Yes"));
+}
+
+/// An image's placement is compared: the same samples painted at another size or place is a
+/// difference, which is what judges fitting and the page turn.
+#[test]
+fn an_images_placement_is_part_of_the_model() {
+    let at = |drawing: &str| {
+        let pdf = pdf_with_image(drawing);
+        canonical(&pdf).expect("a readable PDF")["pages"][0]["images"].clone()
+    };
+    let first = at("q 10 0 0 10 20 20 cm /Im1 Do Q");
+    assert_eq!(first, json!([image_value()]));
+    let moved = at("q 10 0 0 10 30 20 cm /Im1 Do Q");
+    assert!(
+        !compare(&first, &moved).is_same(),
+        "a picture at another place is a difference"
+    );
+    let turned = at("q 0 10 -10 0 20 20 cm /Im1 Do Q");
+    assert!(
+        !compare(&first, &turned).is_same(),
+        "a picture turned with the page is a difference"
+    );
+}
+
+/// A one-page PDF whose content paints the image `/Im1` under `drawing`.
+fn pdf_with_image(drawing: &str) -> Vec<u8> {
+    let objects = vec![
+        Object::new("catalog", "<< /Type /Catalog /Pages {pages} >>"),
+        Object::new("pages", "<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+        Object::new(
+            "page",
+            "<< /Type /Page /Parent {pages} /MediaBox [0 0 200 100] \
+             /Resources << /XObject << /Im1 {image} >> >> /Contents {content} >>",
+        ),
+        Object::new("content", stream(&[], drawing.as_bytes(), false)),
+        Object::new(
+            "image",
+            stream(
+                &[
+                    ("Type", "/XObject".to_string()),
+                    ("Subtype", "/Image".to_string()),
+                    ("Width", "4".to_string()),
+                    ("Height", "2".to_string()),
+                    ("ColorSpace", "/DeviceRGB".to_string()),
+                    ("BitsPerComponent", "8".to_string()),
+                ],
+                SAMPLES.as_bytes(),
+                false,
+            ),
+        ),
+    ];
+    assemble(&objects, "")
 }
 
 /// The model is deterministic: one file is one value, so canonicalising a document twice and

@@ -14,13 +14,17 @@
 //!   per `Tj`/`'`/`"` and one per `TJ` (its string elements concatenated, its kerning numbers
 //!   dropped), each resolved to the characters it draws through the font in force's `/ToUnicode`
 //!   map;
-//! - `"images": [{"sha256": …, "width": …, "height": …}]` — the images the content paints, by the
-//!   digest of their **decoded** samples and the pixel size they decode to, so re-encoding an
-//!   image is not a difference;
-//! - `"forms": [{"sha256": …, "len": …}]` — the form XObjects the content paints, by the digest of
-//!   their decoded content. A form's *content* is not walked into (an engine may nest one
-//!   differently), but its presence and its bytes are compared: a flattened form that draws its
-//!   fields' appearances is not the same page as one that simply dropped them;
+//! - `"images": [{"sha256": …, "width": …, "height": …, "placement": [a, b, c, d, e, f]}]` — the
+//!   images the content paints, by the digest of their **decoded** samples, the pixel size they
+//!   decode to (so re-encoding an image is not a difference), and the current transform at the
+//!   `Do`/`BI` that paints them: the unit square's image space maps through it, so the drawn size,
+//!   the place and the turn the page gives the picture are all compared;
+//! - `"forms": n` — how many form XObjects the content paints. A form's *content* is not compared
+//!   as a digest (that would bake one library's generated drawing operators into the record), but
+//!   a page that paints a form is still told apart from one that paints none;
+//! - `"appearance_text": […]` — the strings the form XObjects the page paints draw, in painting
+//!   order, resolved the way an appearance is (see below). A flattened field's value is here
+//!   rather than in `text`, which is only what the page's own content draws;
 //! - `"vector": {"count": …, "sha256": …}` — how many path operators the page draws and a digest
 //!   of them with their operands;
 //! - `"annots": [{"subtype": …, "rect": […], "contents": …}]` — the page's own annotations, in
@@ -28,7 +32,23 @@
 //!
 //! The document also carries the four content-bearing Info entries (`title`, `author`, `subject`,
 //! `keywords`; `null` when the document states none), every form field's fully-qualified name,
-//! kind, value and options, and the names of its embedded files.
+//! kind, value, options, shown appearance state and drawn appearance text, and the names of its
+//! embedded files.
+//!
+//! # How an appearance is read
+//!
+//! A text field's or a choice field's appearance draws the value the field holds, so the model
+//! reads the text its appearance stream draws. The characters are the ones the stream's font
+//! states in its `/ToUnicode` map — the only code-to-character mapping a subset font written for
+//! PDF carries — and a code that map does not name contributes nothing. The font must carry an
+//! embedded program (`/FontFile`, `/FontFile2` or `/FontFile3`): an appearance drawn with a font
+//! the file does not carry is not one the model reads.
+//!
+//! The blind spot is stated rather than papered over: an appearance that declares consistent
+//! characters and draws the wrong outlines is not detected, because the model does not compare a
+//! glyph's outline. Nor does it check that the embedded program carries a glyph for every code the
+//! appearance draws: a code the stated map names decodes to its character whatever the program
+//! holds, so a subset missing a glyph still reads as the value it claims.
 //!
 //! # What is normalised away
 //!
@@ -39,8 +59,13 @@
 //! - **The trailer's identity**: `/ID` is never read, so two writes of one document compare equal.
 //! - **The writing application**: `/CreationDate`, `/ModDate`, `/Creator`, `/Producer` and any
 //!   version string an engine stamps are dropped. They name the producer, not the document.
-//! - **Appearance streams** (`/AP`): a widget's appearance is generated from the field's value,
-//!   which is compared instead, so two engines may draw it differently.
+//! - **Appearance streams** (`/AP`): a widget's appearance is generated from the field's value, so
+//!   two engines may draw it differently. What is compared is the characters the appearance draws
+//!   through its stated map and the appearance state a button shows, never the stream's operators,
+//!   its font's name or its subset numbering.
+//! - **The image's own encoding and the drawing operators around it**: an image is compared by its
+//!   decoded samples, and its placement by the transform it is painted under, not by how the
+//!   writer spelled the `q`/`cm`/`Do` sequence.
 //! - **Dictionary key order**: every dictionary the model reads is read by key, and the value it
 //!   produces is a JSON object, whose keys are sorted.
 //! - **A crop box that repeats the media box**: the format defines a missing crop box as the media
@@ -56,28 +81,39 @@
 //!
 //! # Limits the model states rather than hides
 //!
-//! - A page's text and images are what its **own** content stream draws. A form XObject's content
-//!   is not walked: it is a resource of its own, drawn through `/Do`, and two engines nest one
-//!   differently. The form is still recorded, by digest, so painting one is a difference.
+//! - A page's text and images are what its **own** content stream draws. A form XObject's text is
+//!   recorded separately (`appearance_text`), because a form is a resource of its own and two
+//!   engines nest one differently. A form's images and path operators are not recorded at all.
 //! - **What the model does not look at at all**: outlines, page labels, the catalog's language,
 //!   XMP metadata and a link annotation's action target. A difference confined to those is not
 //!   seen; the model states that here rather than implying it compares them.
 //! - **How a drawn string is decoded**: text is compared as the characters the page draws, resolved
 //!   through the font's `/ToUnicode` map where the font has one; a page whose text cannot be
-//!   resolved through a map falls back to its raw codes, which the model states. The map is read by
+//!   resolved through a map falls back to its raw codes, which the model states. An appearance's
+//!   text has no such fallback: a code its map does not name contributes nothing. The map is read by
 //!   the same CMap parser the renderer uses (`hayro-cmap`), and a character code is a two-byte
 //!   value — what a `/ToUnicode` map for a simple font states. The font's identity — its name and
 //!   its subset numbering — is not part of the model: engines name and subset fonts differently,
 //!   and only the characters are compared.
 //! - A field's kind is inherited along its `/Parent` chain, which is where a widget keeps it.
-//! - A field with no `/Subtype` annotation, or a page with no `/Annots`, contributes nothing.
+//! - A field with no `/Subtype` annotation, or a page with no `/Annots`, contributes nothing. The
+//!   annotation list is read in order and an entry the file cannot resolve contributes nothing
+//!   either, which is what makes a page whose widget objects an engine deleted read as having no
+//!   annotations at all.
+//! - An appearance is compared by the characters it draws, not by **where** it draws them: the
+//!   line positions, the font size and the box's border and padding are not part of the model. A
+//!   push button's regenerated appearance draws its caption, and the button's own box and border
+//!   are not compared either.
+//! - A field's `/DA` is not read: it states what a viewer would edit the field with, not what the
+//!   file shows.
 //!
 //! # What the model refuses
 //!
 //! A document of more than 10,000 pages, or a page that runs more than 100,000 content-stream
 //! operators, is an error rather than a model: a page tree or a stream that never ends must fail
 //! the gate with a message, not exhaust the harness. The annotation, field, option and attachment
-//! lists are bounded for the same reason.
+//! lists are bounded for the same reason, and so is the depth of form XObjects a page's appearance
+//! walk follows.
 //!
 //! Every stream the model decodes is charged its decoded length against one document-wide total
 //! (256 MiB): a page's content, a form XObject, a font's `/ToUnicode` map. An image is charged at
@@ -95,6 +131,7 @@
 use crate::util::hex_string;
 use anyhow::{Result, anyhow, bail};
 use hayro::hayro_syntax::Pdf;
+use hayro::hayro_syntax::content::{Instruction, UntypedIter};
 use hayro::hayro_syntax::metadata::Metadata;
 use hayro::hayro_syntax::object::dict::Dict;
 use hayro::hayro_syntax::object::stream::{ImageDecodeParams, Stream};
@@ -118,6 +155,10 @@ const MAX_FIELDS: usize = 1000;
 
 /// Maximum depth of the field tree, so `/Kids` that point in a cycle terminate.
 const MAX_FIELD_DEPTH: usize = 32;
+
+/// Maximum depth of form XObjects an appearance walk follows, so a form that paints itself
+/// terminates.
+const MAX_FORM_DEPTH: usize = 8;
 
 /// Maximum options listed for one field: a list box whose `/Opt` is a cycle.
 const MAX_FIELD_OPTIONS: usize = 100;
@@ -192,10 +233,11 @@ fn model(bytes: &[u8]) -> Result<Value> {
         .iter()
         .map(|page| page_value(page, &mut budget))
         .collect::<Result<Vec<_>>>()?;
+    let fields = fields_value(&pdf, &mut budget)?;
     Ok(json!({
         "pages": pages,
         "info": info_value(pdf.metadata()),
-        "form": { "fields": fields_value(&pdf) },
+        "form": { "fields": fields },
         "attachments": attachment_names(&pdf),
     }))
 }
@@ -302,12 +344,17 @@ fn page_value(page: &Page<'_>, budget: &mut Decoded) -> Result<Value> {
 
     let mut text: Vec<Value> = Vec::new();
     let mut images: Vec<Value> = Vec::new();
-    let mut forms: Vec<Value> = Vec::new();
+    let mut appearance_text: Vec<Value> = Vec::new();
+    let mut forms = 0_usize;
     let mut vector = Sha256::new();
     let mut vector_count = 0_usize;
     // The font the following text operators draw with, and the maps already parsed for this page.
     let mut font: Option<Dict<'_>> = None;
     let mut unicode_maps: ToUnicodeCache = HashMap::new();
+    // The transform the content paints under: `cm` composes onto it, and `q`/`Q` save and restore
+    // it. An image's placement is this transform at the `Do` that paints it.
+    let mut ctm = Matrix::IDENTITY;
+    let mut saved: Vec<Matrix> = Vec::new();
     charge_content(page, budget)?;
     let mut operations = page.operations();
     let mut operators = 0_usize;
@@ -315,6 +362,19 @@ fn page_value(page: &Page<'_>, budget: &mut Decoded) -> Result<Value> {
         charge_operators(&mut operators)?;
         let operator: &[u8] = instruction.operator;
         match operator {
+            // The graphics state the page paints under. `q`/`Q` do not nest further than the stack
+            // a stream states, which the operator bound already limits.
+            b"q" => saved.push(ctm),
+            b"Q" => {
+                if let Some(previous) = saved.pop() {
+                    ctm = previous;
+                }
+            }
+            b"cm" => {
+                if let Some(transform) = matrix_of(&instruction) {
+                    ctm = transform.compose(&ctm);
+                }
+            }
             // `Tf` names the font the following strings are drawn with. `get_font` walks the
             // resource's parent chain, so an inherited font is found as well.
             b"Tf" => {
@@ -326,41 +386,17 @@ fn page_value(page: &Page<'_>, budget: &mut Decoded) -> Result<Value> {
                         _ => None,
                     });
             }
-            b"Tj" | b"'" => {
-                if let Some(Object::String(drawn)) = instruction.operands().next() {
-                    text.push(Value::from(drawn_text(
-                        drawn.as_bytes(),
-                        font.as_ref(),
-                        &mut unicode_maps,
-                        budget,
-                    )?));
-                }
-            }
-            // `"` sets the word and character spacing before it draws, so the string is last.
-            b"\"" => {
-                if let Some(Object::String(drawn)) = instruction.operands().last() {
-                    text.push(Value::from(drawn_text(
-                        drawn.as_bytes(),
-                        font.as_ref(),
-                        &mut unicode_maps,
-                        budget,
-                    )?));
-                }
-            }
-            b"TJ" => {
-                if let Some(Object::Array(parts)) = instruction.operands().next() {
-                    let mut line = String::new();
-                    for part in parts.iter::<Object<'_>>() {
-                        if let Object::String(drawn) = part {
-                            line.push_str(&drawn_text(
-                                drawn.as_bytes(),
-                                font.as_ref(),
-                                &mut unicode_maps,
-                                budget,
-                            )?);
-                        }
-                    }
-                    text.push(Value::from(line));
+            // Every text-showing operator draws one run; `TJ`'s string elements are concatenated
+            // and its kerning numbers dropped.
+            b"Tj" | b"'" | b"\"" | b"TJ" => {
+                if let Some(drawn) = instruction_text(
+                    &instruction,
+                    font.as_ref(),
+                    &mut unicode_maps,
+                    budget,
+                    RunText::Page,
+                )? {
+                    text.push(Value::from(drawn));
                 }
             }
             b"Do" => {
@@ -368,8 +404,9 @@ fn page_value(page: &Page<'_>, budget: &mut Decoded) -> Result<Value> {
                     && let Some(stream) = page.resources().get_x_object(name)
                 {
                     if stream.dict().get::<Name<'_>>(b"Subtype").as_deref() == Some(b"Form") {
-                        forms.push(form_value(&stream, budget)?);
-                    } else if let Some(image) = image_value(&stream, budget)? {
+                        forms += 1;
+                        walk_form(&stream, &mut appearance_text, &mut unicode_maps, budget, 0)?;
+                    } else if let Some(image) = image_value(&stream, budget, &ctm)? {
                         images.push(image);
                     }
                 }
@@ -377,7 +414,7 @@ fn page_value(page: &Page<'_>, budget: &mut Decoded) -> Result<Value> {
             // An inline image arrives as the one stream operand of its `BI`.
             b"BI" => {
                 if let Some(Object::Stream(stream)) = instruction.operands().next()
-                    && let Some(image) = image_value(stream, budget)?
+                    && let Some(image) = image_value(stream, budget, &ctm)?
                 {
                     images.push(image);
                 }
@@ -404,9 +441,81 @@ fn page_value(page: &Page<'_>, budget: &mut Decoded) -> Result<Value> {
         "text": text,
         "images": images,
         "forms": forms,
+        "appearance_text": appearance_text,
         "vector": { "count": vector_count, "sha256": hex_string(&vector.finalize()) },
         "annots": annotations_value(page),
     }))
+}
+
+/// A PDF transform as the format states it: `[a b c d e f]`, the matrix that maps a point `(x, y)`
+/// to `(a x + c y + e, b x + d y + f)`.
+#[derive(Clone, Copy, Debug)]
+struct Matrix {
+    a: f64,
+    b: f64,
+    c: f64,
+    d: f64,
+    e: f64,
+    f: f64,
+}
+
+impl Matrix {
+    /// The identity: the unit square stays where it is.
+    const IDENTITY: Self = Self {
+        a: 1.0,
+        b: 0.0,
+        c: 0.0,
+        d: 1.0,
+        e: 0.0,
+        f: 0.0,
+    };
+
+    /// This transform composed onto `outer`: a point is mapped by `self` and then by `outer`, which
+    /// is what the format's `cm` states.
+    fn compose(&self, outer: &Self) -> Self {
+        Self {
+            a: self.a * outer.a + self.b * outer.c,
+            b: self.a * outer.b + self.b * outer.d,
+            c: self.c * outer.a + self.d * outer.c,
+            d: self.c * outer.b + self.d * outer.d,
+            e: self.e * outer.a + self.f * outer.c + outer.e,
+            f: self.e * outer.b + self.f * outer.d + outer.f,
+        }
+    }
+
+    /// The transform as the model holds it: six coordinates, each rounded like every other number.
+    fn value(self) -> Value {
+        json!([
+            rounded(self.a),
+            rounded(self.b),
+            rounded(self.c),
+            rounded(self.d),
+            rounded(self.e),
+            rounded(self.f),
+        ])
+    }
+}
+
+/// The six numbers of a `cm`, or `None` when the operator does not state six numbers.
+fn matrix_of(instruction: &hayro::hayro_syntax::content::Instruction<'_, '_>) -> Option<Matrix> {
+    let numbers = instruction
+        .operands()
+        .map(|operand| match operand {
+            Object::Number(number) => Some(number.as_f64()),
+            _ => None,
+        })
+        .collect::<Option<Vec<f64>>>()?;
+    match numbers.as_slice() {
+        [a, b, c, d, e, f] => Some(Matrix {
+            a: *a,
+            b: *b,
+            c: *c,
+            d: *d,
+            e: *e,
+            f: *f,
+        }),
+        _ => None,
+    }
 }
 
 /// The quarter turn a page is displayed at, in degrees clockwise.
@@ -458,24 +567,41 @@ fn pdf_text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
+/// How a text run is read: a page's own content falls back to the string's bytes, while an
+/// appearance must state its characters through an embedded font's map.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RunText {
+    Page,
+    Appearance,
+}
+
 /// The characters a drawn string stands for: its font's `/ToUnicode` map when the font has one,
-/// otherwise the string's own bytes.
+/// otherwise, for a page's own content, the string's own bytes.
 ///
 /// A map names each character by a 2-byte code, so the bytes are split into 2-byte codes and each
-/// is looked up. A code the map does not name contributes the code point itself, and a font with no
-/// map keeps [`pdf_text`]'s own reading.
-fn drawn_text<'a>(
+/// is looked up. A page run's unnamed code contributes the code point itself; an appearance's
+/// contributes nothing, because the appearance must say what it draws.
+fn run_text<'a>(
     bytes: &[u8],
     font: Option<&Dict<'a>>,
     cache: &mut ToUnicodeCache,
     budget: &mut Decoded,
+    mode: RunText,
 ) -> Result<String> {
+    let font = match mode {
+        RunText::Page => font,
+        RunText::Appearance => font.filter(|font| font_is_embedded(font)),
+    };
     let Some(map) = font
         .map(|font| to_unicode_map(font, cache, budget))
         .transpose()?
         .flatten()
     else {
-        return Ok(pdf_text(bytes));
+        return Ok(if mode == RunText::Page {
+            pdf_text(bytes)
+        } else {
+            String::new()
+        });
     };
     let mut out = String::new();
     for pair in bytes.as_chunks::<2>().0 {
@@ -483,15 +609,54 @@ fn drawn_text<'a>(
         match map.lookup_bf_string(u32::from(code)) {
             Some(BfString::Char(character)) => out.push(character),
             Some(BfString::String(text)) => out.push_str(&text),
-            // A code the map does not name is still a code point the page draws.
-            None => {
+            None if mode == RunText::Page => {
                 if let Some(character) = char::from_u32(u32::from(code)) {
                     out.push(character);
                 }
             }
+            None => {}
         }
     }
     Ok(out)
+}
+
+/// The run a text-showing instruction draws, or `None` when it is not one. `TJ`'s string elements
+/// are concatenated and its kerning numbers dropped; `"` states its string last.
+fn instruction_text<'b, 'a>(
+    instruction: &Instruction<'b, 'a>,
+    font: Option<&Dict<'a>>,
+    cache: &mut ToUnicodeCache,
+    budget: &mut Decoded,
+    mode: RunText,
+) -> Result<Option<String>> {
+    let operator: &[u8] = instruction.operator;
+    match operator {
+        b"Tj" | b"'" => match instruction.operands().next() {
+            Some(Object::String(drawn)) => {
+                Ok(Some(run_text(drawn.as_bytes(), font, cache, budget, mode)?))
+            }
+            _ => Ok(None),
+        },
+        b"\"" => match instruction.operands().last() {
+            Some(Object::String(drawn)) => {
+                Ok(Some(run_text(drawn.as_bytes(), font, cache, budget, mode)?))
+            }
+            _ => Ok(None),
+        },
+        b"TJ" => {
+            let Some(Object::Array(parts)) = instruction.operands().next() else {
+                return Ok(None);
+            };
+            let mut line = String::new();
+            for part in parts.iter::<Object<'_>>() {
+                if let Object::String(drawn) = part {
+                    line.push_str(&run_text(drawn.as_bytes(), font, cache, budget, mode)?);
+                }
+            }
+            Ok(Some(line))
+        }
+        _ => Ok(None),
+    }
 }
 
 /// The font's parsed `/ToUnicode` map, if it has a decodable one. The parse happens once per font
@@ -567,28 +732,111 @@ fn operand_text(object: &Object<'_>, out: &mut String) {
     }
 }
 
-/// One form XObject as the model holds it: the digest of its decoded content and its length. A
-/// stream that cannot be decoded is identified by its raw bytes rather than dropped.
-fn form_value(stream: &Stream<'_>, budget: &mut Decoded) -> Result<Value> {
-    let raw;
-    let bytes = match stream.decoded() {
-        Ok(decoded) => decoded,
-        Err(_) => {
-            raw = stream.raw_data();
-            raw
-        }
+/// The strings one painted form XObject draws, appended in drawing order.
+///
+/// A form's content is walked with its own `/Resources`, because the fonts it names are its own. A
+/// form that paints another form is followed, bounded by [`MAX_FORM_DEPTH`]. A stream that cannot
+/// be decoded contributes nothing: a form whose content the model cannot read states no text.
+fn walk_form(
+    stream: &Stream<'_>,
+    out: &mut Vec<Value>,
+    cache: &mut ToUnicodeCache,
+    budget: &mut Decoded,
+    depth: usize,
+) -> Result<()> {
+    if depth > MAX_FORM_DEPTH {
+        return Ok(());
+    }
+    let Ok(bytes) = stream.decoded() else {
+        return Ok(());
     };
     budget.stream(stream, bytes.len() as u64)?;
-    Ok(json!({
-        "sha256": hex_string(&Sha256::digest(bytes.as_ref())),
-        "len": bytes.len(),
-    }))
+    let fonts = stream
+        .dict()
+        .get::<Dict<'_>>(b"Resources")
+        .and_then(|resources| resources.get::<Dict<'_>>(b"Font"));
+    let mut font: Option<Dict<'_>> = None;
+    let mut operators = 0_usize;
+    let mut operations = UntypedIter::new(bytes.as_ref());
+    while let Some(instruction) = operations.next() {
+        charge_operators(&mut operators)?;
+        let operator: &[u8] = instruction.operator;
+        match operator {
+            b"Tf" => {
+                font = instruction
+                    .operands()
+                    .next()
+                    .and_then(|operand| match operand {
+                        Object::Name(name) => fonts.as_ref().and_then(|fonts| fonts.get(name)),
+                        _ => None,
+                    });
+            }
+            b"Tj" | b"'" | b"\"" | b"TJ" => {
+                if let Some(drawn) = instruction_text(
+                    &instruction,
+                    font.as_ref(),
+                    cache,
+                    budget,
+                    RunText::Appearance,
+                )? && !drawn.is_empty()
+                {
+                    out.push(Value::from(drawn));
+                }
+            }
+            b"Do" => {
+                if let Some(Object::Name(name)) = instruction.operands().next()
+                    && let Some(nested) = stream
+                        .dict()
+                        .get::<Dict<'_>>(b"Resources")
+                        .and_then(|resources| resources.get::<Dict<'_>>(b"XObject"))
+                        .and_then(|objects| objects.get::<Stream<'_>>(name))
+                    && nested.dict().get::<Name<'_>>(b"Subtype").as_deref() == Some(b"Form")
+                {
+                    walk_form(&nested, out, cache, budget, depth + 1)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Whether a font carries its own outline program: a `/FontFile`, `/FontFile2` or `/FontFile3` on
+/// its descriptor, or on the descendant of a composite font.
+fn font_is_embedded(font: &Dict<'_>) -> bool {
+    fn descriptor_holds_program(descriptor: &Dict<'_>) -> bool {
+        ["FontFile", "FontFile2", "FontFile3"]
+            .iter()
+            .any(|key| descriptor.contains_key(key.as_bytes()))
+    }
+    if font
+        .get::<Dict<'_>>(b"FontDescriptor")
+        .is_some_and(|descriptor| descriptor_holds_program(&descriptor))
+    {
+        return true;
+    }
+    font.get::<Array<'_>>(b"DescendantFonts")
+        .and_then(|descendants| {
+            descendants
+                .iter::<Object<'_>>()
+                .find_map(|descendant| match descendant {
+                    Object::Dict(descendant) => Some(descendant),
+                    _ => None,
+                })
+        })
+        .and_then(|descendant| descendant.get::<Dict<'_>>(b"FontDescriptor"))
+        .is_some_and(|descriptor| descriptor_holds_program(&descriptor))
 }
 
 /// One image stream — an image XObject or an inline image — as the model holds it: the digest of
-/// its decoded samples and the pixel size they decode to. Re-encoding the same picture is the same
-/// image; different samples are not.
-fn image_value(stream: &Stream<'_>, budget: &mut Decoded) -> Result<Option<Value>> {
+/// its decoded samples, the pixel size they decode to, and the transform it is painted under.
+/// Re-encoding the same picture is the same image; different samples or a different placement are
+/// not.
+fn image_value(
+    stream: &Stream<'_>,
+    budget: &mut Decoded,
+    placement: &Matrix,
+) -> Result<Option<Value>> {
     let dict = stream.dict();
     // A form XObject draws content of its own and carries no samples. An inline image states no
     // subtype at all, so only a stated non-image subtype is skipped.
@@ -633,6 +881,7 @@ fn image_value(stream: &Stream<'_>, budget: &mut Decoded) -> Result<Option<Value
         "sha256": hex_string(&Sha256::digest(decoded.data.as_ref())),
         "width": width,
         "height": height,
+        "placement": placement.value(),
     })))
 }
 
@@ -703,16 +952,16 @@ fn info_value(metadata: &Metadata) -> Value {
 }
 
 /// Every form field, in field-tree order.
-fn fields_value(pdf: &Pdf) -> Vec<Value> {
+fn fields_value(pdf: &Pdf, budget: &mut Decoded) -> Result<Vec<Value>> {
     let Some(acroform) = catalog(pdf).and_then(|catalog| catalog.get::<Dict<'_>>(b"AcroForm"))
     else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let Some(fields) = acroform.get::<Array<'_>>(b"Fields") else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let mut walk = FieldWalk {
-        fields: Vec::new(),
+        found: Vec::new(),
         visited: HashSet::new(),
     };
     for field in fields.iter::<Object<'_>>() {
@@ -720,7 +969,20 @@ fn fields_value(pdf: &Pdf) -> Vec<Value> {
             walk.visit(&field, "", 0);
         }
     }
-    walk.fields
+    let mut cache: ToUnicodeCache = HashMap::new();
+    let mut out = Vec::new();
+    for (field, name) in walk.found {
+        let kind = field_kind(&field);
+        out.push(json!({
+            "name": name,
+            "kind": kind,
+            "value": field_value(&field),
+            "options": field_options(&field, kind),
+            "state": field_state(&field, kind),
+            "appearance": field_appearance(&field, &mut cache, budget)?,
+        }));
+    }
+    Ok(out)
 }
 
 /// The document catalog, which holds the form and the name tree.
@@ -730,16 +992,16 @@ fn catalog<'a>(pdf: &'a Pdf) -> Option<Dict<'a>> {
 
 /// One pass over the field tree: the fields it reaches and the objects it has already entered, so
 /// `/Kids` that point back terminate.
-struct FieldWalk {
-    fields: Vec<Value>,
+struct FieldWalk<'a> {
+    found: Vec<(Dict<'a>, String)>,
     visited: HashSet<(usize, usize)>,
 }
 
-impl FieldWalk {
+impl<'a> FieldWalk<'a> {
     /// Visit `field` and, through it, the named kids below it. `prefix` is the qualified name its
     /// ancestors established.
-    fn visit(&mut self, field: &Dict<'_>, prefix: &str, depth: usize) {
-        if depth > MAX_FIELD_DEPTH || self.fields.len() >= MAX_FIELDS {
+    fn visit(&mut self, field: &Dict<'a>, prefix: &str, depth: usize) {
+        if depth > MAX_FIELD_DEPTH || self.found.len() >= MAX_FIELDS {
             return;
         }
         if !self.visited.insert(dict_id(field)) {
@@ -749,12 +1011,7 @@ impl FieldWalk {
         // A dict whose kids are fields of their own is a container: it names no field itself, but
         // its name is part of its kids'.
         if !is_container(field) {
-            self.fields.push(json!({
-                "name": name,
-                "kind": field_kind(field),
-                "value": field_value(field),
-                "options": field_options(field),
-            }));
+            self.found.push((field.clone(), name.clone()));
         }
         let Some(kids) = field.get::<Array<'_>>(b"Kids") else {
             return;
@@ -769,10 +1026,95 @@ impl FieldWalk {
                 continue;
             }
             self.visit(&kid, &name, depth + 1);
-            if self.fields.len() >= MAX_FIELDS {
+            if self.found.len() >= MAX_FIELDS {
                 return;
             }
         }
+    }
+}
+
+/// The widgets a field draws: its kids that name no field of their own, or the field itself when it
+/// is a widget and has no kids.
+fn field_widgets<'a>(field: &Dict<'a>) -> Vec<Dict<'a>> {
+    let mut widgets = Vec::new();
+    if let Some(kids) = field.get::<Array<'a>>(b"Kids") {
+        for kid in kids.iter::<Object<'a>>() {
+            if let Object::Dict(kid) = kid
+                && !kid.contains_key(b"T")
+            {
+                widgets.push(kid);
+            }
+        }
+    }
+    if widgets.is_empty()
+        && (field.contains_key(b"Rect")
+            || field.get::<Name<'a>>(b"Subtype").as_deref() == Some(b"Widget"))
+    {
+        widgets.push(field.clone());
+    }
+    widgets
+}
+
+/// The appearance state a button shows: the `/AS` of its widget, or, for a radio group whose
+/// widgets each state one, the state that is not `Off`. A field of another kind shows no state.
+fn field_state(field: &Dict<'_>, kind: &str) -> Value {
+    fn state_of(widget: &Dict<'_>) -> Option<String> {
+        widget
+            .get::<Name<'_>>(b"AS")
+            .map(|state| String::from_utf8_lossy(&state).into_owned())
+    }
+    match kind {
+        "checkbox" => field_widgets(field)
+            .first()
+            .and_then(state_of)
+            .map_or(Value::Null, Value::from),
+        "radio" => {
+            let widgets = field_widgets(field);
+            for widget in &widgets {
+                if let Some(state) = state_of(widget)
+                    && state != "Off"
+                {
+                    return Value::from(state);
+                }
+            }
+            if widgets.is_empty() {
+                Value::Null
+            } else {
+                Value::from("Off")
+            }
+        }
+        _ => Value::Null,
+    }
+}
+
+/// The strings a field's appearance draws, widget by widget, in widget order.
+fn field_appearance(
+    field: &Dict<'_>,
+    cache: &mut ToUnicodeCache,
+    budget: &mut Decoded,
+) -> Result<Value> {
+    let mut out = Vec::new();
+    for widget in field_widgets(field) {
+        let Some(stream) = normal_appearance(&widget) else {
+            continue;
+        };
+        walk_form(&stream, &mut out, cache, budget, 0)?;
+    }
+    Ok(Value::Array(out))
+}
+
+/// The normal appearance stream a widget shows: its `/AP /N` when that is a stream, or the state
+/// its `/AS` names when it is a dictionary of states.
+fn normal_appearance<'a>(widget: &Dict<'a>) -> Option<Stream<'a>> {
+    let appearances = widget.get::<Dict<'a>>(b"AP")?;
+    match appearances.get::<Object<'a>>(b"N")? {
+        Object::Stream(stream) => Some(stream),
+        Object::Dict(states) => {
+            let state = widget.get::<Name<'a>>(b"AS");
+            let key: &[u8] = state.as_deref().unwrap_or(b"Off");
+            states.get::<Stream<'a>>(key)
+        }
+        _ => None,
     }
 }
 
@@ -860,9 +1202,22 @@ fn field_value(field: &Dict<'_>) -> Value {
     }
 }
 
-/// The options a field offers: a radio group's fill values, a choice's display names.
-fn field_options(field: &Dict<'_>) -> Value {
+/// One `/Opt` entry's text, when the entry is a string.
+fn option_text(object: Object<'_>) -> Option<String> {
+    match object {
+        Object::String(text) => Some(pdf_text(text.as_bytes())),
+        _ => None,
+    }
+}
+
+/// The options a field offers: a button's fill values, a choice's display names.
+fn field_options(field: &Dict<'_>, kind: &str) -> Value {
     let mut options = Vec::new();
+    // The two kinds read the same entry differently: a button's (`PDFAcroButton`, which a checkbox
+    // extends as much as a radio group) `/Opt` is its export values, which are the top-level
+    // strings alone, so a pair names none; a choice field's is its display names, which a pair's
+    // second entry states.
+    let button = matches!(kind, "radio" | "checkbox");
     match inherited(field, b"Opt") {
         Some(Object::String(text)) => options.push(pdf_text(text.as_bytes())),
         Some(Object::Array(items)) => {
@@ -872,17 +1227,14 @@ fn field_options(field: &Dict<'_>) -> Value {
                 }
                 match item {
                     Object::String(text) => options.push(pdf_text(text.as_bytes())),
-                    // An `[export display]` pair: the display name is what a person reads.
-                    Object::Array(pair) => {
-                        let parts = pair
-                            .iter::<Object<'_>>()
-                            .filter_map(|part| match part {
-                                Object::String(text) => Some(pdf_text(text.as_bytes())),
-                                _ => None,
-                            })
-                            .collect::<Vec<_>>();
-                        if let Some(display) = parts.last() {
-                            options.push(display.clone());
+                    // An `[export display]` pair: the display name is its second entry, and its
+                    // first when the pair states one entry — the way both engines read it.
+                    Object::Array(pair) if !button => {
+                        let mut entries = pair.iter::<Object<'_>>();
+                        let first = entries.next().and_then(option_text);
+                        let second = entries.next().and_then(option_text);
+                        if let Some(display) = second.or(first) {
+                            options.push(display);
                         }
                     }
                     _ => {}
@@ -1130,14 +1482,17 @@ mod tests {
             .and_then(|xobjects| xobjects.get::<Stream<'_>>(b"Fm1"))
             .expect("the fixture's page names its form");
         let mut budget = Decoded::default();
-        let value = form_value(&form, &mut budget).expect("a small form is under the bound");
+        let mut out = Vec::new();
+        let mut cache = HashMap::new();
+        walk_form(&form, &mut out, &mut cache, &mut budget, 0)
+            .expect("a small form is under the bound");
         assert_eq!(budget.total, 7, "the form's decoded content");
-        assert_eq!(
-            value["len"],
-            json!(7),
-            "and the model reports the same length"
+        assert!(
+            out.is_empty(),
+            "a form that draws no text states none to the model"
         );
-        let error = form_value(&form, &mut spent()).expect_err("a spent total refuses the form");
+        let error = walk_form(&form, &mut out, &mut cache, &mut spent(), 0)
+            .expect_err("a spent total refuses the form");
         assert!(error.to_string().contains("decoded streams"), "{error}");
     }
 

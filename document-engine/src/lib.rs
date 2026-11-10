@@ -12,11 +12,12 @@
 //!   produces several files, and never overwrites. An OOXML edit is carried out by the writing half
 //!   part by part: every part the edit does not name is carried into the produced file with the
 //!   content it had, so a chart, a comment, a macro or a media file the caller never mentioned
-//!   survives. A PDF page action builds a document out of the pages a merge or a split names, or
-//!   changes the box or the turn of the pages it names and keeps everything else the file holds.
-//!   The Word and workbook edits and the five PDF page actions are the operations the writing half
-//!   carries out; the other six answer with the vocabulary's `reason_not_carried_out` until their
-//!   port lands.
+//!   survives. A PDF page action builds a document out of the pages a merge or a split names, changes
+//!   the box or the turn of the pages it names, or draws text, a picture or a filled form into them,
+//!   and keeps everything else the file holds. The Word and workbook edits, the five PDF page actions
+//!   and the three PDF drawing actions are the operations the writing half carries out; `create`,
+//!   `fill_template` and `pptx_edit` answer with the vocabulary's `reason_not_carried_out` until
+//!   their port lands.
 //! - [`vocabulary`]: every reading bound the engine enforces, every mark it prints, who enforces
 //!   and who prints each one, the enumerations it shares between reading and producing, and the
 //!   embedded font the producing half draws with — one file, embedded at build time, read from

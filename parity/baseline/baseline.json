@@ -1,6 +1,6 @@
 {
   "note": "Recorded from the reference engine by `cargo run --bin record-baseline`. The harness never rewrites this file: recording is a deliberate act.",
-  "recorded_at_unix": 1794248021,
+  "recorded_at_unix": 1794307118,
   "writer": {
     "engine": "reference-writer",
     "build": "d92ee6931fa8ccd1f223d8e1e7f50870924739131121cdbd887c110b0a623b7c",
@@ -79990,8 +79990,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80030,13 +80031,14 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": [
                 59.528,
                 336.756,
                 357.168,
                 757.701
               ],
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80055,8 +80057,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80094,13 +80097,14 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": [
                 59.528,
                 336.756,
                 357.168,
                 757.701
               ],
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80119,8 +80123,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80173,13 +80178,14 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": [
                 59.528,
                 336.756,
                 357.168,
                 757.701
               ],
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80198,8 +80204,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80237,13 +80244,14 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": [
                 59.528,
                 336.756,
                 357.168,
                 757.701
               ],
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80262,8 +80270,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80306,13 +80315,14 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": [
                 89.292,
                 505.134,
                 238.112,
                 715.6065
               ],
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80331,13 +80341,14 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": [
                 89.292,
                 505.134,
                 238.112,
                 715.6065
               ],
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80368,9 +80379,11 @@
           "form": {
             "fields": [
               {
+                "appearance": [],
                 "kind": "text",
                 "name": "field",
                 "options": [],
+                "state": null,
                 "value": "Ada"
               }
             ]
@@ -80405,11 +80418,20 @@
                   "subtype": "FileAttachment"
                 }
               ],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [
                 {
                   "height": 2,
+                  "placement": [
+                    80.0,
+                    0.0,
+                    0.0,
+                    40.0,
+                    72.0,
+                    700.0
+                  ],
                   "sha256": "f3d3918dcdb3ddb1b3505fde03f91e7d0e0f28ffc30b3af3f578ceee1144be58",
                   "width": 4
                 }
@@ -80442,13 +80464,14 @@
                   "subtype": "Text"
                 }
               ],
+              "appearance_text": [],
               "crop": [
                 0.0,
                 420.945,
                 297.64,
                 841.89
               ],
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80486,13 +80509,14 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": [
                 59.528,
                 84.189,
                 357.168,
                 505.134
               ],
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80530,13 +80554,14 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": [
                 59.528,
                 336.756,
                 357.168,
                 757.701
               ],
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80555,8 +80580,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80582,6 +80608,347 @@
       "class": "internal",
       "reason": "{{variable}}"
     },
+    "pdf/pdf_form_fill/broken_pair_options": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
+    "pdf/pdf_form_fill/buttons@buttons": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [],
+                "kind": "text",
+                "name": "name",
+                "options": [],
+                "state": null,
+                "value": null
+              },
+              {
+                "appearance": [],
+                "kind": "checkbox",
+                "name": "agree",
+                "options": [],
+                "state": "Off",
+                "value": "Off"
+              },
+              {
+                "appearance": [],
+                "kind": "radio",
+                "name": "choice",
+                "options": [],
+                "state": "one",
+                "value": "one"
+              },
+              {
+                "appearance": [
+                  "red"
+                ],
+                "kind": "choice",
+                "name": "colour",
+                "options": [
+                  "red",
+                  "green",
+                  "blue"
+                ],
+                "state": null,
+                "value": "red"
+              }
+            ]
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    700.0,
+                    272.0,
+                    724.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    660.0,
+                    86.0,
+                    674.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    620.0,
+                    86.0,
+                    634.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    600.0,
+                    86.0,
+                    614.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    560.0,
+                    220.0,
+                    584.0
+                  ],
+                  "subtype": "Widget"
+                }
+              ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A form with one field of each kind"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/checkbox_state@refused_checkbox_state": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "form field \"agree\" is a checkbox and takes true or false, got: \"Yes\""
+    },
+    "pdf/pdf_form_fill/combed@combed": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [
+                  "a",
+                  "b",
+                  "c"
+                ],
+                "kind": "text",
+                "name": "name",
+                "options": [],
+                "state": null,
+                "value": "abc"
+              }
+            ]
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    700.0,
+                    172.0,
+                    760.0
+                  ],
+                  "subtype": "Widget"
+                }
+              ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A form with one text field"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/combed_overflow@refused_combed_overflow": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "Failed to layout combed text as lineLength=4 is greater than cellCount=3"
+    },
+    "pdf/pdf_form_fill/described@described": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [
+                  "Ada"
+                ],
+                "kind": "text",
+                "name": "name",
+                "options": [],
+                "state": null,
+                "value": "Ada"
+              },
+              {
+                "appearance": [],
+                "kind": "checkbox",
+                "name": "agree",
+                "options": [],
+                "state": "Off",
+                "value": "Off"
+              },
+              {
+                "appearance": [],
+                "kind": "radio",
+                "name": "choice",
+                "options": [],
+                "state": "Off",
+                "value": "Off"
+              },
+              {
+                "appearance": [
+                  "red"
+                ],
+                "kind": "choice",
+                "name": "colour",
+                "options": [
+                  "red",
+                  "green",
+                  "blue"
+                ],
+                "state": null,
+                "value": "red"
+              }
+            ]
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": "Form",
+            "title": "Filled"
+          },
+          "pages": [
+            {
+              "annots": [
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    700.0,
+                    272.0,
+                    724.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    660.0,
+                    86.0,
+                    674.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    620.0,
+                    86.0,
+                    634.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    600.0,
+                    86.0,
+                    614.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    560.0,
+                    220.0,
+                    584.0
+                  ],
+                  "subtype": "Widget"
+                }
+              ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A form with one field of each kind"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
     "pdf/pdf_form_fill/flatten": {
       "status": "produced",
       "outputs": {
@@ -80599,29 +80966,187 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [
+                "Ada",
+                "green"
+              ],
               "crop": null,
-              "forms": [
+              "forms": 5,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A form with one field of each kind"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/flatten_greek@flatten_greek": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [
+                "Привет Ω",
+                "green"
+              ],
+              "crop": null,
+              "forms": 5,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A form with one field of each kind"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/greek@greek": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [
+                  "Привет Ω"
+                ],
+                "kind": "text",
+                "name": "name",
+                "options": [],
+                "state": null,
+                "value": "Привет Ω"
+              },
+              {
+                "appearance": [],
+                "kind": "checkbox",
+                "name": "agree",
+                "options": [],
+                "state": "Off",
+                "value": "Off"
+              },
+              {
+                "appearance": [],
+                "kind": "radio",
+                "name": "choice",
+                "options": [],
+                "state": "Off",
+                "value": "Off"
+              },
+              {
+                "appearance": [
+                  "red"
+                ],
+                "kind": "choice",
+                "name": "colour",
+                "options": [
+                  "red",
+                  "green",
+                  "blue"
+                ],
+                "state": null,
+                "value": "red"
+              }
+            ]
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [
                 {
-                  "len": 263,
-                  "sha256": "a24d9b13561eb47c9509b6b9b57b9d2587cec16a620ee16a618f6aafb43ae17e"
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    700.0,
+                    272.0,
+                    724.0
+                  ],
+                  "subtype": "Widget"
                 },
                 {
-                  "len": 25,
-                  "sha256": "9fe93db7b8893a2ca3d78332b28baa4e8d3e273f5daf780f25af051dbcce0b9a"
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    660.0,
+                    86.0,
+                    674.0
+                  ],
+                  "subtype": "Widget"
                 },
                 {
-                  "len": 0,
-                  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    620.0,
+                    86.0,
+                    634.0
+                  ],
+                  "subtype": "Widget"
                 },
                 {
-                  "len": 25,
-                  "sha256": "9fe93db7b8893a2ca3d78332b28baa4e8d3e273f5daf780f25af051dbcce0b9a"
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    600.0,
+                    86.0,
+                    614.0
+                  ],
+                  "subtype": "Widget"
                 },
                 {
-                  "len": 271,
-                  "sha256": "028d52519ae4df30aa3473a1bff07bd06c5dbf94085a4b0d988d489ab7cd83b2"
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    560.0,
+                    220.0,
+                    584.0
+                  ],
+                  "subtype": "Widget"
                 }
               ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80650,24 +81175,35 @@
           "form": {
             "fields": [
               {
+                "appearance": [
+                  "Ada"
+                ],
                 "kind": "text",
                 "name": "name",
                 "options": [],
+                "state": null,
                 "value": "Ada"
               },
               {
+                "appearance": [],
                 "kind": "checkbox",
                 "name": "agree",
                 "options": [],
+                "state": "Yes",
                 "value": "Yes"
               },
               {
+                "appearance": [],
                 "kind": "radio",
                 "name": "choice",
                 "options": [],
+                "state": "two",
                 "value": "two"
               },
               {
+                "appearance": [
+                  "green"
+                ],
                 "kind": "choice",
                 "name": "colour",
                 "options": [
@@ -80675,6 +81211,7 @@
                   "green",
                   "blue"
                 ],
+                "state": null,
                 "value": "green"
               }
             ]
@@ -80739,8 +81276,9 @@
                   "subtype": "Widget"
                 }
               ],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80761,6 +81299,911 @@
         }
       }
     },
+    "pdf/pdf_form_fill/listed_field@listed_field": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [
+                "Ada"
+              ],
+              "crop": null,
+              "forms": 1,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A form whose field is also an annotation"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/max_length@refused_max_length": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "Attempted to set text with length=6 for TextField with maxLength=3 and name=name"
+    },
+    "pdf/pdf_form_fill/misplaced@misplaced": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [
+                "Ada"
+              ],
+              "crop": null,
+              "forms": 1,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A form whose widget names no page"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/missing_field@refused_missing_field": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "no such form field: nope; this document has: name (text), agree (checkbox), choice (radio; options: one, two), colour (choice; options: red, green, blue)"
+    },
+    "pdf/pdf_form_fill/multiline@multiline": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [
+                  "the quick brown",
+                  "fox jumps over the",
+                  "lazy dog"
+                ],
+                "kind": "text",
+                "name": "name",
+                "options": [],
+                "state": null,
+                "value": "the quick brown fox jumps over the lazy dog"
+              }
+            ]
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    700.0,
+                    172.0,
+                    760.0
+                  ],
+                  "subtype": "Widget"
+                }
+              ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A form with one text field"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/newline@newline": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [
+                  "line one line two"
+                ],
+                "kind": "text",
+                "name": "name",
+                "options": [],
+                "state": null,
+                "value": "line one\nline two"
+              },
+              {
+                "appearance": [],
+                "kind": "checkbox",
+                "name": "agree",
+                "options": [],
+                "state": "Off",
+                "value": "Off"
+              },
+              {
+                "appearance": [],
+                "kind": "radio",
+                "name": "choice",
+                "options": [],
+                "state": "Off",
+                "value": "Off"
+              },
+              {
+                "appearance": [
+                  "red"
+                ],
+                "kind": "choice",
+                "name": "colour",
+                "options": [
+                  "red",
+                  "green",
+                  "blue"
+                ],
+                "state": null,
+                "value": "red"
+              }
+            ]
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    700.0,
+                    272.0,
+                    724.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    660.0,
+                    86.0,
+                    674.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    620.0,
+                    86.0,
+                    634.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    600.0,
+                    86.0,
+                    614.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    560.0,
+                    220.0,
+                    584.0
+                  ],
+                  "subtype": "Widget"
+                }
+              ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A form with one field of each kind"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/no_choice@refused_no_choice": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "form field \"fruit\" offers no choice to select; this document has: note (text)"
+    },
+    "pdf/pdf_form_fill/option@refused_option": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "form field \"fruit\" takes one of: apple, pear; got: plum"
+    },
+    "pdf/pdf_form_fill/option_list@option_list": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [],
+                "kind": "text",
+                "name": "note",
+                "options": [],
+                "state": null,
+                "value": null
+              },
+              {
+                "appearance": [
+                  "apple",
+                  "pear"
+                ],
+                "kind": "choice",
+                "name": "fruit",
+                "options": [
+                  "apple",
+                  "pear"
+                ],
+                "state": null,
+                "value": "pear"
+              }
+            ]
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    700.0,
+                    272.0,
+                    724.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    660.0,
+                    220.0,
+                    684.0
+                  ],
+                  "subtype": "Widget"
+                }
+              ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A form with an option list"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/paired_options@paired_options": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [
+                  "One",
+                  "Two"
+                ],
+                "kind": "choice",
+                "name": "choice",
+                "options": [
+                  "One",
+                  "Two"
+                ],
+                "state": null,
+                "value": "Two"
+              }
+            ]
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    660.0,
+                    220.0,
+                    684.0
+                  ],
+                  "subtype": "Widget"
+                }
+              ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A form with paired options"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/paired_radio": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "form field \"choice\" offers no choice to select; this document has: no fillable fields"
+    },
+    "pdf/pdf_form_fill/pushbutton@pushbutton_caption": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [
+                  "Ada"
+                ],
+                "kind": "text",
+                "name": "name",
+                "options": [],
+                "state": null,
+                "value": "Ada"
+              },
+              {
+                "appearance": [
+                  "Send"
+                ],
+                "kind": "button",
+                "name": "send",
+                "options": [],
+                "state": null,
+                "value": null
+              }
+            ]
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    700.0,
+                    172.0,
+                    730.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    650.0,
+                    172.0,
+                    680.0
+                  ],
+                  "subtype": "Widget"
+                }
+              ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A form with a captioned button"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/radio_options@radio_options": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [],
+                "kind": "radio",
+                "name": "choice",
+                "options": [
+                  "One",
+                  "Two"
+                ],
+                "state": "1",
+                "value": "1"
+              }
+            ]
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    700.0,
+                    86.0,
+                    714.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    680.0,
+                    86.0,
+                    694.0
+                  ],
+                  "subtype": "Widget"
+                }
+              ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A form with a radio group"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/radio_outrun@refused_radio_outrun": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "form field \"choice\" cannot take \"Three\": {{variable}}"
+    },
+    "pdf/pdf_form_fill/rectless": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
+    "pdf/pdf_form_fill/rectless_button": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
+    "pdf/pdf_form_fill/rectless_flatten": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
+    "pdf/pdf_form_fill/signature": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
+    "pdf/pdf_form_fill/state_appearance@state_appearance": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [
+                  "Ada"
+                ],
+                "kind": "text",
+                "name": "name",
+                "options": [],
+                "state": null,
+                "value": "Ada"
+              }
+            ]
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    700.0,
+                    172.0,
+                    760.0
+                  ],
+                  "subtype": "Widget"
+                }
+              ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A form with one text field"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/stated_size@stated_size": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [
+                  "the quick brown fox",
+                  "jumps over the lazy",
+                  "dog"
+                ],
+                "kind": "text",
+                "name": "name",
+                "options": [],
+                "state": null,
+                "value": "the quick brown fox jumps over the lazy dog"
+              }
+            ]
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    700.0,
+                    172.0,
+                    760.0
+                  ],
+                  "subtype": "Widget"
+                }
+              ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A form with one text field"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/structure@refused_structure": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "the value for \"name\" must be text, a number or a boolean, not a structure"
+    },
+    "pdf/pdf_form_fill/undrawable@undrawable": {
+      "status": "produced",
+      "unsupported": [
+        "漢",
+        "字"
+      ],
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [],
+                "kind": "text",
+                "name": "name",
+                "options": [],
+                "state": null,
+                "value": "漢字"
+              },
+              {
+                "appearance": [],
+                "kind": "checkbox",
+                "name": "agree",
+                "options": [],
+                "state": "Off",
+                "value": "Off"
+              },
+              {
+                "appearance": [],
+                "kind": "radio",
+                "name": "choice",
+                "options": [],
+                "state": "Off",
+                "value": "Off"
+              },
+              {
+                "appearance": [
+                  "red"
+                ],
+                "kind": "choice",
+                "name": "colour",
+                "options": [
+                  "red",
+                  "green",
+                  "blue"
+                ],
+                "state": null,
+                "value": "red"
+              }
+            ]
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    700.0,
+                    272.0,
+                    724.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    660.0,
+                    86.0,
+                    674.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    620.0,
+                    86.0,
+                    634.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    600.0,
+                    86.0,
+                    614.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    560.0,
+                    220.0,
+                    584.0
+                  ],
+                  "subtype": "Widget"
+                }
+              ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A form with one field of each kind"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/unfillable@refused_unfillable": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "form field \"button\" cannot take a value — it is not a fillable field; this document has: no fillable fields"
+    },
     "pdf/pdf_image": {
       "status": "produced",
       "outputs": {
@@ -80778,16 +82221,33 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [
                 {
                   "height": 2,
+                  "placement": [
+                    80.0,
+                    0.0,
+                    0.0,
+                    40.0,
+                    72.0,
+                    700.0
+                  ],
                   "sha256": "f3d3918dcdb3ddb1b3505fde03f91e7d0e0f28ffc30b3af3f578ceee1144be58",
                   "width": 4
                 },
                 {
                   "height": 2,
+                  "placement": [
+                    100.0,
+                    0.0,
+                    0.0,
+                    50.0,
+                    50.0,
+                    50.0
+                  ],
                   "sha256": "cdad675f7130fb5b6e94acc75cdef5059afabc4e1e8435c91bd86f6e5be02fcc",
                   "width": 4
                 }
@@ -80811,6 +82271,418 @@
         }
       }
     },
+    "pdf/pdf_image/broken_png@refused_broken_png": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "cannot embed broken.png as a PNG image: the file's bytes are not a whole PNG image"
+    },
+    "pdf/pdf_image/described@described": {
+      "status": "produced",
+      "outputs": {
+        "drawn.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": "Ada",
+            "keywords": null,
+            "subject": null,
+            "title": "Placed"
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [
+                {
+                  "height": 2,
+                  "placement": [
+                    80.0,
+                    0.0,
+                    0.0,
+                    40.0,
+                    72.0,
+                    700.0
+                  ],
+                  "sha256": "f3d3918dcdb3ddb1b3505fde03f91e7d0e0f28ffc30b3af3f578ceee1144be58",
+                  "width": 4
+                },
+                {
+                  "height": 2,
+                  "placement": [
+                    100.0,
+                    0.0,
+                    0.0,
+                    50.0,
+                    56.0,
+                    420.945
+                  ],
+                  "sha256": "cdad675f7130fb5b6e94acc75cdef5059afabc4e1e8435c91bd86f6e5be02fcc",
+                  "width": 4
+                }
+              ],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text beside a picture"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_image/implied_side@refused_implied_side": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "an image's width implied by its height must be greater than 0 and at most 20000 points, got: 40000"
+    },
+    "pdf/pdf_image/off_page@off_page": {
+      "status": "produced",
+      "notes": [
+        "[the picture's box reaches past the visible area of page 1 — the part beyond is not shown on it]"
+      ],
+      "outputs": {
+        "drawn.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [
+                {
+                  "height": 2,
+                  "placement": [
+                    80.0,
+                    0.0,
+                    0.0,
+                    40.0,
+                    72.0,
+                    700.0
+                  ],
+                  "sha256": "f3d3918dcdb3ddb1b3505fde03f91e7d0e0f28ffc30b3af3f578ceee1144be58",
+                  "width": 4
+                },
+                {
+                  "height": 2,
+                  "placement": [
+                    120.0,
+                    0.0,
+                    0.0,
+                    60.0,
+                    -50.0,
+                    50.0
+                  ],
+                  "sha256": "f3d3918dcdb3ddb1b3505fde03f91e7d0e0f28ffc30b3af3f578ceee1144be58",
+                  "width": 4
+                }
+              ],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text beside a picture"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_image/png_fitted@png_fitted": {
+      "status": "produced",
+      "outputs": {
+        "drawn.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [
+                {
+                  "height": 2,
+                  "placement": [
+                    80.0,
+                    0.0,
+                    0.0,
+                    40.0,
+                    72.0,
+                    700.0
+                  ],
+                  "sha256": "f3d3918dcdb3ddb1b3505fde03f91e7d0e0f28ffc30b3af3f578ceee1144be58",
+                  "width": 4
+                },
+                {
+                  "height": 2,
+                  "placement": [
+                    3.0,
+                    0.0,
+                    0.0,
+                    1.5,
+                    56.0,
+                    784.39
+                  ],
+                  "sha256": "f3d3918dcdb3ddb1b3505fde03f91e7d0e0f28ffc30b3af3f578ceee1144be58",
+                  "width": 4
+                }
+              ],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text beside a picture"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_image/png_sized@png_sized": {
+      "status": "produced",
+      "outputs": {
+        "drawn.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [
+                {
+                  "height": 2,
+                  "placement": [
+                    80.0,
+                    0.0,
+                    0.0,
+                    40.0,
+                    72.0,
+                    700.0
+                  ],
+                  "sha256": "f3d3918dcdb3ddb1b3505fde03f91e7d0e0f28ffc30b3af3f578ceee1144be58",
+                  "width": 4
+                },
+                {
+                  "height": 2,
+                  "placement": [
+                    120.0,
+                    0.0,
+                    0.0,
+                    60.0,
+                    50.0,
+                    50.0
+                  ],
+                  "sha256": "f3d3918dcdb3ddb1b3505fde03f91e7d0e0f28ffc30b3af3f578ceee1144be58",
+                  "width": 4
+                }
+              ],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text beside a picture"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_image/side@refused_side": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "an image's width and height must be greater than 0 and at most 20000 points, got: 0"
+    },
+    "pdf/pdf_image/stale_crc@stale_crc": {
+      "status": "produced",
+      "outputs": {
+        "drawn.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [
+                {
+                  "height": 2,
+                  "placement": [
+                    80.0,
+                    0.0,
+                    0.0,
+                    40.0,
+                    72.0,
+                    700.0
+                  ],
+                  "sha256": "f3d3918dcdb3ddb1b3505fde03f91e7d0e0f28ffc30b3af3f578ceee1144be58",
+                  "width": 4
+                },
+                {
+                  "height": 2,
+                  "placement": [
+                    3.0,
+                    0.0,
+                    0.0,
+                    1.5,
+                    56.0,
+                    784.39
+                  ],
+                  "sha256": "f3d3918dcdb3ddb1b3505fde03f91e7d0e0f28ffc30b3af3f578ceee1144be58",
+                  "width": 4
+                }
+              ],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text beside a picture"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_image/turned@turned": {
+      "status": "produced",
+      "outputs": {
+        "drawn.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [
+                {
+                  "height": 2,
+                  "placement": [
+                    0.0,
+                    3.0,
+                    -1.5,
+                    0.0,
+                    57.5,
+                    56.0
+                  ],
+                  "sha256": "f3d3918dcdb3ddb1b3505fde03f91e7d0e0f28ffc30b3af3f578ceee1144be58",
+                  "width": 4
+                }
+              ],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                "Rotated page text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_image/webp@refused_webp": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "a PDF cannot embed picture.webp: a PDF holds a picture as PNG or JPEG — convert the WebP picture first"
+    },
     "pdf/pdf_merge": {
       "status": "produced",
       "outputs": {
@@ -80828,8 +82700,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80848,8 +82721,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80868,8 +82742,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80888,8 +82763,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80927,8 +82803,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80947,8 +82824,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80967,8 +82845,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -80987,8 +82866,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81026,8 +82906,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81046,8 +82927,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81066,8 +82948,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81086,8 +82969,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81130,8 +83014,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81150,8 +83035,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81189,8 +83075,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81209,8 +83096,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81229,8 +83117,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81249,8 +83138,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81288,8 +83178,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81308,8 +83199,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81328,8 +83220,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81348,8 +83241,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81387,8 +83281,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81418,8 +83313,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81438,8 +83334,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81477,8 +83374,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81497,8 +83395,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81517,8 +83416,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81537,8 +83437,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81576,8 +83477,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81613,8 +83515,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81633,8 +83536,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81653,8 +83557,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81673,8 +83578,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81712,8 +83618,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81732,8 +83639,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81752,8 +83660,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81772,8 +83681,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81832,11 +83742,20 @@
                   "subtype": "FileAttachment"
                 }
               ],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [
                 {
                   "height": 2,
+                  "placement": [
+                    80.0,
+                    0.0,
+                    0.0,
+                    40.0,
+                    72.0,
+                    700.0
+                  ],
                   "sha256": "f3d3918dcdb3ddb1b3505fde03f91e7d0e0f28ffc30b3af3f578ceee1144be58",
                   "width": 4
                 }
@@ -81869,8 +83788,9 @@
                   "subtype": "Text"
                 }
               ],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81908,8 +83828,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81928,8 +83849,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -81948,8 +83870,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82008,11 +83931,20 @@
                   "subtype": "FileAttachment"
                 }
               ],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [
                 {
                   "height": 2,
+                  "placement": [
+                    80.0,
+                    0.0,
+                    0.0,
+                    40.0,
+                    72.0,
+                    700.0
+                  ],
                   "sha256": "f3d3918dcdb3ddb1b3505fde03f91e7d0e0f28ffc30b3af3f578ceee1144be58",
                   "width": 4
                 }
@@ -82045,8 +83977,9 @@
                   "subtype": "Text"
                 }
               ],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82065,8 +83998,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82085,8 +84019,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82124,8 +84059,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82144,8 +84080,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82164,8 +84101,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82184,8 +84122,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82223,8 +84162,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82243,8 +84183,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82263,8 +84204,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82283,8 +84225,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82327,8 +84270,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82347,8 +84291,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82386,8 +84331,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82406,8 +84352,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82445,8 +84392,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82465,8 +84413,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82504,8 +84453,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82524,8 +84474,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82572,8 +84523,9 @@
                   "subtype": "Square"
                 }
               ],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82627,8 +84579,9 @@
                   "subtype": "Text"
                 }
               ],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82658,8 +84611,9 @@
                   "subtype": "Text"
                 }
               ],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82690,9 +84644,11 @@
           "form": {
             "fields": [
               {
+                "appearance": [],
                 "kind": "text",
                 "name": "field",
                 "options": [],
+                "state": null,
                 "value": "Ada"
               }
             ]
@@ -82727,11 +84683,20 @@
                   "subtype": "FileAttachment"
                 }
               ],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [
                 {
                   "height": 2,
+                  "placement": [
+                    38.0097,
+                    0.0,
+                    0.0,
+                    19.0049,
+                    92.7936,
+                    774.475
+                  ],
                   "sha256": "f3d3918dcdb3ddb1b3505fde03f91e7d0e0f28ffc30b3af3f578ceee1144be58",
                   "width": 4
                 }
@@ -82764,8 +84729,9 @@
                   "subtype": "Text"
                 }
               ],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82803,8 +84769,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82842,8 +84809,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82862,8 +84830,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82906,8 +84875,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82926,8 +84896,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82965,8 +84936,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -82985,8 +84957,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83024,8 +84997,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83044,8 +85018,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83088,8 +85063,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83108,8 +85084,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83162,8 +85139,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83182,8 +85160,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83221,8 +85200,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83241,8 +85221,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83285,8 +85266,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83305,8 +85287,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83349,8 +85332,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83369,8 +85353,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83408,8 +85393,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83428,8 +85414,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83467,8 +85454,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83487,8 +85475,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83526,8 +85515,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83546,8 +85536,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83578,9 +85569,11 @@
           "form": {
             "fields": [
               {
+                "appearance": [],
                 "kind": "text",
                 "name": "field",
                 "options": [],
+                "state": null,
                 "value": "Ada"
               }
             ]
@@ -83615,11 +85608,20 @@
                   "subtype": "FileAttachment"
                 }
               ],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [
                 {
                   "height": 2,
+                  "placement": [
+                    80.0,
+                    0.0,
+                    0.0,
+                    40.0,
+                    72.0,
+                    700.0
+                  ],
                   "sha256": "f3d3918dcdb3ddb1b3505fde03f91e7d0e0f28ffc30b3af3f578ceee1144be58",
                   "width": 4
                 }
@@ -83652,8 +85654,9 @@
                   "subtype": "Text"
                 }
               ],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83691,8 +85694,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83711,8 +85715,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83750,8 +85755,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83789,8 +85795,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83809,8 +85816,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83848,8 +85856,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83868,8 +85877,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83907,8 +85917,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83927,8 +85938,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -83971,8 +85983,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -84005,8 +86018,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -84044,8 +86058,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -84078,8 +86093,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -84117,8 +86133,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -84151,8 +86168,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -84190,8 +86208,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -84224,8 +86243,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -84263,8 +86283,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -84283,8 +86304,9 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -84322,8 +86344,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -84356,8 +86379,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -84395,8 +86419,9 @@
           "pages": [
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,
@@ -84416,8 +86441,345 @@
             },
             {
               "annots": [],
+              "appearance_text": [],
               "crop": null,
-              "forms": [],
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_text/color@refused_color": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "color must be 6 hex digits, with an optional leading \"#\", got: red"
+    },
+    "pdf/pdf_text/defaults@defaults": {
+      "status": "produced",
+      "outputs": {
+        "text.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text",
+                "Привет Ω"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_text/described@described": {
+      "status": "produced",
+      "outputs": {
+        "text.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": "Ada",
+            "keywords": "stamp",
+            "subject": "Text",
+            "title": "Stamped"
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text",
+                "Hello"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_text/missing_glyphs@missing_glyphs": {
+      "status": "produced",
+      "unsupported": [
+        "漢"
+      ],
+      "outputs": {
+        "text.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text",
+                "AB\u0000CD"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_text/off_page@off_page": {
+      "status": "produced",
+      "notes": [
+        "[the text's box reaches past the visible area of page 1 — the part beyond is not shown on it]"
+      ],
+      "outputs": {
+        "text.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text",
+                "Off the page"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_text/opacity@refused_opacity": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "\"opacity\" must be greater than 0 and at most 1, got: 0"
+    },
+    "pdf/pdf_text/point@refused_point": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "\"x\" must be within ±20000 points, got 20001"
+    },
+    "pdf/pdf_text/size@refused_size": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "\"size\" must be greater than 0 and at most 20000 points, got 0"
+    },
+    "pdf/pdf_text/stamp@stamp": {
+      "status": "produced",
+      "outputs": {
+        "stamped.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text",
+                "AVATAR"
+              ],
+              "vector": {
+                "count": 6,
+                "sha256": "efc4a05af199c7ef3fb51c89c7742e09e602fc16d8b1c66856b0b628ccb379db"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
               "images": [],
               "media": [
                 0.0,

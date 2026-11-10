@@ -12,9 +12,20 @@ description = "The MahBot document engine: read documents, produce and edit them
 test-support = []
 
 [dependencies]
+# The PDF writer embeds a subset of the bundled NotoSans. The sfnt parser and subsetter live in
+# `src/writing/pdf/font.rs` rather than behind a font crate. `skrifa`/`read-fonts` are already
+# resolved through hayro and already recorded in the comparison's codec list, so naming one would
+# change neither the lockfile nor the recorded identity; it would tie this manifest's exact pin to
+# whatever version hayro resolves, to replace the reading of one trusted asset the crate ships — the
+# cmap, the composite glyphs and the metrics — beside subset assembly, checksums and the PDF-side
+# font dictionary that are hand-written either way.
+#
 # Format classification opens a CFB's directory and a ZIP's central directory; no entry is
 # decompressed to decide a family. The versions are the product's own, pinned by its lockfile.
 hayro = "=0.7.1"
+# The PDF writing half compresses the streams it adds: the subset font program, an image's samples
+# and the content that draws them. The product's own kit compresses the same streams.
+flate2 = "=1.1.10"
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
 # The PDF page actions' object model: parsing, page-tree walking, deep-copying a page's objects
 # between documents and writing the result back. Already resolved by `pdf-extract`; named here
@@ -25,7 +36,10 @@ pdf-extract = { version = "=0.12.1", default-features = false }
 quick-xml = { version = "=0.39.4", default-features = false }
 regex = "1.13"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+# A request's values are read in the order the caller wrote them: the reference iterates
+# `Object.entries(req.values)`, and that order decides which fault a two-fault fill reports and the
+# order of the characters its answer lists.
+serde_json = { version = "1.0", features = ["preserve_order"] }
 sha2 = "0.10"
 strum = { version = "0.27", features = ["derive"] }
 tracing = "0.1"
@@ -35,7 +49,5 @@ zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
 # A package may depend on itself as a dev-dependency: this is what turns `test-support` on for
 # the integration tests without putting the corpus builders into a normal build.
 document-engine = { path = ".", features = ["test-support"] }
-# A PDF fixture's compressed stream is built with the decoder's own deflate.
-flate2 = "=1.1.10"
 # Tests write into a fresh directory that removes itself, even when an assertion fails.
 tempfile = "3"

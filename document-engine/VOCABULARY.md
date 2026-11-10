@@ -12,7 +12,7 @@ copy carries its licence beside it (`NotoSans-LICENSE.txt`).
 |---|---|
 | `rules` | The shared writer/reader rules — a copy of `assets/docgen/rules.json`, value for value, the data the JavaScript kit inlines at build time. It is kept as data, not restated as a typed graph: the code that reads a rule adds the view it needs. |
 | `reading` | The bounds and constants of the reading surface: the prefix a caller peeks, the input size a caller caps, the pictures a caller delivers and the text a caller spills, the page-text floor, the crop-box slack, the raster envelope (target, quality, scale ceiling) and the raster decode envelope applied to an embedded image. |
-| `limits` | The reader and producer caps: the ZIP entry, XML depth, Word table/style/field/link, Excel range-probe, chart, number-format, PDF mark/field, edit-work and multi-file bounds. Every entry is the reference's own number, read from its sources. |
+| `limits` | The reader and producer caps: the ZIP entry, XML depth, Word table/style/field/link, Excel range-probe, chart, number-format, PDF mark/field/catalogue, edit-work and multi-file bounds. Every entry is the reference's own number, read from its sources. |
 | `engine` | The bounds the engine states for itself, where the reference states none: the paragraph-nesting cap that keeps a Word edit's cost bounded on a deeply nested body, the page-tree and object-copy depth caps that keep the PDF writer's walks off the stack, the scan budget the PDF writer's body walk may spend on one file and on each object stream it expands, the bytes one look at what comes next may inspect, the bytes one PDF container may decode to, and the highest object number the writer can state in its index. Nothing here is the reference's number, so nothing here is pinned by the contract test. |
 | `marks` | The fixed words, labels, templates and note fragments a reading or an operation prints, by key, each with the producers that print it. `{name}` placeholders are replaced with `Marks::format`. A mark the `rules` section already states (a Word tracked-change or chart label, a peripheral part's kind, a PDF form word) is not repeated here: `src/vocabulary.rs` reads it from `rules` under its key. A note with no values ("the workbook declares no sheets") is a fixed sentence and lives here; one that interpolates values is composed at the reporting site from this section's fragments and marks. |
 | `derived_marks` | The `rules` sections whose values are printed marks (Word marks and their chart labels, slide labels, PDF form words and field kinds, metadata keys, and peripheral parts), each naming the producers that print them today. The Word marks and peripheral parts are printed by both halves — a reading labels them and a Word edit names them in a refusal — and the rest by the reading only, until their writing port prints one. They live in `rules` because the kit needs them as request vocabulary; this section says they are marks too. |
@@ -23,16 +23,20 @@ result names them through `Family::as_str`.
 
 One mark is interim: `reason_not_carried_out` is the engine's answer for a recognised operation it
 does not carry out. It is stated here rather than in code, and the operation's own reason replaces
-it once the dispatch carries the operation out. The writing half carries `docx_edit`, `xlsx_edit`
-and the five PDF page actions out today, so that mark is the answer for the other six operations
-only.
+it once the dispatch carries the operation out. The writing half carries `docx_edit`, `xlsx_edit`,
+the five PDF page actions and the three PDF drawing actions (`pdf_text`, `pdf_image`,
+`pdf_form_fill`) out today, so that mark is the answer for `create`, `fill_template` and
+`pptx_edit` only.
 
 The writing half's marks have their own namespaces: a refusal or a value an edit names is an
 `edit_*` mark, a note or a loss it raises is a `note_*` mark, every sentence the request surface
-prints before an operation runs is a `surface_*` mark, and a PDF page action's refusals and its one
-note are `pdf_page_*` marks. A write that fails after it created files and cannot remove one of them
-is `write_leftover`, whichever half was writing. The page actions' namespace is separate from the
-reading's `pdf_*` marks because the reading already owns that prefix for what it prints about a PDF.
+prints before an operation runs is a `surface_*` mark, a PDF page action's refusals and its one note
+are `pdf_page_*` marks, and the three drawing actions' own refusals are `pdf_text_*`, `pdf_image_*`
+and `pdf_form_*` marks (the image-size sentences are shared with the OOXML arms and live under
+`edit_*`). A write that fails after it created files and cannot remove one of them is
+`write_leftover`, whichever half was writing. The page actions' namespace is separate from the
+reading's `pdf_*` marks because the reading already owns that prefix for what it prints about a PDF;
+the drawing actions' marks are named for their operation so the two halves stay readable.
 A sentence that is operation-agnostic is shared rather than copied: `edit_input_missing` names the
 operation and is the one sentence an operation with a single input refuses with, whichever half
 carries it out, and the crate's own caps on a merge extend the `surface_*` namespace that already

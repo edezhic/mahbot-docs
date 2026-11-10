@@ -93,7 +93,7 @@ pub(super) struct Frame {
     pub(super) width: f64,
     pub(super) height: f64,
     /// The quarter turn the page is displayed at, in `0..=3`.
-    turns: i64,
+    pub(super) turns: i64,
     /// Where the displayed page's top-left corner falls in user space.
     pub(super) origin: (f64, f64),
     /// Where one displayed unit right and down point in user space.
@@ -103,12 +103,22 @@ pub(super) struct Frame {
 
 impl Frame {
     /// Where a point of the displayed page falls in user space.
-    fn to_user(&self, dx: f64, dy: f64) -> (f64, f64) {
+    pub(super) fn to_user(&self, dx: f64, dy: f64) -> (f64, f64) {
         match self.turns {
             1 => (self.x0 + dy, self.y0 + dx),
             2 => (self.x1 - dx, self.y0 + dy),
             3 => (self.x1 - dy, self.y1 - dx),
             _ => (self.x0 + dx, self.y1 - dy),
+        }
+    }
+
+    /// Where a user-space point falls on the displayed page: the inverse of [`to_user`](Self::to_user).
+    pub(super) fn to_display(&self, x: f64, y: f64) -> (f64, f64) {
+        match self.turns {
+            1 => (y - self.y0, x - self.x0),
+            2 => (self.x1 - x, y - self.y0),
+            3 => (self.y1 - y, self.x1 - x),
+            _ => (x - self.x0, self.y1 - y),
         }
     }
 }
@@ -594,7 +604,7 @@ fn pages_id(document: &Document) -> Result<ObjectId, Failure> {
         .catalog()
         .and_then(|catalog| catalog.get(b"Pages"))
         .and_then(Object::as_reference)
-        .map_err(|_| Failure::internal(crate::contained::engine_failed()))
+        .map_err(|_| Failure::engine())
 }
 
 /// Append `page` to the document's page tree, and point the page at that tree: a page without its
@@ -602,7 +612,7 @@ fn pages_id(document: &Document) -> Result<ObjectId, Failure> {
 /// engine builds, and may name it in one it opened — a page-less file whose blank page an in-place
 /// action adds.
 pub(super) fn add_page(document: &mut Document, page: ObjectId) -> Result<(), Failure> {
-    let internal = || Failure::internal(crate::contained::engine_failed());
+    let internal = || Failure::engine();
     let pages = pages_id(document)?;
     document
         .get_object_mut(page)
@@ -693,7 +703,7 @@ impl<'a> Copier<'a> {
         if self.placed.insert(page) {
             return Ok(copy);
         }
-        let internal = || Failure::internal(crate::contained::engine_failed());
+        let internal = || Failure::engine();
         let dictionary = document
             .get_dictionary(copy)
             .map_err(|_| internal())?
@@ -716,7 +726,7 @@ impl<'a> Copier<'a> {
         if let Some(&copy) = self.memo.get(&page) {
             return Ok(copy);
         }
-        let internal = || Failure::internal(crate::contained::engine_failed());
+        let internal = || Failure::engine();
         let dictionary = page_dictionary(
             source,
             self.chains,
@@ -816,7 +826,7 @@ fn page_dictionary(
     dictionary: &Dictionary,
 ) -> Result<Dictionary, Failure> {
     if media_box(source, chains, ancestry, page).is_none() {
-        return Err(Failure::internal(crate::contained::engine_failed()));
+        return Err(Failure::engine());
     }
     let mut dictionary = dictionary.clone();
     for key in INHERITABLE {
@@ -1041,8 +1051,7 @@ pub(super) fn frame(
     ancestry: &Ancestry,
     page: ObjectId,
 ) -> Result<Frame, Failure> {
-    let media = media_box(document, chains, ancestry, page)
-        .ok_or_else(|| Failure::internal(crate::contained::engine_failed()))?;
+    let media = media_box(document, chains, ancestry, page).ok_or_else(Failure::engine)?;
     let crop = area(document, chains, ancestry, page, b"CropBox").unwrap_or(media);
     let mut x0 = media.x.max(crop.x);
     let mut y0 = media.y.max(crop.y);
@@ -1057,7 +1066,7 @@ pub(super) fn frame(
     // A quarter turn, of which anything else — which the format does not allow — is read as the
     // nearest. A turn the format does not allow to be a number at all is the library's own fault.
     let Some(rotation) = rotation(document, chains, ancestry, page) else {
-        return Err(Failure::internal(crate::contained::engine_failed()));
+        return Err(Failure::engine());
     };
     let step = super::step();
     let turn = js_round(rotation / step);
@@ -1120,7 +1129,7 @@ pub(super) fn set_box(document: &mut Document, page: ObjectId, key: &str, area: 
     if let Ok(dictionary) = document.get_object_mut(page).and_then(Object::as_dict_mut) {
         dictionary.set(
             key,
-            Object::Array(corners.iter().copied().map(number).collect()),
+            Object::Array(corners.iter().copied().map(object_number).collect()),
         );
     }
 }
@@ -1128,7 +1137,7 @@ pub(super) fn set_box(document: &mut Document, page: ObjectId, key: &str, area: 
 /// Write the page's turn.
 pub(super) fn set_rotation(document: &mut Document, page: ObjectId, degrees: f64) {
     if let Ok(dictionary) = document.get_object_mut(page).and_then(Object::as_dict_mut) {
-        dictionary.set("Rotate", number(degrees));
+        dictionary.set("Rotate", object_number(degrees));
     }
 }
 
@@ -1139,7 +1148,7 @@ pub(super) fn set_rotation(document: &mut Document, page: ObjectId, degrees: f64
     clippy::cast_possible_truncation,
     reason = "a value under a billion is exact as an integer, and the format's reals are single-precision"
 )]
-fn number(value: f64) -> Object {
+fn object_number(value: f64) -> Object {
     if value.fract() == 0.0 && value.abs() < 1e9 {
         Object::Integer(value as i64)
     } else {
@@ -1228,7 +1237,7 @@ pub(super) fn normalize_annots(
             Object::Array(values) => values.clone(),
             // A reference that names no object is no list of annotations.
             Object::Reference(_) | Object::Null => Vec::new(),
-            _ => return Err(Failure::internal(crate::contained::engine_failed())),
+            _ => return Err(Failure::engine()),
         },
     };
     set_annots(document, page, annots);
@@ -1395,8 +1404,8 @@ fn numbers_of(document: &Document, chains: &Chains, object: &Object) -> Option<V
 fn moved_points(numbers: &[f64], scale: f64, tx: f64, ty: f64) -> Vec<Object> {
     let mut moved = Vec::with_capacity(numbers.len());
     for pair in numbers.as_chunks::<2>().0 {
-        moved.push(number(scale * pair[0] + tx));
-        moved.push(number(scale * pair[1] + ty));
+        moved.push(object_number(scale * pair[0] + tx));
+        moved.push(object_number(scale * pair[1] + ty));
     }
     moved
 }
@@ -1530,7 +1539,7 @@ pub(super) fn save(mut document: Document, has_pages: bool) -> Result<Vec<u8>, F
     // A `Vec` cannot refuse a write, so a failure here is the object model's, not the file's.
     document
         .save_to(&mut bytes)
-        .map_err(|_| Failure::internal(crate::contained::engine_failed()))?;
+        .map_err(|_| Failure::engine())?;
     Ok(bytes)
 }
 
@@ -1541,7 +1550,12 @@ fn blank_page(document: &mut Document) -> ObjectId {
         ("Type".to_string(), Object::Name(b"Page".to_vec())),
         (
             "MediaBox".to_string(),
-            Object::Array([0.0, 0.0, 595.28, 841.89].into_iter().map(number).collect()),
+            Object::Array(
+                [0.0, 0.0, 595.28, 841.89]
+                    .into_iter()
+                    .map(object_number)
+                    .collect(),
+            ),
         ),
         (
             "Resources".to_string(),

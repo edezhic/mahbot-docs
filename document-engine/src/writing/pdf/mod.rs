@@ -1,26 +1,50 @@
-//! The PDF page actions: building a document out of pages, and changing what a page shows.
+//! The PDF page actions: building a document out of pages, changing what a page shows, and drawing
+//! into it.
 //!
-//! Five operations share one substrate: `pdf_merge` and `pdf_split` build a fresh document and copy
+//! Eight operations share one substrate: `pdf_merge` and `pdf_split` build a fresh document and copy
 //! the pages into it, so a produced file holds its pages and nothing of the source's catalog — no
-//! form, outline, labels, tags or name tree; `pdf_rotate`, `pdf_crop` and `pdf_resize` load the file
-//! and change the page they name, so everything else it holds survives. [`page`] is the object model
-//! all five work through, and [`scan`] is how it reads a file: the way the reference's library reads
-//! one, from the body and never through the cross-reference index, so a file whose index is damaged
-//! or absent is answered from what its body holds. A file whose pages — or, for the in-place actions,
-//! whose streams — cannot be read at all is refused rather than rewritten.
+//! form, outline, labels, tags or name tree; `pdf_rotate`, `pdf_crop`, `pdf_resize`, `pdf_text`,
+//! `pdf_image` and `pdf_form_fill` load the file and change the pages they name, so everything else
+//! it holds survives. [`page`] is the object model all eight work through, and [`scan`] is how it
+//! reads a file: the way the reference's library reads one, from the body and never through the
+//! cross-reference index, so a file whose index is damaged or absent is answered from what its body
+//! holds. A file whose pages — or, for the in-place actions, whose streams — cannot be read at all is
+//! refused rather than rewritten. The three drawing actions share [`draw`] for the embedded font, the
+//! subset it carries and the content stream they append; [`font`] is the bundled face and its
+//! glyph-level subset.
 //!
 //! The reference's answers for these actions carry notes and no losses — a resize says which
-//! annotations could not follow the content — and its refusals are its own words, read from the
-//! vocabulary under the `pdf_page_` namespace. A page list the reference's library faults on is the
-//! engine's own failure here rather than an invented refusal. A page value the reference coerces
-//! rather than taking as a page number is the request surface's business: the product's tool layer
-//! builds the list as numbers and refuses anything else before the engine runs, so this module does
-//! not reproduce the coercion.
+//! annotations could not follow the content, and a drawing says which pages a mark reached past —
+//! and its refusals are its own words, read from the vocabulary under the `pdf_page_`, `pdf_text_`,
+//! `pdf_image_` and `pdf_form_` namespaces (the image-size sentences are shared with the OOXML
+//! arms). A page list the reference's library faults on is the engine's own failure here rather
+//! than an invented refusal. A page value the reference coerces rather than taking as a page number
+//! is the request surface's business: the product's tool layer builds the list as numbers and
+//! refuses anything else before the engine runs, so this module does not reproduce the coercion.
 //!
 //! Every call writes each part as it is built and removes every part it wrote when a later one
 //! fails: a call that fails partway leaves nothing behind, including a split that had already
 //! produced some of its parts. Writing as it builds also means a split of many parts holds one part
 //! at a time rather than all of them. The reference does not promise either.
+//!
+//! Three produced-file differences from the reference are known and stated rather than hidden:
+//!
+//! - A regenerated field's `/DA` is left as the file states it, where the reference restates it with
+//!   the embedded font and the size it chose. The entry says what a viewer would edit the field
+//!   with rather than what the file shows, and the comparison does not read it.
+//! - An object-valued number is held in the object model as a 32-bit float, so a computed coordinate
+//!   can be spelled with fewer digits than the reference's. The comparison rounds every number to
+//!   four decimals, which hides that difference up to about two thousand points — and no page,
+//!   box or transform this half writes is anywhere near that.
+//! - A flattened form removes each widget from its page's `/Annots` where the reference removes the
+//!   widget's *appearance* reference instead and then deletes the widget object, leaving a dangling
+//!   reference behind. An entry the model cannot resolve reads as no annotation at all, so the two
+//!   compare equal.
+//!
+//! A fourth is not comparable at all, because only one side produces: a PNG whose image data is
+//! short. The reference's decoder inflates what it can and embeds the partial samples; this half
+//! refuses the file, since its decoder validates the stream and no other reproduces that artefact.
+//! The writer's own test witnesses the refusal.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -29,15 +53,20 @@ use lopdf::{Document, ObjectId};
 use serde_json::{Map, Value};
 
 use super::{
-    create_new, in_span, interpolated, js_number, remove_and, rounded_mebibytes, span_bounds,
-    write_bytes, write_into,
+    create_new, in_span, interpolated, js_round, remove_and, rounded_mebibytes, span_bounds,
+    stringified, write_bytes, write_into,
 };
 use crate::operation::{Failure, Outcome, Request};
 use crate::vocabulary::{self, vocabulary};
 
 mod date;
+mod draw;
+mod font;
+mod form;
 mod page;
+mod picture;
 mod scan;
+mod text;
 
 /// The files one call writes, in the order the outputs were named, and the notes its answer
 /// carries. A part is written as soon as it is built, so a split of many parts holds one at a time;
@@ -47,6 +76,8 @@ struct Produced {
     outputs: Vec<PathBuf>,
     written: Vec<PathBuf>,
     notes: Vec<String>,
+    /// The characters the embedded font cannot draw, in the order the operation collected them.
+    unsupported: draw::Unsupported,
     /// Whether the answer has taken responsibility for the files: a committed call reports them, and
     /// a failed one has already removed them.
     committed: bool,
@@ -58,6 +89,7 @@ impl Produced {
             outputs,
             written: Vec::new(),
             notes: Vec::new(),
+            unsupported: draw::Unsupported::default(),
             committed: false,
         }
     }
@@ -77,7 +109,7 @@ impl Produced {
         write: &dyn Fn(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
     ) -> Result<(), Failure> {
         let Some(path) = self.outputs.get(self.written.len()).cloned() else {
-            return Err(Failure::internal(crate::contained::engine_failed()));
+            return Err(Failure::engine());
         };
         let mut file = create_new(&path, "pdf_page_write_failed")?;
         self.written.push(path);
@@ -89,12 +121,13 @@ impl Produced {
         if self.written.len() != self.outputs.len() {
             // One part per output by construction; a mismatch is an engine defect, and answering
             // with files the call did not produce would be worse than failing.
-            return self.fail(Failure::internal(crate::contained::engine_failed()));
+            return self.fail(Failure::engine());
         }
         self.committed = true;
         Outcome {
             outputs: std::mem::take(&mut self.outputs),
             notes: std::mem::take(&mut self.notes),
+            unsupported: std::mem::take(&mut self.unsupported).into_strings(),
             ..Outcome::default()
         }
     }
@@ -155,6 +188,27 @@ pub(crate) fn crop(request: &Request, output: &Path) -> Outcome {
 pub(crate) fn resize(request: &Request, output: &Path) -> Outcome {
     produce(vec![output.to_path_buf()], |produced| {
         run_resize(request, produced)
+    })
+}
+
+/// Draw text into the pages the request names.
+pub(crate) fn draw_text(request: &Request, output: &Path) -> Outcome {
+    produce(vec![output.to_path_buf()], |produced| {
+        text::run(request, produced)
+    })
+}
+
+/// Place a picture on the pages the request names.
+pub(crate) fn place_image(request: &Request, output: &Path) -> Outcome {
+    produce(vec![output.to_path_buf()], |produced| {
+        picture::run(request, produced)
+    })
+}
+
+/// Fill the form the request names, optionally flattening it.
+pub(crate) fn fill_form(request: &Request, output: &Path) -> Outcome {
+    produce(vec![output.to_path_buf()], |produced| {
+        form::run(request, produced)
     })
 }
 
@@ -268,14 +322,14 @@ fn run_rotate(request: &Request, produced: &mut Produced) -> Result<(), Failure>
     for index in page_indices(&ids, request.values.get("pages"))? {
         let id = ids[index];
         let Some(current) = page::rotation(&document, &chains, &ancestry, id) else {
-            return Err(Failure::internal(crate::contained::engine_failed()));
+            return Err(Failure::engine());
         };
         let next = ((current + degrees) % 360.0 + 360.0) % 360.0;
-        // The library refuses a turn that is not a quarter, and a page may state one itself even
-        // though the format does not allow it: that request is the engine's own fault, as it is the
-        // reference's, rather than a file this writer rewrites.
+        // The library faults on a turn that is not a quarter, and a page may state one itself even
+        // though the format does not allow it: the shape is the library's own failure rather than a
+        // file this writer rewrites.
         if next % step() != 0.0 {
-            return Err(Failure::internal(crate::contained::engine_failed()));
+            return Err(Failure::engine());
         }
         page::set_rotation(&mut document, id, next);
     }
@@ -380,14 +434,14 @@ fn run_resize(request: &Request, produced: &mut Produced) -> Result<(), Failure>
 /// moved where the fitted page sits. The scale is written first and the translation second, so the
 /// translation is the outer transform and the move is not scaled again.
 fn wrap_resize(document: &mut Document, page: ObjectId, scale: f64, tx: f64, ty: f64) {
-    let factor = js_number(scale);
+    let factor = draw::number(scale);
     page::wrap_contents(
         document,
         page,
         format!("q {factor} 0 0 {factor} 0 0 cm\n").as_bytes(),
         b"Q\n",
     );
-    let (x, y) = (js_number(tx), js_number(ty));
+    let (x, y) = (draw::number(tx), draw::number(ty));
     page::wrap_contents(
         document,
         page,
@@ -402,16 +456,11 @@ fn wrap_resize(document: &mut Document, page: ObjectId, scale: f64, tx: f64, ty:
 /// is not one here is an engine defect.
 fn input_paths(request: &Request) -> Result<Vec<&Path>, Failure> {
     let Some(values) = request.values.get("inputs").and_then(Value::as_array) else {
-        return Err(Failure::internal(crate::contained::engine_failed()));
+        return Err(Failure::engine());
     };
     values
         .iter()
-        .map(|value| {
-            value
-                .as_str()
-                .map(Path::new)
-                .ok_or_else(|| Failure::internal(crate::contained::engine_failed()))
-        })
+        .map(|value| value.as_str().map(Path::new).ok_or_else(Failure::engine))
         .collect()
 }
 
@@ -453,7 +502,7 @@ fn groups(request: &Request) -> Result<&[Value], Failure> {
         .get("groups")
         .and_then(Value::as_array)
         .map(Vec::as_slice)
-        .ok_or_else(|| Failure::internal(crate::contained::engine_failed()))
+        .ok_or_else(Failure::engine)
 }
 
 /// The zero-based page indices a request names, resolved against the document's own pages: absent,
@@ -467,7 +516,7 @@ fn page_indices(pages: &[ObjectId], selection: Option<&Value>) -> Result<Vec<usi
             .map(|value| page_index(value, pages.len()))
             .collect::<Result<Vec<usize>, Failure>>()?,
         // A page list the reference's own library faults on; see the module's note.
-        Some(_) => return Err(Failure::internal(crate::contained::engine_failed())),
+        Some(_) => return Err(Failure::engine()),
     };
     page_count_limit(indices.len())?;
     Ok(indices)
@@ -485,7 +534,7 @@ fn page_indices(pages: &[ObjectId], selection: Option<&Value>) -> Result<Vec<usi
 )]
 fn page_index(value: &Value, count: usize) -> Result<usize, Failure> {
     let Some(number) = value.as_f64().filter(|number| number.fract() == 0.0) else {
-        return Err(Failure::internal(crate::contained::engine_failed()));
+        return Err(Failure::engine());
     };
     let count_as_number = f64::from(u32::try_from(count).unwrap_or(u32::MAX));
     if number < 1.0 || number > count_as_number {
@@ -3574,6 +3623,973 @@ mod tests {
             &outcome,
             "pdf_page_encrypted",
             &[("name", "permissions.pdf")],
+        );
+    }
+
+    // ── the three drawing actions ────────────────────────────────────────────────────────────────
+
+    /// One page's own content, decoded, as the writer wrote it.
+    fn content(document: &Document, number: u32) -> String {
+        let page = document
+            .get_pages()
+            .get(&number)
+            .copied()
+            .expect("the page the call names");
+        let contents = document
+            .get_dictionary(page)
+            .ok()
+            .and_then(|dictionary| dictionary.get(b"Contents").ok())
+            .cloned()
+            .expect("a page the call wrote states content");
+        let mut out = String::new();
+        let mut push = |object: &Object| {
+            let stream = match object.as_reference().ok() {
+                Some(id) => document.get_object(id).and_then(Object::as_stream),
+                None => object.as_stream(),
+            };
+            if let Ok(stream) = stream
+                && let Ok(bytes) = stream.decompressed_content()
+            {
+                out.push_str(&String::from_utf8_lossy(&bytes));
+            }
+        };
+        match contents {
+            Object::Array(items) => items.iter().for_each(&mut push),
+            other => push(&other),
+        }
+        out
+    }
+
+    /// One description entry of a produced file, decoded.
+    fn info(document: &Document, key: &str) -> Option<String> {
+        let id = document.trailer.get(b"Info").ok()?.as_reference().ok()?;
+        let value = document.get_dictionary(id).ok()?.get(key.as_bytes()).ok()?;
+        match value {
+            Object::String(bytes, _) => Some(super::form::pdf_text(bytes)),
+            _ => None,
+        }
+    }
+
+    /// The field dictionary a produced form holds under `name`.
+    fn field(document: &Document, name: &str) -> ObjectId {
+        let catalog = catalog(document);
+        let acroform = catalog
+            .get(b"AcroForm")
+            .ok()
+            .and_then(|acroform| match acroform {
+                Object::Reference(id) => document.get_dictionary(*id).ok(),
+                Object::Dictionary(dictionary) => Some(dictionary),
+                _ => None,
+            })
+            .expect("the produced form");
+        let fields = acroform
+            .get(b"Fields")
+            .ok()
+            .and_then(|fields| fields.as_array().ok())
+            .expect("the produced field list");
+        fields
+            .iter()
+            .filter_map(|entry| entry.as_reference().ok())
+            .find(|id| {
+                document
+                    .get_dictionary(*id)
+                    .ok()
+                    .and_then(|dictionary| dictionary.get(b"T").ok())
+                    .and_then(|title| match title {
+                        Object::String(bytes, _) => Some(super::form::pdf_text(bytes)),
+                        _ => None,
+                    })
+                    .is_some_and(|title| title == name)
+            })
+            .expect("the field the call names")
+    }
+
+    #[test]
+    fn pdf_text_draws_the_text_describes_the_file_and_keeps_its_input() {
+        let directory = scratch();
+        let input = fixture(directory.path(), "basic.pdf", build::pdf_basic());
+        let before = std::fs::read(&input).expect("the input");
+        let outcome = run(
+            directory.path(),
+            "pdf_text",
+            json!({
+                "input": input.to_string_lossy(),
+                "text": "Привет Ω",
+                "pages": [1],
+                "x": 100,
+                "y": 200,
+                "metadata": {
+                    "title": "Stamped",
+                    "author": "Ada",
+                    "subject": "Text",
+                    "keywords": "stamp",
+                },
+            }),
+            "out",
+        );
+        let path = produced(&outcome);
+        let document = parsed(path);
+        let body = content(&document, 1);
+        assert!(body.contains(" Tj"), "the page draws a string:\n{body}");
+        assert!(
+            reading(path, &directory.path().join("reading")).contains("Привет Ω"),
+            "the produced page draws the text"
+        );
+        for (key, value) in [
+            ("Title", "Stamped"),
+            ("Author", "Ada"),
+            ("Subject", "Text"),
+            ("Keywords", "stamp"),
+        ] {
+            assert_eq!(info(&document, key).as_deref(), Some(value), "{key}");
+        }
+        assert_eq!(
+            std::fs::read(&input).expect("the input"),
+            before,
+            "the file the call reads is untouched"
+        );
+    }
+
+    #[test]
+    fn a_rotated_mark_states_its_matrix_in_the_library_s_own_spelling() {
+        // The model does not compare a text matrix, so this is the one witness that a turn is
+        // written the way the reference's own PDF library writes it: a quarter turn's cosine is
+        // small enough that JavaScript's `String()` would take the exponent form, which the library
+        // expands in place.
+        let directory = scratch();
+        let input = fixture(directory.path(), "basic.pdf", build::pdf_basic());
+        let outcome = run(
+            directory.path(),
+            "pdf_text",
+            json!({
+                "input": input.to_string_lossy(),
+                "text": "Ada",
+                "pages": [1],
+                "x": 100,
+                "y": 200,
+                "rotate": 90,
+            }),
+            "out",
+        );
+        let body = content(&parsed(produced(&outcome)), 1);
+        assert!(
+            body.contains(
+                "0.00000000000000006123233995736767 1 -1 0.00000000000000006123233995736767 100 200"
+            ),
+            "the quarter turn's matrix is the library's expanded form:\n{body}"
+        );
+    }
+
+    #[test]
+    fn a_filled_choice_carries_no_selected_index() {
+        // The reference's `updateSelectedIndices` drops `/I` for the single value a fill sets, and
+        // the model does not read `/I`, so this is the one witness that the produced field has none.
+        let directory = scratch();
+        let input = fixture(
+            directory.path(),
+            "option-form.pdf",
+            build::pdf_option_form(),
+        );
+        let outcome = run(
+            directory.path(),
+            "pdf_form_fill",
+            json!({
+                "input": input.to_string_lossy(),
+                "values": { "fruit": "pear" },
+            }),
+            "out",
+        );
+        let document = parsed(produced(&outcome));
+        let fruit = field(&document, "fruit");
+        let dictionary = document
+            .get_dictionary(fruit)
+            .expect("the field's dictionary");
+        assert!(
+            dictionary.get(b"I").is_err(),
+            "a single-value fill drops the selected index"
+        );
+    }
+
+    #[test]
+    fn a_filled_dropdown_carries_no_selected_index_and_turns_editing_on() {
+        // The reference's `select` drops `/I` for the single value a fill sets, and turns the
+        // field's `Edit` flag on only when the value is not one of its options. The model reads
+        // neither, so this is the one witness for both.
+        let directory = scratch();
+        let input = fixture(directory.path(), "form.pdf", build::pdf_form());
+        let outcome = run(
+            directory.path(),
+            "pdf_form_fill",
+            json!({
+                "input": input.to_string_lossy(),
+                "values": { "colour": "green" },
+            }),
+            "out",
+        );
+        let document = parsed(produced(&outcome));
+        let colour = field(&document, "colour");
+        let dictionary = document
+            .get_dictionary(colour)
+            .expect("the field's dictionary");
+        assert!(
+            dictionary.get(b"I").is_err(),
+            "a single-value fill drops the selected index"
+        );
+        let flags = dictionary
+            .get(b"Ff")
+            .and_then(Object::as_i64)
+            .expect("the field keeps its flags");
+        assert_eq!(
+            flags & (1 << 18),
+            0,
+            "a value the field offers leaves editing off"
+        );
+
+        let outcome = run(
+            directory.path(),
+            "pdf_form_fill",
+            json!({
+                "input": input.to_string_lossy(),
+                "values": { "colour": "purple" },
+            }),
+            "second",
+        );
+        let document = parsed(produced(&outcome));
+        let colour = field(&document, "colour");
+        let dictionary = document
+            .get_dictionary(colour)
+            .expect("the field's dictionary");
+        let flags = dictionary
+            .get(b"Ff")
+            .and_then(Object::as_i64)
+            .expect("the field keeps its flags");
+        assert_ne!(
+            flags & (1 << 18),
+            0,
+            "a value outside the field's list turns editing on"
+        );
+        assert_ne!(flags & (1 << 17), 0, "the field stays a dropdown");
+    }
+
+    #[test]
+    fn pdf_text_notes_an_off_page_mark_and_lists_an_undrawable_character() {
+        let directory = scratch();
+        let input = fixture(directory.path(), "basic.pdf", build::pdf_basic());
+        let outcome = run(
+            directory.path(),
+            "pdf_text",
+            json!({
+                "input": input.to_string_lossy(),
+                "text": "AB漢CD",
+                "pages": [1],
+                "x": -100,
+                "y": 100,
+                "size": 24,
+            }),
+            "out",
+        );
+        produced(&outcome);
+        assert_eq!(
+            outcome.notes,
+            vec![
+                "[the text's box reaches past the visible area of page 1 — the part beyond is not \
+                 shown on it]"
+                    .to_string()
+            ]
+        );
+        assert_eq!(outcome.unsupported, vec!["漢".to_string()]);
+    }
+
+    #[test]
+    fn pdf_image_fits_a_picture_whole_and_turns_it_with_the_page() {
+        let directory = scratch();
+        let input = fixture(directory.path(), "rotated.pdf", build::pdf_rotated_page());
+        let image = fixture(directory.path(), "picture.png", build::png());
+        let outcome = run(
+            directory.path(),
+            "pdf_image",
+            json!({
+                "input": input.to_string_lossy(),
+                "image": image.to_string_lossy(),
+                "pages": [1],
+            }),
+            "out",
+        );
+        let document = parsed(produced(&outcome));
+        let body = content(&document, 1);
+        // A 4x2 picture fitted whole keeps its own 3x1.5 point size and is turned a quarter with
+        // the page, at the visible area's top-left corner.
+        assert!(
+            body.contains("1 0 0 1 57.5 56 cm"),
+            "the picture is placed at the turned page's corner:\n{body}"
+        );
+        assert!(
+            body.contains("0 1 -1 0 0 0 cm"),
+            "the picture is turned with the page:\n{body}"
+        );
+        assert!(
+            body.contains("3 0 0 1.5 0 0 cm"),
+            "the picture keeps its own size:\n{body}"
+        );
+    }
+
+    #[test]
+    fn pdf_form_fill_keeps_the_fields_and_flatten_removes_them() {
+        let directory = scratch();
+        let input = fixture(directory.path(), "form.pdf", build::pdf_form());
+        let outcome = run(
+            directory.path(),
+            "pdf_form_fill",
+            json!({
+                "input": input.to_string_lossy(),
+                "values": { "name": "Ada", "agree": true, "choice": "two" },
+                "metadata": { "title": "Filled" },
+            }),
+            "out",
+        );
+        let document = parsed(produced(&outcome));
+        assert_eq!(info(&document, "Title").as_deref(), Some("Filled"));
+        let name = field(&document, "name");
+        assert_eq!(
+            document
+                .get_dictionary(name)
+                .ok()
+                .and_then(|dictionary| dictionary.get(b"V").ok())
+                .and_then(|value| match value {
+                    Object::String(bytes, _) => Some(String::from_utf16_lossy(
+                        &bytes
+                            .strip_prefix(&[0xFE, 0xFF])
+                            .unwrap_or(bytes)
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
+                            .map(|pair| u16::from_be_bytes(*pair))
+                            .collect::<Vec<_>>()
+                    )),
+                    _ => None,
+                })
+                .as_deref(),
+            Some("Ada")
+        );
+        let agree = field(&document, "agree");
+        assert_eq!(
+            document
+                .get_dictionary(agree)
+                .ok()
+                .and_then(|dictionary| dictionary.get(b"AS").ok())
+                .and_then(|state| state.as_name().ok())
+                .map(|state| String::from_utf8_lossy(state).into_owned()),
+            Some("Yes".to_string())
+        );
+
+        // The flattened form paints every widget and leaves no field behind.
+        let flat = fixture(directory.path(), "form.pdf", build::pdf_form());
+        let outcome = run(
+            directory.path(),
+            "pdf_form_fill",
+            json!({
+                "input": flat.to_string_lossy(),
+                "values": { "name": "Ada", "agree": true, "choice": "two", "colour": "green" },
+                "flatten": true,
+            }),
+            "out2",
+        );
+        let document = parsed(produced(&outcome));
+        let catalog = catalog(&document);
+        let acroform = catalog
+            .get(b"AcroForm")
+            .ok()
+            .and_then(|acroform| match acroform {
+                Object::Reference(id) => document.get_dictionary(*id).ok(),
+                Object::Dictionary(dictionary) => Some(dictionary),
+                _ => None,
+            });
+        assert!(
+            acroform
+                .and_then(|acroform| acroform.get(b"Fields").ok())
+                .and_then(|fields| fields.as_array().ok())
+                .is_none_or(Vec::is_empty),
+            "a flattened form holds no field"
+        );
+        let page = document.get_pages()[&1];
+        assert!(annotations(&document, page).is_empty(), "no widget stays");
+        let body = content(&document, 1);
+        assert!(
+            body.matches(" Do").count() >= 5,
+            "the flatten paints every widget:\n{body}"
+        );
+    }
+
+    /// The dictionary `key` holds in `dictionary`, resolved through any reference.
+    fn nested(document: &Document, dictionary: &Dictionary, key: &[u8]) -> Option<Dictionary> {
+        let value = dictionary.get(key).ok()?;
+        let value = match value {
+            Object::Reference(id) => document.get_object(*id).ok()?,
+            other => other,
+        };
+        value.as_dict().ok().cloned()
+    }
+
+    /// The bodies of the form XObjects one page's own content draws, resolved through the page's
+    /// resources: what the page actually paints, rather than every stream the file happens to hold.
+    fn painted(document: &Document, number: u32) -> Vec<String> {
+        let Some(page) = document.get_pages().get(&number).copied() else {
+            return Vec::new();
+        };
+        let Some(page) = document.get_dictionary(page).ok() else {
+            return Vec::new();
+        };
+        let Some(resources) = nested(document, page, b"Resources") else {
+            return Vec::new();
+        };
+        let xobjects = nested(document, &resources, b"XObject").unwrap_or_default();
+        let body = content(document, number);
+        let tokens: Vec<&str> = body.split_whitespace().collect();
+        let mut out = Vec::new();
+        for (index, token) in tokens.iter().enumerate() {
+            if tokens.get(index + 1) != Some(&"Do") {
+                continue;
+            }
+            let Some(name) = token.strip_prefix('/') else {
+                continue;
+            };
+            let Some(Object::Reference(id)) = xobjects.get(name.as_bytes()).ok() else {
+                continue;
+            };
+            if let Ok(stream) = document.get_object(*id).and_then(Object::as_stream)
+                && let Ok(bytes) = stream.decompressed_content()
+            {
+                out.push(String::from_utf8_lossy(&bytes).into_owned());
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn a_flatten_paints_the_state_the_field_s_value_names() {
+        // The reference reads a button's appearance from the field's `/V`, not from the widget's
+        // `/AS`, so a box whose two disagree is painted as its value says. No compared field sees a
+        // form XObject's operators, so this is the one witness: the stream the page's content draws
+        // is the on-state's, not the empty `/Off` the widget itself shows.
+        let directory = scratch();
+        let input = fixture(
+            directory.path(),
+            "state-form.pdf",
+            build::pdf_state_disagreement_form(),
+        );
+        let outcome = run(
+            directory.path(),
+            "pdf_form_fill",
+            json!({
+                "input": input.to_string_lossy(),
+                "values": { "name": "Ada" },
+                "flatten": true,
+            }),
+            "out",
+        );
+        let document = parsed(produced(&outcome));
+        let drawn = painted(&document, 1);
+        assert!(
+            drawn.iter().any(|body| body.contains("4 4 6 6 re")),
+            "the box is painted in the state its value names: {drawn:?}"
+        );
+    }
+
+    #[test]
+    fn a_png_s_checksum_does_not_cost_the_picture_and_its_data_must_inflate() {
+        // The reference's decoder never checks a chunk's checksum, so a damaged one must not cost
+        // the caller the picture. Its image data, however, must inflate: the reference embeds the
+        // partial samples a corrupt stream yields, which no other decoder reproduces, so the writer
+        // refuses that one and says so.
+        let directory = scratch();
+        let input = fixture(directory.path(), "basic.pdf", build::pdf_basic());
+        let stale = fixture(directory.path(), "stale.png", build::stale_crc_png());
+        let outcome = run(
+            directory.path(),
+            "pdf_image",
+            json!({
+                "input": input.to_string_lossy(),
+                "image": stale.to_string_lossy(),
+                "pages": [1],
+            }),
+            "out",
+        );
+        let document = parsed(produced(&outcome));
+        assert_eq!(
+            document
+                .objects
+                .values()
+                .filter(|object| object.as_stream().is_ok_and(|stream| {
+                    matches!(
+                        stream.dict.get(b"Subtype").and_then(Object::as_name),
+                        Ok(b"Image")
+                    )
+                }))
+                .count(),
+            1,
+            "the damaged checksum costs the picture nothing"
+        );
+
+        let short = fixture(directory.path(), "short.png", build::short_data_png());
+        let outcome = run(
+            directory.path(),
+            "pdf_image",
+            json!({
+                "input": input.to_string_lossy(),
+                "image": short.to_string_lossy(),
+                "pages": [1],
+            }),
+            "second",
+        );
+        assert_eq!(refusal(&outcome).class, "usage");
+        assert!(
+            refusal(&outcome)
+                .reason
+                .starts_with("cannot read short.png as an image"),
+            "the refusal names the file: {}",
+            refusal(&outcome).reason
+        );
+    }
+
+    #[test]
+    fn a_filled_appearance_draws_the_value_inside_the_field() {
+        let directory = scratch();
+        let input = fixture(directory.path(), "form.pdf", build::pdf_form());
+        let outcome = run(
+            directory.path(),
+            "pdf_form_fill",
+            json!({
+                "input": input.to_string_lossy(),
+                "values": { "name": "Привет Ω" },
+            }),
+            "out",
+        );
+        let document = parsed(produced(&outcome));
+        let name = field(&document, "name");
+        let widget = document
+            .get_dictionary(name)
+            .expect("the field is its own widget");
+        let normal = widget
+            .get(b"AP")
+            .ok()
+            .and_then(|ap| ap.as_dict().ok())
+            .and_then(|ap| ap.get(b"N").ok());
+        let appearance = match normal {
+            Some(Object::Reference(id)) => {
+                document.get_object(*id).and_then(Object::as_stream).ok()
+            }
+            Some(Object::Stream(stream)) => Some(stream),
+            _ => None,
+        }
+        .expect("the field states an appearance");
+        let bbox = appearance
+            .dict
+            .get(b"BBox")
+            .ok()
+            .and_then(|bbox| bbox.as_array().ok())
+            .expect("the appearance states a box");
+        let width = f64::from(bbox[2].as_float().expect("a box side"))
+            - f64::from(bbox[0].as_float().expect("a box side"));
+        let content = appearance
+            .decompressed_content()
+            .expect("the appearance's content");
+        let text = String::from_utf8_lossy(&content);
+        let size = text
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .find(|pair| pair[1] == "Tf")
+            .and_then(|pair| pair[0].parse::<f64>().ok())
+            .expect("the appearance states a font size");
+        assert!(
+            super::font::Face::bundled().width("Привет Ω", size) <= width,
+            "the value fits the field's own area"
+        );
+    }
+
+    #[test]
+    fn pdf_form_fill_refuses_a_structured_value_and_leaves_nothing() {
+        let directory = scratch();
+        let input = fixture(directory.path(), "form.pdf", build::pdf_form());
+        let outcome = run(
+            directory.path(),
+            "pdf_form_fill",
+            json!({
+                "input": input.to_string_lossy(),
+                "values": { "name": { "first": "Ada" } },
+            }),
+            "out",
+        );
+        assert_usage_refusal(&outcome, "pdf_form_value_kind", &[("name", "name")]);
+    }
+
+    #[test]
+    fn pdf_form_fill_requires_its_values() {
+        let directory = scratch();
+        let outcome = run(
+            directory.path(),
+            "pdf_form_fill",
+            json!({ "input": "form.pdf" }),
+            "out",
+        );
+        assert_usage_refusal(&outcome, "surface_values_missing", &[]);
+    }
+
+    #[test]
+    fn form_values_are_read_in_request_order() {
+        let directory = scratch();
+        let input = fixture(directory.path(), "form.pdf", build::pdf_form());
+        let outcome = run(
+            directory.path(),
+            "pdf_form_fill",
+            json!({
+                "input": input.to_string_lossy(),
+                "values": { "name": "漢", "colour": "字" },
+            }),
+            "out",
+        );
+        produced(&outcome);
+        assert_eq!(
+            outcome.unsupported,
+            vec!["漢".to_string(), "字".to_string()],
+            "the characters are listed in the order the request names the fields"
+        );
+    }
+
+    /// The content stream `name`'s widget draws as its normal appearance, decoded.
+    fn appearance(document: &Document, name: &str) -> String {
+        let field = field(document, name);
+        let dictionary = document
+            .get_dictionary(field)
+            .expect("the field is its own widget");
+        let appearances = dictionary
+            .get(b"AP")
+            .expect("the widget states appearances");
+        let appearances = match appearances {
+            Object::Reference(id) => document
+                .get_dictionary(*id)
+                .expect("the appearances resolve"),
+            Object::Dictionary(dictionary) => dictionary,
+            _ => panic!("the appearances are a dictionary"),
+        };
+        let stream = match appearances.get(b"N").expect("a normal appearance") {
+            Object::Reference(id) => document
+                .get_object(*id)
+                .and_then(Object::as_stream)
+                .expect("a stream"),
+            Object::Stream(stream) => stream,
+            _ => panic!("the normal appearance is a stream"),
+        };
+        String::from_utf8_lossy(&stream.decompressed_content().expect("decoded")).into_owned()
+    }
+
+    /// The `(x, y)` every `Tm` in `body` places a line at.
+    fn placements(body: &str) -> Vec<(f64, f64)> {
+        body.split(" Tm")
+            .filter_map(|part| {
+                let tokens: Vec<&str> = part.split_whitespace().rev().take(6).collect();
+                Some((tokens.get(1)?.parse().ok()?, tokens.first()?.parse().ok()?))
+            })
+            .collect()
+    }
+
+    /// The font size an appearance stream states.
+    fn appearance_size(body: &str) -> f64 {
+        body.split(" Tf")
+            .next()
+            .and_then(|head| head.split_whitespace().last())
+            .and_then(|size| size.parse().ok())
+            .expect("a stated size")
+    }
+
+    #[test]
+    fn a_combed_field_centres_each_character_in_its_own_cell() {
+        // The model compares the text an appearance draws, not where it draws it, so this is the
+        // one check that a cell's character does not overprint the one before.
+        let directory = scratch();
+        let input = fixture(directory.path(), "combed.pdf", build::pdf_combed_form());
+        let outcome = run(
+            directory.path(),
+            "pdf_form_fill",
+            json!({
+                "input": input.to_string_lossy(),
+                "values": { "name": "abc" },
+            }),
+            "out",
+        );
+        let document = parsed(produced(&outcome));
+        let body = appearance(&document, "name");
+        let placed = placements(&body);
+        assert_eq!(placed.len(), 3, "one cell per character:\n{body}");
+        assert!(
+            placed.windows(2).all(|pair| pair[1].0 > pair[0].0),
+            "each character sits right of the one before:\n{body}"
+        );
+        assert!(
+            placed.windows(2).all(|pair| pair[0].1 == pair[1].1),
+            "the cells share one baseline:\n{body}"
+        );
+    }
+
+    #[test]
+    fn a_line_whose_only_whitespace_leads_it_is_not_broken_before_it() {
+        // The reference's splitter never breaks at a line's first character, so a value that starts
+        // with a space and continues as one unbreakable word is drawn as one line rather than as an
+        // empty line above it. The model skips an empty run, so it cannot see the difference.
+        let directory = scratch();
+        let input = fixture(directory.path(), "wrapped.pdf", build::pdf_multiline_form());
+        let outcome = run(
+            directory.path(),
+            "pdf_form_fill",
+            json!({
+                "input": input.to_string_lossy(),
+                "values": { "name": format!(" {}", "a".repeat(200)) },
+            }),
+            "out",
+        );
+        let document = parsed(produced(&outcome));
+        let body = appearance(&document, "name");
+        assert_eq!(
+            placements(&body).len(),
+            1,
+            "one line, not an empty one above it:\n{body}"
+        );
+    }
+
+    #[test]
+    fn a_right_aligned_field_insets_its_box_by_the_border_and_padding() {
+        // `/Q` and `/BS /W` move a line inside its box, which the comparison does not read, so this
+        // is the one witness that the alignment and the border are applied — and that a choice
+        // field's own `/Q` is not.
+        let directory = scratch();
+        let input = fixture(directory.path(), "aligned.pdf", build::pdf_aligned_form());
+        let outcome = run(
+            directory.path(),
+            "pdf_form_fill",
+            json!({
+                "input": input.to_string_lossy(),
+                "values": { "name": "Ada", "plain": "Ada", "choice": "b" },
+            }),
+            "out",
+        );
+        let document = parsed(produced(&outcome));
+        let aligned = appearance(&document, "name");
+        // A 100-point box with a 3-point border and 1 point of padding on each side leaves 92
+        // points; right alignment puts the line's left edge at 4 + 92 - its own width.
+        let width = super::font::Face::bundled().width("Ada", appearance_size(&aligned));
+        let (x, _) = placements(&aligned)[0];
+        assert!(
+            (x - (4.0 + 92.0 - width)).abs() < 0.01,
+            "{x} is the right-aligned edge:\n{aligned}"
+        );
+        // The field that states neither starts one point in.
+        let plain = appearance(&document, "plain");
+        let (x, _) = placements(&plain)[0];
+        assert!((x - 1.0).abs() < 0.01, "{x} is one point in:\n{plain}");
+        // The dropdown states right alignment too, and the reference's provider draws it left.
+        let choice = appearance(&document, "choice");
+        let (x, _) = placements(&choice)[0];
+        assert!((x - 1.0).abs() < 0.01, "{x} is one point in:\n{choice}");
+    }
+
+    #[test]
+    fn a_cmyk_jpeg_is_written_with_four_components_and_an_inverted_decode() {
+        // The component count is read from the frame header's own byte; a colour JPEG is written
+        // as three components and a four-component one as CMYK with its samples inverted.
+        let directory = scratch();
+        let image = fixture(directory.path(), "cmyk.jpg", cmyk_jpeg());
+        let input = fixture(directory.path(), "basic.pdf", build::pdf_basic());
+        let outcome = run(
+            directory.path(),
+            "pdf_image",
+            json!({
+                "input": input.to_string_lossy(),
+                "image": image.to_string_lossy(),
+            }),
+            "out",
+        );
+        let document = parsed(produced(&outcome));
+        let stream = document
+            .objects
+            .values()
+            .filter_map(|object| object.as_stream().ok())
+            .find(|stream| {
+                stream
+                    .dict
+                    .get(b"Subtype")
+                    .and_then(Object::as_name)
+                    .is_ok_and(|subtype| subtype == b"Image")
+            })
+            .expect("an image XObject");
+        assert_eq!(
+            stream
+                .dict
+                .get(b"ColorSpace")
+                .and_then(Object::as_name)
+                .ok(),
+            Some(b"DeviceCMYK".as_slice())
+        );
+        let decode: Vec<i64> = stream
+            .dict
+            .get(b"Decode")
+            .and_then(Object::as_array)
+            .expect("a decode array")
+            .iter()
+            .filter_map(|value| value.as_i64().ok())
+            .collect();
+        assert_eq!(decode, vec![1, 0, 1, 0, 1, 0, 1, 0]);
+    }
+
+    /// A four-component JPEG: a frame header stating four components and a scan the size reader
+    /// can find the end of. The writer passes its bytes through, so nothing has to decode them.
+    fn cmyk_jpeg() -> Vec<u8> {
+        let mut bytes = vec![
+            0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x14, 0x08, 0x00, 0x01, 0x00, 0x01, 0x04,
+        ];
+        bytes.extend_from_slice(&[1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0, 4, 0x11, 0]);
+        bytes.extend_from_slice(&[0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00]);
+        bytes.push(0);
+        bytes.extend_from_slice(&[0xFF, 0xD9]);
+        bytes
+    }
+
+    #[test]
+    fn a_button_whose_appearance_is_one_stream_gets_the_states_it_shows() {
+        // The reference regenerates a button whose normal appearance is not a state dictionary;
+        // the model compares the state the box shows, not the mark, so this is the only witness.
+        let directory = scratch();
+        let input = fixture(
+            directory.path(),
+            "stream.pdf",
+            build::pdf_stream_appearance_form(),
+        );
+        let outcome = run(
+            directory.path(),
+            "pdf_form_fill",
+            json!({
+                "input": input.to_string_lossy(),
+                "values": { "agree": true },
+            }),
+            "out",
+        );
+        let document = parsed(produced(&outcome));
+        let widget = field(&document, "agree");
+        let dictionary = document.get_dictionary(widget).expect("the widget");
+        let appearances = match dictionary.get(b"AP").expect("appearances") {
+            Object::Reference(id) => document.get_dictionary(*id).expect("the appearances"),
+            Object::Dictionary(dictionary) => dictionary,
+            _ => panic!("the appearances are a dictionary"),
+        };
+        let normal = match appearances.get(b"N").expect("a normal appearance") {
+            Object::Reference(id) => document.get_dictionary(*id).expect("the normal appearance"),
+            Object::Dictionary(dictionary) => dictionary,
+            _ => panic!("the normal appearance is a state dictionary"),
+        };
+        assert!(
+            normal.has(b"Yes") && normal.has(b"Off"),
+            "the states the box shows are written"
+        );
+    }
+
+    #[test]
+    fn pdf_text_requires_its_text() {
+        let directory = scratch();
+        let outcome = run(
+            directory.path(),
+            "pdf_text",
+            json!({ "input": "basic.pdf" }),
+            "out",
+        );
+        assert_usage_refusal(&outcome, "surface_text_missing", &[]);
+    }
+
+    #[test]
+    fn pdf_image_requires_its_image() {
+        let directory = scratch();
+        let outcome = run(
+            directory.path(),
+            "pdf_image",
+            json!({ "input": "basic.pdf" }),
+            "out",
+        );
+        assert_usage_refusal(&outcome, "surface_image_missing", &[]);
+    }
+
+    #[test]
+    fn pdf_text_applies_a_stated_opacity() {
+        let directory = scratch();
+        let input = fixture(directory.path(), "basic.pdf", build::pdf_basic());
+        let outcome = run(
+            directory.path(),
+            "pdf_text",
+            json!({
+                "input": input.to_string_lossy(),
+                "text": "Faded",
+                "pages": [1],
+                "opacity": 0.5,
+                "stamp": true,
+            }),
+            "out",
+        );
+        let document = parsed(produced(&outcome));
+        let body = content(&document, 1);
+        assert_eq!(
+            body.matches(" gs").count(),
+            2,
+            "the text and the stamp each name a graphics state:\n{body}"
+        );
+        let states: Vec<&Dictionary> = document
+            .objects
+            .values()
+            .filter_map(|object| object.as_dict().ok())
+            .filter(|dictionary| {
+                dictionary.get(b"Type").and_then(Object::as_name).ok() == Some(b"ExtGState")
+            })
+            .collect();
+        let alpha = |dictionary: &Dictionary, key: &[u8]| {
+            dictionary
+                .get(key)
+                .and_then(Object::as_float)
+                .ok()
+                .map(f64::from)
+        };
+        assert_eq!(states.len(), 2, "one state for the text, one for the stamp");
+        assert!(
+            states
+                .iter()
+                .any(|state| alpha(state, b"ca") == Some(0.5) && alpha(state, b"CA") == Some(0.5)),
+            "the stamp's border is translucent"
+        );
+        assert!(
+            states
+                .iter()
+                .any(|state| alpha(state, b"ca") == Some(0.5) && alpha(state, b"CA").is_none()),
+            "the text's fill is translucent"
+        );
+    }
+
+    #[test]
+    fn pdf_text_uses_the_reference_line_leading() {
+        let directory = scratch();
+        let input = fixture(directory.path(), "basic.pdf", build::pdf_basic());
+        let outcome = run(
+            directory.path(),
+            "pdf_text",
+            json!({
+                "input": input.to_string_lossy(),
+                "text": "one\ntwo",
+                "pages": [1],
+                "size": 12,
+            }),
+            "out",
+        );
+        let document = parsed(produced(&outcome));
+        let body = content(&document, 1);
+        assert!(body.contains("24 TL"), "the fixed leading is 24:\n{body}");
+        assert_eq!(
+            body.matches(" T*").count(),
+            2,
+            "both lines are drawn:\n{body}"
         );
     }
 }

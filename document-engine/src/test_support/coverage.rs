@@ -1905,9 +1905,118 @@ pub const WRITING_WITNESSES: &[WritingWitness] = &[
         case: "pdf/pdf_resize/no_geometry",
         witness: "[1 annotation(s) could not follow the resized content on page 1]",
     },
+    // ── the three PDF drawing actions ──────────────────────────────────────────────────────────
+    WritingWitness {
+        mark: "edit_color_digits",
+        case: "pdf/pdf_text/color@refused_color",
+        witness: "color must be 6 hex digits, with an optional leading \"#\", got: red",
+    },
+    WritingWitness {
+        mark: "pdf_page_point",
+        case: "pdf/pdf_text/point@refused_point",
+        witness: "\"x\" must be within ±20000 points, got 20001",
+    },
+    WritingWitness {
+        mark: "pdf_text_size",
+        case: "pdf/pdf_text/size@refused_size",
+        witness: "\"size\" must be greater than 0 and at most 20000 points, got 0",
+    },
+    WritingWitness {
+        mark: "pdf_text_opacity",
+        case: "pdf/pdf_text/opacity@refused_opacity",
+        witness: "\"opacity\" must be greater than 0 and at most 1, got: 0",
+    },
+    WritingWitness {
+        mark: "note_pdf_past_area",
+        case: "pdf/pdf_text/off_page@off_page",
+        witness: "[the text's box reaches past the visible area of page 1 — the part beyond is not shown on it]",
+    },
+    WritingWitness {
+        mark: "edit_image_side_span",
+        case: "pdf/pdf_image/side@refused_side",
+        witness: "an image's width and height must be greater than 0 and at most 20000 points, got: 0",
+    },
+    WritingWitness {
+        mark: "edit_image_implied_span",
+        case: "pdf/pdf_image/implied_side@refused_implied_side",
+        witness: "an image's width implied by its height must be greater than 0 and at most 20000 points, got: 40000",
+    },
+    WritingWitness {
+        mark: "pdf_image_webp",
+        case: "pdf/pdf_image/webp@refused_webp",
+        witness: "a PDF cannot embed picture.webp: a PDF holds a picture as PNG or JPEG — convert the WebP picture first",
+    },
+    WritingWitness {
+        mark: "pdf_form_no_field",
+        case: "pdf/pdf_form_fill/missing_field@refused_missing_field",
+        witness: "no such form field: nope; this document has: name (text), agree (checkbox), choice (radio; options: one, two), colour (choice; options: red, green, blue)",
+    },
+    WritingWitness {
+        mark: "pdf_form_catalogue_field",
+        case: "pdf/pdf_form_fill/missing_field@refused_missing_field",
+        witness: "name (text)",
+    },
+    WritingWitness {
+        mark: "pdf_form_catalogue_options",
+        case: "pdf/pdf_form_fill/missing_field@refused_missing_field",
+        witness: "choice (radio; options: one, two)",
+    },
+    WritingWitness {
+        mark: "pdf_form_catalogue_none",
+        case: "pdf/pdf_form_fill/unfillable@refused_unfillable",
+        witness: "no fillable fields",
+    },
+    WritingWitness {
+        mark: "pdf_form_not_fillable",
+        case: "pdf/pdf_form_fill/unfillable@refused_unfillable",
+        witness: "form field \"button\" cannot take a value — it is not a fillable field; this document has: no fillable fields",
+    },
+    WritingWitness {
+        mark: "pdf_form_checkbox_value",
+        case: "pdf/pdf_form_fill/checkbox_state@refused_checkbox_state",
+        witness: "form field \"agree\" is a checkbox and takes true or false, got: \"Yes\"",
+    },
+    WritingWitness {
+        mark: "pdf_form_option",
+        case: "pdf/pdf_form_fill/option@refused_option",
+        witness: "form field \"fruit\" takes one of: apple, pear; got: plum",
+    },
+    WritingWitness {
+        mark: "pdf_form_option_failed",
+        case: "pdf/pdf_form_fill/radio_outrun@refused_radio_outrun",
+        witness: "form field \"choice\" cannot take \"Three\": {{variable}}",
+    },
+    WritingWitness {
+        mark: "pdf_form_max_length",
+        case: "pdf/pdf_form_fill/max_length@refused_max_length",
+        witness: "Attempted to set text with length=6 for TextField with maxLength=3 and name=name",
+    },
+    WritingWitness {
+        mark: "pdf_form_combed_layout",
+        case: "pdf/pdf_form_fill/combed_overflow@refused_combed_overflow",
+        witness: "Failed to layout combed text as lineLength=4 is greater than cellCount=3",
+    },
+    WritingWitness {
+        mark: "pdf_form_no_choice",
+        case: "pdf/pdf_form_fill/no_choice@refused_no_choice",
+        witness: "form field \"fruit\" offers no choice to select; this document has: note (text)",
+    },
+    WritingWitness {
+        mark: "pdf_form_value_kind",
+        case: "pdf/pdf_form_fill/structure@refused_structure",
+        witness: "the value for \"name\" must be text, a number or a boolean, not a structure",
+    },
 ];
 
 pub const WRITING_UNREACHED: &[Unreached] = &[
+    Unreached {
+        reason: "no generated document carries more fillable fields than the shared cap, so no corpus case reaches the truncation; the port's own test builds one past the cap and raises the mark",
+        marks: &["pdf_form_catalogue_more"],
+    },
+    Unreached {
+        reason: "only the crate refuses it: the reference's own decoder inflates what it can and embeds the partial samples of a PNG whose image data is short, which no other decoder reproduces, so a case would compare the two decoders rather than the writer; the writer's own test covers the refusal",
+        marks: &["pdf_image_unreadable"],
+    },
     Unreached {
         reason: "the reference prints it for an edit sub-operation it does not know, and the crate's request surface refuses that name before dispatch, so a case carrying one would rest on that surface divergence rather than on the writer",
         marks: &["edit_docx_unknown"],
@@ -1924,7 +2033,6 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
             "edit_border_empty",
             "edit_border_object",
             "edit_border_side",
-            "edit_color_digits",
             "edit_font_empty",
             "edit_height_span",
             "edit_null_value",
@@ -2031,10 +2139,8 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         reason: "a picture request the corpus does not make: a WebP or unreadable file, or a size outside the rule; the recorded picture is a PNG of the stated size",
         marks: &[
             "edit_image_extension",
-            "edit_image_implied_span",
             "edit_image_label_jpeg",
             "edit_image_label_webp",
-            "edit_image_side_span",
             "edit_image_unreadable",
         ],
     },
@@ -2099,6 +2205,14 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
             "surface_unknown_edit",
             "surface_unknown_format",
             "surface_unknown_operation",
+        ],
+    },
+    Unreached {
+        reason: "the reference's own kit faults before it reads a value when a required entry is absent, so a corpus case would record a runtime error rather than a product refusal; the crate's surface refuses the missing entry before opening the file, and the product's tool layer refuses it above both",
+        marks: &[
+            "surface_image_missing",
+            "surface_text_missing",
+            "surface_values_missing",
         ],
     },
     Unreached {

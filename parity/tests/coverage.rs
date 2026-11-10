@@ -182,6 +182,7 @@ const UNRECOGNISABLE: &[&str] = &[
     "edit_row_address",
     "edit_sheet_none",
     "edit_text_not_text",
+    "pdf_form_catalogue_more",
 ];
 
 /// A mark's sentence as a pattern covering one whole answer line, with each `{placeholder}`

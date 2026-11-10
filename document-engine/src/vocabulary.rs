@@ -357,6 +357,10 @@ pub struct Limits {
     pub pdf_field_options_max: usize,
     /// The deepest form-field parent chain a PDF reading resolves.
     pub pdf_field_depth_max: usize,
+    /// The most fields a form-fill refusal's catalogue lists.
+    pub pdf_catalogue_max: usize,
+    /// The most characters a form-fill refusal's catalogue prints.
+    pub pdf_catalogue_chars_max: usize,
     /// The most part text one edit call may rewrite, in UTF-16 code units — the unit the kit's own
     /// `EDIT_WORK_MAX` is compared against.
     pub edit_work_max_code_units: u64,
@@ -681,6 +685,24 @@ rule_view!(
     PdfFormWords,
     "pdf_form_words",
     "The words a form list prints around a field."
+);
+rule_view!(
+    pub(crate) pdf_opacity,
+    Span,
+    "pdf_opacity",
+    "The opacities a drawn mark may be given."
+);
+rule_view!(
+    pub(crate) pdf_point_abs_max,
+    f64,
+    "pdf_point_abs_max",
+    "The magnitude of a PDF position or angle a page operation may state."
+);
+rule_view!(
+    pub(crate) scalar_kinds,
+    Vec<String>,
+    "scalar_kinds",
+    "The JSON kinds a form or template value may be."
 );
 
 // The workbook edits' rules: the bounds and lists `writing/xlsx` validates a request against.

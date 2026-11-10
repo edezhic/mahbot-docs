@@ -488,6 +488,139 @@ pub const FORM_PDF: Document = Document {
     build: build::pdf_form,
 };
 
+/// One A4 page with an option list and a text field: the option-list refusal's input.
+pub const OPTION_FORM_PDF: Document = Document {
+    name: "option-form.pdf",
+    build: build::pdf_option_form,
+};
+
+/// One A4 page whose option list offers no choice at all: the no-choice refusal's input.
+pub const EMPTY_CHOICE_FORM_PDF: Document = Document {
+    name: "empty-choice-form.pdf",
+    build: build::pdf_empty_choice_form,
+};
+
+/// One A4 page whose option list states `[value, display]` pairs: the appearance lists each pair's
+/// display name rather than its value.
+pub const PAIRED_OPTIONS_FORM_PDF: Document = Document {
+    name: "paired-options-form.pdf",
+    build: build::pdf_paired_options_form,
+};
+
+/// One A4 page whose option list states a three-entry pair with a number where the display name
+/// goes: reading the options is the library's own failure.
+pub const BROKEN_PAIR_OPTIONS_FORM_PDF: Document = Document {
+    name: "broken-pair-options-form.pdf",
+    build: build::pdf_broken_pair_options_form,
+};
+
+/// One A4 page whose radio group states `[value, display]` pairs: its export values are none, so a
+/// fill has no option to select.
+pub const PAIRED_RADIO_FORM_PDF: Document = Document {
+    name: "paired-radio-form.pdf",
+    build: build::pdf_paired_radio_form,
+};
+
+/// One A4 page whose text widget states no rectangle: filling it is the library's own failure.
+pub const RECTLESS_FORM_PDF: Document = Document {
+    name: "rectless-form.pdf",
+    build: build::pdf_rectless_form,
+};
+
+/// One A4 page whose button states no rectangle and no appearance: setting it is the library's own
+/// failure, because the appearance provider reads the rectangle first.
+pub const RECTLESS_BUTTON_FORM_PDF: Document = Document {
+    name: "rectless-button-form.pdf",
+    build: build::pdf_rectless_button_form,
+};
+
+/// One A4 page whose button states no rectangle but does carry an appearance: only flattening the
+/// form reaches the library's own rectangle read, which fails.
+pub const RECTLESS_FLAT_FORM_PDF: Document = Document {
+    name: "rectless-flat-form.pdf",
+    build: build::pdf_rectless_flat_form,
+};
+
+/// One A4 page carrying a signature field and a text field: a signature's appearance is never
+/// regenerated, so flattening the form is the reference's own failure.
+pub const SIGNATURE_FORM_PDF: Document = Document {
+    name: "signature-form.pdf",
+    build: build::pdf_signature_form,
+};
+
+/// One A4 page whose annotation list carries a field's own dictionary beside the widget it owns:
+/// flattening removes both references.
+pub const LISTED_FIELD_FORM_PDF: Document = Document {
+    name: "listed-field-form.pdf",
+    build: build::pdf_listed_field_form,
+};
+
+/// One A4 page carrying a text widget whose `/P` names an object that is not a page: a flatten
+/// reaches the page whose annotations list the widget.
+pub const MISPLACED_FORM_PDF: Document = Document {
+    name: "misplaced-form.pdf",
+    build: build::pdf_misplaced_form,
+};
+
+/// One A4 page carrying a multi-line text field: the wrapping a fill's appearance lays out.
+pub const MULTILINE_FORM_PDF: Document = Document {
+    name: "multiline-form.pdf",
+    build: build::pdf_multiline_form,
+};
+
+/// The same field stating its own 9-point appearance size: the value wraps where that size puts it.
+pub const STATED_SIZE_FORM_PDF: Document = Document {
+    name: "stated-size-form.pdf",
+    build: build::pdf_stated_size_form,
+};
+
+/// One A4 page carrying a text field with `/MaxLen 3`: a longer value is the library's own failure.
+pub const MAX_LENGTH_FORM_PDF: Document = Document {
+    name: "max-length-form.pdf",
+    build: build::pdf_max_length_form,
+};
+
+/// One A4 page carrying a combed text field with `/MaxLen 5`: one character per cell.
+pub const COMBED_FORM_PDF: Document = Document {
+    name: "combed-form.pdf",
+    build: build::pdf_combed_form,
+};
+
+/// One A4 page carrying a combed field whose value is wider than its `/MaxLen`, beside a field a
+/// fill can name: regenerating the combed appearance is the reference's own layout failure.
+pub const COMBED_OVERFLOW_FORM_PDF: Document = Document {
+    name: "combed-overflow-form.pdf",
+    build: build::pdf_combed_overflow_form,
+};
+
+/// One A4 page carrying a text field and a captioned push button: the reference draws the caption
+/// into the button's appearance on every fill.
+pub const PUSHBUTTON_CAPTION_FORM_PDF: Document = Document {
+    name: "pushbutton-caption-form.pdf",
+    build: build::pdf_pushbutton_caption_form,
+};
+
+/// One A4 page carrying a radio group whose `/Opt` export values are matched to its widgets' own
+/// on-states by index.
+pub const RADIO_OPTIONS_FORM_PDF: Document = Document {
+    name: "radio-options-form.pdf",
+    build: build::pdf_radio_options_form,
+};
+
+/// The same radio group with one more export value than it has on-states: the reference refuses
+/// the option that outruns them.
+pub const RADIO_OUTRUN_FORM_PDF: Document = Document {
+    name: "radio-outrun-form.pdf",
+    build: build::pdf_radio_outrun_form,
+};
+
+/// One A4 page carrying a text field whose normal appearance is a state dictionary: the reference
+/// regenerates it when the field is filled.
+pub const STATE_APPEARANCE_FORM_PDF: Document = Document {
+    name: "state-appearance-form.pdf",
+    build: build::pdf_state_appearance_form,
+};
+
 /// One A4 page carrying a `/Text` annotation.
 pub const ANNOTATED_PDF: Document = Document {
     name: "annotated.pdf",
@@ -764,10 +897,21 @@ pub const PICTURE_JPEG: Document = Document {
     name: "picture.jpg",
     build: build::jpeg,
 };
+/// The sample picture as a WebP: the format a PDF refuses before it embeds.
+pub const PICTURE_WEBP: Document = Document {
+    name: "picture.webp",
+    build: build::webp,
+};
 /// A picture whose name claims PNG and whose bytes are not one: the placement path's refusal.
 pub const PICTURE_BROKEN_PNG: Document = Document {
     name: "broken.png",
     build: build::broken_png,
+};
+/// The sample picture with one byte of its image chunk's checksum flipped: the reference embeds it,
+/// so the writer must too.
+pub const PICTURE_STALE_CRC_PNG: Document = Document {
+    name: "stale-crc.png",
+    build: build::stale_crc_png,
 };
 
 /// Every document the reader reference is recorded on, in the order it is recorded: the original
@@ -897,5 +1041,49 @@ pub fn writer_documents() -> Vec<Document> {
         DAMAGED_ENCRYPTED_PDF,
         DAMAGED_BODY_PDF,
         DAMAGED_INDEX_SYNTAX_PDF,
+        DOCX_BODYLESS,
+        DOCX_BREAKS,
+        DOCX_BROKEN,
+        DOCX_COLUMNS,
+        DOCX_EDIT,
+        DOCX_MACRO,
+        DOCX_REVISIONS,
+        DOCX_STRICT,
+        XLSX_ALL_HIDDEN,
+        XLSX_BAD_MERGE_REF,
+        XLSX_BROKEN_MERGES,
+        XLSX_EDIT,
+        XLSX_MACRO,
+        XLSX_NO_CONTENT_TYPES,
+        XLSX_NO_FAMILY,
+        XLSX_ONE_VISIBLE,
+        XLSX_ONLY_SHEET,
+        XLSX_SELF_CLOSING,
+        XLSX_UNCLOSED_MERGE_CELL,
+        OPTION_FORM_PDF,
+        EMPTY_CHOICE_FORM_PDF,
+        PAIRED_OPTIONS_FORM_PDF,
+        BROKEN_PAIR_OPTIONS_FORM_PDF,
+        PAIRED_RADIO_FORM_PDF,
+        RECTLESS_FORM_PDF,
+        RECTLESS_BUTTON_FORM_PDF,
+        RECTLESS_FLAT_FORM_PDF,
+        MULTILINE_FORM_PDF,
+        STATED_SIZE_FORM_PDF,
+        MAX_LENGTH_FORM_PDF,
+        COMBED_FORM_PDF,
+        COMBED_OVERFLOW_FORM_PDF,
+        PUSHBUTTON_CAPTION_FORM_PDF,
+        RADIO_OPTIONS_FORM_PDF,
+        RADIO_OUTRUN_FORM_PDF,
+        STATE_APPEARANCE_FORM_PDF,
+        SIGNATURE_FORM_PDF,
+        LISTED_FIELD_FORM_PDF,
+        MISPLACED_FORM_PDF,
+        PICTURE_PNG,
+        PICTURE_JPEG,
+        PICTURE_BROKEN_PNG,
+        PICTURE_STALE_CRC_PNG,
+        PICTURE_WEBP,
     ]
 }

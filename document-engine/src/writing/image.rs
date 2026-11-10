@@ -25,6 +25,8 @@ pub(super) const PX_TO_POINTS: f64 = 72.0 / 96.0;
 /// A picture the request embeds: its bytes, the kind its name claims, and the pixel size the frame
 /// header states.
 pub(super) struct Picture {
+    /// The file's own base name, as a refusal or a resource names it.
+    pub(super) name: String,
     pub(super) kind: &'static str,
     pub(super) content_type: &'static str,
     pub(super) bytes: Vec<u8>,
@@ -81,6 +83,7 @@ pub(super) fn read_image(value: Option<&Value>) -> Result<Picture, Failure> {
         )));
     };
     Ok(Picture {
+        name,
         kind,
         content_type,
         bytes,
@@ -145,6 +148,71 @@ fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
     }
     None
 }
+
+/// The PNG with every chunk's CRC recomputed, for a decoder that checks one; `None` when every
+/// chunk already states the right one, so a whole picture is copied only when it needs repairing.
+/// The reference's own decoder never checks a checksum, so a damaged one must not cost the caller
+/// the picture: the samples are the same either way. The walk is the one [`png_size`] takes.
+pub(super) fn rechecksummed(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut repaired: Option<Vec<u8>> = None;
+    let mut offset = PNG_SIGNATURE.len();
+    while offset.saturating_add(PNG_CHUNK_OVERHEAD) <= bytes.len() {
+        let Some(length) = word_at(bytes, offset) else {
+            break;
+        };
+        let length = usize::try_from(length).unwrap_or(usize::MAX);
+        // The CRC covers the chunk's type and data, not its length; its own field follows the data.
+        let crc_at = offset
+            .saturating_add(PNG_CHUNK_OVERHEAD - U32_BYTES)
+            .saturating_add(length);
+        let Some(chunk) = bytes.get(offset.saturating_add(U32_BYTES)..crc_at) else {
+            break;
+        };
+        let crc = crc32(chunk);
+        if word_at(bytes, crc_at) != Some(u64::from(crc)) {
+            let out = repaired.get_or_insert_with(|| bytes.to_vec());
+            if let Some(field) = out.get_mut(crc_at..crc_at.saturating_add(U32_BYTES)) {
+                field.copy_from_slice(&crc.to_be_bytes());
+            }
+        }
+        offset = crc_at.saturating_add(U32_BYTES);
+    }
+    repaired
+}
+
+/// The CRC-32 a PNG chunk carries.
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = u32::MAX;
+    for &byte in bytes {
+        crc =
+            CRC_TABLE[(crc ^ u32::from(byte)) as usize % CRC_TABLE.len()] ^ (crc >> BITS_PER_BYTE);
+    }
+    !crc
+}
+
+/// The polynomial CRC-32 is computed with.
+const CRC_POLYNOMIAL: u32 = 0xedb8_8320;
+
+/// The remainder one leading byte leaves: the CRC-32 lookup table, built once at compile time.
+const CRC_TABLE: [u32; 256] = {
+    let mut table = [0; 256];
+    let mut index: u32 = 0;
+    while (index as usize) < table.len() {
+        let mut crc = index;
+        let mut bit = 0;
+        while bit < BITS_PER_BYTE {
+            crc = if crc & 1 == 0 {
+                crc >> 1
+            } else {
+                CRC_POLYNOMIAL ^ (crc >> 1)
+            };
+            bit += 1;
+        }
+        table[index as usize] = crc;
+        index += 1;
+    }
+    table
+};
 
 /// One big-endian 32-bit word at `offset`.
 fn word_at(bytes: &[u8], offset: usize) -> Option<u64> {

@@ -236,6 +236,37 @@ const FORMAT_NAMES: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "src/writing/pdf/text.rs",
+        &[
+            (
+                "pages",
+                "the request's page-selection key, not the note's page noun",
+            ),
+            (
+                "text",
+                "the request's text key and the note's own subject word",
+            ),
+            (
+                "stamp",
+                "the request's stamp key and the note's own subject word",
+            ),
+        ],
+    ),
+    (
+        "src/operation.rs",
+        &[(
+            "text",
+            "the `pdf_text` request's own key, not the field-kind word the catalogue prints",
+        )],
+    ),
+    (
+        "src/writing/pdf/picture.rs",
+        &[(
+            "pages",
+            "the request's page-selection key, not the note's page noun",
+        )],
+    ),
+    (
         "src/writing/pdf/scan.rs",
         &[(
             "null",
@@ -399,6 +430,234 @@ fn marks_for(path: &Path) -> Vec<String> {
 /// crate's own halves enforce is read from the vocabulary is
 /// [`every_bound_the_crate_enforces_is_read_from_the_vocabulary`].
 const SPEC_CONSTANTS: &[(&str, f64, usize, &str)] = &[
+    // ── the embedded PDF font ────────────────────────────────────────────────────────────────────
+    // An sfnt's own record sizes and field offsets: none is a bound the vocabulary states.
+    (
+        "src/writing/pdf/font.rs",
+        4.0,
+        2,
+        "the four bytes of a 32-bit word, the unit `ALIGN` and `WORD` name",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        4.0,
+        2,
+        "the four fields of a font bounding box, read from `head` and answered",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        4.0,
+        4,
+        "the four bytes a table record's 32-bit fields span and the four-byte step between them",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        4.0,
+        4,
+        "`loca`'s four bytes per glyph offset and the four-byte step through a glyph's records",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        4.0,
+        2,
+        "format 4's four-field header",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        4.0,
+        2,
+        "the four bytes of a format-12 group's first field",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        4.0,
+        3,
+        "the four fields of a format-12 group",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        4.0,
+        1,
+        "the four bytes of a `maxp` table's version",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        8.0,
+        2,
+        "`head`'s checksum adjustment at byte 8 and a table record's offset at byte 8",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        8.0,
+        1,
+        "a format-12 group's third field at byte 8",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        8.0,
+        4,
+        "the four F2Dot14 scales a composite glyph may state",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        6.0,
+        1,
+        "`hhea`'s descent at byte 6",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        6.0,
+        1,
+        "`maxp`'s glyph count at byte 6",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        6.0,
+        1,
+        "cmap format 4's `segCountX2` at byte 6",
+    ),
+    ("src/writing/pdf/font.rs", 16.0, 1, "one sfnt table record"),
+    ("src/writing/pdf/font.rs", 16.0, 1, "the format-12 header"),
+    (
+        "src/writing/pdf/font.rs",
+        16.0,
+        1,
+        "a format-12 group's first group offset",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        10.0,
+        1,
+        "a composite glyph's header length",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        10.0,
+        1,
+        "cmap platform 3's UCS-4 encoding id",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        50.0,
+        2,
+        "`head`'s `indexToLocFormat` at byte 50, read and written",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        3.0,
+        1,
+        "cmap platform 3, the Microsoft platform the bundled font's map is read from",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        32.0,
+        1,
+        "the `maxp` table's 32 bytes",
+    ),
+    (
+        "src/writing/pdf/font.rs",
+        1000.0,
+        1,
+        "PDF glyph space: a width is stated in thousandths of an em",
+    ),
+    (
+        "src/writing/pdf/draw.rs",
+        4.0,
+        2,
+        "the two halves of a quarter inset",
+    ),
+    (
+        "src/writing/pdf/draw.rs",
+        4.0,
+        1,
+        "a font descriptor's symbolic flag",
+    ),
+    (
+        "src/writing/pdf/draw.rs",
+        4.0,
+        1,
+        "the four corners of a rectangle the page states",
+    ),
+    (
+        "src/writing/pdf/draw.rs",
+        4.0,
+        1,
+        "the four hex digits one glyph code is written as",
+    ),
+    (
+        "src/writing/pdf/draw.rs",
+        3.0,
+        1,
+        "the three colour channels a hex colour is split into",
+    ),
+    (
+        "src/writing/pdf/draw.rs",
+        16.0,
+        1,
+        "the base a hex colour's digits are read in",
+    ),
+    (
+        "src/writing/pdf/draw.rs",
+        255.0,
+        1,
+        "the top of one colour channel, which a hex byte is divided by",
+    ),
+    (
+        "src/writing/pdf/text.rs",
+        8.0,
+        4,
+        "the stamp box's inset on each side, in its mark and in the drawn path",
+    ),
+    (
+        "src/writing/pdf/text.rs",
+        16.0,
+        4,
+        "the stamp box's padding on each side, in its mark and in the drawn path",
+    ),
+    (
+        "src/writing/pdf/picture.rs",
+        3.0,
+        6,
+        "the third quarter turn, the three RGB channels, the alpha channel's index and the JPEG \
+         component defaults and offsets",
+    ),
+    (
+        "src/writing/pdf/picture.rs",
+        8.0,
+        2,
+        "the bits per component a written image sample states",
+    ),
+    (
+        "src/writing/pdf/picture.rs",
+        4.0,
+        2,
+        "the four CMYK components and the four bytes of a JPEG marker's length field",
+    ),
+    (
+        "src/writing/pdf/picture.rs",
+        8.0,
+        1,
+        "the offset of a JPEG frame header's component count, past the length, precision, height \
+         and width fields",
+    ),
+    (
+        "src/writing/pdf/form.rs",
+        16.0,
+        1,
+        "the button-flag bit that marks a push button",
+    ),
+    (
+        "src/writing/pdf/form.rs",
+        4.0,
+        2,
+        "the quarter of a button's box the on-state's mark is inset by",
+    ),
+    (
+        "src/writing/pdf/form.rs",
+        4.0,
+        1,
+        "the smallest font size the reference's own fitter tries",
+    ),
     (
         "src/writing/pdf/mod.rs",
         4.0,
@@ -408,7 +667,7 @@ const SPEC_CONSTANTS: &[(&str, f64, usize, &str)] = &[
     (
         "src/writing/pdf/page.rs",
         3.0,
-        2,
+        3,
         "the quarter turns a page's turn is counted in — one, two or three — and the fourth index \
          of a page box's four corners; not a scale",
     ),
@@ -679,6 +938,12 @@ const SPEC_CONSTANTS: &[(&str, f64, usize, &str)] = &[
         8.0,
         2,
         "the eight bytes of two big-endian words, the unit an image format's offsets are counted in",
+    ),
+    (
+        "src/writing/image.rs",
+        256.0,
+        2,
+        "the CRC-32 lookup table's one entry per byte value",
     ),
     (
         "src/writing/image.rs",

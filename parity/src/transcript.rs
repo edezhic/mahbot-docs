@@ -78,7 +78,7 @@ impl CaseTranscript {
             } else {
                 format!("{name}#{occurrence}")
             };
-            let value = canonical(path)?;
+            let value = sorted_value(&canonical(path)?);
             outputs.insert(key, value);
         }
         Ok(Self {
@@ -235,11 +235,40 @@ pub fn marked(template: &str, reason: &str) -> Option<String> {
     (!middle.is_empty()).then(|| format!("{prefix}{VARIABLE}{suffix}"))
 }
 
-/// The transcript's canonical serialisation: sorted keys, two-space indent, one trailing newline.
+/// The transcript's canonical serialisation: two-space indent, one trailing newline. A map's
+/// iteration order cannot decide the record: the one canonical `Value` a transcript carries is
+/// sorted by [`CaseTranscript::build`] through [`sorted_value`], while a struct keeps the order its
+/// fields are declared in. This writer does not re-sort, because a struct's field order is part of
+/// the record too — sorting here would rewrite every case's field order on the next re-record.
 pub fn to_json<T: Serialize>(value: &T) -> anyhow::Result<String> {
     let mut text = serde_json::to_string_pretty(value)?;
     text.push('\n');
     Ok(text)
+}
+
+/// `value` with every object's keys in sorted order. The workspace's `serde_json` keeps insertion
+/// order, so the map a value was built from would otherwise decide the record — and a re-record
+/// would rewrite every key of the baseline instead of the entries that moved.
+#[must_use]
+pub fn sorted_value(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let entries: BTreeMap<&String, serde_json::Value> = map
+                .iter()
+                .map(|(key, value)| (key, sorted_value(value)))
+                .collect();
+            serde_json::Value::Object(
+                entries
+                    .into_iter()
+                    .map(|(key, value)| (key.clone(), value))
+                    .collect(),
+            )
+        }
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.iter().map(sorted_value).collect())
+        }
+        other => other.clone(),
+    }
 }
 
 /// The identity line a report prints beside a comparison.
@@ -256,6 +285,50 @@ pub fn identity_line(identity: &crate::engine::EngineIdentity) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sorted_value_puts_every_object_key_in_order() {
+        // The map a canonical value was built from keeps insertion order, so the record sorts it:
+        // otherwise a re-record would rewrite every key instead of the entries that moved.
+        let value = serde_json::json!({"b": 1, "a": {"d": 2, "c": 3}});
+        assert_eq!(
+            serde_json::to_string(&sorted_value(&value)).expect("a value"),
+            r#"{"a":{"c":3,"d":2},"b":1}"#
+        );
+    }
+
+    #[derive(Serialize)]
+    struct Fields {
+        z: u8,
+        a: u8,
+    }
+
+    #[test]
+    fn the_writer_keeps_a_structs_field_order() {
+        // The baseline is a struct of maps: its own fields keep the order they are declared in,
+        // while each map (and each canonical value inside one) is already ordered.
+        let text = to_json(&Fields { z: 1, a: 2 }).expect("a transcript");
+        assert!(text.find("\"z\"").expect("z") < text.find("\"a\"").expect("a"));
+    }
+
+    #[test]
+    fn a_transcript_sorts_the_canonical_value_it_records() {
+        // `CaseTranscript::build` is the only place a canonical `Value` enters a transcript, so its
+        // sort is what keeps a re-record from rewriting every object key.
+        let outcome = WriterOutcome {
+            outputs: vec![std::path::PathBuf::from("produced.pdf")],
+            ..WriterOutcome::default()
+        };
+        let transcript = CaseTranscript::build(&outcome, |_| {
+            Ok(serde_json::json!({"b": 1, "a": {"d": 2, "c": 3}}))
+        })
+        .expect("a transcript");
+        let text = to_json(&transcript).expect("a transcript");
+        assert!(
+            text.find("\"a\"").expect("a") < text.find("\"b\"").expect("b"),
+            "the canonical value is recorded in sorted order:\n{text}"
+        );
+    }
 
     #[test]
     fn a_template_keeps_the_engines_words_and_marks_the_variable() {
