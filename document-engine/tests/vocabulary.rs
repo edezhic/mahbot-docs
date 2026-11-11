@@ -804,12 +804,6 @@ const SPEC_CONSTANTS: &[(&str, f64, usize, &str)] = &[
         "the radix of a hexadecimal character reference in XML text",
     ),
     (
-        "src/operation.rs",
-        3.0,
-        1,
-        "the three template families `TEMPLATE_FORMATS` names",
-    ),
-    (
         "src/reading/marks.rs",
         8.0,
         1,

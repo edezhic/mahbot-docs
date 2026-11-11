@@ -34,8 +34,8 @@ to prove the gate rejects it: a case passes only if its transcript matches the b
 declared effect happened, and a no-op satisfies neither. `parity --engine reference` is the
 recorder's engine — the reference writer and the product's own reader — and is the only run that
 also requires the build identity to match the baseline. `parity --engine crate` (the default) pairs
-the engine crate's own writer and reader; an operation the crate's writer has not landed yet is
-shown as `SKIP`, not failed, and a run that judged no case at all is not a pass.
+the engine crate's own writer and reader; an (operation, family) pair the crate's writer has not
+landed yet is shown as `SKIP`, not failed, and a run that judged no case at all is not a pass.
 
 ## What is here
 
@@ -46,11 +46,11 @@ shown as `SKIP`, not failed, and a run that judged no case at all is not a pass.
 | `src/reference/writer.rs` | The current writer: the committed kit bundle and font, embedded and materialized into the harness's temporary directory, run on `bun` through the product's request-and-result contract (`request-<n>.json` in, `result-<n>.json` out, never stdout). |
 | `src/reference/reader.rs` | The current reader: `document::convert_document_file`, the one bounded entry point every product read passes through, plus the product converter's own detection verdict built from its `pub(crate)` primitives. |
 | `src/reference/crate_reader.rs` | The engine crate's reader: `document_engine::reading::{detect, read}`, whose shapes are already the harness's. This is the default reader. |
-| `src/reference/crate_writer.rs` | The engine crate's writer: `document_engine::operation::execute`, bridged from the kit's request shape to the crate's `Request`/`Destination`. The crate's writer implements only the operations `src/corpus/ledger.rs` records, so the rest are unjudged rather than failed. |
+| `src/reference/crate_writer.rs` | The engine crate's writer: `document_engine::operation::execute`, bridged from the kit's request shape to the crate's `Request`/`Destination`. The crate's writer carries out the (operation, family) pairs the engine's own statement names, and the harness judges only those; the rest are unjudged rather than failed. |
 | `src/reference/noop.rs` | The negative control. |
 | `src/reference_sources/` | Byte-for-byte copies of the product's reader modules, compiled here. `tests/engine_contract.rs` compares them with `../../src/` and fails when they diverge. |
 | `src/host/` | The minimal host the reader sources need: `rules.json` and its typed views, `contain_panics`, and the handful of `util` helpers the readers call. |
-| `src/corpus/` | The writer scenarios (`cases.rs`) and their declared effects (`effect.rs`); `ledger.rs` states which operations the crate's writer covers; the document builders are re-exported from `document_engine::test_support`, their one home. |
+| `src/corpus/` | The writer scenarios (`cases.rs`) and their declared effects (`effect.rs`); `ledger.rs` records, per (operation, family) pair, what the crate's writer delivers — checked against the engine's statement and compiled for the tests only, never read by the gate; the document builders are re-exported from `document_engine::test_support`, their one home. |
 | `src/canonical/` | The canonical model, one module per format, plus the diff. |
 | `src/harness.rs` | Runs a corpus against an engine, compares, and produces verdicts. |
 | `src/baseline.rs` | The recorded reference, with the identity of the engine that produced it. |
@@ -85,8 +85,9 @@ A different engine is a new pair of `impl`s, not a change to the corpus, the mod
 impl Writer for MyEngine {
     fn identity(&self) -> EngineIdentity { … }
     fn run(&self, request: &serde_json::Value, scratch: &Path) -> anyhow::Result<WriterOutcome> { … }
-    // Optional: false means the corpus's cases for that operation are unjudged, not failed.
-    fn covers(&self, key: &Key) -> bool { … }
+    // Optional: what the engine says about that (operation, family) pair. `NotCarriedOut` makes
+    // its cases unjudged; `Unaccepted` makes them a corpus defect, which fails.
+    fn coverage(&self, key: &Key) -> Coverage { … }
 }
 impl Reader for MyEngine {
     fn identity(&self) -> EngineIdentity { … }
@@ -104,12 +105,22 @@ with a path, the name the document was given, and a directory for extracted imag
 the reader are both `Send + Sync` and each runs on a thread of its own under a timeout, so one that
 never returns costs one case or one reading rather than the gate.
 
-An engine need not implement the whole corpus. `Writer::covers` answers whether the engine carries
-out the operation a case exercises; a case it does not is *unjudged*: the run still produces its
-outcome, so the baseline's entry is not stale, and the verdict says `SKIP <key> — <why>` rather
-than failing a comparison the engine never entered. The crate's ledger (`src/corpus/ledger.rs`)
-names the operations its writer implements today. A run that judged no case at all is not a pass —
-the report says `no writer case was judged: the engine implements none of the corpus's operations`.
+An engine need not implement the whole corpus. `Writer::coverage` answers what the engine does with
+the (operation, family) pair a case exercises. A pair it does not carry out is *unjudged*: the run
+still produces its outcome, so the baseline's entry is not stale, and the verdict says
+`SKIP <key> — <why>` rather than failing a comparison the engine never entered. The skip reason names
+the pair, not the operation alone. A pair the engine does not accept fails instead. A run that
+judged no case at all is not a pass — the report says `no writer case was judged: the engine carries
+out none of the pairs the corpus exercises`.
+
+Coverage is recorded per (operation, family) pair: the crate's ledger (`src/corpus/ledger.rs`) states
+for every pair the engine accepts whether it is delivered or not carried out, and a test checks that
+record against the engine's own statement in both directions — a pair recorded delivered while the
+engine answers the interim sentence fails, and so does a pair recorded not carried out while the
+engine carries it out. The engine states the pairs it carries out as data
+(`document_engine::operation::answer` for one pair, `accepted_pairs` for every pair, both compiled
+only for a test or a `test-support` consumer), and the dispatch reads that statement rather than a
+branch beside it, so the record cannot drift from the answer.
 
 `WriterOutcome`, `Failure`, `Reading`, `ImageArtifact` and `Family` are not defined here: they are
 the `document-engine` crate's own shapes, re-exported so the reference answers in them and the
@@ -437,13 +448,22 @@ case, and each is a verdict problem rather than an abort:
 A verdict is keyed by `(family, operation, sub-operation)`, plus a case identifier when several
 cases share one, and says pass, fail or unjudged; a failure lists what differed, in terms a person
 can act on, bounded and without dumping two documents. An unjudged case is one the engine's
-`covers` says it does not implement: it is reported as `SKIP <key> — <why>`, counted apart, and
-never read as a pass — a run that judged no case at all fails with
-`no writer case was judged: the engine implements none of the corpus's operations`. Refusals are
-compared by the class the engine reports (`usage` for the caller's to fix, `internal` otherwise) and
-by the reason, with volatile parts normalised; the sentence the product prints around it is not the
-harness's business. A reason declared as a template records a third-party library's message as
-`{{variable}}`, so a different message inside the same engine words is the same reason.
+`coverage` says it does not carry out for the case's family: it is reported as
+`SKIP <key> — <why>`, counted apart, and never read as a pass — a run that judged no case at all
+fails with `no writer case was judged: the engine carries out none of the pairs the corpus
+exercises`. A case naming a pair the engine does not accept fails instead: it never ran, so it is
+counted as failed rather than judged, and its problem names the pair.
+
+The summary counts cases per (operation, family) pair — judged and unjudged — and lists every pair
+with unjudged cases, in the `family/operation` spelling a verdict key uses and the order the block is
+sorted in. The counts describe the run, so they are honest for any engine: the reference and the
+no-op engine have no unported pair, so all their cases are judged (and the no-op's all fail), while
+the crate's own unported pairs show as unjudged. The counts are printed after the per-verdict lines
+and before the aggregate, and `--quiet` does not suppress them. Refusals are compared by the class
+the engine reports (`usage` for the caller's to fix, `internal` otherwise) and by the reason, with
+volatile parts normalised; the sentence the product prints around it is not the harness's business.
+A reason declared as a template records a third-party library's message as `{{variable}}`, so a
+different message inside the same engine words is the same reason.
 
 `baseline/baseline.json` is recorded from the current engine and kept with its identity: the
 writer's build digest and `bun <version>` (with the bundle, kit, rules, lockfile, font and the

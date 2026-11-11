@@ -3,7 +3,7 @@
 
 use document_parity::baseline::Baseline;
 use document_parity::engine::{Reader, Writer};
-use document_parity::harness::{Harness, Judgement, NO_CASE_JUDGED};
+use document_parity::harness::{Harness, Judgement, NO_CASE_JUDGED, PairReport};
 use document_parity::reference::{
     CrateReader, CrateWriter, NoOpReader, NoOpWriter, ReferenceReader, ReferenceWriter,
 };
@@ -28,7 +28,8 @@ fn main() {
                      Runs every corpus case and reading, compares them with the recorded baseline,\n\
                      and checks every declared effect. `crate` pairs the engine crate's own writer\n\
                      and reader; `reference` is the engine the baseline records; `noop` is the\n\
-                     negative control."
+                     negative control. A (operation, family) pair the writer has not landed yet is\n\
+                     reported as SKIP; the summary counts judged and unjudged cases per pair."
                 );
                 return;
             }
@@ -138,17 +139,16 @@ fn run(engine: &str, baseline_path: &Path, quiet: bool) -> anyhow::Result<i32> {
     }
     let judged = report.judged();
     let unjudged = report.unjudged();
-    let failed = report
-        .verdicts
-        .iter()
-        .filter(|verdict| matches!(verdict.judgement, Judgement::Judged))
-        .filter(|verdict| !verdict.passed())
-        .count();
+    let failed = report.failed();
     let readings = report
         .readings
         .iter()
         .filter(|reading| reading.passed)
         .count();
+    println!();
+    for line in summary_lines(&report.pairs()) {
+        println!("{line}");
+    }
     println!(
         "\n{} verdicts ({} judged, {} unjudged, {} failed); {} readings ({} passed, {} failed); \
          {} stale; identity {}",
@@ -172,4 +172,72 @@ fn run(engine: &str, baseline_path: &Path, quiet: bool) -> anyhow::Result<i32> {
         report.passed()
     };
     Ok(if clean { 0 } else { 1 })
+}
+
+/// The per-pair summary printed before the aggregate: a header, one line for every pair the corpus
+/// exercises, and the pairs with unjudged cases. The aggregate alone cannot say which pairs a run
+/// did not judge.
+fn summary_lines(pairs: &[PairReport]) -> Vec<String> {
+    let mut lines = vec![format!("pairs ({}):", pairs.len())];
+    lines.extend(pairs.iter().map(|pair| {
+        format!(
+            "  {pair}: {} judged, {} unjudged",
+            pair.judged, pair.unjudged
+        )
+    }));
+    let unjudged: Vec<String> = pairs
+        .iter()
+        .filter(|pair| pair.unjudged > 0)
+        .map(ToString::to_string)
+        .collect();
+    lines.push(format!(
+        "pairs with unjudged cases: {}",
+        if unjudged.is_empty() {
+            "none".to_string()
+        } else {
+            unjudged.join(", ")
+        }
+    ));
+    lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use document_parity::engine::Family;
+
+    fn pair(operation: &str, family: Family, judged: usize, unjudged: usize) -> PairReport {
+        PairReport {
+            operation: operation.to_string(),
+            family,
+            judged,
+            unjudged,
+        }
+    }
+
+    #[test]
+    fn the_summary_counts_cases_per_pair_and_names_the_unjudged_ones() {
+        let pairs = [
+            pair("create", Family::Docx, 0, 1),
+            pair("docx_edit", Family::Docx, 3, 0),
+        ];
+        assert_eq!(
+            summary_lines(&pairs),
+            vec![
+                "pairs (2):".to_string(),
+                "  docx/create: 0 judged, 1 unjudged".to_string(),
+                "  docx/docx_edit: 3 judged, 0 unjudged".to_string(),
+                "pairs with unjudged cases: docx/create".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_run_that_judged_every_pair_lists_none_as_unjudged() {
+        let pairs = [pair("docx_edit", Family::Docx, 3, 0)];
+        assert_eq!(
+            summary_lines(&pairs).last().map(String::as_str),
+            Some("pairs with unjudged cases: none")
+        );
+    }
 }

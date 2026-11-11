@@ -1,11 +1,13 @@
 //! The gate: run every case against one engine, compare each transcript with the recorded
 //! baseline, and check each case's declared effect. A case passes only when both hold.
 //!
-//! An engine need not implement the whole corpus. A case whose operation the writer's
-//! [`Writer::covers`] refuses is *unjudged*: it still produces a [`CaseOutcome`] — so the
-//! baseline's entry is not stale merely because this engine cannot answer it — and its verdict
-//! says why instead of failing a comparison the engine never entered. A run that judged nothing
-//! is not a pass: the gate exists to judge, and a report with no judged case says so.
+//! An engine need not implement the whole corpus. A case whose (operation, family) pair the
+//! writer's [`Writer::coverage`] says it does not carry out is *unjudged*: it still produces a
+//! [`CaseOutcome`] — so the baseline's entry is not stale merely because this engine cannot answer
+//! it — and its verdict says why instead of failing a comparison the engine never entered. A pair
+//! the operation does not accept is a corpus defect ([`Coverage::Unaccepted`]) and the case fails.
+//! A run that judged nothing is not a pass: the gate exists to judge, and a report with no judged
+//! case says so.
 //!
 //! A writer case runs on a thread of its own under [`WRITE_TIMEOUT`]. An in-process writer cannot
 //! be interrupted: the abandoned thread may keep writing into that case's directory after the
@@ -15,7 +17,7 @@
 use crate::baseline::Baseline;
 use crate::canonical::{self, Comparison};
 use crate::corpus::{Case, Document, Expect, Reason};
-use crate::engine::{EngineIdentity, Key, Kind, Reader, Reading, Writer};
+use crate::engine::{Coverage, EngineIdentity, Family, Key, Kind, Reader, Reading, Writer};
 use crate::shutdown::panic_message;
 use crate::transcript::{self, CaseTranscript, ReadingTranscript, Status};
 use anyhow::{Context as _, Result, bail};
@@ -40,10 +42,10 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(120);
 /// timeout: a reader that never returns must not hold the gate open.
 const READ_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// The problem a report states when it judged no case at all: an engine that implements none of
-/// the corpus's operations has proved nothing, however many transcripts it produced.
+/// The problem a report states when it judged no case at all: an engine that carries out none of
+/// the pairs the corpus exercises has proved nothing, however many transcripts it produced.
 pub const NO_CASE_JUDGED: &str =
-    "no writer case was judged: the engine implements none of the corpus's operations";
+    "no writer case was judged: the engine carries out none of the pairs the corpus exercises";
 
 /// The largest produced file the harness reads into memory to canonicalise. An engine's outputs
 /// are small; a bigger file is a case failure with a message, not an exhaustion of the run.
@@ -150,15 +152,22 @@ impl Harness {
             .iter()
             .map(|case| {
                 let key = case.key();
-                // A case the writer does not cover is not run at all: it is unjudged rather than
-                // failed, and the budget is not spent on an answer the engine cannot give.
-                if !self.writer.covers(&key) {
-                    let why = unjudged_reason(&key);
-                    CaseOutcome::unjudged(key, why)
-                } else if self.spent(started) {
-                    CaseOutcome::problem(key, self.over_budget())
-                } else {
-                    self.run_case(case)
+                match self.writer.coverage(&key) {
+                    Coverage::Unaccepted => {
+                        let why = unaccepted_reason(&key);
+                        CaseOutcome::corpus_defect(key, why)
+                    }
+                    // A case the writer does not carry out is not run at all: it is unjudged
+                    // rather than failed, and the budget is not spent on an answer the engine
+                    // cannot give.
+                    Coverage::NotCarriedOut => {
+                        let why = unjudged_reason(&key);
+                        CaseOutcome::unjudged(key, why)
+                    }
+                    Coverage::Delivered if self.spent(started) => {
+                        CaseOutcome::problem(key, self.over_budget())
+                    }
+                    Coverage::Delivered => self.run_case(case),
                 }
             })
             .collect();
@@ -678,11 +687,14 @@ fn normalise_reading(transcript: &mut ReadingTranscript, root: &Path) {
 /// Whether a case was judged against the baseline, or why it could not be.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Judgement {
-    /// The engine implements the operation, so its transcript is compared.
+    /// The engine carries the case's (operation, family) pair out, so its transcript is compared.
     Judged,
-    /// The engine does not implement the operation. One sentence says so; the case is neither
-    /// passed nor failed on content.
+    /// The engine does not carry the pair out. One sentence says so; the case is neither passed nor
+    /// failed on content.
     Unjudged(String),
+    /// The corpus names a pair the engine does not accept: the case never ran, so it is not a
+    /// judgement. It fails the run.
+    CorpusDefect,
 }
 
 /// One case's run: its transcript, or why there is none.
@@ -703,6 +715,16 @@ impl CaseOutcome {
         }
     }
 
+    /// A case the corpus itself makes impossible: it is a defect, not a judgement.
+    fn corpus_defect(key: Key, problem: String) -> Self {
+        Self {
+            key,
+            transcript: None,
+            problem: Some(problem),
+            judgement: Judgement::CorpusDefect,
+        }
+    }
+
     fn unjudged(key: Key, why: String) -> Self {
         Self {
             key,
@@ -713,12 +735,30 @@ impl CaseOutcome {
     }
 }
 
-/// Why a case the writer does not cover is not judged.
+/// Why a case the writer does not carry out is not judged: the (operation, family) pair, not the
+/// operation alone, is what the engine's statement answers for.
 fn unjudged_reason(key: &Key) -> String {
     match &key.sub_operation {
-        Some(sub) => format!("the engine does not implement {}/{sub}", key.operation),
-        None => format!("the engine does not implement {}", key.operation),
+        Some(sub) => format!(
+            "the engine does not implement {}/{sub} for {}",
+            key.operation,
+            key.family.as_str()
+        ),
+        None => format!(
+            "the engine does not implement {} for {}",
+            key.operation,
+            key.family.as_str()
+        ),
     }
+}
+
+/// Why a case naming a pair the engine does not accept fails: the corpus may not hold one.
+fn unaccepted_reason(key: &Key) -> String {
+    format!(
+        "the corpus names {} for {}, a pair the engine does not accept",
+        key.operation,
+        key.family.as_str()
+    )
 }
 
 /// One writer run's answer, kept apart so a timeout is not mistaken for an engine error.
@@ -780,6 +820,21 @@ pub struct ReadingVerdict {
     pub problems: Vec<String>,
 }
 
+/// One (operation, family) pair's cases, as one run judged them.
+pub struct PairReport {
+    pub operation: String,
+    pub family: Family,
+    pub judged: usize,
+    pub unjudged: usize,
+}
+
+impl std::fmt::Display for PairReport {
+    /// The pair as `family/operation`, the spelling a verdict key and a skip line use.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&crate::engine::pair_name(self.family, &self.operation))
+    }
+}
+
 /// The whole gate.
 pub struct Report {
     pub writer: EngineIdentity,
@@ -807,7 +862,8 @@ impl Report {
     /// The shared verdict aggregate: every judged verdict and every reading matches the baseline,
     /// the corpus still holds every baseline entry, and at least one case was judged. A run that
     /// judged nothing has not shown anything, however many transcripts it produced. An unjudged
-    /// case is neither a pass nor a failure, so it is left out rather than counted either way.
+    /// case is neither a pass nor a failure, so it is left out rather than counted either way; a
+    /// corpus defect fails the run.
     ///
     /// The engine's identity is deliberately not part of it — being pointed at another
     /// implementation is what the harness is for.
@@ -816,11 +872,7 @@ impl Report {
         self.stale.is_empty()
             && self.stale_readings.is_empty()
             && self.judged() > 0
-            && self
-                .verdicts
-                .iter()
-                .filter(|verdict| matches!(verdict.judgement, Judgement::Judged))
-                .all(Verdict::passed)
+            && self.failed() == 0
             && self.readings.iter().all(|reading| reading.passed)
     }
 
@@ -833,10 +885,51 @@ impl Report {
             .count()
     }
 
-    /// How many cases the engine does not implement, and so were not judged.
+    /// How many cases the engine does not carry out, and so were not judged.
     #[must_use]
     pub fn unjudged(&self) -> usize {
-        self.verdicts.len() - self.judged()
+        self.verdicts
+            .iter()
+            .filter(|verdict| matches!(verdict.judgement, Judgement::Unjudged(_)))
+            .count()
+    }
+
+    /// How many verdicts are failures: a judged case that did not match, and a corpus defect. The
+    /// counts are not a partition — a judged case that failed is counted as judged and as failed.
+    #[must_use]
+    pub fn failed(&self) -> usize {
+        self.verdicts
+            .iter()
+            .filter(|verdict| {
+                !matches!(verdict.judgement, Judgement::Unjudged(_)) && !verdict.passed()
+            })
+            .count()
+    }
+
+    /// The cases each (operation, family) pair holds, and how many of them this run judged, in the
+    /// `family/operation` order they are printed in. The counts describe the run, not the crate's
+    /// ledger: a ledger-derived count would read the same for every engine, while these say what
+    /// this engine actually answered.
+    #[must_use]
+    pub fn pairs(&self) -> Vec<PairReport> {
+        let mut pairs: BTreeMap<(Family, &str), PairReport> = BTreeMap::new();
+        for verdict in &self.verdicts {
+            let pair = pairs
+                .entry((verdict.key.family, verdict.key.operation.as_str()))
+                .or_insert_with(|| PairReport {
+                    operation: verdict.key.operation.clone(),
+                    family: verdict.key.family,
+                    judged: 0,
+                    unjudged: 0,
+                });
+            match verdict.judgement {
+                Judgement::Judged => pair.judged += 1,
+                Judgement::Unjudged(_) => pair.unjudged += 1,
+                // A corpus defect never ran: it is neither, and the FAIL line names it.
+                Judgement::CorpusDefect => {}
+            }
+        }
+        pairs.into_values().collect()
     }
 
     /// The reference gate's answer: [`Report::passed`], and that the engine is the build the
@@ -953,7 +1046,7 @@ impl Run {
         }
         Verdict {
             key: outcome.key.clone(),
-            judgement: Judgement::Judged,
+            judgement: outcome.judgement.clone(),
             problems,
         }
     }
@@ -1172,6 +1265,29 @@ mod tests {
         });
         let problem = outcome.problem.expect("a problem");
         assert!(problem.contains("panicked"), "{problem}");
+    }
+
+    #[test]
+    fn a_skip_reason_names_the_pair() {
+        let plain = Key::new(Family::Docx, "create", None);
+        assert_eq!(
+            unjudged_reason(&plain),
+            "the engine does not implement create for docx"
+        );
+        let sub = Key::new(Family::Xlsx, "xlsx_edit", Some("merge_cells"));
+        assert_eq!(
+            unjudged_reason(&sub),
+            "the engine does not implement xlsx_edit/merge_cells for xlsx"
+        );
+    }
+
+    #[test]
+    fn an_unaccepted_reason_names_the_pair_and_the_operation() {
+        let key = Key::new(Family::Pdf, "fill_template", None);
+        assert_eq!(
+            unaccepted_reason(&key),
+            "the corpus names fill_template for pdf, a pair the engine does not accept"
+        );
     }
 
     #[test]

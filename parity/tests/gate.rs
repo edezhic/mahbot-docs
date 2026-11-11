@@ -5,13 +5,13 @@ mod common;
 
 use document_parity::baseline::Baseline;
 use document_parity::engine::{
-    EngineIdentity, Family, Key, Kind, Reader, Reading, Writer, WriterOutcome,
+    Coverage, EngineIdentity, Family, Key, Kind, Reader, Reading, Writer, WriterOutcome,
 };
 use document_parity::harness::{CaseOutcome, Harness, Judgement, Run};
 use document_parity::reference::{NoOpReader, NoOpWriter, ReferenceReader, ReferenceWriter};
 use document_parity::transcript::CaseTranscript;
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -121,23 +121,21 @@ impl Writer for SlowWriter {
     }
 }
 
-/// A writer that implements no operation: every case is unjudged, so the run judges nothing.
-struct UncoveringWriter;
+/// A writer whose every case gets `coverage`: one that implements nothing, or one that accepts no
+/// pair.
+struct CoverageWriter(Coverage);
 
-impl Writer for UncoveringWriter {
+impl Writer for CoverageWriter {
     fn identity(&self) -> EngineIdentity {
-        identity("uncovering-writer")
+        identity("coverage-writer")
     }
 
     fn run(&self, _request: &Value, _scratch: &Path) -> anyhow::Result<WriterOutcome> {
-        Ok(WriterOutcome::failed(
-            "usage",
-            "no operation is implemented",
-        ))
+        Ok(WriterOutcome::failed("usage", "not run"))
     }
 
-    fn covers(&self, _key: &Key) -> bool {
-        false
+    fn coverage(&self, _key: &Key) -> Coverage {
+        self.0
     }
 }
 
@@ -1033,7 +1031,7 @@ fn a_writer_that_implements_nothing_judges_nothing() {
     // that the writer judged no case at all.
     let harness = Harness::at(
         Harness::temp_root(),
-        Box::new(UncoveringWriter),
+        Box::new(CoverageWriter(Coverage::NotCarriedOut)),
         Box::new(ReferenceReader),
     )
     .expect("a harness root");
@@ -1053,6 +1051,18 @@ fn a_writer_that_implements_nothing_judges_nothing() {
             .all(|verdict| matches!(verdict.judgement, Judgement::Unjudged(_))),
         "every verdict says why it was not judged"
     );
+    // The skip reason names the pair, not the operation alone: a reader must be able to tell which
+    // family the engine has not landed.
+    for verdict in &report.verdicts {
+        let Judgement::Unjudged(why) = &verdict.judgement else {
+            panic!("{} is unjudged", verdict.key);
+        };
+        assert!(
+            why.contains(&verdict.key.operation) && why.contains(verdict.key.family.as_str()),
+            "{}: the skip reason names no pair: {why:?}",
+            verdict.key
+        );
+    }
     assert!(
         report.readings.iter().all(|reading| reading.passed),
         "the readings are the reference's, so only the empty writer is at issue"
@@ -1061,6 +1071,86 @@ fn a_writer_that_implements_nothing_judges_nothing() {
         !report.passed(),
         "a run that judged nothing must not read as a pass"
     );
+}
+
+#[test]
+fn the_report_counts_cases_per_pair() {
+    // Every pair the corpus exercises is listed once, and a writer that implements nothing leaves
+    // every one of its cases unjudged.
+    let harness = Harness::at(
+        Harness::temp_root(),
+        Box::new(CoverageWriter(Coverage::NotCarriedOut)),
+        Box::new(NoOpReader),
+    )
+    .expect("a harness root");
+    let run = harness.run();
+    let report =
+        run.report(&Baseline::load(&Baseline::default_path()).expect("the baseline is recorded"));
+    let pairs = report.pairs();
+    assert_eq!(
+        pairs.iter().map(|pair| pair.unjudged).sum::<usize>(),
+        report.verdicts.len(),
+        "every case is counted against its pair"
+    );
+    assert!(
+        pairs
+            .iter()
+            .all(|pair| pair.judged == 0 && pair.unjudged > 0),
+        "a writer that implements nothing judges no pair"
+    );
+    let listed: BTreeSet<String> = pairs.iter().map(ToString::to_string).collect();
+    let exercised: BTreeSet<String> = document_parity::corpus::writer_cases()
+        .iter()
+        .map(|case| document_parity::engine::pair_name(case.family, case.operation))
+        .collect();
+    assert_eq!(
+        listed, exercised,
+        "the report lists every pair the corpus exercises, spelled as a verdict key is"
+    );
+}
+
+#[test]
+fn a_pair_the_engine_does_not_accept_fails_rather_than_skipping() {
+    let harness = Harness::at(
+        Harness::temp_root(),
+        Box::new(CoverageWriter(Coverage::Unaccepted)),
+        Box::new(NoOpReader),
+    )
+    .expect("a harness root");
+    let run = harness.run();
+    let report =
+        run.report(&Baseline::load(&Baseline::default_path()).expect("the baseline is recorded"));
+    assert_eq!(report.unjudged(), 0, "no case is skipped");
+    assert_eq!(
+        report.failed(),
+        report.verdicts.len(),
+        "every case fails instead"
+    );
+    assert!(
+        report
+            .pairs()
+            .iter()
+            .all(|pair| pair.judged == 0 && pair.unjudged == 0),
+        "a corpus defect is neither judged nor unjudged"
+    );
+    for verdict in &report.verdicts {
+        assert!(
+            matches!(verdict.judgement, Judgement::CorpusDefect),
+            "{} is a defect, not a judgement: {:?}",
+            verdict.key,
+            verdict.judgement
+        );
+        assert!(
+            verdict.problems.iter().any(|problem| problem
+                .contains("a pair the engine does not accept")
+                && problem.contains(&verdict.key.operation)
+                && problem.contains(verdict.key.family.as_str())),
+            "{} fails naming the pair the engine does not accept: {:?}",
+            verdict.key,
+            verdict.problems
+        );
+    }
+    assert!(!report.passed(), "a corpus defect must not read as a pass");
 }
 
 #[test]

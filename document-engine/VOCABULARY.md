@@ -21,11 +21,15 @@ copy carries its licence beside it (`NotoSans-LICENSE.txt`).
 The four families are not in the file: `Family::ALL` is their one home, and every operation and
 result names them through `Family::as_str`.
 
-One mark is interim: `reason_not_carried_out` is the engine's answer for a recognised operation it
-does not carry out. It is stated here rather than in code, and the operation's own reason replaces
-it once the dispatch carries the operation out. The writing half carries `docx_edit`, `xlsx_edit`,
-`pptx_edit`, the five PDF page actions and the three PDF drawing actions (`pdf_text`, `pdf_image`,
-`pdf_form_fill`) out today, so that mark is the answer for `create` and `fill_template` only.
+One mark is interim: `reason_not_carried_out` is the engine's answer for a recognised
+(operation, family) pair it does not carry out. It is stated here rather than in code, and the pair's
+own reason replaces it once the dispatch carries the pair out. The writing half carries the three
+edits, the five PDF page actions and the three PDF drawing actions out today — one pair each — so
+that mark is the answer for the seven pairs `create` and `fill_template` accept between them: every
+family of `create`, and the three OOXML families of `fill_template`. The sentence names the operation
+and not the family because the engine is not wired into a product build while any family of an
+operation is unimplemented, so no user meets it for a sibling of a landed family; if that ever stops
+being true, it must name the family too.
 
 The writing half's marks have their own namespaces: a refusal or a value an edit names is an
 `edit_*` mark (a presentation edit's are `edit_pptx_*`; a sentence it shares with the Word edit keeps

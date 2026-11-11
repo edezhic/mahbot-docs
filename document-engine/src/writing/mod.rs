@@ -678,10 +678,28 @@ fn rounded_mebibytes(count: u64) -> String {
     (count.saturating_add(MEBIBYTE / 2) / MEBIBYTE).to_string()
 }
 
+/// The function that edits one family's package: the edits list applied to an open package.
+pub(crate) type Port = fn(&mut Editor, &[Value]) -> Result<(), Failure>;
+
+/// The Word edit's port, named by the statement row for the Word edit.
+pub(crate) const DOCX_PORT: Port = docx::edit;
+/// The workbook edit's port.
+pub(crate) const XLSX_PORT: Port = xlsx::edit;
+/// The presentation edit's port.
+pub(crate) const PPTX_PORT: Port = pptx::edit;
+
 /// Carry out one edit operation, writing `output`. On any failure after the write starts, the file
 /// is removed: a call that fails partway leaves nothing behind.
-pub(crate) fn edit_operation(request: &Request, family: Family, output: &Path) -> Outcome {
-    match run_edit(request, family, output) {
+///
+/// The family decides how the package is opened and which refusals it earns; the port, which the
+/// operation's statement states beside it, edits the package.
+pub(crate) fn edit_operation(
+    request: &Request,
+    family: Family,
+    port: Port,
+    output: &Path,
+) -> Outcome {
+    match run_edit(request, family, port, output) {
         Ok(finished) => Outcome {
             outputs: vec![output.to_path_buf()],
             notes: finished.notes,
@@ -696,21 +714,13 @@ pub(crate) fn edit_operation(request: &Request, family: Family, output: &Path) -
 }
 
 /// The edit operation's body, answering with the finished package on success.
-fn run_edit(request: &Request, family: Family, output: &Path) -> Result<Finished, Failure> {
+fn run_edit(
+    request: &Request,
+    family: Family,
+    port: Port,
+    output: &Path,
+) -> Result<Finished, Failure> {
     let marks = &vocabulary().marks;
-    // The family decides how the package is opened and which port edits it. A family the dispatch
-    // does not route here has no port, and answers the interim sentence before anything is opened:
-    // opening a document as a family it is not would answer a different refusal.
-    let port: fn(&mut Editor, &[Value]) -> Result<(), Failure> = match family {
-        Family::Docx => docx::edit,
-        Family::Xlsx => xlsx::edit,
-        Family::Pptx => pptx::edit,
-        Family::Pdf => {
-            return Err(Failure::internal(crate::operation::not_carried_out(
-                &request.operation,
-            )));
-        }
-    };
     let Some(edits) = request.values.get("edits").and_then(Value::as_array) else {
         // The operation surface refuses a request without an "edits" array before dispatch, so
         // reaching this is an engine defect.

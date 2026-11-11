@@ -37,16 +37,18 @@
 //! An edit is one object in `edits` whose `op` is one of its family's sub-operations; a path a
 //! sub-operation takes (an `add_image`'s `image`) travels inside that object.
 //!
-//! Which operations are carried out is the writing half's business, not this surface's:
-//! `docx_edit`, `xlsx_edit`, `pptx_edit`, the five PDF page actions (`pdf_merge`, `pdf_split`,
-//! `pdf_rotate`, `pdf_crop`, `pdf_resize`) and the three PDF drawing actions (`pdf_text`,
-//! `pdf_image`, `pdf_form_fill`) are, and every other operation answers with the vocabulary's
-//! `reason_not_carried_out` until its port lands. The surface's own checks run first either way,
-//! so a request refused here is refused before any file is opened.
+//! Which (operation, family) pairs are carried out is the writing half's progress, and the engine
+//! states it as data in this module: every operation names the families it accepts and the handler
+//! that answers each accepted pair, and the dispatch reads that statement and nothing else. A pair
+//! whose port has not landed holds no handler and answers the vocabulary's `reason_not_carried_out`;
+//! the surface's own checks run first either way, so a request refused here is refused before any
+//! file is opened. The statement is also where the `format` value and the output extension learn
+//! what an operation accepts, so the answer and the statement cannot disagree.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::path::{Component, Path, PathBuf};
+use strum::{EnumIter, IntoEnumIterator};
 
 use crate::vocabulary::Family;
 
@@ -177,12 +179,20 @@ impl Failure {
 /// process down. Scheduling and how many run at once are the caller's business.
 #[must_use]
 pub fn execute(request: &Request) -> Outcome {
-    crate::contained::contain_panics(|| dispatch(request))
+    execute_with(request, Operation::pairs)
+}
+
+/// [`execute`] with the statement the dispatch reads injected. The dispatch has no other source for
+/// what it carries out, so substituting one pair's handler is what proves that one family of an
+/// operation is answered while its sibling is refused — and, until a port lands, that the answer
+/// follows the statement rather than a branch beside it.
+fn execute_with(request: &Request, statement: Statement) -> Outcome {
+    crate::contained::contain_panics(|| dispatch(request, statement))
         .unwrap_or_else(|_| Outcome::failed(INTERNAL, crate::contained::engine_failed()))
 }
 
 /// The one dispatch, with the panic boundary already around it.
-fn dispatch(request: &Request) -> Outcome {
+fn dispatch(request: &Request, statement: Statement) -> Outcome {
     let marks = &crate::vocabulary::vocabulary().marks;
     let Some(operation) = Operation::parse(&request.operation) else {
         return Outcome::failed(
@@ -190,10 +200,11 @@ fn dispatch(request: &Request) -> Outcome {
             marks.format("surface_unknown_operation", &[("name", &request.operation)]),
         );
     };
-    if let Err(reason) = validate(request, operation) {
-        return Outcome::failed(USAGE, reason);
-    }
-    let outputs = match output_paths(request, operation) {
+    let pair = match validate(request, operation, statement) {
+        Ok(pair) => pair,
+        Err(reason) => return Outcome::failed(USAGE, reason),
+    };
+    let outputs = match output_paths(request, operation, pair.family) {
         Ok(outputs) => outputs,
         Err(reason) => return Outcome::failed(USAGE, reason),
     };
@@ -216,28 +227,18 @@ fn dispatch(request: &Request) -> Outcome {
             ),
         );
     }
-    // The edit opens the package, proves its family from the content, and writes a copy of it; the
-    // destination is still the engine's to name, and the write is create-new.
-    if let Some(family @ (Family::Docx | Family::Xlsx | Family::Pptx)) = operation.edit_family() {
-        return crate::writing::edit_operation(request, family, &outputs[0]);
-    }
-    match operation {
-        Operation::PdfMerge => crate::writing::pdf::merge(request, &outputs[0]),
-        Operation::PdfSplit => crate::writing::pdf::split(request, &outputs),
-        Operation::PdfRotate => crate::writing::pdf::rotate(request, &outputs[0]),
-        Operation::PdfCrop => crate::writing::pdf::crop(request, &outputs[0]),
-        Operation::PdfResize => crate::writing::pdf::resize(request, &outputs[0]),
-        Operation::PdfText => crate::writing::pdf::draw_text(request, &outputs[0]),
-        Operation::PdfImage => crate::writing::pdf::place_image(request, &outputs[0]),
-        Operation::PdfFormFill => crate::writing::pdf::fill_form(request, &outputs[0]),
-        _ => Outcome::failed(INTERNAL, not_carried_out(operation.name())),
+    // The statement is the one answer for the pair: a family it does not hold was refused above,
+    // and a pair without a handler is one whose port has not landed.
+    match pair.handler {
+        Some(handler) => handler.answer(request, &outputs, pair.family),
+        None => Outcome::failed(INTERNAL, not_carried_out(operation.name())),
     }
 }
 
-/// The interim answer for an operation whose port has not landed: the one sentence that says so,
-/// composed here for the dispatch and for the writing half's exhaustive-match guard, which no
-/// request reaches.
-pub(crate) fn not_carried_out(operation: &str) -> String {
+/// The interim answer for an accepted pair whose port has not landed: the one sentence that says
+/// so. It names the operation and not the family; `VOCABULARY.md` records why that is safe while a
+/// port is missing.
+fn not_carried_out(operation: &str) -> String {
     crate::vocabulary::vocabulary().marks.format(
         crate::vocabulary::REASON_NOT_CARRIED_OUT,
         &[("operation", operation)],
@@ -272,8 +273,8 @@ fn check_destination(destination: &Destination) -> Result<(), String> {
     }
 }
 
-/// The closed operation set.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The closed operation set, in the order the tool lists it — the order `Operation::iter` yields.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter)]
 enum Operation {
     Create,
     FillTemplate,
@@ -293,22 +294,7 @@ enum Operation {
 impl Operation {
     /// The operation a name states, or `None` when the set does not hold it.
     fn parse(name: &str) -> Option<Self> {
-        Some(match name {
-            "create" => Self::Create,
-            "fill_template" => Self::FillTemplate,
-            "docx_edit" => Self::DocxEdit,
-            "xlsx_edit" => Self::XlsxEdit,
-            "pptx_edit" => Self::PptxEdit,
-            "pdf_merge" => Self::PdfMerge,
-            "pdf_split" => Self::PdfSplit,
-            "pdf_rotate" => Self::PdfRotate,
-            "pdf_crop" => Self::PdfCrop,
-            "pdf_resize" => Self::PdfResize,
-            "pdf_text" => Self::PdfText,
-            "pdf_image" => Self::PdfImage,
-            "pdf_form_fill" => Self::PdfFormFill,
-            _ => return None,
-        })
+        Self::iter().find(|operation| operation.name() == name)
     }
 
     /// The operation's own name.
@@ -330,15 +316,205 @@ impl Operation {
         }
     }
 
-    /// The family whose edit vocabulary this operation applies, when it is an edit.
-    const fn edit_family(self) -> Option<Family> {
+    /// The statement's row for this operation: every family it accepts, and what answers each.
+    /// This is the one home of what an operation accepts — the `format` check reads it here too —
+    /// and the match is exhaustive, so an operation cannot join the closed set without stating its
+    /// pairs.
+    const fn pairs(self) -> &'static [Pair] {
         match self {
-            Self::DocxEdit => Some(Family::Docx),
-            Self::XlsxEdit => Some(Family::Xlsx),
-            Self::PptxEdit => Some(Family::Pptx),
-            _ => None,
+            Self::Create => CREATE,
+            Self::FillTemplate => FILL_TEMPLATE,
+            Self::DocxEdit => DOCX_EDIT,
+            Self::XlsxEdit => XLSX_EDIT,
+            Self::PptxEdit => PPTX_EDIT,
+            Self::PdfMerge => PDF_MERGE,
+            Self::PdfSplit => PDF_SPLIT,
+            Self::PdfRotate => PDF_ROTATE,
+            Self::PdfCrop => PDF_CROP,
+            Self::PdfResize => PDF_RESIZE,
+            Self::PdfText => PDF_TEXT,
+            Self::PdfImage => PDF_IMAGE,
+            Self::PdfFormFill => PDF_FORM_FILL,
         }
     }
+
+    /// The request value that names the document this operation's output is a copy of, or `None`
+    /// when the output is a new file. This is the operation's request vocabulary, not the pair
+    /// statement: an edit copies its `input`, a filled template its `template`, and a created
+    /// document or a PDF action nothing.
+    const fn copies(self) -> Option<&'static str> {
+        match self {
+            Self::FillTemplate => Some("template"),
+            Self::DocxEdit | Self::XlsxEdit | Self::PptxEdit => Some("input"),
+            Self::Create
+            | Self::PdfMerge
+            | Self::PdfSplit
+            | Self::PdfRotate
+            | Self::PdfCrop
+            | Self::PdfResize
+            | Self::PdfText
+            | Self::PdfImage
+            | Self::PdfFormFill => None,
+        }
+    }
+}
+
+// ── the statement of what the engine carries out ─────────────────────────────────────────────
+//
+// The statement is a table in code, not a `vocabulary.json` section: a pair's answer is a handler,
+// which the data file cannot state, and the vocabulary is the home of bounds and printed words.
+
+/// What answers one accepted pair.
+#[derive(Clone, Copy)]
+enum Handler {
+    /// A whole-operation answer: the request, and the output paths the surface derived for it.
+    Action(fn(&Request, &[PathBuf]) -> Outcome),
+    /// A package edit's port. The dispatch passes the pair's family, so the row that names the
+    /// family and the code that opens the package cannot disagree.
+    Edit(crate::writing::Port),
+}
+
+impl Handler {
+    /// The outcome for one accepted pair.
+    fn answer(self, request: &Request, outputs: &[PathBuf], family: Family) -> Outcome {
+        match self {
+            Self::Action(action) => action(request, outputs),
+            Self::Edit(port) => crate::writing::edit_operation(request, family, port, &outputs[0]),
+        }
+    }
+}
+
+/// One accepted (operation, family) pair. `handler` is the code that answers it, or `None` while
+/// the pair's port has not landed — in which case the dispatch answers the interim sentence. There
+/// is no other place that answer is decided.
+struct Pair {
+    family: Family,
+    handler: Option<Handler>,
+}
+
+/// The statement the dispatch reads, injected so a test can substitute one.
+type Statement = fn(Operation) -> &'static [Pair];
+
+/// One pair, for the statement's rows below.
+const fn pair(family: Family, handler: Option<Handler>) -> Pair {
+    Pair { family, handler }
+}
+
+/// `create` accepts every family: a document can be made of any of the four.
+const CREATE: &[Pair] = &[
+    pair(Family::Docx, None),
+    pair(Family::Xlsx, None),
+    pair(Family::Pptx, None),
+    pair(Family::Pdf, None),
+];
+
+/// `fill_template` accepts the three OOXML families: a PDF has no placeholder template of its own.
+const FILL_TEMPLATE: &[Pair] = &[
+    pair(Family::Docx, None),
+    pair(Family::Xlsx, None),
+    pair(Family::Pptx, None),
+];
+
+const DOCX_EDIT: &[Pair] = &[pair(
+    Family::Docx,
+    Some(Handler::Edit(crate::writing::DOCX_PORT)),
+)];
+const XLSX_EDIT: &[Pair] = &[pair(
+    Family::Xlsx,
+    Some(Handler::Edit(crate::writing::XLSX_PORT)),
+)];
+const PPTX_EDIT: &[Pair] = &[pair(
+    Family::Pptx,
+    Some(Handler::Edit(crate::writing::PPTX_PORT)),
+)];
+const PDF_MERGE: &[Pair] = &[pair(Family::Pdf, Some(Handler::Action(pdf_merge)))];
+const PDF_SPLIT: &[Pair] = &[pair(Family::Pdf, Some(Handler::Action(pdf_split)))];
+const PDF_ROTATE: &[Pair] = &[pair(Family::Pdf, Some(Handler::Action(pdf_rotate)))];
+const PDF_CROP: &[Pair] = &[pair(Family::Pdf, Some(Handler::Action(pdf_crop)))];
+const PDF_RESIZE: &[Pair] = &[pair(Family::Pdf, Some(Handler::Action(pdf_resize)))];
+const PDF_TEXT: &[Pair] = &[pair(Family::Pdf, Some(Handler::Action(pdf_text)))];
+const PDF_IMAGE: &[Pair] = &[pair(Family::Pdf, Some(Handler::Action(pdf_image)))];
+const PDF_FORM_FILL: &[Pair] = &[pair(Family::Pdf, Some(Handler::Action(pdf_form_fill)))];
+
+/// The PDF actions' handlers. Each answers with the output paths the surface derived for it; a
+/// split is the one action that writes several.
+fn pdf_merge(request: &Request, outputs: &[PathBuf]) -> Outcome {
+    crate::writing::pdf::merge(request, &outputs[0])
+}
+fn pdf_split(request: &Request, outputs: &[PathBuf]) -> Outcome {
+    crate::writing::pdf::split(request, outputs)
+}
+fn pdf_rotate(request: &Request, outputs: &[PathBuf]) -> Outcome {
+    crate::writing::pdf::rotate(request, &outputs[0])
+}
+fn pdf_crop(request: &Request, outputs: &[PathBuf]) -> Outcome {
+    crate::writing::pdf::crop(request, &outputs[0])
+}
+fn pdf_resize(request: &Request, outputs: &[PathBuf]) -> Outcome {
+    crate::writing::pdf::resize(request, &outputs[0])
+}
+fn pdf_text(request: &Request, outputs: &[PathBuf]) -> Outcome {
+    crate::writing::pdf::draw_text(request, &outputs[0])
+}
+fn pdf_image(request: &Request, outputs: &[PathBuf]) -> Outcome {
+    crate::writing::pdf::place_image(request, &outputs[0])
+}
+fn pdf_form_fill(request: &Request, outputs: &[PathBuf]) -> Outcome {
+    crate::writing::pdf::fill_form(request, &outputs[0])
+}
+
+/// What the engine's statement says about one (operation, family) pair.
+///
+/// The three negative answers are distinct on purpose: an operation the engine does not know, a
+/// family the operation does not accept, and an accepted pair whose port has not landed. A caller
+/// that records what the engine carries out can therefore state a pair it accepts and refuse to
+/// state one it does not.
+#[cfg(any(test, feature = "test-support"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Answer {
+    /// The name is not one of the engine's operations.
+    UnknownOperation,
+    /// The operation is one of them and does not accept this family.
+    UnacceptedFamily,
+    /// The operation accepts the family, and the pair's port has not landed: a request naming it
+    /// answers the interim sentence.
+    NotCarriedOut,
+    /// The operation accepts the family and carries it out.
+    CarriedOut,
+}
+
+/// [`Answer`] for one pair, read from the statement the dispatch itself reads.
+///
+/// Compiled for a test or for a consumer that asks for `test-support`: the product never asks the
+/// engine what it carries out — it calls [`execute`] and reads the answer — so this is the seam the
+/// parity harness and the crate's own tests check the statement through.
+#[cfg(any(test, feature = "test-support"))]
+#[must_use]
+pub fn answer(operation: &str, family: Family) -> Answer {
+    let Some(operation) = Operation::parse(operation) else {
+        return Answer::UnknownOperation;
+    };
+    match operation.pairs().iter().find(|pair| pair.family == family) {
+        None => Answer::UnacceptedFamily,
+        Some(pair) if pair.handler.is_some() => Answer::CarriedOut,
+        Some(_) => Answer::NotCarriedOut,
+    }
+}
+
+/// Every `(operation, family)` pair the engine accepts, in the tool's operation order and each
+/// operation's own family order.
+///
+/// A consumer that records what the engine carries out is total over this list, not over the pairs
+/// its corpus happens to exercise: a pair left out of its record is visible here even when no case
+/// names it. Compiled like [`answer`].
+#[cfg(any(test, feature = "test-support"))]
+pub fn accepted_pairs() -> impl Iterator<Item = (&'static str, Family)> {
+    Operation::iter().flat_map(|operation| {
+        operation
+            .pairs()
+            .iter()
+            .map(move |pair| (operation.name(), pair.family))
+    })
 }
 
 /// Every `docx_edit` sub-operation.
@@ -400,28 +576,33 @@ pub(crate) fn edit_names(family: Family) -> &'static [&'static str] {
     }
 }
 
-/// The formats `fill_template` understands — every family but a PDF, which has no placeholder
-/// template of its own.
-const TEMPLATE_FORMATS: [Family; 3] = [Family::Docx, Family::Xlsx, Family::Pptx];
-
-/// Refuse a request the operation cannot accept before anything is written.
-fn validate(request: &Request, operation: Operation) -> Result<(), String> {
+/// Refuse a request the operation cannot accept before anything is written, answering the pair the
+/// request names when it can.
+fn validate(
+    request: &Request,
+    operation: Operation,
+    statement: Statement,
+) -> Result<&'static Pair, String> {
     let marks = &crate::vocabulary::vocabulary().marks;
     for reserved in ["output", "outputs"] {
         if request.values.contains_key(reserved) {
             return Err(marks.format("surface_reserved_output", &[("name", reserved)]));
         }
     }
-    if let Some(family) = operation.edit_family() {
-        return validate_edits(request, family);
+    let pairs = statement(operation);
+    // An operation that takes a `format` value accepts more than one family and the request names
+    // one of them; every other operation works on exactly one family, which the request does not
+    // name. A test holds the statement to that.
+    let pair = match pairs {
+        [pair] => pair,
+        _ => format_pair(request, pairs)?,
+    };
+    // A pair answered by an edit port takes an `edits` value, and every edit names a sub-operation
+    // its family has.
+    if matches!(pair.handler, Some(Handler::Edit(_))) {
+        validate_edits(request, pair.family)?;
     }
     match operation {
-        Operation::Create => {
-            format_family(request, &Family::ALL)?;
-        }
-        Operation::FillTemplate => {
-            format_family(request, &TEMPLATE_FORMATS)?;
-        }
         Operation::PdfSplit => {
             let groups = split_groups(request)?;
             if groups.is_empty() {
@@ -455,21 +636,20 @@ fn validate(request: &Request, operation: Operation) -> Result<(), String> {
         }
         _ => {}
     }
-    Ok(())
+    Ok(pair)
 }
 
-/// The family a `format` value names, when the operation accepts it.
-fn format_family(request: &Request, accepted: &[Family]) -> Result<Family, String> {
+/// The pair a `format` value names, when the operation's statement accepts it.
+fn format_pair<'a>(request: &Request, pairs: &'a [Pair]) -> Result<&'a Pair, String> {
     let marks = &crate::vocabulary::vocabulary().marks;
     let word = request
         .values
         .get("format")
         .and_then(Value::as_str)
         .ok_or_else(|| marks.get("surface_format_missing"))?;
-    accepted
+    pairs
         .iter()
-        .copied()
-        .find(|family| family.as_str() == word)
+        .find(|pair| pair.family.as_str() == word)
         .ok_or_else(|| marks.format("surface_unknown_format", &[("format", word)]))
 }
 
@@ -532,9 +712,13 @@ fn merge_inputs(request: &Request) -> Result<&[Value], String> {
 }
 
 /// The files a request will produce, named from the caller's directory and base name.
-fn output_paths(request: &Request, operation: Operation) -> Result<Vec<PathBuf>, String> {
+fn output_paths(
+    request: &Request,
+    operation: Operation,
+    family: Family,
+) -> Result<Vec<PathBuf>, String> {
     let base = checked_base(&request.destination.base_name)?;
-    let extension = output_extension(request, operation)?;
+    let extension = output_extension(request, operation, family);
     let names: Vec<String> = if operation == Operation::PdfSplit {
         (1..=split_groups(request)?.len())
             .map(|part| format!("{base}_part{part}.{extension}"))
@@ -548,18 +732,12 @@ fn output_paths(request: &Request, operation: Operation) -> Result<Vec<PathBuf>,
         .collect())
 }
 
-/// The extension a request's output carries.
-fn output_extension(request: &Request, operation: Operation) -> Result<String, String> {
-    if let Some(family) = operation.edit_family() {
-        return Ok(copy_extension(request.values.get("input"), family));
-    }
-    match operation {
-        Operation::Create => Ok(format_family(request, &Family::ALL)?.as_str().to_string()),
-        Operation::FillTemplate => {
-            let family = format_family(request, &TEMPLATE_FORMATS)?;
-            Ok(copy_extension(request.values.get("template"), family))
-        }
-        _ => Ok(Family::Pdf.as_str().to_string()),
+/// The extension a request's output carries: a copy keeps the input's own spelling of the family,
+/// a new file carries the family's extension.
+fn output_extension(request: &Request, operation: Operation, family: Family) -> String {
+    match operation.copies() {
+        Some(value) => copy_extension(request.values.get(value), family),
+        None => family.as_str().to_string(),
     }
 }
 
@@ -607,6 +785,31 @@ mod tests {
     use crate::testing::scratch;
     use serde_json::json;
     use std::collections::BTreeSet;
+
+    /// The closed set, in the order the tool lists it.
+    const OPERATIONS: [&str; 13] = [
+        "create",
+        "fill_template",
+        "docx_edit",
+        "xlsx_edit",
+        "pptx_edit",
+        "pdf_merge",
+        "pdf_split",
+        "pdf_rotate",
+        "pdf_crop",
+        "pdf_resize",
+        "pdf_text",
+        "pdf_image",
+        "pdf_form_fill",
+    ];
+
+    /// Every accepted pair whose port has not landed, read from the statement itself so a pair that
+    /// joins it without a handler is covered here rather than in a hand-kept list.
+    fn pairs_without_a_port() -> Vec<(&'static str, Family)> {
+        accepted_pairs()
+            .filter(|&(operation, family)| answer(operation, family) == Answer::NotCarriedOut)
+            .collect()
+    }
 
     /// A request for `operation` with `values`, writing into `directory`.
     #[expect(
@@ -657,14 +860,20 @@ mod tests {
             ("pdf_image", json!({ "input": "a.pdf", "image": "x.png" })),
             ("pdf_form_fill", json!({ "input": "a.pdf", "values": {} })),
         ];
-        assert_eq!(cases.len(), 13, "the closed set holds thirteen operations");
+        let names: Vec<&str> = cases.iter().map(|(name, _)| *name).collect();
+        assert_eq!(
+            names, OPERATIONS,
+            "the closed set holds thirteen operations"
+        );
+        let stated: Vec<&str> = Operation::iter().map(Operation::name).collect();
+        assert_eq!(stated, OPERATIONS, "every operation is in the statement");
         for (name, values) in cases {
             let operation =
                 Operation::parse(name).unwrap_or_else(|| panic!("{name} is in the closed set"));
             assert_eq!(operation.name(), name, "the name round-trips");
             let request = request(dir.path(), name, values);
             assert!(
-                validate(&request, operation).is_ok(),
+                validate(&request, operation, Operation::pairs).is_ok(),
                 "{name} must accept its own shape"
             );
         }
@@ -689,7 +898,7 @@ mod tests {
                 let edit = Operation::parse(&operation)
                     .unwrap_or_else(|| panic!("{operation} is in the closed set"));
                 assert!(
-                    validate(&request, edit).is_ok(),
+                    validate(&request, edit, Operation::pairs).is_ok(),
                     "{operation}/{name} must be recognised"
                 );
             }
@@ -756,13 +965,109 @@ mod tests {
         for family in Family::ALL {
             let request = request(dir.path(), "create", json!({ "format": family.as_str() }));
             assert!(
-                validate(&request, operation).is_ok(),
+                validate(&request, operation, Operation::pairs).is_ok(),
                 "create must accept {}",
                 family.as_str()
             );
         }
         let request = request(dir.path(), "create", json!({ "format": "odt" }));
-        assert!(validate(&request, operation).is_err());
+        assert!(validate(&request, operation, Operation::pairs).is_err());
+    }
+
+    #[test]
+    fn every_operation_states_the_families_it_accepts() {
+        for name in OPERATIONS {
+            let operation = Operation::parse(name).expect("the closed set");
+            let pairs = operation.pairs();
+            assert!(!pairs.is_empty(), "{name} states no family");
+            // An operation that takes a `format` value accepts more than one family; every other
+            // operation works on exactly one, which the request does not name. `validate` derives
+            // the `format` check from that, so the statement must hold it.
+            assert_eq!(
+                pairs.len() > 1,
+                matches!(name, "create" | "fill_template"),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_answer_distinguishes_an_unknown_operation_an_unaccepted_family_and_a_landed_pair() {
+        assert_eq!(answer("read", Family::Pdf), Answer::UnknownOperation);
+        assert_eq!(
+            answer("fill_template", Family::Pdf),
+            Answer::UnacceptedFamily
+        );
+        assert_eq!(answer("create", Family::Docx), Answer::NotCarriedOut);
+        assert_eq!(answer("pdf_merge", Family::Pdf), Answer::CarriedOut);
+    }
+
+    #[test]
+    fn every_pair_without_a_port_answers_the_interim_sentence() {
+        let dir = scratch();
+        let pairs = pairs_without_a_port();
+        assert!(!pairs.is_empty(), "the writing half is still landing ports");
+        for (operation, family) in pairs {
+            let request = request(dir.path(), operation, json!({ "format": family.as_str() }));
+            let failure = execute(&request).failure.expect("a failure");
+            assert!(!failure.is_usage(), "{operation}/{}", family.as_str());
+            assert_eq!(
+                failure.reason,
+                crate::vocabulary::vocabulary().marks.format(
+                    crate::vocabulary::REASON_NOT_CARRIED_OUT,
+                    &[("operation", operation)],
+                ),
+                "{operation}/{}",
+                family.as_str()
+            );
+        }
+    }
+
+    /// A statement that carries `create` out for Word only: the seam a port lands through.
+    static WORD_ONLY: &[Pair] = &[
+        pair(Family::Docx, Some(Handler::Action(answer_with_docx))),
+        pair(Family::Xlsx, None),
+        pair(Family::Pptx, None),
+        pair(Family::Pdf, None),
+    ];
+
+    fn word_only(operation: Operation) -> &'static [Pair] {
+        match operation {
+            Operation::Create => WORD_ONLY,
+            other => other.pairs(),
+        }
+    }
+
+    /// The substituted handler writes the file the surface named, so the test can see that it
+    /// answered rather than the interim sentence.
+    fn answer_with_docx(_request: &Request, outputs: &[PathBuf]) -> Outcome {
+        std::fs::write(&outputs[0], b"docx").expect("the substituted handler writes its output");
+        Outcome::produced(outputs.to_vec())
+    }
+
+    #[test]
+    fn one_family_is_answered_while_its_sibling_is_refused() {
+        let dir = scratch();
+        let answered = execute_with(
+            &request(dir.path(), "create", json!({ "format": "docx" })),
+            word_only,
+        );
+        assert!(answered.failure.is_none(), "{:?}", answered.failure);
+        assert_eq!(
+            std::fs::read(dir.path().join("out.docx")).expect("read the answered pair's file"),
+            b"docx"
+        );
+        let refused = execute_with(
+            &request(dir.path(), "create", json!({ "format": "xlsx" })),
+            word_only,
+        );
+        assert_eq!(
+            refused.failure.expect("a failure").reason,
+            crate::vocabulary::vocabulary().marks.format(
+                crate::vocabulary::REASON_NOT_CARRIED_OUT,
+                &[("operation", "create")],
+            )
+        );
     }
 
     #[test]
@@ -798,7 +1103,7 @@ mod tests {
             "pdf_split",
             json!({ "groups": [[1], [2], [3]] }),
         );
-        let paths = output_paths(&request, Operation::PdfSplit).expect("names");
+        let paths = output_paths(&request, Operation::PdfSplit, Family::Pdf).expect("names");
         let names: Vec<String> = paths
             .iter()
             .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())

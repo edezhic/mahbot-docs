@@ -12,7 +12,7 @@
 //! on the engine crate; the crate never depends on the harness.
 
 // The neutral result shapes, owned by the engine crate.
-pub use document_engine::operation::{Failure, Outcome as WriterOutcome};
+pub use document_engine::operation::{Answer, Failure, Outcome as WriterOutcome};
 pub use document_engine::reading::{ImageArtifact, Kind, Reading};
 // The four document families, shared by the corpus's keys and the engine's own vocabulary.
 pub use document_engine::vocabulary::Family;
@@ -61,10 +61,11 @@ impl Key {
     /// under.
     #[must_use]
     pub fn slug(&self) -> String {
-        let slug = match &self.sub_operation {
-            Some(sub) => format!("{}/{}/{}", self.family.as_str(), self.operation, sub),
-            None => format!("{}/{}", self.family.as_str(), self.operation),
-        };
+        let mut slug = pair_name(self.family, &self.operation);
+        if let Some(sub) = &self.sub_operation {
+            slug.push('/');
+            slug.push_str(sub);
+        }
         match &self.case {
             Some(case) => format!("{slug}@{case}"),
             None => slug,
@@ -76,6 +77,13 @@ impl std::fmt::Display for Key {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.slug())
     }
+}
+
+/// A pair as `family/operation` — the order a verdict key spells it in, so a pair's summary line
+/// and a ledger message are found by the same search as a verdict.
+#[must_use]
+pub fn pair_name(family: Family, operation: &str) -> String {
+    format!("{}/{operation}", family.as_str())
 }
 
 /// Who produced a transcript: the engine's name, the identity of its build, and the runtime it ran
@@ -117,6 +125,31 @@ pub fn request_outputs(request: &serde_json::Value) -> Vec<PathBuf> {
         .collect()
 }
 
+/// What a writer says about one (operation, family) pair before the harness runs its cases: the
+/// engine's three-way answer, in the harness's own vocabulary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Coverage {
+    /// The operation accepts the pair and the engine carries it out: its cases are judged.
+    Delivered,
+    /// The operation accepts the pair and the engine does not carry it out yet: its cases are
+    /// unjudged, never a pass.
+    NotCarriedOut,
+    /// The engine does not accept the pair: the operation is not one it knows, or does not accept
+    /// this family. A skip would claim the engine knows the pair and has not carried it out, which
+    /// is a different claim, so the case fails.
+    Unaccepted,
+}
+
+impl From<Answer> for Coverage {
+    fn from(answer: Answer) -> Self {
+        match answer {
+            Answer::CarriedOut => Self::Delivered,
+            Answer::NotCarriedOut => Self::NotCarriedOut,
+            Answer::UnknownOperation | Answer::UnacceptedFamily => Self::Unaccepted,
+        }
+    }
+}
+
 /// Drives one writer implementation through the product's request-and-result contract.
 ///
 /// `Send + Sync` because each case runs on a thread of its own under a timeout, so a writer that
@@ -128,11 +161,14 @@ pub trait Writer: Send + Sync {
     /// own transient files; the request already names the absolute input and output paths.
     fn run(&self, request: &serde_json::Value, scratch: &Path) -> anyhow::Result<WriterOutcome>;
 
-    /// Whether this engine implements the operation a case exercises. An engine that does not is
-    /// not judged on that case: the verdict says so instead of failing it. The reference implements
-    /// the closed set; the crate's writer implements the operations it has landed.
-    fn covers(&self, _key: &Key) -> bool {
-        true
+    /// What this engine says about the (operation, family) pair a case exercises: the one decision
+    /// the harness makes before running the case.
+    ///
+    /// The default is [`Coverage::Delivered`] — the whole closed operation set — which is what the
+    /// reference and the no-op control implement. An engine with a partial operation set answers
+    /// from its own statement.
+    fn coverage(&self, _key: &Key) -> Coverage {
+        Coverage::Delivered
     }
 }
 

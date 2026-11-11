@@ -2492,7 +2492,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         marks: &["surface_merge_bytes_too_many"],
     },
     Unreached {
-        reason: "printed only for the two operations the writing half does not carry out, create and fill_template; the recorded reference carries every one of them out, so no recorded answer prints it",
+        reason: "printed only for the seven (operation, family) pairs the writing half does not carry out — every family of create and the three OOXML families of fill_template; the recorded reference carries every one of them out, so no recorded answer prints it",
         marks: &["reason_not_carried_out"],
     },
 ];

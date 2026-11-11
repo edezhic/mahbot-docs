@@ -44,8 +44,8 @@ pub(crate) const REASON_COULD_NOT_BE_READ: &str = "reason_could_not_be_read";
 /// The vocabulary key of the reason a reading gives for an encrypted package.
 pub(crate) const REASON_PASSWORD_PROTECTED: &str = "reason_password_protected";
 
-/// The vocabulary key of the reason an operation gives when the engine recognises it but does not
-/// carry it out.
+/// The vocabulary key of the reason the engine gives when it recognises an operation and family
+/// but does not carry the pair out.
 pub(crate) const REASON_NOT_CARRIED_OUT: &str = "reason_not_carried_out";
 
 /// The engine's vocabulary, parsed once.

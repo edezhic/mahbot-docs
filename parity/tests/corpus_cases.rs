@@ -8,6 +8,7 @@
 //! blamed on the operation.
 mod common;
 
+use document_engine::operation::{Answer, answer};
 use document_parity::corpus::{Case, Document, Expect, documents, reader_documents, writer_cases};
 use document_parity::engine::Family;
 use std::collections::{BTreeSet, HashSet};
@@ -92,6 +93,49 @@ fn edit_sub_operations(family: Family, operation: &str) -> BTreeSet<&'static str
         })
         .filter_map(|case| case.sub_operation)
         .collect()
+}
+
+#[test]
+fn every_case_names_an_accepted_pair() {
+    // Engine-independent: `Writer::coverage` defaults to `Delivered`, so only the crate's writer
+    // reports an unaccepted pair. A case naming one would still run against the reference and
+    // could reach the recorded baseline, so the corpus itself must not hold one.
+    for case in writer_cases() {
+        assert!(
+            !matches!(
+                answer(case.operation, case.family),
+                Answer::UnknownOperation | Answer::UnacceptedFamily
+            ),
+            "{}: `{}` does not accept {}",
+            case.key().slug(),
+            case.operation,
+            case.family.as_str()
+        );
+    }
+}
+
+#[test]
+fn a_case_that_names_its_family_agrees_with_the_request() {
+    // A case's family is load-bearing for `create` and `fill_template`: the pair is keyed by the
+    // case's family while the request names it in its `format` value, so the two must agree. Every
+    // other operation works on one family and takes no `format`.
+    for case in writer_cases() {
+        let named = case.request.get("format").and_then(|value| value.as_str());
+        if matches!(case.operation, "create" | "fill_template") {
+            assert_eq!(
+                named,
+                Some(case.family.as_str()),
+                "{}: the request's format and the case's family disagree",
+                case.key().slug()
+            );
+        } else {
+            assert!(
+                named.is_none(),
+                "{}: only an operation that names its family takes a format",
+                case.key().slug()
+            );
+        }
+    }
 }
 
 #[test]

@@ -12,7 +12,8 @@
 
 pub mod cases;
 pub mod effect;
-pub mod ledger;
+#[cfg(test)]
+mod ledger;
 
 pub use document_engine::test_support::{Document, build, documents, legacy_formats};
 pub use effect::Effect;
@@ -97,6 +98,10 @@ impl Expect {
 }
 
 /// One scenario.
+///
+/// `family` is the family the operation itself names, never the family of an input file: an
+/// `xlsx_edit` case over a Word input keys as `xlsx/xlsx_edit`, and the refusal is the case's own
+/// expectation rather than a missing port.
 pub struct Case {
     pub family: Family,
     pub operation: &'static str,

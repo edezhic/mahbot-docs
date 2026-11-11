@@ -6,12 +6,11 @@
 //! substituted `$in`/`$out`, so the first output path names the directory and the base name the
 //! engine derives every produced name from.
 //!
-//! The writing half is still being ported: [`crate_writer_covers`] states which operations it
-//! carries out, and the harness does not judge a case it does not cover.
+//! The writing half is still being ported: the engine's own statement says which (operation,
+//! family) pairs it carries out, and the harness judges only those.
 
-use crate::corpus::ledger::crate_writer_covers;
-use crate::engine::{EngineIdentity, Key, Writer, WriterOutcome};
-use document_engine::operation::{Destination, Request, execute};
+use crate::engine::{Coverage, EngineIdentity, Key, Writer, WriterOutcome};
+use document_engine::operation::{Destination, Request, answer, execute};
 use document_engine::vocabulary::Family;
 use serde_json::{Map, Value};
 use std::path::Path;
@@ -44,8 +43,8 @@ impl Writer for CrateWriter {
         }
     }
 
-    fn covers(&self, key: &Key) -> bool {
-        crate_writer_covers(key)
+    fn coverage(&self, key: &Key) -> Coverage {
+        Coverage::from(answer(&key.operation, key.family))
     }
 
     fn run(&self, request: &Value, _scratch: &Path) -> anyhow::Result<WriterOutcome> {

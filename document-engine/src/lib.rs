@@ -14,10 +14,11 @@
 //!   content it had, so a chart, a comment, a macro or a media file the caller never mentioned
 //!   survives. A PDF page action builds a document out of the pages a merge or a split names, changes
 //!   the box or the turn of the pages it names, or draws text, a picture or a filled form into them,
-//!   and keeps everything else the file holds. The Word, workbook and presentation edits, the five
-//!   PDF page actions and the three PDF drawing actions are the operations the writing half carries
-//!   out; `create` and `fill_template` answer with the vocabulary's `reason_not_carried_out` until
-//!   their port lands.
+//!   and keeps everything else the file holds. What the writing half carries out is a statement of
+//!   (operation, family) pairs — the Word, workbook and presentation edits, the five PDF page
+//!   actions and the three PDF drawing actions today, with every family of `create` and
+//!   `fill_template` answering the vocabulary's `reason_not_carried_out` until its port lands — and
+//!   the dispatch reads that statement and nothing else.
 //! - [`vocabulary`]: every reading bound the engine enforces, every mark it prints, who enforces
 //!   and who prints each one, the enumerations it shares between reading and producing, and the
 //!   embedded font the producing half draws with — one file, embedded at build time, read from
@@ -41,7 +42,10 @@
 //!
 //! `test_support` is the one home of the generated corpus documents the crate's own tests and
 //! the parity harness both read; it is not part of the engine's behaviour, and it is compiled only
-//! for a test or for a consumer that asks for the `test-support` feature.
+//! for a test or for a consumer that asks for the `test-support` feature. The operation statement's
+//! queries (`operation::answer` for one pair, `operation::accepted_pairs` for every pair the engine
+//! accepts) are compiled the same way: the product never asks, because it calls the engine and reads
+//! the answer.
 
 #![warn(clippy::pedantic)]
 // The moved reader's crate root allowed these three: its documentation is written

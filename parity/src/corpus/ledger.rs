@@ -1,95 +1,249 @@
-//! What the crate's writer carries out today. A case the writer does not cover is not judged: the
-//! verdict names the operation instead of failing a comparison the engine never entered.
+//! What the crate's writer carries out today, per (operation, family) pair. A pair recorded as not
+//! carried out is not judged: the verdict names the pair instead of failing a comparison the engine
+//! never entered.
 //!
-//! The ledger is the one place the writing half's progress is stated. Adding an operation to
-//! [`CRATE_WRITER`] starts judging every corpus case for it; an operation that is not listed there
-//! must be in [`NOT_YET_DELIVERED`], so a case cannot silently become unjudged because a name was
-//! misspelled.
+//! The ledger restates the engine's own statement, and is checked against it in both directions: a
+//! pair recorded delivered while the engine answers the interim sentence fails, and so does a pair
+//! recorded not carried out while the engine carries it out. The ledger is also total over every
+//! pair the engine accepts — an accepted pair with no record, or a pair recorded delivered with no
+//! case to judge, fails rather than passing in silence.
+//!
+//! It is compiled for the harness's tests only: the gate reads the engine's statement, so the
+//! ledger has no runtime consumer. This list is what a person reviews.
 
-use crate::engine::Key;
+use crate::corpus::Case;
+use crate::engine::{Coverage, Family, pair_name};
+use document_engine::operation::{Answer, accepted_pairs, answer};
+use std::collections::BTreeMap;
 
-/// The operations the crate's writer carries out today, by name. Listing an operation covers every
-/// sub-operation it declares.
-pub const CRATE_WRITER: &[&str] = &[
-    "docx_edit",
-    "xlsx_edit",
-    "pptx_edit",
-    "pdf_merge",
-    "pdf_split",
-    "pdf_rotate",
-    "pdf_crop",
-    "pdf_resize",
-    "pdf_text",
-    "pdf_image",
-    "pdf_form_fill",
+/// One accepted pair and the coverage the crate's writer claims for it. The claim is the same
+/// three-way answer the writer gives; `Unaccepted` is not a valid claim for an accepted pair, and
+/// [`problems`] reports one. `family` is the operation's own family, never the input file's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Record {
+    operation: &'static str,
+    family: Family,
+    coverage: Coverage,
+}
+
+const fn entry(operation: &'static str, family: Family, coverage: Coverage) -> Record {
+    Record {
+        operation,
+        family,
+        coverage,
+    }
+}
+
+/// Every pair the crate's writer answers for today.
+const CRATE_WRITER: &[Record] = &[
+    // `create` and `fill_template` are still being ported: not one of their pairs is carried out,
+    // so each is recorded as it is rather than left out.
+    entry("create", Family::Docx, Coverage::NotCarriedOut),
+    entry("create", Family::Xlsx, Coverage::NotCarriedOut),
+    entry("create", Family::Pptx, Coverage::NotCarriedOut),
+    entry("create", Family::Pdf, Coverage::NotCarriedOut),
+    entry("fill_template", Family::Docx, Coverage::NotCarriedOut),
+    entry("fill_template", Family::Xlsx, Coverage::NotCarriedOut),
+    entry("fill_template", Family::Pptx, Coverage::NotCarriedOut),
+    entry("docx_edit", Family::Docx, Coverage::Delivered),
+    entry("xlsx_edit", Family::Xlsx, Coverage::Delivered),
+    entry("pptx_edit", Family::Pptx, Coverage::Delivered),
+    entry("pdf_merge", Family::Pdf, Coverage::Delivered),
+    entry("pdf_split", Family::Pdf, Coverage::Delivered),
+    entry("pdf_rotate", Family::Pdf, Coverage::Delivered),
+    entry("pdf_crop", Family::Pdf, Coverage::Delivered),
+    entry("pdf_resize", Family::Pdf, Coverage::Delivered),
+    entry("pdf_text", Family::Pdf, Coverage::Delivered),
+    entry("pdf_image", Family::Pdf, Coverage::Delivered),
+    entry("pdf_form_fill", Family::Pdf, Coverage::Delivered),
 ];
 
-/// The operations the writing half does not deliver. Every unjudged corpus case must name one.
-pub const NOT_YET_DELIVERED: &[&str] = &["create", "fill_template"];
-
-/// Whether the crate's writer implements the operation a case exercises.
+/// Every problem with `records` as a statement of what the crate's writer carries out, read against
+/// the engine's own statement and against `cases`.
 #[must_use]
-pub fn crate_writer_covers(key: &Key) -> bool {
-    CRATE_WRITER.contains(&key.operation.as_str())
+fn problems(records: &[Record], cases: &[Case]) -> Vec<String> {
+    let mut problems = Vec::new();
+    let mut recorded: BTreeMap<(&str, Family), Coverage> = BTreeMap::new();
+    for record in records {
+        let pair = (record.operation, record.family);
+        if recorded.insert(pair, record.coverage).is_some() {
+            problems.push(format!(
+                "{} is recorded twice",
+                pair_name(record.family, record.operation)
+            ));
+        }
+    }
+    // What the engine actually carries out, which is what a record is checked against.
+    let actual: BTreeMap<(&str, Family), bool> = accepted_pairs()
+        .map(|(operation, family)| {
+            (
+                (operation, family),
+                answer(operation, family) == Answer::CarriedOut,
+            )
+        })
+        .collect();
+    // Every accepted pair must be recorded: a pair left out would be neither judged nor stated as
+    // not carried out.
+    for &(operation, family) in actual.keys() {
+        if !recorded.contains_key(&(operation, family)) {
+            problems.push(format!(
+                "{} is accepted but has no recorded state",
+                pair_name(family, operation)
+            ));
+        }
+    }
+    // Both directions of the record against the engine's answer, and the case that would judge it.
+    for (&(operation, family), &claimed) in &recorded {
+        let pair = pair_name(family, operation);
+        let Some(&carried_out) = actual.get(&(operation, family)) else {
+            problems.push(format!(
+                "{pair} is recorded but is not a pair any operation accepts"
+            ));
+            continue;
+        };
+        match (carried_out, claimed) {
+            (true, Coverage::NotCarriedOut) => problems.push(format!(
+                "{pair} is recorded not carried out, but the engine carries it out"
+            )),
+            (false, Coverage::Delivered) => problems.push(format!(
+                "{pair} is recorded delivered, but the engine answers the interim sentence"
+            )),
+            (_, Coverage::Unaccepted) => problems.push(format!(
+                "{pair} is recorded unaccepted, but the operation accepts it"
+            )),
+            (true, Coverage::Delivered) | (false, Coverage::NotCarriedOut) => {}
+        }
+        if claimed == Coverage::Delivered
+            && !cases
+                .iter()
+                .any(|case| case.operation == operation && case.family == family)
+        {
+            problems.push(format!(
+                "{pair} is recorded delivered, but no corpus case would judge it"
+            ));
+        }
+    }
+    problems
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::Family;
+    use crate::corpus::writer_cases;
+
+    /// The ledger with one pair's claim replaced, so a deliberate mistake can be judged.
+    fn with_coverage(operation: &str, family: Family, coverage: Coverage) -> Vec<Record> {
+        let mut ledger = CRATE_WRITER.to_vec();
+        for record in &mut ledger {
+            if record.operation == operation && record.family == family {
+                record.coverage = coverage;
+            }
+        }
+        ledger
+    }
+
+    /// The ledger without one pair.
+    fn without(operation: &str, family: Family) -> Vec<Record> {
+        CRATE_WRITER
+            .iter()
+            .filter(|record| !(record.operation == operation && record.family == family))
+            .copied()
+            .collect()
+    }
 
     #[test]
-    fn every_corpus_operation_is_either_covered_or_named_as_not_delivered() {
-        // The ledger is what makes an unjudged case honest: a case can only be skipped because its
-        // operation is one the writing half has not delivered, never because a name drifted.
-        for case in crate::corpus::writer_cases() {
-            let operation = case.operation;
+    fn the_ledger_matches_the_engine_statement() {
+        assert_eq!(
+            problems(CRATE_WRITER, &writer_cases()),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn a_pair_recorded_not_carried_out_while_the_engine_carries_it_out_fails() {
+        let ledger = with_coverage("pdf_merge", Family::Pdf, Coverage::NotCarriedOut);
+        let found = problems(&ledger, &writer_cases());
+        assert!(
+            found.iter().any(|problem| problem.contains("pdf/pdf_merge")
+                && problem.contains("the engine carries it out")),
+            "{found:?}"
+        );
+    }
+
+    #[test]
+    fn a_pair_recorded_delivered_while_the_engine_answers_the_interim_sentence_fails() {
+        let ledger = with_coverage("create", Family::Docx, Coverage::Delivered);
+        let found = problems(&ledger, &writer_cases());
+        assert!(
+            found.iter().any(|problem| problem.contains("docx/create")
+                && problem.contains("answers the interim sentence")),
+            "{found:?}"
+        );
+    }
+
+    #[test]
+    fn a_pair_recorded_unaccepted_while_the_engine_accepts_it_fails() {
+        let ledger = with_coverage("pdf_merge", Family::Pdf, Coverage::Unaccepted);
+        let found = problems(&ledger, &writer_cases());
+        assert!(
+            found.iter().any(|problem| problem.contains("pdf/pdf_merge")
+                && problem.contains("the operation accepts it")),
+            "{found:?}"
+        );
+    }
+
+    #[test]
+    fn an_accepted_pair_left_out_of_the_ledger_fails() {
+        let ledger = without("create", Family::Pdf);
+        let found = problems(&ledger, &writer_cases());
+        assert!(
+            found
+                .iter()
+                .any(|problem| problem.contains("pdf/create")
+                    && problem.contains("no recorded state")),
+            "{found:?}"
+        );
+    }
+
+    #[test]
+    fn a_pair_the_operation_does_not_accept_cannot_be_recorded() {
+        let mut ledger = CRATE_WRITER.to_vec();
+        ledger.push(entry("fill_template", Family::Pdf, Coverage::NotCarriedOut));
+        ledger.push(entry("read", Family::Pdf, Coverage::NotCarriedOut));
+        let found = problems(&ledger, &writer_cases());
+        for pair in ["pdf/fill_template", "pdf/read"] {
             assert!(
-                crate_writer_covers(&case.key()) || NOT_YET_DELIVERED.contains(&operation),
-                "{operation} is neither covered nor named as not delivered"
+                found.iter().any(|problem| problem.contains(pair)
+                    && problem.contains("not a pair any operation accepts")),
+                "{pair}: {found:?}"
             );
         }
     }
 
     #[test]
-    fn a_covered_operation_covers_every_sub_operation() {
-        // Coverage is by operation, not by family or sub-operation: a name the ledger lists covers
-        // every sub-operation it declares, and one it does not list is covered by no key at all.
-        for (family, operation, sub_operation) in [
-            (Family::Xlsx, "xlsx_edit", Some("merge_cells")),
-            (Family::Docx, "docx_edit", Some("add_table")),
-            (Family::Pptx, "pptx_edit", Some("add_table")),
-        ] {
-            let key = Key::new(family, operation, sub_operation);
-            assert!(crate_writer_covers(&key), "{key} is covered");
-        }
-        let other = Key::new(Family::Pptx, "create", None);
-        assert!(!crate_writer_covers(&other));
+    fn a_delivered_pair_with_no_case_fails() {
+        let cases: Vec<Case> = writer_cases()
+            .into_iter()
+            .filter(|case| case.operation != "pdf_merge")
+            .collect();
+        let found = problems(CRATE_WRITER, &cases);
+        assert!(
+            found.iter().any(|problem| problem.contains("pdf/pdf_merge")
+                && problem.contains("no corpus case would judge it")),
+            "{found:?}"
+        );
     }
 
     #[test]
-    fn every_delivered_operation_is_exercised_by_a_case() {
-        // An operation the ledger lists must have at least one case: a name that covers nothing
-        // would report a delivered action with nothing judged. Whether a listed operation is
-        // judged follows from the list itself; `the_two_lists_are_disjoint` is the other half.
-        let cases = crate::corpus::writer_cases();
-        for operation in CRATE_WRITER {
-            assert!(
-                cases.iter().any(|case| case.operation == *operation),
-                "the corpus does not exercise `{operation}`, which the ledger says is delivered"
-            );
-        }
-    }
-
-    #[test]
-    fn the_two_lists_are_disjoint() {
-        // An operation in both lists would be judged and recorded as not delivered at once: the
-        // gate would stay green while the ledger read as less than it is.
-        for operation in CRATE_WRITER {
-            assert!(
-                !NOT_YET_DELIVERED.contains(operation),
-                "`{operation}` is both delivered and named as not delivered"
-            );
-        }
+    fn a_duplicate_record_fails() {
+        let mut ledger = CRATE_WRITER.to_vec();
+        ledger.push(entry("pdf_merge", Family::Pdf, Coverage::Delivered));
+        let found = problems(&ledger, &writer_cases());
+        assert!(
+            found
+                .iter()
+                .any(|problem| problem.contains("pdf/pdf_merge") && problem.contains("twice")),
+            "{found:?}"
+        );
     }
 }
