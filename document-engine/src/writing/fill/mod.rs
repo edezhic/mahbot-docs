@@ -387,8 +387,9 @@ mod tests {
 
     #[test]
     fn the_property_parts_the_model_excludes_are_filled_too() {
-        // The canonical model drops `docProps/app.xml` and `docProps/custom.xml`, so the gate
-        // cannot see a substitution in either. The reference renders them, and so must the port.
+        // The harness's OOXML model states that `docProps/app.xml` and `docProps/custom.xml` are
+        // excluded, so the gate cannot see a substitution in either. The reference renders them, and
+        // so must the port.
         let directory = scratch();
         let template = directory.path().join("parts.docx");
         std::fs::write(&template, build::docx_fill_parts()).expect("the sample is written");

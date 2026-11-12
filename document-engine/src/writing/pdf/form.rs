@@ -7,11 +7,12 @@
 //! the catalogue of what can be. The appearance of every field whose value changed (or whose
 //! appearance the file does not carry) is regenerated, so a filled value is what a reader shows.
 //!
-//! A malformed form that leaves the reference's library without what it needs — an `/Opt` whose
-//! entries are not text, a widget that states no `/Rect`, one whose appearance the file does not
-//! carry, one whose page the file does not name — is the engine's own failure here: the class is
-//! `internal`, as the reference's is, but the sentence is the engine's rather than the library's,
-//! so the corpus compares those cases by class alone.
+//! A malformed form that leaves the reference's library without what it needs — a widget that states
+//! no `/Rect`, or one whose appearance the file does not carry — is the engine's own failure here:
+//! the class is `internal`, as the reference's is, but the sentence is the engine's rather than the
+//! library's, so the corpus compares those cases by class alone. A widget whose `/P` names an object
+//! that is not a page is not one of them: the reference falls back to the page whose annotation list
+//! names the widget, and `widget_page` does the same.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;

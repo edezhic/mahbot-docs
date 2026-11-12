@@ -5751,8 +5751,8 @@ pub fn pdf_rectless_flat_form() -> Vec<u8> {
 
 /// One A4 page carrying a right-aligned text widget with a three-point border, a second widget
 /// stating neither, and a right-aligned dropdown: the appearance box's inset and alignment are only
-/// visible in where the line sits, which the comparison does not read. Only the crate's own test
-/// fills it, so it is not a writer case's input.
+/// visible in where the line sits, which the harness's PDF model's appearance-geometry limit says it
+/// does not compare. Only the crate's own test fills it, so it is not a writer case's input.
 #[must_use]
 pub fn pdf_aligned_form() -> Vec<u8> {
     form_page("A form with an aligned field", |pdf, page| {

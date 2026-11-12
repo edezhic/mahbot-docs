@@ -1444,7 +1444,7 @@ pub fn mutations() -> Vec<Document> {
 }
 
 /// The documents a writer case builds that the reader corpus deliberately does not record, so their
-/// readings stay out of the baseline: the inputs a produced file is compared against.
+/// readings stay out of the baseline: the inputs the engine reads for those cases.
 #[must_use]
 pub fn writer_documents() -> Vec<Document> {
     vec![

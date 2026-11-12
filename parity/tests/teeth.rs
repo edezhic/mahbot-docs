@@ -1,8 +1,9 @@
-//! The comparison has teeth: a reading or a produced case altered in any single compared field
+//! The comparison has teeth: a reading or a produced case altered in a field its sample populates
 //! fails it, and so does a detection answer changed for one input.
 //!
 //! Each case compares one recorded answer with one altered copy of it, through the same
-//! [`Run::report`] the gate uses, so a field the comparison stopped looking at fails here.
+//! [`Run::report`] the gate uses, so a transcript field the comparison stopped looking at fails
+//! here. The samples leave the refusal and unsupported fields empty, so no case alters those.
 
 use document_engine::reading::{ImageArtifact, Reading};
 use document_parity::baseline::Baseline;
@@ -182,8 +183,8 @@ fn a_changed_detection_is_reported_on_its_own() {
     );
 }
 
-/// One produced case's transcript with every compared field populated: a status, a note, a loss
-/// and one produced file.
+/// One produced case's transcript with the fields a produced answer populates: a status, a note, a
+/// loss and one produced file.
 fn case_sample() -> CaseTranscript {
     CaseTranscript {
         status: Status::Produced,

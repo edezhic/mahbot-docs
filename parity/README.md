@@ -51,13 +51,13 @@ landed yet is shown as `SKIP`, not failed, and a run that judged no case at all 
 | `src/reference_sources/` | Byte-for-byte copies of the product's reader modules, compiled here. `tests/engine_contract.rs` compares them with `../../src/` and fails when they diverge. |
 | `src/host/` | The minimal host the reader sources need: `rules.json` and its typed views, `contain_panics`, and the handful of `util` helpers the readers call. |
 | `src/corpus/` | The writer scenarios (`cases.rs`) and their declared effects (`effect.rs`); `ledger.rs` records, per (operation, family) pair, what the crate's writer delivers — checked against the engine's statement and compiled for the tests only, never read by the gate; the document builders are re-exported from `document_engine::test_support`, their one home. |
-| `src/canonical/` | The canonical model, one module per format, plus the diff. |
+| `src/canonical/` | The canonical model, one module per format; each states what it compares, normalises, does not compare and refuses, and the diff. |
 | `src/harness.rs` | Runs a corpus against an engine, compares, and produces verdicts. |
 | `src/baseline.rs` | The recorded reference, with the identity of the engine that produced it. |
 | `src/transcript.rs` | The normalised transcript: no paths, no nonces, no timings. |
 | `tests/engine_contract.rs` | The engine crate's contract, proved from here: its vocabulary is the reference's data, its result shapes carry every recorded field, its closed operation set holds every corpus operation and edit, the reference copies are byte-for-byte the product's, and the host's media tables are the product's own. |
 | `tests/coverage.rs` | The corpus's depth: every reading mark is witnessed by a recorded reading or recorded as unproducible with its reason, every mark only the writing half prints is witnessed by a recorded case's answer or recorded unreached with its reason, neither ledger's "not produced" side names a mark a recorded answer really prints, every per-family failure verdict is witnessed, and every corpus document is in the baseline. |
-| `tests/teeth.rs` | The comparison has teeth: a reading or a produced case altered in any single compared field — a picture dropped, a note or a loss reworded, an output renamed, a produced file's content changed, a status flipped — fails it, and so does a detection answer changed for one input. |
+| `tests/teeth.rs` | The comparison has teeth: a reading or a produced case altered in a field its sample populates — a picture dropped, a note or a loss reworded, an output renamed, a produced file's content changed, a status flipped — fails it, and so does a detection answer changed for one input. |
 | `baseline/baseline.json` | The recorded reference (about 9.3 MB of canonical documents). |
 | `src/bin/parity.rs`, `src/bin/record-baseline.rs` | The gate and the deliberate recorder. |
 
@@ -324,6 +324,13 @@ builders have one home in `document_engine::test_support`, which the crate's own
 - the failure side: requests the engine refuses as the caller's to fix, and one it accepts and
   fails to carry out (a PDF whose `/AcroForm` is not a dictionary).
 
+Two behaviours of a template fill cannot be witnessed through the corpus, because no value the
+operation accepts is a list: a paragraph loop that repeats inserts a continuous section break
+between its copies, and a section over a table produces one row per value. Neither is a limit of
+the model — the result is ordinary XML in `word/document.xml`, which the model would compare — but
+no case can produce them: the first needs a value that iterates, the second a section whose body is
+a table row. They are stated here rather than left to a case that would have to invent a list.
+
 The reader corpus is the same generated documents plus the negative and depth cases:
 
 - one document per family the reader reads, with the features that family has: Word comments,
@@ -357,71 +364,44 @@ reading ledger, which reads the same vocabulary entry.
 
 ## The canonical model
 
-Comparison happens on a declared model per format, never on bytes. Each format's module states
-what it compares, what it normalises away, what it compares byte for byte, and what it refuses; the
-OOXML model's self-tests iterate the tables that state its normalisations, and the PDF model's cover
-each compared field in turn:
+Comparison happens on a declared model per format, never on the bytes of a file. Each format's
+model is its own module's documentation: `src/canonical/ooxml.rs` for the three package formats and
+`src/canonical/pdf.rs` for PDF. Each states what it compares and how, what it normalises away, what
+it compares byte for byte, what it does not compare, and what it refuses. This section is the
+orientation summary and the rule those statements follow; the statements themselves are not
+restated here, because a claim with two homes drifts in one of them.
 
-- **what is compared**: for an OOXML package, the part names and, per part, an XML tree (element
-  names, attributes, text in document order) or a binary digest; for a PDF, page boxes, rotation,
-  the text each page draws (resolved through the font's `ToUnicode` map where it has one), the
-  images it paints (by the digest of their decoded samples and the transform each is painted
-  under, so its size, place and turn are compared), how many form XObjects it paints, the text
-  those forms draw (a flattened field's value), a digest of its vector operators, its annotations,
-  its description, its form fields (value, options, shown appearance state and the text each
-  appearance draws) and its attachments.
-- **what is normalised away**: archive entry order, timestamps and compression; Word's `w:rsid*`,
-  `w:paraId`/`w:textId`/`w:tblId` and the `w14:`/`wp14:` spellings; relationship ids (references
-  are rewritten to the relationship's own key); generated media file names (replaced by a name
-  derived from the content, numbered by occurrence when two parts carry identical bytes);
-  `dcterms:created`/`dcterms:modified` and `cp:revision`; `docProps/app.xml` and
-  `docProps/custom.xml` entirely; whitespace-only text between elements; entity spelling; in a PDF,
-  object numbers, the cross-reference layout, `/Length`, stream compression, the trailer `/ID`,
-  `/CreationDate`, `/ModDate`, `/Creator`, `/Producer`, an appearance's own operators and font
-  identity, and the form content a page paints.
-- **what is compared byte for byte**: an embedded binary part, by SHA-256 and length.
+Two kinds of claim are treated differently, and each statement says which it is:
 
-A comparison that cannot decide says so instead of passing: a document the model cannot canonicalise
-is a failure ("cannot canonicalise an output"), never an empty value, and the harness reports it as
-such. An archive whose stated entry count exceeds what it yields is refused rather than collapsed
-into its last entries; the model cannot say which name repeats, and a ZIP64 archive states no count
-it reads, so that limitation is recorded rather than hidden. The model's own tests are in
-`tests/ooxml_model.rs` and `tests/pdf_canonical.rs`: unchanged documents compare equal, every
-retained field is shown sensitive, every normalised field is shown ignored, and a single meaningful
-change compares unequal at a named path.
+- a **limit of comparison** is something the model does not compare, so a difference confined to it
+  compares equal. It is demonstrated by a test — in `tests/ooxml_model.rs` or
+  `tests/pdf_canonical.rs` — that constructs exactly that difference and requires the comparison to
+  pass, and the model's statement names that test beside the limit, or — where the limit is a rule
+  the statement states under "What is normalised away" — names that rule, which names its test.
+  Where no document the corpus can hold expresses the difference, the statement says so instead, and
+  names the test that pins the reading if one does;
+- a **limit of reporting** is something the model cannot say about a document it compares correctly,
+  such as which of two archive entries of one name is the one that repeats. It is not a limit of
+  comparison, gets no such test, and the statement says so and why.
 
-### Deliberate limits of the model
+The model's tests pin the model's behaviour, not its prose: a claim added to a statement without a
+test fails nothing, and the prose can drift again. What they do guarantee is narrower: a normalised
+case must differ from the base file it is compared with, so a case whose construction went stale
+fails rather than passes.
 
-- OOXML element order is retained: in OOXML it is meaningful.
-- Namespace prefixes are compared as spelled (`w:p`, not the URI): both sides write the standard
-  prefixes, and a prefix is part of the tree the model states.
-- A page's text is what its own content stream draws. A document that draws its text as vector
-  outlines reads as a page with no text and reports a text difference — a difference, never a
-  pass.
-- A form XObject's own operators are not compared; a page that paints a form is counted, and the
-  text the form draws is read through the font its resources state. A form that draws only vector
-  marks is therefore told apart from one that draws nothing, but not from a different vector mark.
-- An appearance's text is decoded through the character map the file states, and a code that map
-  does not name contributes nothing; the font must carry an embedded program. The blind spot is
-  stated: an appearance that declares consistent characters and draws the wrong outlines is not
-  detected, because no glyph outline is compared.
-- A drawn string is decoded through its font's `ToUnicode` map as two-byte codes (the Identity-H
-  encoding every engine in this corpus writes). A one-byte font with such a map would decode its
-  codes pairwise; the model states the assumption rather than guessing per font.
-- The PDF model does not look at outlines, page labels, the catalog's language, XMP metadata or a
-  link annotation's action target. A difference confined to those is not seen, and the model says
-  so here rather than implying it compares them.
-- `w:id` values (bookmarks, footnotes) are compared as written; they are consistent within a
-  document and the current writer preserves them.
-- `docProps/app.xml` and `docProps/custom.xml` are excluded entirely: every element they hold is a
-  statistic about the file or the writing application rather than content. A template fill still
-  substitutes in both — the reference renders them — so a wrong value there is not a difference
-  this model can see; the port's own test pins it instead.
-- Two behaviours of a template fill cannot be witnessed through the corpus, because no value the
-  operation accepts is a list: a paragraph loop that repeats inserts a continuous section break
-  between its copies, and a section over a table produces one row per value. Both are stated here
-  rather than left to a case that would have to invent a list; the first needs a value that
-  iterates, the second a section whose body is a table row.
+A comparison that cannot decide whether two documents differ says so instead of passing
+(`Comparison::undecidable`), and a document the model cannot canonicalise is a failure ("cannot
+canonicalise an output"), never an empty value — an unreadable file must not read as a pass. The
+comparison itself can only fail to decide on a tree deeper than the walk bound it states; a document
+the model cannot read is the failure above, not a pass. Each model states what it refuses, and every
+bound that cuts a list short rather than refusing is stated there as a limit of comparison, with its
+test.
+
+The model's own tests are in `tests/ooxml_model.rs` and `tests/pdf_canonical.rs`: unchanged
+documents compare equal, every field a table names is shown sensitive or shown ignored, and a
+single meaningful change compares unequal at a named path. Each table row constructs the one change
+it names, and the OOXML model's self-tests iterate the tables that state its normalisations, so a
+rule added to a table without a test fails the table.
 
 ## Effects
 
@@ -535,8 +515,8 @@ A panicking engine — or a panicking corpus builder — is one failed verdict, 
 resource bounds are verdicts too: a produced file over 64 MiB, each pipe's output beyond its last
 64 KiB, a result file over 8 MiB, an OOXML part over 64 MiB, a package of more than 4096 parts or
 256 MiB of parts, an archive whose stated entry count exceeds what it yields, an XML part nesting
-deeper than 256 elements, a PDF of more than 10,000 pages, a page running more than 100,000
-content-stream operators or an image claiming more than 64 MiB to decode fails the case with a
+deeper than 256 elements, a PDF of more than 10,000 pages, a content stream running more than
+100,000 operators or an image claiming more than 64 MiB to decode fails the case with a
 message rather than exhausting the harness, and so does a document whose decoded streams — page
 content, form XObjects, `/ToUnicode` maps, images — pass 256 MiB in total. An image is charged its
 declared area before it is decoded; any other stream is decoded first and then charged, so one

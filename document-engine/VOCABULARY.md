@@ -226,7 +226,7 @@ What it cannot see, and why that is recorded rather than fixed:
 
 `tests/standalone.rs` builds and runs the crate's own tests in a temporary copy that holds only the
 crate's files — no product sources, no harness, no workspace — so "the crate stands alone" is a
-build, not a textual claim. `tests/vocabulary.rs` adds the textual half: no source, manifest or
-`include!` path names a product source, the harness or a runtime, and `tests/common` names the
-forbidden references once.
+build, not a textual claim. `tests/vocabulary.rs` adds the textual half: no code path, manifest or
+`include!` path names a product source, the harness crate or a runtime, while prose may name the
+harness; `tests/common` names the forbidden references once.
 

@@ -4,54 +4,141 @@
 //!
 //! A package becomes `{ "format": …, "parts": { <part name>: <part> } }`. A part is one of:
 //!
-//! - `{"kind": "xml", "tree": <node>}` — an XML part, as a tree of elements and text;
-//! - `{"kind": "binary", "sha256": …, "len": …}` — an embedded binary part, compared byte for
-//!   byte by digest;
-//! - `{"kind": "text", "text": …}` — a part that is neither XML nor binary.
+//! - `{"kind": "xml", "tree": <node>}` — a part whose name ends in `.xml`, as a tree of elements
+//!   and text. A part that says it is XML and is not is a refusal, not a binary part;
+//! - `{"kind": "xml", "tree": …}` built from a part whose name ends in `.rels` — see below;
+//! - `{"kind": "text", "text": …}` — any other part whose bytes are valid UTF-8 with no NUL byte,
+//!   compared as the exact string it holds: it is not parsed, so nothing in it is normalised;
+//! - `{"kind": "binary", "sha256": …, "len": …}` — every other part, compared byte for byte by
+//!   digest.
 //!
 //! A node is `{"name": "w:p", "attrs": {…}, "children": [<node> | {"text": "…"}]}`, with empty
-//! `attrs`/`children` omitted. Element order is retained: in OOXML it is meaningful. Attribute
-//! order and the order of a set's members are not.
+//! `attrs`/`children` omitted. Element order is retained and compared — in OOXML it is meaningful —
+//! except in the two parts whose members are a set: the root's children of `[Content_Types].xml`
+//! and of a `.rels` part are sorted before comparison, because their order is generated. Attribute
+//! order is not compared: attributes are an object, matched by name.
+//!
+//! An element's name is compared as spelled, prefix included: the model resolves no namespace, and
+//! an `xmlns` declaration is an ordinary attribute. That the corpus's two sides write the same
+//! standard prefixes is an assumption about the corpus, not a property of the model. So is the
+//! consistency of `w:id` values (bookmarks, footnotes): they are compared as written, and the
+//! model does not check that one document numbers them uniquely.
 //!
 //! # What is normalised away
 //!
-//! - **The archive**: entry order, timestamps, compression method, CRCs and extra fields are never
-//!   read — only part names and part content.
-//! - **Generated identifiers**: Word's `w:rsid*` revision-save ids, `w:paraId`/`w:textId`/
-//!   `w:tblId` (and their `w14:`/`wp14:` spellings) are dropped; relationship `Id`s are dropped and
-//!   every reference to one is rewritten to the relationship's own key, so two engines may number
-//!   relationships differently; an embedded media part's generated file name is replaced by a name
-//!   derived from its content, with an occurrence number when two parts carry identical bytes.
+//! Each rule below names the test that demonstrates it; the README states what makes a claim a
+//! limit of comparison and how a limit is demonstrated.
+//!
+//! - **The archive**: entry order, timestamps, compression method and extra fields are never
+//!   compared — only part names and part content. A part's CRC is not part of the model, but the
+//!   archive reader checks it, so a part whose CRC does not match its bytes refuses the package
+//!   (`the_archive_is_normalised_away`).
+//! - **Generated identifiers**: Word's seven `rsid…` revision-save attributes — `rsidR`, `rsidRPr`,
+//!   `rsidRDefault`, `rsidP`, `rsidDel`, `rsidSect` and `rsidTr`, listed in `DROPPED_ATTRIBUTES` —
+//!   together with `w:paraId`/`w:textId`/`w:tblId`/`w:anchorId`/`w:editId` (and their
+//!   `w14:`/`wp14:` spellings, since an attribute is matched by its local name wherever it appears)
+//!   are dropped (`every_dropped_attribute_is_ignored`,
+//!   `generated_identifiers_are_normalised_away`); relationship `Id`s are dropped and a reference to
+//!   one is rewritten to the relationship's own key, so two engines may number relationships
+//!   differently (`every_relationship_attribute_is_rewritten`). Only the
+//!   attributes the model names are rewritten, and only when the id resolves in the owning part's
+//!   `.rels`: a dangling reference is kept as written, so it stays visible.
+//! - **A relationship's target mode**: only `External` is recorded, so an entry that states
+//!   `Internal` and one that states no mode are one entry; what the model keeps is whether the
+//!   target leaves the package (`a_relationship_entry_is_its_type_target_and_mode`).
+//! - **A relationship target's spelling**: an internal target is resolved against the part that owns
+//!   the `.rels` — a leading `/` makes it package-absolute, and `.` and `..` segments of a relative
+//!   target are folded, while an absolute target's own segments are not — so two spellings of one
+//!   part are one target (`a_relationship_entry_is_its_type_target_and_mode` constructs the
+//!   absolute, the `.`-prefixed and the `..` spelling). No corpus case writes two spellings of one
+//!   target, so no corpus case shows the difference.
+//! - **Generated media names**: a media part's generated file name is replaced by one derived from
+//!   its content, keeping the part's extension (`every_media_directory_is_normalised`). Two parts
+//!   with identical bytes stay two parts: the
+//!   second and later carry an occurrence number, assigned in the order of the generated names, so
+//!   which relationship points at which of two identical parts is still visible
+//!   (`two_media_parts_with_identical_bytes_stay_two_parts`).
 //! - **Metadata dates and derived statistics**: `dcterms:created`/`dcterms:modified` and
-//!   `cp:revision` are dropped from `docProps/core.xml`; `docProps/app.xml` and
-//!   `docProps/custom.xml` are excluded entirely, because every element they hold is a statistic
-//!   about the file or the writing application rather than content.
-//! - **Whitespace between elements**: a text node that is entirely whitespace is dropped unless
-//!   its parent says `xml:space="preserve"`. Text content is otherwise kept exactly, and entities
-//!   are decoded, so two spellings of one character compare equal.
-//!
-//! # What the model cannot witness
-//!
-//! A fill's values are scalars, never lists, so a section renders exactly once or not at all. Two
-//! behaviours of the reference are therefore out of the model's reach: the continuous section break
-//! a paragraph loop would insert when it renders more than once, and a table section producing more
-//! than one row. They are stated here rather than left to a passing gate. A next-page section is
-//! not one of them: a section whose properties sit in the paragraph that opens it inserts that
-//! section before the rendered body with a scalar value too, and the corpus's `next_page` case
-//! records it — `two_main_sections` records which part's list it comes from, the last main-type
-//! part's, for every part.
+//!   `cp:revision` are dropped from `docProps/core.xml` (`every_dropped_element_is_ignored`);
+//!   `docProps/app.xml` and `docProps/custom.xml` are excluded entirely (see "What the model does
+//!   not compare").
+//! - **Whitespace**: a text node that is entirely whitespace — by Unicode's definition, not XML's
+//!   four characters — is dropped unless the nearest `xml:space` in force says `preserve`, which
+//!   any ancestor may state and `default` may reset. Text content is otherwise kept exactly
+//!   (`whitespace_between_elements_is_not_content`, `a_no_break_space_in_a_text_run_is_whitespace`,
+//!   `a_preserved_space_is_content`).
+//! - **Character and entity references in element text are dropped, not resolved.** The text on
+//!   either side of a reference is kept as separate text nodes, and the reference's character is
+//!   lost: `a&amp;b` is the two text nodes `a` and `b`. Attribute values are unescaped, so a
+//!   character's spelling is normalised in an attribute and not in element text
+//!   (`a_character_reference_is_dropped_and_splits_its_text`,
+//!   `two_different_references_in_text_compare_equal`).
+//! - **Markup between elements and inside a text run**: the XML declaration and a DOCTYPE, which
+//!   can only occur outside the root, carry no content and are dropped. A comment or a processing
+//!   instruction is ignored between elements; inside a text run it splits the text into separate
+//!   nodes, which is a difference. A CDATA section is always its own text node, and is not
+//!   unescaped (`a_comment_between_elements_is_ignored_and_one_inside_text_splits_it`,
+//!   `markup_outside_the_root_is_dropped`).
+//! - **Text outside the root element** is not part of the document and is dropped; a part with
+//!   more than one root element is modelled as its last root
+//!   (`the_last_root_element_is_the_document`).
 //!
 //! # What is compared byte for byte
 //!
-//! An embedded binary part (an image, a font, an embedded object) by its SHA-256 and length.
+//! A `text` part, as the exact string it holds, and an embedded binary part (an image, a font, an
+//! embedded object) by its SHA-256 and length. A part held as a tree is compared element by element
+//! instead.
+//!
+//! # What the model does not compare
+//!
+//! Each limit below names the test that constructs its difference; the README states what makes a
+//! claim a limit of comparison and why a limit of reporting gets no test.
+//!
+//! - **A character or entity reference in element text**: see the reference bullet under "What is
+//!   normalised away" — two different references in one run compare equal, and neither equals the
+//!   character written literally (`two_different_references_in_text_compare_equal`,
+//!   `a_character_reference_is_dropped_and_splits_its_text`).
+//! - **`docProps/app.xml` and `docProps/custom.xml`** are excluded entirely: the first holds
+//!   statistics about the file and the application that wrote it, the second a producer's own
+//!   custom properties. A difference confined to either is not seen
+//!   (`every_ignored_part_is_ignored`). A template fill substitutes in both, so a wrong value
+//!   there is not a difference this model can see; the corpus has no case that would show it.
+//! - **An attribute the model drops by local name**: see "Generated identifiers" above — an
+//!   unrelated attribute of one of the twelve names in `DROPPED_ATTRIBUTES` is invisible wherever
+//!   it appears, and an attribute of any other name, `rsidNew` included, is compared
+//!   (`every_dropped_attribute_is_ignored`, `an_attribute_the_table_does_not_name_is_compared`).
+//! - **A `.rels` part beyond its relationships' type, target and whether the target is external**:
+//!   the part is rebuilt from those three, so its root element, its namespace declarations and any
+//!   other attribute or child are not compared
+//!   (`a_relationship_entry_is_its_type_target_and_mode`).
+//! - **A whitespace-only text node**: see the whitespace bullet under "What is normalised away" — a
+//!   run holding only a no-break space is dropped like an empty one
+//!   (`a_no_break_space_in_a_text_run_is_whitespace`).
+//! - **The archive's stated entry count**: the archive reader reads as many entries as the record's
+//!   count for this disk states, and the model refuses a package whose stated total exceeds what the
+//!   reader yields. A record that understates both counts is read as holding only the entries it
+//!   states, and a ZIP64 archive states its counts in a record the model does not read, so the
+//!   refusal does not apply to it (`an_archive_that_understates_its_entry_count_is_read_as_it_states`).
+//! - **A second root element**: see the last bullet under "What is normalised away"
+//!   (`the_last_root_element_is_the_document`).
+//!
+//! One limit of reporting is stated rather than tested: when an archive holds two entries of one
+//! name, the model cannot say which name repeats. Where the record counts both, the model refuses
+//! the package rather than model the collapsed read, and that refusal can name only the two counts;
+//! where it does not — an understated record or a ZIP64 one — the comparison limit above applies and
+//! the second entry is not seen. This is not a limit of comparison, so it has no test that requires
+//! a difference to compare equal.
 //!
 //! # What the model refuses
 //!
-//! A part larger than 64 MiB, a package of more than 4096 parts or 256 MiB of parts in total, a
-//! package holding two parts of one name, and an XML part nesting deeper than 256 elements are
-//! errors rather than models: an engine that emits a zip bomb or an unbounded tree must fail the
-//! gate with a message, not exhaust the harness. The harness bounds its own read of a produced file
-//! for the same reason.
+//! An error rather than a model: a file that is not a readable ZIP archive; an entry that cannot be
+//! read (a CRC mismatch included); a part larger than 64 MiB, a package of more than 4096 parts or
+//! 256 MiB of parts in total; an XML part nesting deeper than 256 elements, one that is not
+//! well-formed or has no root element; an unknown entity in an attribute; a package with no part of
+//! its own family (`word/document.xml`, `xl/workbook.xml`, `ppt/presentation.xml`), which is not
+//! the format it claims. An engine that emits a zip bomb or an unbounded tree must fail the gate
+//! with a message, not exhaust the harness; the harness bounds its own read of a produced file for
+//! the same reason.
 
 use crate::engine::Family;
 use anyhow::{Context as _, Result, bail};
@@ -63,8 +150,7 @@ use std::collections::BTreeMap;
 use std::io::{Cursor, Read as _};
 
 /// The largest part the model reads, matching the product's own per-entry bound. The read itself
-/// is capped, not just the declared size: an engine emitting a zip bomb must fail the gate with a
-/// message, not exhaust the harness.
+/// is capped, not just the declared size.
 const MAX_PART_BYTES: u64 = 64 * 1024 * 1024;
 
 /// The most parts one package may hold.
@@ -78,8 +164,7 @@ const MAX_PACKAGE_BYTES: u64 = 256 * 1024 * 1024;
 /// stack overflow is not a comparison that can be reported.
 pub const MAX_XML_DEPTH: usize = 256;
 
-/// Parts excluded from the model: generated statistics and custom properties carry no document
-/// content, and a producer may or may not write them.
+/// Parts excluded from the model; the module docs state what each holds and what that costs.
 pub const IGNORED_PARTS: &[&str] = &["docProps/app.xml", "docProps/custom.xml"];
 
 /// Attributes dropped by local name wherever they appear: generated identifiers.
@@ -110,7 +195,8 @@ pub const RELATIONSHIP_ATTRIBUTES: &[&str] = &[
     "r:id", "r:embed", "r:link", "r:cs", "r:dm", "r:lo", "r:qs", "o:relid",
 ];
 
-/// Directories whose part names are generated per file and replaced by a content-derived name.
+/// Directories whose part names are generated per file and replaced by a content-derived name,
+/// matched by prefix: a part in a subdirectory of one is renamed into that directory.
 pub const MEDIA_DIRS: &[&str] = &[
     "word/media/",
     "xl/media/",
@@ -182,13 +268,8 @@ fn binary_part(bytes: &[u8]) -> Value {
     })
 }
 
-/// Every part's bytes, by name. Entry order, timestamps and compression are not read.
-///
-/// The archive reader resolves two central-directory entries of one name to the last of them, so a
-/// package whose stated entry count exceeds what the archive yields is refused rather than
-/// silently modelled as the entries' last. The check knows only the counts: it cannot say which
-/// name repeats, and a ZIP64 archive states its count in a record this model does not read, so a
-/// ZIP64 package with repeated names is not detected. A package the kit writes is neither.
+/// Every part's bytes, by name. The module docs state what the archive read normalises away and
+/// what it cannot report.
 fn read_parts(bytes: &[u8]) -> Result<Parts> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes))
         .context("the package is not a readable ZIP archive")?;
@@ -196,9 +277,9 @@ fn read_parts(bytes: &[u8]) -> Result<Parts> {
         && stated > archive.len()
     {
         bail!(
-            "the archive states {stated} entries but yields {}: the reader would drop the entries \
-             it resolves to an earlier one, so the package is refused rather than modelled \
-             without them",
+            "the archive states {stated} entries but yields {}: the reader keys entries by name \
+             and keeps the last of two of one name, so the package is refused rather than modelled \
+             without the entries it collapses",
             archive.len()
         );
     }
@@ -266,9 +347,8 @@ fn charge(total: &mut u64, len: usize) -> Result<()> {
     Ok(())
 }
 
-/// Generated media part names, replaced by a name derived from the part's content. Two parts with
-/// identical bytes are two parts: the second and later keep an occurrence number, so the model
-/// never silently collapses a duplicate.
+/// Generated media part names, replaced by a name derived from the part's content; the module docs
+/// state what the replacement keeps visible.
 fn media_names(parts: &Parts) -> BTreeMap<String, String> {
     let mut names = BTreeMap::new();
     let mut occurrences: BTreeMap<String, usize> = BTreeMap::new();
@@ -433,8 +513,8 @@ fn parse_rels(bytes: &[u8]) -> Result<Vec<(String, String, String, bool)>> {
     Ok(out)
 }
 
-/// A `.rels` part as the canonical model holds it: a set, so its members are sorted, with the
-/// generated `Id` dropped and each target replaced by the relationship's own key.
+/// A `.rels` part as the canonical model holds it: its entries, sorted. The module docs state what
+/// an entry keeps and what is dropped.
 fn canonical_rels(name: &str, bytes: &[u8], media: &BTreeMap<String, String>) -> Result<Value> {
     let owner = rels_owner(name);
     let entries = parse_rels(bytes)?;
@@ -521,7 +601,8 @@ fn parse_xml(bytes: &[u8], owner: &str, rels: &Rels) -> Result<Value> {
                 );
             }
             Ok(Event::Eof) => break,
-            // Declarations, comments and processing instructions carry no document content.
+            // Markup that carries no document content, and the references the model drops: see the
+            // module docs for where each is ignored and where it splits a text run.
             Ok(_) => {}
             Err(e) => bail!("an XML part is not readable: {e}"),
         }
@@ -594,6 +675,8 @@ fn with_children(mut node: Value, children: Vec<Value>) -> Value {
     node
 }
 
+/// Push a finished node onto the element being read, or make it the root; the module docs state
+/// what a part with more than one root keeps.
 fn push_node(stack: &mut [(Value, Vec<Value>)], root: &mut Option<Value>, node: Value) {
     match stack.last_mut() {
         Some((_, children)) => children.push(node),
@@ -601,8 +684,8 @@ fn push_node(stack: &mut [(Value, Vec<Value>)], root: &mut Option<Value>, node: 
     }
 }
 
-/// Append one text node to the element being read. Text outside the root element is not part of
-/// the document and is dropped.
+/// Append one text node to the element being read, unless the module docs' whitespace rule drops
+/// it.
 fn push_text(stack: &mut [(Value, Vec<Value>)], text: &str, preserve: bool) {
     if text.trim().is_empty() && !preserve {
         return;
@@ -630,7 +713,9 @@ fn rewrite_part_names(node: &mut Value, media: &BTreeMap<String, String>) {
     }
 }
 
-/// Sort an element's children, for the parts whose members are a set.
+/// Sort the root's children, for the two parts whose members are a set. The sort is one level deep:
+/// those parts' members are the root's own children, which is the only place their order is
+/// generated.
 fn sort_children(node: &mut Value) {
     if let Some(children) = node.get_mut("children").and_then(Value::as_array_mut) {
         children.sort_by_key(sorted_string);

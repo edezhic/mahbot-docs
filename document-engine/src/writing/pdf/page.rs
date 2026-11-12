@@ -42,10 +42,12 @@
 //!
 //! In some malformed shapes the reference's resize faults inside its library or its split refuses,
 //! while this engine carries the file or refuses it rather than faulting; in others the reference
-//! produces a file that lost what the input held where this engine refuses. The harness judges only
-//! the shapes where both sides produce, so no produced file is compared across that line: each
-//! refusal this engine makes is stated where it is made, with the sentence and the class it carries,
-//! and none of them is a produced file that lost what the input held.
+//! produces a file that lost what the input held where this engine refuses. A case is judged by the
+//! expectation it declares — produced, refused or failed — not by whether both sides produce, so a
+//! refusal where a case expects a produced file fails rather than passing quietly. The caps the
+//! crate owns have no counterpart in the reference, so no corpus case exercises them. Each refusal
+//! this engine makes is stated where it is made, with the sentence and the class it carries, and
+//! none of them is a produced file that lost what the input held.
 //!
 //! A catalog the trailer states inline is read as well: the reference writes it back inline, which
 //! no reader can follow, while this engine gives the catalog a number of its own so that the produced

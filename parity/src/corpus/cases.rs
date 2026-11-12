@@ -392,7 +392,9 @@ fn fill_template_cases() -> Vec<Case> {
         // namespace — and carries every other part through untouched: an endnote, a `customXml`
         // item in another namespace, a field instruction and a deleted tracked-change run all keep
         // the placeholder they were written with. The application and custom properties are
-        // excluded from the canonical model, so they are pinned by the parts beside them.
+        // excluded from the canonical model, so the effects below cannot pin them;
+        // `the_property_parts_the_model_excludes_are_filled_too` in the crate's fill tests pins
+        // them instead.
         produced(
             Family::Docx,
             "fill_template",

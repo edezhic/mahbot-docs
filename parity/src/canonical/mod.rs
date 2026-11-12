@@ -1,17 +1,17 @@
 //! The declared canonical model: what a document *means*, per format, written down once and used
 //! for generated inputs and produced outputs alike.
 //!
-//! Comparison happens on this model, never on bytes. Each format's model states three things, in
-//! its own module's docs and in the tables the self-tests iterate:
+//! Comparison happens on this model, never on the bytes of a file. Each format's model states, in
+//! its own module's documentation, what it compares: the PDF model is [`pdf`], the three package
+//! formats are [`ooxml`]. The README states the rule those statements follow — which claim needs a
+//! test and which is a limit of reporting — and points at them rather than restating them.
 //!
-//! - what is compared, and how (`canonical::ooxml`, `canonical::pdf`);
-//! - what is normalised away because it carries no meaning — metadata dates, archive entry
-//!   timestamps, generated identifiers, object numbering, compression, absolute paths, nonces,
-//!   timings;
-//! - what is compared byte for byte (an embedded binary part, by digest).
+//! The normalisation that belongs to a *run* rather than to a document — absolute paths, the run's
+//! nonce, timings — is [`crate::transcript`]'s, not the model's: it applies to the engine's own
+//! prose and never to what a document says.
 //!
-//! A comparison that cannot decide whether two documents differ says so ([`Comparison::undecidable`])
-//! rather than passing.
+//! What an undecidable comparison and a document the model cannot canonicalise mean is the README's
+//! rule; [`Comparison::undecidable`] and [`canonicalize`] are where it is applied.
 
 pub mod ooxml;
 pub mod pdf;
@@ -21,8 +21,8 @@ use serde_json::Value;
 
 /// The canonical form of one document's bytes.
 ///
-/// A format the model does not cover is an error rather than an empty value: an undecidable
-/// comparison must never read as a pass.
+/// The match is exhaustive over [`Family`], so a format the model does not cover is a compile error
+/// rather than an empty value.
 pub fn canonicalize(family: Family, bytes: &[u8]) -> anyhow::Result<Value> {
     match family {
         Family::Docx | Family::Xlsx | Family::Pptx => ooxml::canonical(family, bytes),
@@ -33,7 +33,8 @@ pub fn canonicalize(family: Family, bytes: &[u8]) -> anyhow::Result<Value> {
 /// One difference, in terms a person can act on: where it is, and what each side has there.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Diff {
-    /// A path into the canonical value, e.g. `parts["word/document.xml"].tree.children[3]`.
+    /// A path into the canonical value: one bracketed segment per level, with `.length` where two
+    /// arrays differ in length, e.g. `["parts"]["word/document.xml"]["tree"]["children"][3]`.
     pub path: String,
     pub expected: String,
     pub actual: String,

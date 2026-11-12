@@ -13,10 +13,11 @@
 //! sum to `0xB1B0AFBA`, so it is written last, over the file the tables make.
 //!
 //! The parser is written here rather than delegated to a font crate. `skrifa`/`read-fonts` are
-//! already resolved through hayro and already recorded in the comparison's codec list, so naming
-//! one would change neither the lockfile nor the recorded identity — but it would tie this
-//! manifest's exact pin to whatever version hayro resolves, and what it would replace is the
-//! reading of one trusted asset the crate ships: the cmap, the composite glyphs and the metrics.
+//! already resolved through hayro and already recorded in the codec list the harness's identity
+//! digest folds in, so naming one would change neither the lockfile nor the recorded identity — but
+//! it would tie this manifest's exact pin to whatever version hayro resolves, and what it would
+//! replace is the reading of one trusted asset the crate ships: the cmap, the composite glyphs and
+//! the metrics.
 //! The subset's own work — renumbering glyphs, assembling the nine-table sfnt and its checksum, and
 //! the PDF-side font dictionary — is hand-written either way.
 

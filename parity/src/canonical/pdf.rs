@@ -6,124 +6,237 @@
 //!
 //! A page is:
 //!
-//! - `{"media": [x0, y0, x1, y1], "crop": […], "rotate": 0}` — the boxes the page shows and the
-//!   quarter turn it is displayed at. `crop` is `null` where the page shows its whole media box:
-//!   the format's own default for a crop box is the media box, so a page that states none and a
-//!   page that states one repeating the media box say the same thing, and neither is a difference;
+//! - `{"media": [x0, y0, x1, y1], "crop": […], "rotate": 0}` — the boxes and the quarter turn the
+//!   page resolves to. `crop` is `null` where the crop box the page resolves to repeats its media
+//!   box — the format's default for a missing crop box is the media box, so the two are one page
+//!   area — and a crop that differs in either direction is reported: the model compares the boxes,
+//!   not the area their intersection shows
+//!   (`a_crop_box_that_does_not_narrow_the_page_is_still_a_difference`);
 //! - `"text": […]` — every string the page's own content stream draws, in drawing order: one entry
 //!   per `Tj`/`'`/`"` and one per `TJ` (its string elements concatenated, its kerning numbers
 //!   dropped), each resolved to the characters it draws through the font in force's `/ToUnicode`
-//!   map;
+//!   map. The model compares the string, not the marks it is drawn with: see "What the model does
+//!   not compare";
 //! - `"images": [{"sha256": …, "width": …, "height": …, "placement": [a, b, c, d, e, f]}]` — the
 //!   images the content paints, by the digest of their **decoded** samples, the pixel size they
-//!   decode to (so re-encoding an image is not a difference), and the current transform at the
-//!   `Do`/`BI` that paints them: the unit square's image space maps through it, so the drawn size,
-//!   the place and the turn the page gives the picture are all compared;
-//! - `"forms": n` — how many form XObjects the content paints. A form's *content* is not compared
-//!   as a digest (that would bake one library's generated drawing operators into the record), but
-//!   a page that paints a form is still told apart from one that paints none;
-//! - `"appearance_text": […]` — the strings the form XObjects the page paints draw, in painting
-//!   order, resolved the way an appearance is (see below). A flattened field's value is here
-//!   rather than in `text`, which is only what the page's own content draws;
+//!   decode to, and the current transform at the `Do`/`BI` that paints them: the unit square's image
+//!   space maps through it, so the drawn size, the place and the turn the content gives the picture
+//!   are all compared. The page's own `/Rotate` is the separate `rotate` field and is not composed
+//!   into a placement. An image the model cannot read, and a `Do` of an object that is not an image,
+//!   are not recorded in `images`: see "What the model does not compare";
+//! - `"forms": n` — how many times the page's own content paints a form XObject: every `Do` of a
+//!   form counts, and a form that paints another form is not counted again. What a form draws is
+//!   not part of this field (see `appearance_text`, and "What the model does not compare");
+//! - `"appearance_text": […]` — the non-empty strings the form XObjects the page paints draw, in
+//!   painting order, resolved the way an appearance is (see below). A flattened field's value is
+//!   here rather than in `text`, which is only what the page's own content draws;
 //! - `"vector": {"count": …, "sha256": …}` — how many path operators the page draws and a digest
 //!   of them with their operands;
 //! - `"annots": [{"subtype": …, "rect": […], "contents": …}]` — the page's own annotations, in
-//!   `/Annots` order, with `/Rect` normalised to a corner pair.
+//!   `/Annots` order, with `/Rect` normalised to a corner pair (or `null` when the annotation
+//!   states none the model reads). An annotation that states no `/Subtype` is recorded with an
+//!   empty subtype, one that states no `/Contents` with empty contents, and a form field's widget is
+//!   recorded here as well as in the field list.
 //!
 //! The document also carries the four content-bearing Info entries (`title`, `author`, `subject`,
 //! `keywords`; `null` when the document states none), every form field's fully-qualified name,
 //! kind, value, options, shown appearance state and drawn appearance text, and the names of its
-//! embedded files.
+//! embedded files, read from the catalog's `/EmbeddedFiles` name tree.
 //!
 //! # How an appearance is read
 //!
-//! A text field's or a choice field's appearance draws the value the field holds, so the model
-//! reads the text its appearance stream draws. The characters are the ones the stream's font
-//! states in its `/ToUnicode` map — the only code-to-character mapping a subset font written for
-//! PDF carries — and a code that map does not name contributes nothing. The font must carry an
-//! embedded program (`/FontFile`, `/FontFile2` or `/FontFile3`): an appearance drawn with a font
-//! the file does not carry is not one the model reads.
+//! A form field's appearance draws the value the field holds, so the model reads the text its
+//! widget's normal appearance stream draws, for every field kind. That stream is the widget's
+//! `/AP /N` when it is a stream, or the state its `/AS` names when `/N` is a dictionary of states —
+//! `Off` when it names none — so an appearance stored under a state the widget does not show is not
+//! read. The characters are the ones the stream's font states in its `/ToUnicode` map — the only
+//! code-to-character mapping a subset font written for PDF carries — decoded as "How a drawn string
+//! is decoded" describes.
 //!
-//! The blind spot is stated rather than papered over: an appearance that declares consistent
-//! characters and draws the wrong outlines is not detected, because the model does not compare a
-//! glyph's outline. Nor does it check that the embedded program carries a glyph for every code the
-//! appearance draws: a code the stated map names decodes to its character whatever the program
-//! holds, so a subset missing a glyph still reads as the value it claims.
+//! A field's kind, flags, value and options are inherited along its `/Parent` chain, which is where
+//! a widget keeps them; a dictionary whose kids name fields of their own is a container and names
+//! no field itself.
+//!
+//! # How a drawn string is decoded
+//!
+//! A page's text is resolved through the font's `/ToUnicode` map where it has one — read by the
+//! same CMap parser the renderer uses (`hayro-cmap`) — and falls back to the string's own bytes
+//! when it has none. An appearance's text has no fallback. A code the map does not name contributes
+//! the character the code stands for in a page's own run — an unpaired surrogate, which is not a
+//! character, contributes nothing — and nothing in an appearance's, because an appearance must
+//! state the characters it draws. A character code is read as a two-byte value whatever the map's
+//! codespace states: that is what the corpus's Identity-H fonts write, an assumption about the
+//! corpus rather than a property of the format, because a simple font's `/ToUnicode` map states
+//! one-byte codes and would be read pairwise here. An odd trailing byte is dropped. A `/ToUnicode`
+//! stream the parser cannot read, and a `Tf` naming a font the resources do not hold, are both read
+//! as a font with no map. The font's identity — its name and its subset numbering — is not part of
+//! the model: engines name and subset fonts differently, and only the characters are compared.
 //!
 //! # What is normalised away
 //!
-//! - **The file's structure**: object numbers, generation numbers, the cross-reference table's
-//!   layout (a table, a stream, or a repaired one), `/Length`, object streams and stream
-//!   compression — a stream is decoded before anything reads it, so Flate-compressed content and
-//!   plain content are one document.
+//! Each rule below is a row of the tests' `normalised_cases` table, which
+//! `every_normalised_part_is_dropped` requires to compare equal; a rule the table cannot state
+//! names its own test.
+//!
+//! - **The file's structure**: object numbers, generation numbers, `/Length` (a number or a
+//!   reference to one: `a_length_stated_indirectly_is_the_same_stream`), the offsets the
+//!   cross-reference index states and whether the reader follows it or rebuilds it from the
+//!   objects, and stream compression — a stream is decoded before anything reads it, so
+//!   Flate-compressed content and plain content are one document.
 //! - **The trailer's identity**: `/ID` is never read, so two writes of one document compare equal.
 //! - **The writing application**: `/CreationDate`, `/ModDate`, `/Creator`, `/Producer` and any
 //!   version string an engine stamps are dropped. They name the producer, not the document.
 //! - **Appearance streams** (`/AP`): a widget's appearance is generated from the field's value, so
 //!   two engines may draw it differently. What is compared is the characters the appearance draws
-//!   through its stated map and the appearance state a button shows, never the stream's operators,
-//!   its font's name or its subset numbering.
+//!   through its stated map and the appearance state a button shows, never the stream's operators
+//!   (`an_appearances_geometry_and_border_are_not_compared`), and its font only through the
+//!   characters it maps, as "How a drawn string is decoded" states.
 //! - **The image's own encoding and the drawing operators around it**: an image is compared by its
 //!   decoded samples, and its placement by the transform it is painted under, not by how the
-//!   writer spelled the `q`/`cm`/`Do` sequence.
-//! - **Dictionary key order**: every dictionary the model reads is read by key, and the value it
-//!   produces is a JSON object, whose keys are sorted.
-//! - **A crop box that repeats the media box**: the format defines a missing crop box as the media
-//!   box, so the two are one page area. Only a crop box that actually narrows the page is reported.
-//! - **Number spelling**: every number is rounded to four decimals and `-0.0` becomes `0.0`, so
-//!   `595.28`, `595.2800` and `595.28001` are one coordinate.
+//!   writer spelled the `q`/`cm`/`Do` sequence
+//!   (`the_same_samples_are_one_image_however_they_are_stored`).
+//! - **Dictionary key order**: the dictionaries the model reads for its own fields are read by key,
+//!   and the comparison matches JSON objects by key, so a dictionary's key order is not a
+//!   difference.
+//! - **A crop box that repeats the media box** is no crop at all: see the `crop` field above
+//!   (`a_crop_box_that_repeats_the_media_box_is_no_crop`).
+//! - **A box's corner order**: a box written the other way round is the same box, because each
+//!   axis is ordered smaller first (`a box written the other way round`).
+//! - **Number spelling**: every number is held on a four-decimal grid — `(x * 10_000).round() /
+//!   10_000`, ties away from zero — and `-0.0` becomes `0.0`, so `595.28`, `595.2800` and
+//!   `595.28001` are one coordinate. Two numbers therefore compare equal when they round to the
+//!   same grid point: a difference above `0.0001` is always a difference, one below `0.00005` is
+//!   usually not one — two numbers that straddle a grid midpoint differ however close they are — and
+//!   between the two it depends on where they fall. A coordinate no float can express — an overflow
+//!   of composed transforms — is held as `0.0`, so it compares equal to a stated zero.
+//! - **A string that states no encoding**: a PDF string is UTF-16BE when it begins with the
+//!   big-endian byte-order mark `FE FF`, and is otherwise read as UTF-8 with lossy replacement, so
+//!   a high byte that is not UTF-8 reads as U+FFFD. PDFDocEncoding is not decoded: two different
+//!   legacy spellings can therefore read as the same replacement character and compare equal
+//!   (`a_string_without_a_utf16_marker_is_read_as_utf8`).
 //!
 //! # What is compared byte for byte
 //!
-//! Nothing: an image is compared by the digest of its samples, which is what survives a
-//! re-encode. The digest is over the decoded bytes, so the same samples compressed and
-//! uncompressed are one image.
+//! Nothing: an image is compared by its decoded samples, as "The image's own encoding and the
+//! drawing operators around it" states.
 //!
-//! # Limits the model states rather than hides
+//! # What the model does not compare
 //!
-//! - A page's text and images are what its **own** content stream draws. A form XObject's text is
-//!   recorded separately (`appearance_text`), because a form is a resource of its own and two
-//!   engines nest one differently. A form's images and path operators are not recorded at all.
-//! - **What the model does not look at at all**: outlines, page labels, the catalog's language,
-//!   XMP metadata and a link annotation's action target. A difference confined to those is not
-//!   seen; the model states that here rather than implying it compares them.
-//! - **How a drawn string is decoded**: text is compared as the characters the page draws, resolved
-//!   through the font's `/ToUnicode` map where the font has one; a page whose text cannot be
-//!   resolved through a map falls back to its raw codes, which the model states. An appearance's
-//!   text has no such fallback: a code its map does not name contributes nothing. The map is read by
-//!   the same CMap parser the renderer uses (`hayro-cmap`), and a character code is a two-byte
-//!   value — what a `/ToUnicode` map for a simple font states. The font's identity — its name and
-//!   its subset numbering — is not part of the model: engines name and subset fonts differently,
-//!   and only the characters are compared.
-//! - A field's kind is inherited along its `/Parent` chain, which is where a widget keeps it.
-//! - A field with no `/Subtype` annotation, or a page with no `/Annots`, contributes nothing. The
-//!   annotation list is read in order and an entry the file cannot resolve contributes nothing
-//!   either, which is what makes a page whose widget objects an engine deleted read as having no
-//!   annotations at all.
-//! - An appearance is compared by the characters it draws, not by **where** it draws them: the
-//!   line positions, the font size and the box's border and padding are not part of the model. A
-//!   push button's regenerated appearance draws its caption, and the button's own box and border
-//!   are not compared either.
-//! - A field's `/DA` is not read: it states what a viewer would edit the field with, not what the
-//!   file shows.
+//! Each limit below names the test that constructs its difference, or — where the limit is a rule
+//! stated under "What is normalised away" — that rule, which names its test. The README states what
+//! makes a claim a limit of comparison and why a limit of reporting gets no test.
+//!
+//! - **A box or turn the page resolves to rather than states itself.** The model reads the values
+//!   the page resolves to: a `/MediaBox`, `/CropBox` or `/Rotate` stated on the `/Pages` node is the
+//!   page's own, a page with no media box anywhere is A4, and a turn that is not a multiple of 90 is
+//!   no turn. A box moved from the page to its parent, a page that states no media box, and
+//!   `/Rotate 45` therefore compare equal to their resolved counterparts
+//!   (`a_box_inherited_from_the_page_tree_is_the_pages_own`, `a_page_with_no_media_box_is_a4`,
+//!   `a_turn_that_is_not_a_quarter_is_no_turn`).
+//! - **Where a page's text sits, and how it is drawn.** `text` is the strings the page draws and
+//!   nothing else: the position, the font size, the colour, the character and word spacing, the
+//!   render mode and the font it is drawn with are not compared — the font's identity is not part of
+//!   the model, as "How a drawn string is decoded" states — so a stamp drawn in the wrong place, at
+//!   the wrong size or in the wrong colour is not a difference the model sees
+//!   (`page_text_is_compared_as_strings_not_as_marks`).
+//! - **A page's vector content beyond its path operators.** The digest covers the path operators
+//!   and their operands; the colour, the line width, the text state and the transform the path is
+//!   drawn under are not in it, so the same path drawn in another colour or at another place
+//!   compares equal (`a_vector_digest_ignores_colour_width_and_transform`).
+//! - **A form XObject's own content.** A page records how many times it paints a form, and the
+//!   text those forms draw; a form's images and path operators are not recorded at all, so a form
+//!   that draws only vector marks is indistinguishable from a form that draws nothing, and two
+//!   different drawings are one page
+//!   (`a_form_that_draws_only_marks_draws_nothing_the_model_reads`,
+//!   `a_painted_form_is_counted_and_its_drawing_is_not_compared`). A form's or an appearance's
+//!   text is read through its **own** `/Resources`: the format lets a form inherit the page's and
+//!   an appearance the AcroForm's `/DR` when it states none, and the model does neither, so a
+//!   stream without resources states no text (`a_form_without_its_own_resources_states_no_text`,
+//!   `an_appearance_does_not_inherit_the_form_default_resources`).
+//! - **An appearance's geometry and border.** An appearance is compared by the characters it
+//!   draws, not by where it draws them: the line positions, the font size, the appearance's own
+//!   `/BBox` — the box it draws in, not the widget's `/Rect`, which `annotations` records — and the
+//!   widget's `/BS` border and padding are not part of the model, whatever the field kind
+//!   (`an_appearances_geometry_and_border_are_not_compared`).
+//! - **An appearance's font when the file does not embed it.** The stream's font must carry an
+//!   embedded program (`/FontFile`, `/FontFile2` or `/FontFile3`) for the appearance to be read at
+//!   all, so a widget whose font carries none states no text and two such widgets compare equal
+//!   whatever their maps say (`an_appearance_drawn_with_an_unembedded_font_states_nothing`).
+//! - **An appearance's glyph program.** The characters come from the stated map; the outlines the
+//!   program carries are not compared, so two files whose programs differ — a subset missing a
+//!   glyph included — state the same value and compare equal. Nor does the model check that the
+//!   program carries a glyph for every code the appearance draws: a code the stated map names
+//!   decodes to its character whatever the program holds
+//!   (`an_appearances_glyph_program_is_not_compared`).
+//! - **A field's `/DA`.** It states what a viewer would edit the field with, not what the file
+//!   shows (`a_fields_default_appearance_is_not_read`).
+//! - **A field's value, kind, state and options, read the way the format's writers read them.** A
+//!   field with no `/FT` and one whose type the model does not name are both `unknown`; a choice
+//!   that selects several options holds them as an array and the model spells them joined with
+//!   `", "`, so an array and a string that spells the join are one value; a choice's — or a push
+//!   button's — `[export display]` pair is its display name, the second entry or the first when the
+//!   pair states one, so the export name is not compared; a radio group's or a checkbox's `/Opt`
+//!   holds export values, so a pair there names none; a radio group's state is the first state its
+//!   widgets show that is not `Off` — `Off` when it has widgets and none shows another state,
+//!   including when they state no `/AS` at all, and `null` when the group has no widget; a
+//!   checkbox's state is its first widget's, `null` when that widget states none
+//!   (`a_field_without_a_type_is_unknown`,
+//!   `a_multi_select_value_is_spelled_as_one_string`,
+//!   `an_option_pairs_export_name_is_not_compared`,
+//!   `a_radio_state_is_the_first_state_that_is_not_off`).
+//! - **An annotation beyond its subtype, rectangle and contents.** The colour, the title, the
+//!   flags and a link's action target are not read, so a difference confined to them compares
+//!   equal (`an_annotation_is_its_subtype_rectangle_and_contents`).
+//! - **The parts of the document the model does not read at all**: outlines, page labels, the
+//!   catalog's language and XMP metadata. A difference confined to them is not seen
+//!   (`outlines_page_labels_language_and_xmp_are_not_read`).
+//! - **The document's structure tree and a page's marked content** are not read either: a document
+//!   that tags its content and one that does not are one document
+//!   (`a_structure_tree_and_marked_content_are_not_read`).
+//! - **An attachment beyond its name.** `attachments` holds the names in the catalog's
+//!   `/EmbeddedFiles` name tree and nothing else: a file specification's bytes are not read, so two
+//!   attachments of one name whose files differ compare equal
+//!   (`an_attachment_is_its_name_and_not_its_file`).
+//! - **A number below the model's grid**: see "Number spelling" above for the boundary, and for the
+//!   coordinate no float can express (`numbers_are_compared_on_a_four_decimal_grid`).
+//! - **A string in a legacy encoding**: see "A string that states no encoding" above.
+//! - **An image the model cannot decode, one that states no positive width or height, and a `Do` of
+//!   an object that is neither an image nor a form.** None of them is recorded, so a page that
+//!   paints only one of them compares equal to a page that paints nothing
+//!   (`an_image_the_model_cannot_decode_is_not_recorded`).
+//! - **A content stream the model cannot decode.** A page's or a form's stream that the decoder
+//!   refuses contributes nothing the model records, so it models as one that draws nothing
+//!   (`a_content_stream_the_model_cannot_decode_draws_nothing`).
+//! - **What lies beyond a bound, and what follows an unreadable entry.** The annotation, field,
+//!   option and attachment lists, the field tree, a name tree and a form nesting all stop at a
+//!   bound, so a difference past it compares equal (`every_list_bound_cuts_off_what_lies_beyond_it`);
+//!   an entry of `/Annots` or `/AcroForm/Fields` that the file cannot resolve ends the list rather
+//!   than being skipped, so everything after it is not modelled
+//!   (`an_unresolvable_reference_ends_the_list_it_is_in`).
+//!
+//! One limit of reporting is not a limit of comparison, so it has no test that requires a difference
+//! to compare equal: the model cannot read the words of a page that draws them as outlines — such a
+//! page states no text, so the model compares the outlines as path operators
+//! (`text_drawn_as_outlines_is_read_as_vector_content` pins what it does read).
 //!
 //! # What the model refuses
 //!
-//! A document of more than 10,000 pages, or a page that runs more than 100,000 content-stream
-//! operators, is an error rather than a model: a page tree or a stream that never ends must fail
-//! the gate with a message, not exhaust the harness. The annotation, field, option and attachment
-//! lists are bounded for the same reason, and so is the depth of form XObjects a page's appearance
-//! walk follows.
+//! A document of more than 10,000 pages, or a content stream that runs more than 100,000
+//! operators, is an error rather than a model. The page bound limits what the model will describe,
+//! not what the parser allocates: the parser materialises the page list before the bound is applied
+//! and recurses through the page tree, so a deeply nested tree overflows its stack rather than
+//! reaching the bound — an abort that no containment can catch. The operator bound is charged per
+//! stream, so a stream that never ends is refused rather than exhausting the run.
 //!
 //! Every stream the model decodes is charged its decoded length against one document-wide total
 //! (256 MiB): a page's content, a form XObject, a font's `/ToUnicode` map. An image is charged at
 //! four bytes per declared pixel **before** it is decoded (64 MiB for one image), so a stream that
-//! claims an enormous size is refused rather than allocated. A stream object is charged once
-//! however often it is painted — it is still decoded on each paint, which is work rather than
-//! memory — and an inline image, which has no object identity, is charged on every paint. A
-//! non-image stream is decoded before it can be charged, so one stream's own expansion is the
-//! decoder's; the charge refuses the document rather than letting a document of many streams
-//! exhaust the run.
+//! claims an enormous size is refused rather than allocated. A stream object painted as an image or
+//! a form is charged once however often it is painted — it is still decoded on each paint, which is
+//! work rather than memory — and an inline image, which has no object identity, is charged on every
+//! paint. A page's content stream is charged per page that reads it. A non-image stream is decoded
+//! before it can be charged, so one stream's own expansion is the decoder's; the charge refuses the
+//! document rather than letting a document of many streams exhaust the run.
 //!
 //! An unreadable PDF is an `Err`, never an empty value: a comparison must not pass because the
 //! model could not read what it was given.
@@ -144,47 +257,49 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 /// The decimals every number in the model keeps — four, the precision a PDF's own arithmetic
-/// holds rather than the last bit of a float's spelling — as the scale that rounds to them.
+/// holds rather than the last bit of a float's spelling — as the scale that rounds to them. The
+/// module docs state what that makes equal.
 const ROUND_FACTOR: f64 = 10_000.0;
 
-/// Maximum annotations modelled for one page, so a `/Annots` array that is a cycle terminates.
+/// Maximum annotations modelled for one page; a longer `/Annots` array is cut off here rather than
+/// walked, so a cycle terminates.
 const MAX_ANNOTATIONS: usize = 1000;
 
-/// Maximum form fields modelled for one document, for the same reason.
+/// Maximum form fields modelled for one document; a longer field tree is cut off here.
 const MAX_FIELDS: usize = 1000;
 
-/// Maximum depth of the field tree, so `/Kids` that point in a cycle terminate.
+/// The depth at which the field-tree walk stops: a field 32 levels below its root is read, one 33
+/// levels down is not, so `/Kids` that point in a cycle terminate.
 const MAX_FIELD_DEPTH: usize = 32;
 
-/// Maximum depth of form XObjects an appearance walk follows, so a form that paints itself
-/// terminates.
+/// The depth at which the appearance walk stops: a form nine deep is followed, one ten deep is not,
+/// so a form that paints itself terminates.
 const MAX_FORM_DEPTH: usize = 8;
 
-/// Maximum options listed for one field: a list box whose `/Opt` is a cycle.
+/// Maximum options listed for one field; a longer `/Opt` is cut off here.
 const MAX_FIELD_OPTIONS: usize = 100;
 
-/// Maximum depth of a name tree, so `/Kids` that point in a cycle terminate.
+/// The depth at which a name tree is walked: a name eight levels below the root is read, one nine
+/// levels down is not, so `/Kids` that point in a cycle terminate.
 const MAX_NAME_TREE_DEPTH: usize = 8;
 
-/// Maximum embedded files named for one document.
+/// Maximum embedded files named for one document; a longer name tree is cut off here.
 const MAX_ATTACHMENTS: usize = 1000;
 
-/// Maximum pages one document may hold, so a page tree that never ends is a refusal rather than an
-/// exhaustion. This is the model's own bound, not the kit's: `rules.json`'s `max_pages_per_request`
-/// bounds the pages a request may name, which is a different quantity.
+/// Maximum pages one document may hold, so a document with more is refused rather than modelled.
+/// This is the model's own bound, not the kit's: `rules.json`'s `max_pages_per_request` bounds the
+/// pages a request may name, which is a different quantity.
 const MAX_PAGES: usize = 10_000;
 
-/// Maximum content-stream operators one page may run. A stream that never ends is a refusal rather
-/// than an exhaustion, and no real page comes near it.
-const MAX_PAGE_OPERATORS: usize = 100_000;
+/// Maximum content-stream operators one stream may run. Each stream the model walks — a page's own
+/// content and each form it paints — is charged its own count.
+const MAX_STREAM_OPERATORS: usize = 100_000;
 
-/// Maximum bytes one image may claim to decode to, charged at four bytes per declared pixel before
-/// the decode is attempted, so an image that claims more is refused rather than allocated.
+/// Maximum bytes one image may claim to decode to.
 const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
 
-/// Maximum bytes one document's decoded streams may hold in total: many large images, content
-/// streams or font maps must fail the case, not the run. Independent of [`MAX_PAGES`] — a document
-/// may be refused by either bound, and the refusal names the one it crossed.
+/// Maximum bytes one document's decoded streams may hold in total. Independent of [`MAX_PAGES`] — a
+/// document may be refused by either bound, and the refusal names the one it crossed.
 const MAX_DECODED_BYTES: u64 = 256 * 1024 * 1024;
 
 /// `/Ff` bit 16: a `Btn` field is a radio group, whose kids are its buttons.
@@ -194,8 +309,7 @@ const FIELD_FLAG_RADIO: i32 = 1 << 15;
 const FIELD_FLAG_PUSH_BUTTON: i32 = 1 << 16;
 
 /// The content-stream operators that build, clip and paint a path — what the model digests as a
-/// page's vector content. Colours, line widths and text state are not path operators and are not
-/// part of the digest.
+/// page's vector content.
 const VECTOR_OPERATORS: &[&[u8]] = &[
     // Construction.
     b"m", b"l", b"c", b"v", b"y", b"h", b"re", //
@@ -208,11 +322,12 @@ const VECTOR_OPERATORS: &[&[u8]] = &[
 /// each CMap once.
 type ToUnicodeCache = HashMap<ObjectIdentifier, Option<Rc<CMap>>>;
 
-/// The canonical form of one PDF's bytes. Never panics; an unreadable PDF is an `Err`.
+/// The canonical form of one PDF's bytes.
 pub fn canonical(bytes: &[u8]) -> Result<Value> {
     // The parser is third-party code running over untrusted bytes; a panic inside it would unwind
     // through the caller, and a caught one must not read as a model of anything. The shared
-    // containment keeps the panic's own message and its trace off the harness's stderr.
+    // containment keeps the panic's own message and its trace off the harness's stderr. A stack
+    // overflow inside the parser aborts the process, which no containment can catch.
     match crate::shutdown::contain_panics(|| model(bytes)) {
         Ok(value) => value,
         Err(payload) => Err(anyhow!(
@@ -250,11 +365,11 @@ fn charge_pages(count: usize) -> Result<()> {
     Ok(())
 }
 
-/// Count one content-stream operator against the page's bound.
+/// Count one content-stream operator against the bound of the stream it belongs to.
 fn charge_operators(count: &mut usize) -> Result<()> {
     *count += 1;
-    if *count > MAX_PAGE_OPERATORS {
-        bail!("a page runs more than {MAX_PAGE_OPERATORS} content-stream operators");
+    if *count > MAX_STREAM_OPERATORS {
+        bail!("a content stream runs more than {MAX_STREAM_OPERATORS} operators");
     }
     Ok(())
 }
@@ -528,8 +643,7 @@ fn rotation_degrees(rotation: Rotation) -> i32 {
     }
 }
 
-/// A box as `[x0, y0, x1, y1]`, with each corner the smaller of the two the file states: a box
-/// written the other way round is the same box.
+/// A box as `[x0, y0, x1, y1]`, each axis from its smaller coordinate to its larger.
 fn box_value(x0: f64, y0: f64, x1: f64, y1: f64) -> Value {
     json!([
         rounded(x0.min(x1)),
@@ -539,11 +653,13 @@ fn box_value(x0: f64, y0: f64, x1: f64, y1: f64) -> Value {
     ])
 }
 
-/// One number as the model holds it: rounded to the four decimals [`ROUND_FACTOR`] names, with
-/// `-0.0` folded onto `0.0`.
+/// One number as the model holds it: on the four-decimal grid [`ROUND_FACTOR`] names, with `-0.0`
+/// folded onto `0.0`.
 fn rounded(value: f64) -> f64 {
-    // A coordinate no float can express is no coordinate: serde_json would write it as `null`,
-    // and two such pages would then compare equal for the wrong reason.
+    // A coordinate no float can express — what a composition of large transforms overflows to —
+    // is held as zero. serde_json writes such a value as `null`, which two pages would then share
+    // for the wrong reason; zero is at least a coordinate, and the module docs state that it
+    // compares equal to a stated zero.
     if !value.is_finite() {
         return 0.0;
     }
@@ -552,8 +668,9 @@ fn rounded(value: f64) -> f64 {
     if rounded == 0.0 { 0.0 } else { rounded }
 }
 
-/// A PDF text string: UTF-16BE when it carries the byte-order mark, otherwise the bytes as they
-/// stand. `from_utf8_lossy` keeps a single-byte encoding readable instead of refusing the file.
+/// A PDF text string: UTF-16BE when it carries the byte-order mark, otherwise the bytes read as
+/// UTF-8 with lossy replacement. PDFDocEncoding is not decoded, so a high byte outside UTF-8 reads
+/// as U+FFFD; the module docs state what that costs the comparison.
 fn pdf_text(bytes: &[u8]) -> String {
     if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
         let units = rest
@@ -567,8 +684,8 @@ fn pdf_text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-/// How a text run is read: a page's own content falls back to the string's bytes, while an
-/// appearance must state its characters through an embedded font's map.
+/// How a text run is read: a page's own content, or an appearance. The module docs state what each
+/// does with a code its font's map does not name.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RunText {
     Page,
@@ -577,10 +694,6 @@ enum RunText {
 
 /// The characters a drawn string stands for: its font's `/ToUnicode` map when the font has one,
 /// otherwise, for a page's own content, the string's own bytes.
-///
-/// A map names each character by a 2-byte code, so the bytes are split into 2-byte codes and each
-/// is looked up. A page run's unnamed code contributes the code point itself; an appearance's
-/// contributes nothing, because the appearance must say what it draws.
 fn run_text<'a>(
     bytes: &[u8],
     font: Option<&Dict<'a>>,
@@ -620,8 +733,8 @@ fn run_text<'a>(
     Ok(out)
 }
 
-/// The run a text-showing instruction draws, or `None` when it is not one. `TJ`'s string elements
-/// are concatenated and its kerning numbers dropped; `"` states its string last.
+/// The run a text-showing instruction draws, or `None` when it is not one. `"` states its string
+/// last; the module docs state what `TJ`'s numbers and strings mean.
 fn instruction_text<'b, 'a>(
     instruction: &Instruction<'b, 'a>,
     font: Option<&Dict<'a>>,
@@ -734,9 +847,8 @@ fn operand_text(object: &Object<'_>, out: &mut String) {
 
 /// The strings one painted form XObject draws, appended in drawing order.
 ///
-/// A form's content is walked with its own `/Resources`, because the fonts it names are its own. A
-/// form that paints another form is followed, bounded by [`MAX_FORM_DEPTH`]. A stream that cannot
-/// be decoded contributes nothing: a form whose content the model cannot read states no text.
+/// A form that paints another form is followed, bounded by [`MAX_FORM_DEPTH`]; the module docs
+/// state what the walk does not read.
 fn walk_form(
     stream: &Stream<'_>,
     out: &mut Vec<Value>,
@@ -830,8 +942,8 @@ fn font_is_embedded(font: &Dict<'_>) -> bool {
 
 /// One image stream — an image XObject or an inline image — as the model holds it: the digest of
 /// its decoded samples, the pixel size they decode to, and the transform it is painted under.
-/// Re-encoding the same picture is the same image; different samples or a different placement are
-/// not.
+/// `None` for a stream whose stated subtype is not `/Image`, one that states no positive width or
+/// height, or one that cannot be decoded.
 fn image_value(
     stream: &Stream<'_>,
     budget: &mut Decoded,
@@ -1210,13 +1322,14 @@ fn option_text(object: Object<'_>) -> Option<String> {
     }
 }
 
-/// The options a field offers: a button's fill values, a choice's display names.
+/// The options a field offers: a radio group's or a checkbox's export values, and a choice's — or a
+/// push button's — display names.
 fn field_options(field: &Dict<'_>, kind: &str) -> Value {
     let mut options = Vec::new();
-    // The two kinds read the same entry differently: a button's (`PDFAcroButton`, which a checkbox
-    // extends as much as a radio group) `/Opt` is its export values, which are the top-level
-    // strings alone, so a pair names none; a choice field's is its display names, which a pair's
-    // second entry states.
+    // The kinds read the same entry differently: a radio group's or a checkbox's (`PDFAcroButton`)
+    // `/Opt` is its export values, which are the top-level strings alone, so a pair names none; for
+    // a choice field — and for a push button, which the model does not single out — it is the
+    // display names, which a pair's second entry states.
     let button = matches!(kind, "radio" | "checkbox");
     match inherited(field, b"Opt") {
         Some(Object::String(text)) => options.push(pdf_text(text.as_bytes())),
@@ -1312,9 +1425,9 @@ mod tests {
     }
 
     #[test]
-    fn a_page_over_the_operator_limit_is_refused() {
+    fn a_stream_over_the_operator_limit_is_refused() {
         let mut count = 0;
-        for _ in 0..MAX_PAGE_OPERATORS {
+        for _ in 0..MAX_STREAM_OPERATORS {
             charge_operators(&mut count).expect("the bound itself is allowed");
         }
         let error =

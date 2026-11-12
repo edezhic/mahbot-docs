@@ -30,16 +30,21 @@
 //! Three produced-file differences from the reference are known and stated rather than hidden:
 //!
 //! - A regenerated field's `/DA` is left as the file states it, where the reference restates it with
-//!   the embedded font and the size it chose. The entry says what a viewer would edit the field
-//!   with rather than what the file shows, and the comparison does not read it.
+//!   the embedded font and the size it chose. The harness's PDF model states that a field's `/DA`
+//!   is not part of what it compares, so the two files compare equal there.
 //! - An object-valued number is held in the object model as a 32-bit float, so a computed coordinate
-//!   can be spelled with fewer digits than the reference's. The comparison rounds every number to
-//!   four decimals, which hides that difference up to about two thousand points — and no page,
-//!   box or transform this half writes is anywhere near that.
+//!   can be spelled with fewer digits than the reference's. The harness's PDF model holds every
+//!   number on a 1e-4 grid, and its statement gives the boundary that follows; what matters here is
+//!   that half a cell is 0.00005. A 32-bit float's own error stays below that only up to about 1024
+//!   points: at the corpus's page, 595 by 842 points, half an ULP is 3.05e-5, which clears the
+//!   0.00005 boundary by 1.95e-5 — two fifths of that half cell, a fifth of a whole one — while a
+//!   coordinate the request surface allows, 20,000 points, carries about a thousandth of a point,
+//!   some ten cells.
 //! - A flattened form removes each widget from its page's `/Annots` where the reference removes the
 //!   widget's *appearance* reference instead and then deletes the widget object, leaving a dangling
-//!   reference behind. An entry the model cannot resolve reads as no annotation at all, so the two
-//!   compare equal.
+//!   reference behind. The harness's PDF model's annotation walk stops at the first entry it cannot
+//!   resolve, as its statement says, so nothing after that entry is modelled; the flattened page's
+//!   only remaining entry is the dangling one, which is why the two sides compare equal here.
 //!
 //! A fourth is not comparable at all, because only one side produces: a PNG whose image data is
 //! short. The reference's decoder inflates what it can and embeds the partial samples; this half
@@ -684,22 +689,19 @@ fn merge_bytes_over(total: u64, limit: u64) -> Option<Failure> {
 
 #[cfg(test)]
 mod tests {
-    //! The page actions' own tests: what the comparison cannot see.
+    //! The page actions' own tests: what the harness's PDF model leaves out.
     //!
-    //! The gate compares meaning — page boxes, the turn, drawn text, image and form digests, annotations
-    //! by subtype and rectangle, field values and four description fields. It does not read an outline,
-    //! a tag, a page label, a name tree or an attachment's file, and it normalises the producer and the
-    //! dates away. These tests read the produced file back with the crate's own reader, and parse it
-    //! with the object model, to pin what the comparison leaves out: what a merge and a split carry and
-    //! what they drop, what the in-place actions keep, that a resize scales and centres the content
-    //! rather than only rewriting the boxes, and that a document carrying an encryption dictionary is
-    //! refused however it would open.
+    //! The harness's PDF model states in its own module documentation what it compares and what it
+    //! does not; what these tests need from it is the other side of the line. They read the produced
+    //! file back with the crate's own reader, and parse it with the object model, to pin what the
+    //! model leaves out: what a merge and a split carry and what they drop, what the in-place actions
+    //! keep, that a resize scales and centres the content rather than only rewriting the boxes, and
+    //! that a document carrying an encryption dictionary is refused however it would open.
     //!
-    //! The caps the crate owns are pinned by the tests that own them, because the reference has none
-    //! of them: it produces where the crate refuses, so no corpus case can judge them. A merge's
-    //! input count and a split's part count are request-shape checks, pinned beside the surface that
-    //! makes them; a merge's byte total can only be checked once the inputs are in hand, so it is
-    //! here.
+    //! The caps the crate owns are pinned by the tests that own them: the reference has no such cap,
+    //! so no corpus case exercises them. A merge's input count and a split's part count are
+    //! request-shape checks, pinned beside the surface that makes them; a merge's byte total can only
+    //! be checked once the inputs are in hand, so it is here.
 
     // A fixture states exact numbers, so a test compares them exactly; the writer's own arithmetic
     // is held to a tolerance where it rounds.
@@ -2855,9 +2857,10 @@ mod tests {
     #[test]
     fn a_file_whose_index_cannot_be_followed_is_read_from_its_body() {
         // Every shape a damaged index takes — offsets shifted, no index at all, a pointer naming
-        // nothing, a root that is not a catalog — read on the two paths a page takes. What the
-        // comparison cannot see is that the recovered page still holds its content, which is what
-        // this pins.
+        // nothing, a root that is not a catalog — read on the two paths a page takes. The model
+        // compares the recovered page's text and path operators, and this asserts its text; what
+        // neither sees is the recovery itself — that the file's index was damaged and answered from
+        // its body, which is what this pins.
         for (name, bytes) in [
             ("shifted.pdf", build::pdf_damaged_shifted()),
             ("no-index.pdf", build::pdf_damaged_no_index()),
@@ -4347,9 +4350,9 @@ mod tests {
 
     #[test]
     fn a_right_aligned_field_insets_its_box_by_the_border_and_padding() {
-        // `/Q` and `/BS /W` move a line inside its box, which the comparison does not read, so this
-        // is the one witness that the alignment and the border are applied — and that a choice
-        // field's own `/Q` is not.
+        // `/Q` and `/BS /W` move a line inside its box, which the harness's PDF model's
+        // appearance-geometry limit says it does not compare, so this is the one witness that the
+        // alignment and the border are applied — and that a choice field's own `/Q` is not.
         let directory = scratch();
         let input = fixture(directory.path(), "aligned.pdf", build::pdf_aligned_form());
         let outcome = run(
@@ -4445,7 +4448,9 @@ mod tests {
     #[test]
     fn a_button_whose_appearance_is_one_stream_gets_the_states_it_shows() {
         // The reference regenerates a button whose normal appearance is not a state dictionary;
-        // the model compares the state the box shows, not the mark, so this is the only witness.
+        // the harness's PDF model compares the state the box shows and the text an appearance
+        // draws, but this mark is drawn as paths, which its statement says are not compared, so the
+        // state is the only witness.
         let directory = scratch();
         let input = fixture(
             directory.path(),
