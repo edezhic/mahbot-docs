@@ -1008,6 +1008,34 @@ const SPEC_CONSTANTS: &[(&str, f64, usize, &str)] = &[
         1,
         "a regular-expression capture-group index (the third group) in a merge rewrite",
     ),
+    // ── the template fill's port of the reference library ───────────────────────────────────────
+    (
+        "src/writing/fill/errors.rs",
+        30.0,
+        1,
+        "the reference's `substr(0, 30)` quotes the first thirty UTF-16 units of the text around a \
+         malformed tag",
+    ),
+    (
+        "src/writing/fill/errors.rs",
+        10.0,
+        1,
+        "the reference lists an unidentified archive's first ten entries in its message",
+    ),
+    (
+        "src/writing/fill/lexer.rs",
+        4.0,
+        3,
+        "the reference widens the text it quotes around a doubled opening tag by four units, starts \
+         a doubled closing tag's context four units back, and widens that context by the same four",
+    ),
+    (
+        "src/writing/fill/postparse.rs",
+        50.0,
+        1,
+        "the reference searches at most fifty neighbouring section tags for the one a closing tag \
+         matches",
+    ),
 ];
 
 /// The exemptions one file gets: each value its reviewed entries cover, with the occurrences of it

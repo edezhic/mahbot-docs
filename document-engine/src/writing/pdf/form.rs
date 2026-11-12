@@ -24,6 +24,7 @@ use super::page;
 use super::{Produced, editable};
 use crate::operation::{Failure, Request};
 use crate::vocabulary::{self, vocabulary};
+use crate::writing::scalar_value;
 
 /// One terminal field: its object, the name it is addressed by, its kind and the widgets it draws.
 struct Field {
@@ -96,11 +97,11 @@ pub(super) fn run(request: &Request, produced: &mut Produced) -> Result<(), Fail
         return Err(Failure::engine());
     };
     for (name, value) in values {
-        if !scalar(value) {
+        if !scalar_value(value) {
             return Err(Failure::usage(
                 vocabulary()
                     .marks
-                    .format("pdf_form_value_kind", &[("name", name)]),
+                    .format("surface_value_structure", &[("name", name)]),
             ));
         }
     }
@@ -423,21 +424,6 @@ pub(super) fn pdf_text(bytes: &[u8]) -> String {
         return String::from_utf16_lossy(&units);
     }
     String::from_utf8_lossy(bytes).into_owned()
-}
-
-/// Whether a value is one of the shared rules' scalar kinds: text, a number or a boolean.
-fn scalar(value: &serde_json::Value) -> bool {
-    let kind = match value {
-        serde_json::Value::String(_) => "string",
-        serde_json::Value::Number(_) => "number",
-        serde_json::Value::Bool(_) => "boolean",
-        serde_json::Value::Null => "nothing",
-        serde_json::Value::Array(_) => "list",
-        serde_json::Value::Object(_) => "map",
-    };
-    vocabulary::scalar_kinds()
-        .iter()
-        .any(|allowed| allowed == kind)
 }
 
 /// A value as the kit's `String()` renders it.

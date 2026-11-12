@@ -493,6 +493,7 @@
   },
   "engine": {
     "paragraph_nesting_max": 1000,
+    "template_nesting_max": 100,
     "page_tree_depth_max": 64,
     "object_depth_max": 128,
     "pdf_scan_passes_max": 8,
@@ -1896,7 +1897,7 @@
         "writing"
       ]
     },
-    "edit_part_duplicate": {
+    "write_part_duplicate": {
       "text": "the package states the part {name} twice",
       "printed_by": [
         "writing"
@@ -1932,7 +1933,7 @@
         "writing"
       ]
     },
-    "edit_object_value": {
+    "surface_object_value": {
       "text": "[object Object]",
       "printed_by": [
         "writing"
@@ -2604,6 +2605,162 @@
         "writing"
       ]
     },
+    "fill_wrong_family_hint": {
+      "text": "rename it to match its content",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_compile_failed": {
+      "text": "the sample cannot be filled: {reason}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_write_failed": {
+      "text": "the filled package could not be written: {message}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_nested": {
+      "text": "the sample nests sections {depth} deep, and the engine reads at most {max}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_invalid_xml": {
+      "text": "An XML file has invalid xml",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_malformed_xml": {
+      "text": "Malformed xml",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_delimiters_invalid": {
+      "text": "New Delimiters cannot be parsed",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_delimiters_repeat": {
+      "text": "the sample holds delimiter changes that never close and name delimiters an earlier change already restarted the scan with, so filling it would never finish",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_tag_unopened": {
+      "text": "The tag beginning with \"{tag}\" is unopened",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_tag_duplicate_open": {
+      "text": "The tag beginning with \"{tag}\" has duplicate open tags",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_tag_duplicate_close": {
+      "text": "The tag ending with \"{tag}\" has duplicate close tags",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_tag_unclosed": {
+      "text": "The tag beginning with \"{tag}\" is unclosed",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_loop_unclosed": {
+      "text": "The loop with tag \"{tag}\" is unclosed",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_loop_unopened": {
+      "text": "The loop with tag \"{tag}\" is unopened",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_closing_mismatch": {
+      "text": "The tag \"{open}\" is closed by the tag \"{close}\"",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_unbalanced_loops": {
+      "text": "Unbalanced loop tags {tags}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_loop_position": {
+      "text": "The tags \"{tag}\" are misplaced in the document, for example one of them is in a table and the other one outside the table",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_tag_not_found": {
+      "text": "No tag \"{element}\" was found at the {side}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_raw_not_alone": {
+      "text": "The raw tag \"{tag}\" should be the only text in this paragraph. This means that this tag should not be surrounded by any text or spaces.",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_raw_not_in_paragraph": {
+      "text": "The tag \"{tag}\" is not inside a paragraph, putting raw tags inside an inline loop is disallowed.",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_corrupt_characters": {
+      "text": "There are some corrupt characters for the field \"{tag}\"",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_raw_not_text": {
+      "text": "The value of the raw tag : \"{tag}\" is not a string",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_filetype_not_identified": {
+      "text": "The filetype for this file could not be identified, is this file corrupted ? {message}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_empty_zip": {
+      "text": "Empty zip file",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_zip_contains": {
+      "text": "Zip file contains : {files}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "fill_xlsx_needs_module": {
+      "text": "Filetype \"{family}\" is supported only with the paid XlsxModule",
+      "printed_by": [
+        "writing"
+      ]
+    },
     "edit_formula_note": {
       "text": "[the sheet's {count} {phrase} while {moved} moved — check the references]",
       "printed_by": [
@@ -2898,7 +3055,7 @@
         "writing"
       ]
     },
-    "pdf_form_value_kind": {
+    "surface_value_structure": {
       "text": "the value for \"{name}\" must be text, a number or a boolean, not a structure",
       "printed_by": [
         "writing"
@@ -3793,6 +3950,9 @@
       "writing"
     ],
     "paragraph_nesting_max": [
+      "writing"
+    ],
+    "template_nesting_max": [
       "writing"
     ],
     "pdf_scan_passes_max": [

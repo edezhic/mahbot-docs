@@ -1,9 +1,12 @@
 //! The string surgery the writing half does on a package's XML parts.
 //!
 //! These are transliterations of the producing kit's helpers, kept one-for-one so a part this
-//! crate writes and a part the kit writes cannot disagree about a tag's shape. A part is XML text,
-//! never a parsed tree: an edit changes the bytes of the one element it names and carries every
-//! other byte through, which is what keeps a chart, a comment or a macro intact.
+//! crate writes and a part the kit writes cannot disagree about a tag's shape. [`attribute_value`]
+//! spells an attribute the way the kit's own reader spells it; the one widening,
+//! [`attribute_value_any_quote`], serves the two package parts the reference parses as XML rather
+//! than with a regex. A part is XML text, never a parsed tree: an edit changes the bytes of the one
+//! element it names and carries every other byte through, which is what keeps a chart, a comment or
+//! a macro intact.
 //!
 //! The helpers return `Option`/`Result` rather than panicking on a part a malformed producer wrote.
 //! A name is a format word the caller states (an element's own name), so the regular expressions
@@ -574,17 +577,81 @@ pub(super) fn listed<S: Borrow<str>>(values: &[S], conjunction: &str) -> String 
 }
 
 /// The value of the attribute `name` on a tag, or `None` when the tag states none.
+///
+/// Spelled the way the kit's own `xmlAttribute` spells it, `\bname="([^"]*)"`, with `name` escaped
+/// because an attribute name is a literal: a single-quoted value and whitespace around the `=` are
+/// not read, because a part this crate edits is read the way the kit reads it.
 #[must_use]
 pub(super) fn attribute_value<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
-    pattern(format!(r#"\b{}="([^"]*)""#, regex::escape(name)))
-        .captures(tag)
-        .and_then(|captures| captures.get(1))
-        .map(|found| found.as_str())
+    value_of(tag, format!(r#"\b{}="([^"]*)""#, regex::escape(name)))
+}
+
+/// [`attribute_value`] spelled the way an XML parser reads it, for the two package parts the
+/// reference's template library parses as XML rather than with a regex: `[Content_Types].xml` and
+/// `_rels/.rels`. Both quote styles and whitespace around the `=` are read, and each style keeps its
+/// own quote as the terminator, so a value holding the other quote is read whole.
+#[must_use]
+pub(super) fn attribute_value_any_quote<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    value_of(
+        tag,
+        format!(
+            r#"(?:^|\s){}\s*=\s*(?:"([^"]*)"|'([^']*)')"#,
+            regex::escape(name)
+        ),
+    )
+}
+
+/// The first capture group of `text`'s match of `expression`: whichever quote style the attribute
+/// was written with is the group that took part.
+fn value_of(text: &str, expression: String) -> Option<&str> {
+    pattern(expression)
+        .captures(text)?
+        .iter()
+        .skip(1)
+        .flatten()
+        .next()
+        .map(|group| group.as_str())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tag_attribute_is_read_the_way_the_kit_reads_it() {
+        let tag = r#"<Override PartName="/word/document.xml" ContentType="x"/>"#;
+        assert_eq!(attribute_value(tag, "PartName"), Some("/word/document.xml"));
+        assert_eq!(attribute_value(tag, "ContentType"), Some("x"));
+        // A single-quoted value is one the kit's own regex does not read, so neither does this.
+        let tag = "<Override PartName='/word/a.xml' ContentType='y'/>";
+        assert_eq!(attribute_value(tag, "PartName"), None);
+        assert_eq!(
+            attribute_value_any_quote(tag, "PartName"),
+            Some("/word/a.xml")
+        );
+        assert_eq!(attribute_value_any_quote(tag, "ContentType"), Some("y"));
+        // So is a value written with whitespace around the `=`, which a parser accepts.
+        let tag = r#"<Override PartName = "/word/b.xml"/>"#;
+        assert_eq!(attribute_value(tag, "PartName"), None);
+        assert_eq!(
+            attribute_value_any_quote(tag, "PartName"),
+            Some("/word/b.xml")
+        );
+        // A value holding the other quote character is read to its own closing quote.
+        let tag = r#"<Override PartName="/word/it's.xml"/>"#;
+        assert_eq!(attribute_value(tag, "PartName"), Some("/word/it's.xml"));
+        assert_eq!(
+            attribute_value_any_quote(tag, "PartName"),
+            Some("/word/it's.xml")
+        );
+        let tag = r#"<Override PartName='/word/it"s.xml'/>"#;
+        assert_eq!(
+            attribute_value_any_quote(tag, "PartName"),
+            Some("/word/it\"s.xml")
+        );
+        // An attribute the tag does not state is `None`, whatever quotes it uses.
+        assert_eq!(attribute_value_any_quote(tag, "ContentType"), None);
+    }
 
     #[test]
     fn a_tag_name_may_be_a_pattern_the_caller_states() {

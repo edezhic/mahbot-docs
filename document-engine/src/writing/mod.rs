@@ -33,6 +33,7 @@ use crate::operation::{Failure, Outcome, Request};
 use crate::vocabulary::{Family, Span, vocabulary};
 
 mod docx;
+mod fill;
 mod image;
 mod opc;
 mod package;
@@ -68,7 +69,7 @@ fn js_string(value: &Value) -> String {
             .map(array_element)
             .collect::<Vec<String>>()
             .join(","),
-        Value::Object(_) => vocabulary().marks.get("edit_object_value").to_string(),
+        Value::Object(_) => vocabulary().marks.get("surface_object_value").to_string(),
         Value::Null => vocabulary().marks.get("edit_null_value").to_string(),
         other => json_literal(other),
     }
@@ -82,6 +83,22 @@ fn array_element(value: &Value) -> String {
     } else {
         js_string(value)
     }
+}
+
+/// Whether a value is one of the shared rules' scalar kinds: text, a number or a boolean. A
+/// structure (and JSON's null, which the rules do not list) is not one.
+pub(super) fn scalar_value(value: &Value) -> bool {
+    let kind = match value {
+        Value::String(_) => "string",
+        Value::Number(_) => "number",
+        Value::Bool(_) => "boolean",
+        Value::Null => "nothing",
+        Value::Array(_) => "list",
+        Value::Object(_) => "map",
+    };
+    crate::vocabulary::scalar_kinds()
+        .iter()
+        .any(|allowed| allowed == kind)
 }
 
 /// A value as the kit's `JSON.stringify` renders it, which is what a refusal quotes a name by: a
@@ -317,28 +334,8 @@ impl Editor {
     /// for one.
     pub(crate) fn open(input: &Path, family: Family) -> Result<Self, Failure> {
         let marks = &vocabulary().marks;
-        let name = crate::support::file_name_or_path(&input.to_string_lossy()).to_string();
-        let bytes = std::fs::read(input).map_err(|error| {
-            Failure::usage(marks.format(
-                "edit_open_unreadable",
-                &[
-                    ("name", &name),
-                    ("kind", family.as_str()),
-                    ("message", &error.to_string()),
-                ],
-            ))
-        })?;
-        let parts = package::read_package(&bytes).map_err(|message| {
-            Failure::usage(marks.format(
-                "edit_open_unreadable",
-                &[
-                    ("name", &name),
-                    ("kind", family.as_str()),
-                    ("message", &message),
-                ],
-            ))
-        })?;
-        match package::package_family(&parts) {
+        let opened = package::read_named(input, family)?;
+        match opened.family {
             Some(real) if real != family => {
                 let hint = marks.format("edit_wrong_family_hint", &[("family", real.as_str())]);
                 return Err(Failure::usage(marks.format(
@@ -355,23 +352,24 @@ impl Editor {
             None => {
                 return Err(Failure::usage(marks.format(
                     "edit_no_family_part",
-                    &[("name", &name), ("family", family.as_str())],
+                    &[("name", &opened.name), ("family", family.as_str())],
                 )));
             }
         }
-        let signed = parts
+        let signed = opened
+            .parts
             .iter()
             .any(|(part, _)| part.starts_with("_xmlsignatures/"));
         Ok(Self {
             input: input.to_path_buf(),
-            parts,
+            parts: opened.parts,
             notes: Vec::new(),
             losses: Vec::new(),
             changed: false,
             touched: false,
             work: 0,
             signed,
-            source: (family == Family::Pptx).then(|| Arc::new(bytes)),
+            source: (family == Family::Pptx).then(|| Arc::new(opened.bytes)),
         })
     }
 
@@ -681,6 +679,9 @@ fn rounded_mebibytes(count: u64) -> String {
 /// The function that edits one family's package: the edits list applied to an open package.
 pub(crate) type Port = fn(&mut Editor, &[Value]) -> Result<(), Failure>;
 
+/// The `fill_template` operation's handler.
+pub(crate) use fill::fill_operation;
+
 /// The Word edit's port, named by the statement row for the Word edit.
 pub(crate) const DOCX_PORT: Port = docx::edit;
 /// The workbook edit's port.
@@ -752,17 +753,18 @@ fn run_edit(
     }
     port(&mut editor, edits)?;
     let finished = editor.finish()?;
-    write_new(output, &finished.bytes)?;
+    write_new(output, &finished.bytes, EDIT_WRITE_FAILED)?;
     Ok(finished)
 }
 
 /// The refusal a failed edit write is answered with.
 const EDIT_WRITE_FAILED: &str = "edit_write_failed";
 
-/// Write `bytes` to `output`, which must not already exist. A file this call created is removed
-/// when the write fails, so a failure leaves nothing behind.
-fn write_new(output: &Path, bytes: &[u8]) -> Result<(), Failure> {
-    write_new_with(output, bytes, &write_bytes)
+/// Write `bytes` to `output`, which must not already exist, answering the sentence `mark` names
+/// when the write fails. A file this call created is removed when the write fails, so a failure
+/// leaves nothing behind.
+pub(super) fn write_new(output: &Path, bytes: &[u8], mark: &str) -> Result<(), Failure> {
+    write_new_with(output, bytes, mark, &write_bytes)
 }
 
 /// [`write_new`] with the write itself injected, so a test can prove a failure removes the file the
@@ -770,10 +772,11 @@ fn write_new(output: &Path, bytes: &[u8]) -> Result<(), Failure> {
 fn write_new_with(
     output: &Path,
     bytes: &[u8],
+    mark: &str,
     write: &dyn Fn(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
 ) -> Result<(), Failure> {
-    let mut file = create_new(output, EDIT_WRITE_FAILED)?;
-    let written = write_into(&mut file, bytes, EDIT_WRITE_FAILED, write);
+    let mut file = create_new(output, mark)?;
+    let written = write_into(&mut file, bytes, mark, write);
     // The handle is closed before anything is removed: a file still open cannot be removed
     // everywhere, and the leftover sentence would then name a file that was removable.
     drop(file);
@@ -1055,9 +1058,12 @@ mod tests {
     fn a_write_that_fails_partway_removes_the_file_it_created() {
         let directory = scratch();
         let output = directory.path().join("out.xlsx");
-        let failure = write_new_with(&output, &b"bytes"[..], &|_file, _bytes| {
-            Err(std::io::Error::other("injected write error"))
-        })
+        let failure = write_new_with(
+            &output,
+            &b"bytes"[..],
+            EDIT_WRITE_FAILED,
+            &|_file, _bytes| Err(std::io::Error::other("injected write error")),
+        )
         .expect_err("a failed write");
         assert!(!failure.is_usage());
         assert!(!output.exists(), "a failed write leaves nothing behind");

@@ -372,6 +372,9 @@ enum Handler {
     /// A package edit's port. The dispatch passes the pair's family, so the row that names the
     /// family and the code that opens the package cannot disagree.
     Edit(crate::writing::Port),
+    /// A template fill. The declared family is the one the caller expects, which is not always the
+    /// family the sample's own parts name.
+    Fill,
 }
 
 impl Handler {
@@ -380,6 +383,7 @@ impl Handler {
         match self {
             Self::Action(action) => action(request, outputs),
             Self::Edit(port) => crate::writing::edit_operation(request, family, port, &outputs[0]),
+            Self::Fill => crate::writing::fill_operation(request, family, &outputs[0]),
         }
     }
 }
@@ -409,10 +413,11 @@ const CREATE: &[Pair] = &[
 ];
 
 /// `fill_template` accepts the three OOXML families: a PDF has no placeholder template of its own.
+/// The Word and presentation families are carried out; the workbook's own filler is a later port.
 const FILL_TEMPLATE: &[Pair] = &[
-    pair(Family::Docx, None),
+    pair(Family::Docx, Some(Handler::Fill)),
     pair(Family::Xlsx, None),
-    pair(Family::Pptx, None),
+    pair(Family::Pptx, Some(Handler::Fill)),
 ];
 
 const DOCX_EDIT: &[Pair] = &[pair(
@@ -592,10 +597,14 @@ fn validate(
     let pairs = statement(operation);
     // An operation that takes a `format` value accepts more than one family and the request names
     // one of them; every other operation works on exactly one family, which the request does not
-    // name. A test holds the statement to that.
-    let pair = match pairs {
-        [pair] => pair,
-        _ => format_pair(request, pairs)?,
+    // name. A test holds the statement to that. The template operation is the one exception to the
+    // naming rule: an absent or unknown format takes the Word path, as the reference decides it.
+    let pair = match operation {
+        Operation::FillTemplate => fill_pair(request, pairs),
+        _ => match pairs {
+            [pair] => pair,
+            _ => format_pair(request, pairs)?,
+        },
     };
     // A pair answered by an edit port takes an `edits` value, and every edit names a sub-operation
     // its family has.
@@ -637,6 +646,22 @@ fn validate(
         _ => {}
     }
     Ok(pair)
+}
+
+/// The pair a template fill names: `pptx` the presentation, `xlsx` the workbook, anything else —
+/// including no format at all — the Word document.
+fn fill_pair<'a>(request: &Request, pairs: &'a [Pair]) -> &'a Pair {
+    let family = match request.values.get("format").and_then(Value::as_str) {
+        Some(word) if word == Family::Pptx.as_str() => Family::Pptx,
+        Some(word) if word == Family::Xlsx.as_str() => Family::Xlsx,
+        _ => Family::Docx,
+    };
+    // `FILL_TEMPLATE` lists the three OOXML families and this rule can name no other, so the
+    // statement always holds the pair; a statement that does not is a defect in the crate.
+    pairs
+        .iter()
+        .find(|pair| pair.family == family)
+        .expect("the fill statement lists every family a format can name")
 }
 
 /// The pair a `format` value names, when the operation's statement accepts it.
@@ -943,19 +968,47 @@ mod tests {
     #[test]
     fn an_unknown_format_is_the_callers_fault() {
         let dir = scratch();
-        for (operation, values) in [
-            ("create", json!({ "format": "odt" })),
-            (
-                "fill_template",
-                json!({ "format": "pdf", "template": "a.pdf" }),
-            ),
+        let outcome = execute(&request(dir.path(), "create", json!({ "format": "odt" })));
+        assert!(outcome.failure.expect("a failure").is_usage());
+    }
+
+    #[test]
+    fn a_template_fill_takes_the_word_path_for_any_format_but_the_two_it_names() {
+        // The reference decides the family from the format alone: the presentation and the
+        // workbook are named, and everything else — an absent value, `pdf`, an unknown word —
+        // is the Word path.
+        let dir = scratch();
+        let operation = Operation::parse("fill_template").expect("fill_template is in the set");
+        for format in [
+            None,
+            Some("docx"),
+            Some("pdf"),
+            Some("odt"),
+            Some("constructor"),
         ] {
-            let outcome = execute(&request(dir.path(), operation, values));
-            assert!(
-                outcome.failure.expect("a failure").is_usage(),
-                "{operation}"
-            );
+            let mut values = json!({ "template": "a.docx" });
+            if let Some(format) = format {
+                values["format"] = json!(format);
+            }
+            let pair = validate(
+                &request(dir.path(), "fill_template", values),
+                operation,
+                Operation::pairs,
+            )
+            .expect("the Word path accepts it");
+            assert_eq!(pair.family, Family::Docx, "{format:?}");
         }
+        let pair = validate(
+            &request(
+                dir.path(),
+                "fill_template",
+                json!({ "format": "pptx", "template": "a.pptx" }),
+            ),
+            operation,
+            Operation::pairs,
+        )
+        .expect("the presentation path accepts it");
+        assert_eq!(pair.family, Family::Pptx);
     }
 
     #[test]

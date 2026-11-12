@@ -384,6 +384,11 @@ pub struct EngineBounds {
     /// deliberately conservative, set where the reference's own walk is still under a second, so the
     /// crate answers in bounded time on a document the kit would spend minutes on.
     pub paragraph_nesting_max: usize,
+    /// The deepest section nesting a template's parser follows before it refuses. A real sample
+    /// nests a handful of levels; the bound keeps a crafted one from making the parse and the
+    /// render as deep as the file, which this engine's panic containment cannot survive. The
+    /// reference has no such bound: its own parser recurses until the runtime's stack runs out.
+    pub template_nesting_max: usize,
     /// The deepest page tree the walk follows before it refuses: a real tree nests a handful of
     /// levels, and the bound keeps a crafted chain from making the walk as long as the file.
     pub page_tree_depth_max: usize,

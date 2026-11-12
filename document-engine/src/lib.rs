@@ -14,11 +14,13 @@
 //!   content it had, so a chart, a comment, a macro or a media file the caller never mentioned
 //!   survives. A PDF page action builds a document out of the pages a merge or a split names, changes
 //!   the box or the turn of the pages it names, or draws text, a picture or a filled form into them,
-//!   and keeps everything else the file holds. What the writing half carries out is a statement of
+//!   and keeps everything else the file holds. A template fill renders a Word or presentation
+//!   sample part by part from a value map. What the writing half carries out is a statement of
 //!   (operation, family) pairs — the Word, workbook and presentation edits, the five PDF page
-//!   actions and the three PDF drawing actions today, with every family of `create` and
-//!   `fill_template` answering the vocabulary's `reason_not_carried_out` until its port lands — and
-//!   the dispatch reads that statement and nothing else.
+//!   actions, the three PDF drawing actions and the Word and presentation fills today, with every
+//!   family of `create` and the workbook family of `fill_template` answering the vocabulary's
+//!   `reason_not_carried_out` until their ports land — and the dispatch reads that statement and
+//!   nothing else.
 //! - [`vocabulary`]: every reading bound the engine enforces, every mark it prints, who enforces
 //!   and who prints each one, the enumerations it shares between reading and producing, and the
 //!   embedded font the producing half draws with — one file, embedded at build time, read from

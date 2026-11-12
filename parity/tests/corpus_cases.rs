@@ -121,7 +121,23 @@ fn a_case_that_names_its_family_agrees_with_the_request() {
     // other operation works on one family and takes no `format`.
     for case in writer_cases() {
         let named = case.request.get("format").and_then(|value| value.as_str());
-        if matches!(case.operation, "create" | "fill_template") {
+        if case.operation == "fill_template" {
+            // The reference decides the family from the format alone: `pptx` and `xlsx` name
+            // their own families, and everything else — an absent value included — is the Word
+            // path. The rule is spelled here rather than asked of the crate, so a case cannot
+            // agree with a wrong crate by construction.
+            let expected = match named {
+                Some("pptx") => Family::Pptx,
+                Some("xlsx") => Family::Xlsx,
+                _ => Family::Docx,
+            };
+            assert_eq!(
+                case.family,
+                expected,
+                "{}: the request's format and the case's family disagree",
+                case.key().slug()
+            );
+        } else if matches!(case.operation, "create") {
             assert_eq!(
                 named,
                 Some(case.family.as_str()),

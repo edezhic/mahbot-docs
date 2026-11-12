@@ -519,28 +519,7 @@ fn docx_rels(entries: &[(&str, &str, &str)]) -> String {
 /// A Word package's `[Content_Types].xml`: the two package defaults, `defaults` beside them, the
 /// body's own override and `overrides` after it.
 fn docx_content_types(defaults: &[(&str, &str)], overrides: &[(&str, &str)]) -> String {
-    let mut types = String::from(concat!(
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
-        r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">"#,
-        r#"<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"#,
-        r#"<Default Extension="xml" ContentType="application/xml"/>"#,
-    ));
-    for (extension, content_type) in defaults {
-        types.push_str(&format!(
-            r#"<Default Extension="{extension}" ContentType="{content_type}"/>"#
-        ));
-    }
-    types.push_str(concat!(
-        r#"<Override PartName="/word/document.xml" "#,
-        r#"ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>"#,
-    ));
-    for (part, content_type) in overrides {
-        types.push_str(&format!(
-            r#"<Override PartName="{part}" ContentType="{content_type}"/>"#
-        ));
-    }
-    types.push_str("</Types>");
-    types
+    docx_content_types_of(DOCX_MAIN_TYPE, defaults, overrides)
 }
 
 /// The content type of a Word part this corpus adds: the styles, header, footer and notes parts
@@ -7709,6 +7688,966 @@ pub fn legacy_ppt_notes() -> Vec<u8> {
 #[must_use]
 pub fn legacy_ppt_corrupt() -> Vec<u8> {
     super::legacy_formats::ppt_corrupt()
+}
+
+// ── fill_template ────────────────────────────────────────────────────────────────────────────
+// A fill renders the parts a template library recognizes and carries every other part through
+// untouched. The samples below state one thing each: which part families a Word sample has the
+// fill reach, which tag kinds it reads, what it refuses, and what a deck does differently.
+
+/// The content type of a Word settings part: a common part a fill renders, whose text it reads
+/// only where the part holds a text element of the WordprocessingML kind.
+const DOCX_SETTINGS_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml";
+/// The content type of a package's core properties.
+const DOCX_CORE_TYPE: &str = "application/vnd.openxmlformats-package.core-properties+xml";
+/// The content type of a Word package's application properties.
+const DOCX_APP_TYPE: &str = "application/vnd.openxmlformats-officedocument.extended-properties+xml";
+/// The content type of a Word package's custom properties.
+const DOCX_CUSTOM_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.custom-properties+xml";
+/// The content type of a diagram's data part.
+const DOCX_DIAGRAM_DATA_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.drawingml.diagramData+xml";
+/// The content type of a diagram's drawing part.
+const DOCX_DIAGRAM_DRAWING_TYPE: &str = "application/vnd.ms-office.drawingml.diagramDrawing+xml";
+/// The content type of a Word document's main part — the one `docx_content_types` states, named
+/// here for the samples that must declare it on a part the package does not hold.
+const DOCX_MAIN_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml";
+/// The content type of a macro-enabled Word document's main part.
+const DOCX_MACRO_MAIN_TYPE: &str = "application/vnd.ms-word.document.macroEnabled.main+xml";
+/// The content type of a Word template's main part.
+const DOCX_TEMPLATE_MAIN_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml";
+/// The content type of a macro-enabled presentation's main part.
+const PPTX_MACRO_MAIN_TYPE: &str =
+    "application/vnd.ms-powerpoint.presentation.macroEnabled.main+xml";
+/// The content type of a deck's macro project.
+const PPTX_VBA_TYPE: &str = "application/vnd.ms-office.vbaProject";
+
+/// One Word body paragraph holding `text` in a single run: the shape a fill case's placeholder is
+/// written in, so the difference a case shows is the value's and never the markup's.
+fn fill_paragraph(text: &str) -> String {
+    format!(r#"<w:p><w:r><w:t xml:space="preserve">{text}</w:t></w:r></w:p>"#)
+}
+
+/// A Word package whose whole body is `body` and which holds no part beside the body: the smallest
+/// sample a fill reads, and the one every Word fill case that needs one story starts from.
+pub fn docx_fill_body(body: &str) -> Vec<u8> {
+    docx_package_around(
+        body,
+        DOCX_NAMESPACES,
+        &docx_rels(&[]),
+        &docx_content_types(&[], &[]),
+        &[],
+    )
+}
+
+/// A Word package of one paragraph holding `text`: the sample a tag case differs in by one tag.
+fn docx_fill_one_paragraph(text: &str) -> Vec<u8> {
+    docx_fill_body(&fill_paragraph(text))
+}
+
+/// A Word part holding one paragraph: the header, footer, notes and comments parts a fill renders
+/// are each one wrapper element around body paragraphs, and all of them open with the declaration.
+fn word_part(open: &str, paragraph: &str, close: &str) -> String {
+    format!("{DECLARATION}{open}{paragraph}{close}")
+}
+
+/// A Word package's `[Content_Types].xml` whose body part carries `main`: the document type
+/// [`docx_content_types`] states, or the macro-enabled and template types a fill must recognise.
+fn docx_content_types_of(
+    main: &str,
+    defaults: &[(&str, &str)],
+    overrides: &[(&str, &str)],
+) -> String {
+    let mut types = String::from(concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">"#,
+        r#"<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"#,
+        r#"<Default Extension="xml" ContentType="application/xml"/>"#,
+    ));
+    for (extension, content_type) in defaults {
+        types.push_str(&format!(
+            r#"<Default Extension="{extension}" ContentType="{content_type}"/>"#
+        ));
+    }
+    types.push_str(&format!(
+        r#"<Override PartName="/word/document.xml" ContentType="{main}"/>"#
+    ));
+    for (part, content_type) in overrides {
+        types.push_str(&format!(
+            r#"<Override PartName="{part}" ContentType="{content_type}"/>"#
+        ));
+    }
+    types.push_str("</Types>");
+    types
+}
+
+/// A Word sample with a placeholder in every part family a fill reaches and in three it does not:
+/// the settings, core, application, custom-properties and both diagram parts, the header, body,
+/// footer, footnotes and comments, and a `customXml` item in the cover-page namespace — then an
+/// endnote, a `customXml` item in a namespace of its own, a field instruction and a deleted
+/// tracked-change run, which a fill leaves as they are. The body's own `{x}` is the one value both
+/// a `w:t` and a `w:delText` spell, so a case shows which of the two was substituted.
+#[must_use]
+pub fn docx_fill_parts() -> Vec<u8> {
+    let body = concat!(
+        r#"<w:p><w:r><w:t xml:space="preserve">Body {main}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:instrText xml:space="preserve"> MERGEFIELD {x} </w:instrText></w:r>"#,
+        r#"<w:r><w:t xml:space="preserve">{x}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:del w:id="1" w:author="Anna Petrova">"#,
+        r#"<w:r><w:delText xml:space="preserve">{x}</w:delText></w:r></w:del></w:p>"#,
+    );
+    let header = word_part(
+        &format!(r#"<w:hdr {DOCX_NAMESPACES}>"#),
+        &fill_paragraph("Header {hdr}"),
+        "</w:hdr>",
+    );
+    let footer = word_part(
+        &format!(r#"<w:ftr {DOCX_NAMESPACES}>"#),
+        &fill_paragraph("Footer {ftr}"),
+        "</w:ftr>",
+    );
+    let footnotes = word_part(
+        &format!(r#"<w:footnotes {DOCX_NAMESPACES}><w:footnote w:id="1">"#),
+        &fill_paragraph("Footnote {ftn}"),
+        "</w:footnote></w:footnotes>",
+    );
+    let endnotes = word_part(
+        &format!(r#"<w:endnotes {DOCX_NAMESPACES}><w:endnote w:id="1">"#),
+        &fill_paragraph("Endnote {e}"),
+        "</w:endnote></w:endnotes>",
+    );
+    let comments = word_part(
+        &format!(r#"<w:comments {DOCX_NAMESPACES}><w:comment w:id="1" w:author="Anna Petrova">"#),
+        &fill_paragraph("Comment {cmt}"),
+        "</w:comment></w:comments>",
+    );
+    // A settings part holds no text element of its own: a fill reads the WordprocessingML text
+    // elements wherever the part family states them, so the placeholder is written in a `w:t`.
+    let settings = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">"#,
+        r#"<w:zoom w:percent="100"/><w:t xml:space="preserve">{s}</w:t></w:settings>"#,
+    );
+    let core = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" "#,
+        r#"xmlns:dc="http://purl.org/dc/elements/1.1/">"#,
+        "<dc:title>{core}</dc:title></cp:coreProperties>",
+    );
+    let app = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">"#,
+        "<Company>{app}</Company></Properties>",
+    );
+    let custom = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" "#,
+        r#"xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">"#,
+        r#"<property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="Dept">"#,
+        "<vt:lpwstr>{custom}</vt:lpwstr></property></Properties>",
+    );
+    let diagram_data = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<dgm:dataModel xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" "#,
+        r#"xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><dgm:ptLst>"#,
+        r#"<dgm:pt modelId="0"><dgm:t><a:p><a:r><a:t>{diag}</a:t></a:r></a:p></dgm:t></dgm:pt>"#,
+        "</dgm:ptLst></dgm:dataModel>",
+    );
+    let diagram_drawing = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<dsp:drawing xmlns:dsp="http://schemas.microsoft.com/office/drawing/2008/diagram" "#,
+        r#"xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><dsp:spTree><dsp:sp>"#,
+        r#"<dsp:txBody><a:p><a:r><a:t>{draw}</a:t></a:r></a:p></dsp:txBody></dsp:sp>"#,
+        "</dsp:spTree></dsp:drawing>",
+    );
+    // The cover-page namespace is the one a Word fill renders a `customXml` item in; an item in any
+    // other namespace is carried through with its placeholder untouched.
+    let cover_page = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<coverPageProps xmlns="http://schemas.microsoft.com/office/2006/coverPageProps">"#,
+        "<Abstract>{cx}</Abstract></coverPageProps>",
+    );
+    let other_item = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<other xmlns="http://example.com/other"><v>{cx2}</v></other>"#,
+    );
+    let rels = docx_rels(&[
+        ("rId3", "header", "header1.xml"),
+        ("rId4", "footer", "footer1.xml"),
+        ("rId5", "footnotes", "footnotes.xml"),
+        ("rId6", "endnotes", "endnotes.xml"),
+        ("rId7", "comments", "comments.xml"),
+        ("rId8", "settings", "settings.xml"),
+    ]);
+    let content_types = docx_content_types(
+        &[],
+        &[
+            ("/word/header1.xml", DOCX_HEADER_TYPE),
+            ("/word/footer1.xml", DOCX_FOOTER_TYPE),
+            ("/word/footnotes.xml", DOCX_FOOTNOTES_TYPE),
+            ("/word/endnotes.xml", DOCX_ENDNOTES_TYPE),
+            ("/word/comments.xml", DOCX_COMMENTS_TYPE),
+            ("/word/settings.xml", DOCX_SETTINGS_TYPE),
+            ("/docProps/core.xml", DOCX_CORE_TYPE),
+            ("/docProps/app.xml", DOCX_APP_TYPE),
+            ("/docProps/custom.xml", DOCX_CUSTOM_TYPE),
+            ("/word/diagrams/data1.xml", DOCX_DIAGRAM_DATA_TYPE),
+            ("/word/diagrams/drawing1.xml", DOCX_DIAGRAM_DRAWING_TYPE),
+            ("/customXml/item1.xml", "application/xml"),
+            ("/customXml/item2.xml", "application/xml"),
+        ],
+    );
+    docx_package_around(
+        body,
+        DOCX_NAMESPACES,
+        &rels,
+        &content_types,
+        &[
+            ("word/header1.xml", header.as_bytes()),
+            ("word/footer1.xml", footer.as_bytes()),
+            ("word/footnotes.xml", footnotes.as_bytes()),
+            ("word/endnotes.xml", endnotes.as_bytes()),
+            ("word/comments.xml", comments.as_bytes()),
+            ("word/settings.xml", settings.as_bytes()),
+            ("docProps/core.xml", core.as_bytes()),
+            ("docProps/app.xml", app.as_bytes()),
+            ("docProps/custom.xml", custom.as_bytes()),
+            ("word/diagrams/data1.xml", diagram_data.as_bytes()),
+            ("word/diagrams/drawing1.xml", diagram_drawing.as_bytes()),
+            ("customXml/item1.xml", cover_page.as_bytes()),
+            ("customXml/item2.xml", other_item.as_bytes()),
+        ],
+    )
+}
+
+/// A Word sample with one paragraph per tag kind: a plain placeholder, a truthy section, an
+/// inverted section over a falsy value, a raw tag holding a whole paragraph, a dash section, a
+/// `{.}` tag, a placeholder split across two runs, and a value with a line break in a bold run —
+/// the run's properties are the ones the paragraph's second line is written with.
+#[must_use]
+pub fn docx_fill_tags() -> Vec<u8> {
+    let body = concat!(
+        r#"<w:p><w:r><w:t xml:space="preserve">Plain {name}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{#sec}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Section body</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{/sec}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{^inv}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Inverted body</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{/inv}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{@raw}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{-w:p dash}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Dash body</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{/dash}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{.}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{na</w:t></w:r>"#,
+        r#"<w:r><w:t xml:space="preserve">me}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">{lb}</w:t></w:r></w:p>"#,
+    );
+    docx_fill_body(body)
+}
+
+/// A Word sample of five sections: one whose name no value answers for and whose body still
+/// renders once, an inverted section whose name no value answers for and which is skipped, a
+/// present-falsy section which is skipped, a present-falsy inverted section which renders, and a
+/// section opened in one cell of a table row and closed in the other, so the row is its body.
+#[must_use]
+pub fn docx_fill_sections() -> Vec<u8> {
+    let body = concat!(
+        r#"<w:p><w:r><w:t xml:space="preserve">{#gone}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Absent body</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{/gone}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{^noinv}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Inverted absent body</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{/noinv}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{#off}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Falsy body</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{/off}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{^flip}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Inverted falsy body</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{/flip}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{^on}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Inverted truthy body</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{/on}</w:t></w:r></w:p>"#,
+        r#"<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr>"#,
+        r#"<w:tblGrid><w:gridCol w:w="4675"/><w:gridCol w:w="4675"/></w:tblGrid>"#,
+        r#"<w:tr><w:tc><w:tcPr><w:tcW w:w="4675" w:type="dxa"/></w:tcPr>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{#row}</w:t></w:r></w:p></w:tc>"#,
+        r#"<w:tc><w:tcPr><w:tcW w:w="4675" w:type="dxa"/></w:tcPr>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{/row}</w:t></w:r></w:p></w:tc></w:tr>"#,
+        r#"<w:tr><w:tc><w:tcPr><w:tcW w:w="4675" w:type="dxa"/></w:tcPr>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Kept cell</w:t></w:r></w:p></w:tc>"#,
+        r#"<w:tc><w:tcPr><w:tcW w:w="4675" w:type="dxa"/></w:tcPr>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Kept cell two</w:t></w:r></w:p></w:tc></w:tr>"#,
+        r#"</w:tbl>"#,
+    );
+    docx_fill_body(body)
+}
+
+/// A Word sample whose section lives in the paragraph the section opens in and declares the
+/// next-page break: one rendered copy of the section still inserts that section before itself and a
+/// page break at its end, which is the only shape in which the reference's next-page insert is
+/// reachable with a scalar value.
+#[must_use]
+pub fn docx_fill_next_page() -> Vec<u8> {
+    let body = concat!(
+        r#"<w:p><w:pPr><w:sectPr><w:type w:val="nextPage"/><w:pgSz w:w="12240" w:h="15840"/></w:sectPr></w:pPr>"#,
+        r#"<w:r><w:t xml:space="preserve">{#page}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Next page body</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{/page}</w:t></w:r></w:p>"#,
+    );
+    docx_fill_body(body)
+}
+
+/// A Word sample whose five tags no value answers for: a plain placeholder, an empty brace pair,
+/// a section, an inverted section, and a name that is a member of `Object.prototype` — the one
+/// shape a lookup that is not own-property would render a function into.
+#[must_use]
+pub fn docx_fill_missing_shapes() -> Vec<u8> {
+    let body = concat!(
+        r#"<w:p><w:r><w:t xml:space="preserve">Plain {plain} here</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Braces {}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{#gone}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Gone body</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{/gone}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{^noinv}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Noinv body</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{/noinv}</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Proto {toString}</w:t></w:r></w:p>"#,
+    );
+    docx_fill_body(body)
+}
+
+/// A Word sample holding no placeholder at all: the body of a fill that declares nothing, which
+/// the fill must carry through exactly — the text element keeps the shape it was written in.
+#[must_use]
+pub fn docx_fill_plain() -> Vec<u8> {
+    docx_fill_body(&fill_paragraph("Plain words and no placeholder"))
+}
+
+/// A Word sample whose two tables are the shapes a fill repairs: a cell holding no paragraph,
+/// which gets one, and a table holding no row, which is dropped; the body then ends with a table,
+/// which gets the empty paragraph a document must end with.
+#[must_use]
+pub fn docx_fill_tables() -> Vec<u8> {
+    let body = concat!(
+        r#"<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr>"#,
+        r#"<w:tblGrid><w:gridCol w:w="4675"/></w:tblGrid>"#,
+        r#"<w:tr><w:tc><w:tcPr><w:tcW w:w="4675" w:type="dxa"/></w:tcPr></w:tc></w:tr>"#,
+        r#"</w:tbl>"#,
+        r#"<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr>"#,
+        r#"<w:tblGrid><w:gridCol w:w="4675"/></w:tblGrid></w:tbl>"#,
+    );
+    docx_fill_body(body)
+}
+
+/// A macro-enabled Word sample: the body's own part is declared as the macro-enabled main type,
+/// which a fill reads as the body it renders just as it reads the document type.
+#[must_use]
+pub fn docx_fill_macro() -> Vec<u8> {
+    docx_package_around(
+        &fill_paragraph("Macro body {name}"),
+        DOCX_NAMESPACES,
+        &docx_rels(&[]),
+        &docx_content_types_of(DOCX_MACRO_MAIN_TYPE, &[], &[]),
+        &[],
+    )
+}
+
+/// A Word sample whose body part is declared as a template's main type while the file is named a
+/// document: the family is the one the part declares, not the one the name spells.
+#[must_use]
+pub fn docx_fill_template_style() -> Vec<u8> {
+    docx_package_around(
+        &fill_paragraph("Template body {name}"),
+        DOCX_NAMESPACES,
+        &docx_rels(&[]),
+        &docx_content_types_of(DOCX_TEMPLATE_MAIN_TYPE, &[], &[]),
+        &[],
+    )
+}
+
+/// A Word sample carrying a signature part: a fill renders the body and carries the signature
+/// through, saying nothing about it — the note an edit prints is the edit's own.
+#[must_use]
+pub fn docx_fill_signed() -> Vec<u8> {
+    let signature = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"/>"#,
+    );
+    docx_package_around(
+        &fill_paragraph("Signed body {name}"),
+        DOCX_NAMESPACES,
+        &docx_rels(&[]),
+        &docx_content_types(&[], &[]),
+        &[("_xmlsignatures/sig1.xml", signature.as_bytes())],
+    )
+}
+
+/// A Word sample whose `[Content_Types].xml` declares the document main type on a part the package
+/// does not hold, while the real body is declared only by the `xml` default: a fill finds no main
+/// part, so nothing is rendered and the body is carried through with its placeholder.
+#[must_use]
+pub fn docx_fill_without_main_type() -> Vec<u8> {
+    let content_types = format!(
+        concat!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+            r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">"#,
+            r#"<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"#,
+            r#"<Default Extension="xml" ContentType="application/xml"/>"#,
+            r#"<Override PartName="/word/document2.xml" ContentType="{}"/>"#,
+            r#"</Types>"#,
+        ),
+        DOCX_MAIN_TYPE,
+    );
+    docx_package_around(
+        &fill_paragraph("Body {b}"),
+        DOCX_NAMESPACES,
+        &docx_rels(&[]),
+        &content_types,
+        &[],
+    )
+}
+
+/// A Word sample whose `[Content_Types].xml` declares a header part and no main type at all: the
+/// header is the one part a fill renders, and the body is carried through with its placeholder.
+#[must_use]
+pub fn docx_fill_header_only() -> Vec<u8> {
+    let header = word_part(
+        &format!(r#"<w:hdr {DOCX_NAMESPACES}>"#),
+        &fill_paragraph("Header {h}"),
+        "</w:hdr>",
+    );
+    let content_types = format!(
+        concat!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+            r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">"#,
+            r#"<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"#,
+            r#"<Default Extension="xml" ContentType="application/xml"/>"#,
+            r#"<Override PartName="/word/header1.xml" ContentType="{}"/>"#,
+            r#"</Types>"#,
+        ),
+        DOCX_HEADER_TYPE,
+    );
+    let rels = docx_rels(&[("rId3", "header", "header1.xml")]);
+    docx_package_around(
+        &fill_paragraph("Body {b}"),
+        DOCX_NAMESPACES,
+        &rels,
+        &content_types,
+        &[("word/header1.xml", header.as_bytes())],
+    )
+}
+
+/// A file named as a Word document whose bytes are not a ZIP at all: the package a fill cannot even
+/// open, which it refuses by name.
+#[must_use]
+pub fn docx_fill_unreadable() -> Vec<u8> {
+    b"this is not a zip archive, and says so in the first bytes".to_vec()
+}
+
+/// A ZIP archive holding one text part and no part of any document family: the sample whose family
+/// nothing declares, which a fill refuses as unidentifiable.
+#[must_use]
+pub fn docx_fill_plain_archive() -> Vec<u8> {
+    package(&[("hello.txt", b"hello there")])
+}
+
+/// A Word sample whose one paragraph holds a tag that is never closed.
+#[must_use]
+pub fn docx_fill_unclosed() -> Vec<u8> {
+    docx_fill_one_paragraph("{name")
+}
+
+/// A Word sample whose one paragraph opens a tag twice.
+#[must_use]
+pub fn docx_fill_duplicate_open() -> Vec<u8> {
+    docx_fill_one_paragraph("{{name}")
+}
+
+/// A Word sample whose one paragraph closes a tag twice.
+#[must_use]
+pub fn docx_fill_duplicate_close() -> Vec<u8> {
+    docx_fill_one_paragraph("{name}}")
+}
+
+/// A Word sample whose one paragraph closes a tag nothing opened.
+#[must_use]
+pub fn docx_fill_unopened() -> Vec<u8> {
+    docx_fill_one_paragraph("name}")
+}
+
+/// A Word sample whose section is opened and never closed.
+#[must_use]
+pub fn docx_fill_unclosed_loop() -> Vec<u8> {
+    docx_fill_body(&format!(
+        "{}{}",
+        fill_paragraph("{#a}"),
+        fill_paragraph("Loop body")
+    ))
+}
+
+/// A Word sample whose section is closed and never opened.
+#[must_use]
+pub fn docx_fill_unopened_loop() -> Vec<u8> {
+    docx_fill_one_paragraph("{/a}")
+}
+
+/// A Word sample whose section is opened under one name and closed under another.
+#[must_use]
+pub fn docx_fill_mismatch_close() -> Vec<u8> {
+    docx_fill_body(&format!(
+        "{}{}{}",
+        fill_paragraph("{#a}"),
+        fill_paragraph("Loop body"),
+        fill_paragraph("{/b}")
+    ))
+}
+
+/// A Word sample whose section is opened inside a table cell, beside text, and closed after the
+/// table: the pair the fill cannot expand without breaking the row apart.
+#[must_use]
+pub fn docx_fill_loop_position() -> Vec<u8> {
+    let body = concat!(
+        r#"<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr>"#,
+        r#"<w:tblGrid><w:gridCol w:w="4675"/></w:tblGrid>"#,
+        r#"<w:tr><w:tc><w:tcPr><w:tcW w:w="4675" w:type="dxa"/></w:tcPr>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Start {#a} here</w:t></w:r></w:p></w:tc></w:tr>"#,
+        r#"</w:tbl>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{/a}</w:t></w:r></w:p>"#,
+    );
+    docx_fill_body(body)
+}
+
+/// A Word sample whose raw tag shares its paragraph with text.
+#[must_use]
+pub fn docx_fill_raw_with_text() -> Vec<u8> {
+    docx_fill_one_paragraph("x {@raw}")
+}
+
+/// A Word sample whose raw tag is alone in its paragraph, for a case that answers it with a number.
+#[must_use]
+pub fn docx_fill_raw_value() -> Vec<u8> {
+    docx_fill_one_paragraph("{@raw}")
+}
+
+/// A Word sample whose one placeholder a case answers with a value holding a character no XML
+/// document may carry.
+#[must_use]
+pub fn docx_fill_corrupt() -> Vec<u8> {
+    docx_fill_one_paragraph("{v}")
+}
+
+/// A Word sample whose one paragraph changes the delimiters halfway through: `{name}` is read with
+/// the braces the sample opened with, `[name]` and `[x]` with the ones the tag switched to.
+#[must_use]
+pub fn docx_fill_delimiter() -> Vec<u8> {
+    docx_fill_one_paragraph("Hi {name}, {=[ ]=}then [name] and [x]")
+}
+
+/// A Word sample whose one paragraph holds two tags a case answers with values the XML cannot carry:
+/// the sample whose render-time errors are collected rather than stopped at the first.
+#[must_use]
+pub fn docx_fill_multi_error() -> Vec<u8> {
+    docx_fill_body(&fill_paragraph("one {a} two {b}"))
+}
+
+/// A Word sample whose one paragraph holds a delimiter tag that names no delimiters: the sample the
+/// fill cannot parse at all.
+#[must_use]
+pub fn docx_fill_bad_delimiters() -> Vec<u8> {
+    docx_fill_body(&fill_paragraph("{=[ ]}"))
+}
+
+/// A Word sample whose one paragraph is not well-formed XML, because a bare `<` opens no element:
+/// the sample an XML parser rejects as invalid.
+#[must_use]
+pub fn docx_fill_invalid_xml() -> Vec<u8> {
+    docx_fill_body("<w:p><w:r><w:t>a < b</w:t></w:r></w:p>")
+}
+
+/// A Word sample whose one paragraph nests a `w:t` inside a `w:t` and closes them the wrong way
+/// round: the sample an XML parser rejects as malformed.
+#[must_use]
+pub fn docx_fill_malformed_xml() -> Vec<u8> {
+    docx_fill_body("<w:p><w:r><w:t>a<w:t>b</w:t></w:t></w:r></w:p>")
+}
+
+/// A Word sample whose settings part holds a placeholder a case answers with a corrupt value while
+/// its main part holds an unclosed section: the reference compiles every part before it renders
+/// any, so only the compile failure is reported and the settings value never renders.
+#[must_use]
+pub fn docx_fill_compile_before_render() -> Vec<u8> {
+    let settings = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">"#,
+        r#"<w:t xml:space="preserve">{a}</w:t></w:settings>"#,
+    );
+    docx_package_around(
+        &fill_paragraph("{#a}"),
+        DOCX_NAMESPACES,
+        &docx_rels(&[]),
+        &docx_content_types(&[], &[("/word/settings.xml", DOCX_SETTINGS_TYPE)]),
+        &[("word/settings.xml", settings.as_bytes())],
+    )
+}
+
+/// A Word sample whose settings part fails to pair while its main part's change tag names no
+/// delimiters: the reference lexes every part before it postparses any, so the thrown sentence is
+/// the one reported.
+#[must_use]
+pub fn docx_fill_thrown_before_postparse() -> Vec<u8> {
+    let settings = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">"#,
+        r#"<w:t xml:space="preserve">{#a}x{/b}</w:t></w:settings>"#,
+    );
+    docx_package_around(
+        &fill_paragraph("{=[ ]}"),
+        DOCX_NAMESPACES,
+        &docx_rels(&[]),
+        &docx_content_types(&[], &[("/word/settings.xml", DOCX_SETTINGS_TYPE)]),
+        &[("word/settings.xml", settings.as_bytes())],
+    )
+}
+
+/// A Word sample whose body holds a raw tag in a run outside any paragraph: the reference refuses
+/// it with the raw module's own sentence rather than the generic missing-tag one.
+#[must_use]
+pub fn docx_fill_raw_outside_paragraph() -> Vec<u8> {
+    docx_fill_body(r#"<w:r><w:t xml:space="preserve">{@x}</w:t></w:r>"#)
+}
+
+/// A Word sample whose one paragraph holds two raw tags: the reference names the first of them as
+/// the paragraph's only text and skips the limit inside it.
+#[must_use]
+pub fn docx_fill_raw_two_in_paragraph() -> Vec<u8> {
+    docx_fill_body(&fill_paragraph("{@a}{@b}"))
+}
+
+/// A Word sample whose two raw tags sit outside any paragraph: each misuse is reported, joined.
+#[must_use]
+pub fn docx_fill_raw_two_outside() -> Vec<u8> {
+    docx_fill_body(concat!(
+        r#"<w:r><w:t xml:space="preserve">{@a}</w:t></w:r>"#,
+        r#"<w:r><w:t xml:space="preserve">{@b}</w:t></w:r>"#,
+    ))
+}
+
+/// A Word sample whose raw tag sits in a paragraph of its own and whose section names a close that
+/// does not match it: a pairing failure and a raw failure in one part.
+#[must_use]
+pub fn docx_fill_raw_and_section() -> Vec<u8> {
+    docx_fill_body(concat!(
+        r#"<w:p><w:r><w:t xml:space="preserve">{@a} x</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">{#s}y{/t}</w:t></w:r></w:p>"#,
+    ))
+}
+
+/// A Word sample whose section expands to a table row the sample does not hold: both edges are
+/// named.
+#[must_use]
+pub fn docx_fill_tag_not_found() -> Vec<u8> {
+    docx_fill_body(&fill_paragraph("{-w:tr a}x{/a}"))
+}
+/// A Word sample whose two top-level sections expand to rows that overlap: the first opens in the
+/// first row and closes in the second, and the second opens in that same row.
+#[must_use]
+pub fn docx_fill_unbalanced_loops() -> Vec<u8> {
+    docx_fill_body(concat!(
+        r#"<w:tbl><w:tr><w:tc><w:p><w:r><w:t xml:space="preserve">{#a}</w:t></w:r></w:p></w:tc></w:tr>"#,
+        r#"<w:tr><w:tc><w:p><w:r><w:t xml:space="preserve">{/a}</w:t></w:r></w:p></w:tc>"#,
+        r#"<w:tc><w:p><w:r><w:t xml:space="preserve">{#b}</w:t></w:r></w:p></w:tc></w:tr>"#,
+        r#"<w:tr><w:tc><w:p><w:r><w:t xml:space="preserve">{/b}</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"#,
+    ))
+}
+
+/// A Word sample whose change tag names delimiters one of which is a prefix of the other.
+#[must_use]
+pub fn docx_fill_prefix_delimiters() -> Vec<u8> {
+    docx_fill_body(&fill_paragraph("{=[[ [[[=}[[[a[[x"))
+}
+
+/// A Word sample whose unterminated change is followed by a tag the new delimiters open and never
+/// close.
+#[must_use]
+pub fn docx_fill_unterminated_unclosed() -> Vec<u8> {
+    docx_fill_body(&fill_paragraph("{=@ #= @x"))
+}
+
+/// A Word sample whose unterminated change is followed by a tag the new delimiters close and never
+/// open.
+#[must_use]
+pub fn docx_fill_unterminated_unopened() -> Vec<u8> {
+    docx_fill_body(&fill_paragraph("{=@ #= name#"))
+}
+
+/// A Word sample declaring two main-type parts: every one of them is templated and filled.
+#[must_use]
+pub fn docx_fill_two_main_parts() -> Vec<u8> {
+    let second = format!(
+        "{DECLARATION}<w:document {DOCX_NAMESPACES}><w:body>{}</w:body></w:document>",
+        fill_paragraph("{second}")
+    );
+    docx_package_around(
+        &fill_paragraph("{first}"),
+        DOCX_NAMESPACES,
+        &docx_rels(&[]),
+        &docx_content_types(&[], &[("/word/document2.xml", DOCX_MAIN_TYPE)]),
+        &[("word/document2.xml", second.as_bytes())],
+    )
+}
+
+/// A Word package with two main-type parts, each opening a section in the paragraph that carries
+/// the loop tag. Their sections differ: the first is `continuous` and the second `nextPage`, so a
+/// fill that read each part's own section properties would insert nothing into the first part,
+/// while the reference keeps the last main-type part's list and inserts the second's section into
+/// both.
+#[must_use]
+pub fn docx_fill_two_main_sections() -> Vec<u8> {
+    let part = |kind: &str, text: &str| {
+        let body = format!(
+            concat!(
+                r#"<w:p><w:pPr><w:sectPr><w:type w:val="{kind}"/>"#,
+                r#"<w:pgSz w:w="12240" w:h="15840"/></w:sectPr></w:pPr>"#,
+                r#"<w:r><w:t xml:space="preserve">{{#page}}</w:t></w:r></w:p>"#,
+                r#"<w:p><w:r><w:t xml:space="preserve">{text}</w:t></w:r></w:p>"#,
+                r#"<w:p><w:r><w:t xml:space="preserve">{{/page}}</w:t></w:r></w:p>"#,
+            ),
+            kind = kind,
+            text = text,
+        );
+        format!("{DECLARATION}<w:document {DOCX_NAMESPACES}><w:body>{body}</w:body></w:document>")
+    };
+    docx_package_of(
+        &part("continuous", "Body A"),
+        &docx_rels(&[]),
+        &docx_content_types(&[], &[("/word/document2.xml", DOCX_MAIN_TYPE)]),
+        &[("word/document2.xml", part("nextPage", "Body B").as_bytes())],
+    )
+}
+
+/// A Word sample whose paragraph holds an unterminated delimiter-change tag: the reference records
+/// the change pair with its closing end outside the text, and its per-part split stops at that
+/// out-of-range match, so the sample is produced unchanged.
+#[must_use]
+pub fn docx_fill_unterminated_delimiter() -> Vec<u8> {
+    docx_fill_body(&fill_paragraph("{=@ #="))
+}
+
+/// A Word sample whose unterminated delimiter change is followed by text written in the delimiters
+/// it names: the split stopped before that text, so it is never parsed as a tag.
+#[must_use]
+pub fn docx_fill_unterminated_delimiter_then_tag() -> Vec<u8> {
+    docx_fill_body(&fill_paragraph("{=@ #= @name#"))
+}
+
+/// A Word sample whose tag before an unterminated delimiter change is still filled, and whose text
+/// between the tag and the change the reference repeats in the tail.
+#[must_use]
+pub fn docx_fill_unterminated_after_tag() -> Vec<u8> {
+    docx_fill_body(&fill_paragraph("{a} {=@ #= @b#"))
+}
+
+/// A Word sample addressing an array's or a string's own members: index 0, index 1 and `length`.
+#[must_use]
+pub fn docx_fill_scope() -> Vec<u8> {
+    docx_fill_body(&fill_paragraph("{0}{1}{length}"))
+}
+
+/// A ZIP archive holding no entry at all: a package whose content types the reference cannot
+/// identify.
+#[must_use]
+pub fn fill_empty_zip() -> Vec<u8> {
+    zip::ZipWriter::new(Cursor::new(Vec::new()))
+        .finish()
+        .expect("a ZIP writer closes the archive it built")
+        .into_inner()
+}
+
+/// A real presentation package under a `.docx` name: a fill asked for the Word family reads the
+/// family from the package's parts, and a deck is refused rather than rendered.
+#[must_use]
+pub fn pptx_deck_named_docx() -> Vec<u8> {
+    pptx_package(
+        &[pptx_slide(&format!(
+            "{}{}",
+            pptx_text_shape(
+                2,
+                "Title",
+                r#"<p:ph type="title"/>"#,
+                "Deck named as a document"
+            ),
+            pptx_text_shape(
+                3,
+                "Body",
+                r#"<p:ph type="body" idx="1"/>"#,
+                "Deck body {name}"
+            ),
+        ))],
+        None,
+    )
+}
+
+/// A real Word package under a `.pptx` name: the same mismatch the other way round.
+#[must_use]
+pub fn docx_package_named_pptx() -> Vec<u8> {
+    docx_fill_body(&fill_paragraph("Word body {name}"))
+}
+
+/// One DrawingML run holding `text`, the unit a slide paragraph is assembled from.
+fn pptx_run(text: &str) -> String {
+    format!(
+        r#"<a:r><a:rPr lang="en-US"/><a:t>{}</a:t></a:r>"#,
+        escape(text)
+    )
+}
+
+/// A slide shape whose text body holds `paragraphs`, each written as its own `a:p`: the shape a
+/// case needs when one paragraph carries a tag of its own or a placeholder spans two runs.
+fn pptx_paragraph_shape(id: u32, name: &str, placeholder: &str, paragraphs: &[String]) -> String {
+    let body: String = paragraphs
+        .iter()
+        .map(|paragraph| format!("<a:p>{paragraph}</a:p>"))
+        .collect();
+    format!(
+        concat!(
+            r#"<p:sp><p:nvSpPr><p:cNvPr id="{}" name="{}"/>"#,
+            r#"<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr>{}</p:nvPr></p:nvSpPr>"#,
+            r#"<p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>{}</p:txBody></p:sp>"#,
+        ),
+        id, name, placeholder, body,
+    )
+}
+
+/// A deck whose one slide carries the tag kinds a presentation reads: a plain placeholder, a
+/// truthy section, an inverted section over a falsy value, a placeholder split across two runs,
+/// and a value with a line break. A presentation has no space-preserving module, so its text
+/// elements are written bare.
+#[must_use]
+pub fn pptx_fill_tags() -> Vec<u8> {
+    let paragraphs = vec![
+        pptx_run("Plain {name}"),
+        pptx_run("{#sec}"),
+        pptx_run("Section body"),
+        pptx_run("{/sec}"),
+        pptx_run("{^inv}"),
+        pptx_run("Inverted body"),
+        pptx_run("{/inv}"),
+        format!("{}{}", pptx_run("{na"), pptx_run("me}")),
+        pptx_run("{lb}"),
+    ];
+    let slide = pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Tags"),
+        pptx_paragraph_shape(3, "Body", r#"<p:ph type="body" idx="1"/>"#, &paragraphs),
+    ));
+    pptx_package(&[slide], None)
+}
+
+/// A deck whose first slide has speaker notes: the notes page carries a section tag, which the
+/// fill reads as a plain name and leaves literal, and a `customXml` item carries a placeholder,
+/// which a presentation does not render at all.
+#[must_use]
+pub fn pptx_fill_notes() -> Vec<u8> {
+    let cover_page = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<coverPageProps xmlns="http://schemas.microsoft.com/office/2006/coverPageProps">"#,
+        "<Abstract>{v}</Abstract></coverPageProps>",
+    );
+    let slide = PptxSlide::new(pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Notes"),
+        pptx_text_shape(
+            3,
+            "Body",
+            r#"<p:ph type="body" idx="1"/>"#,
+            "Notes body {name}"
+        ),
+    )))
+    .with_notes("{#sec} and {x} and {y}");
+    pptx_deck(
+        &[slide],
+        "",
+        "",
+        &[("customXml/item1.xml", cover_page.as_bytes())],
+    )
+}
+
+/// A macro-enabled deck: its presentation part is declared as the macro-enabled main type and the
+/// package carries a macro project beside its slide.
+#[must_use]
+pub fn pptx_fill_macro() -> Vec<u8> {
+    let slides = vec![pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Macro deck"),
+        pptx_text_shape(
+            3,
+            "Body",
+            r#"<p:ph type="body" idx="1"/>"#,
+            "Macro body {name}"
+        ),
+    ))];
+    let presentation = pptx_presentation_of(r#"<p:sldId id="256" r:id="rId3"/>"#, None, PPTX_SIZES);
+    let presentation_rels = pptx_presentation_rels_of(&["slides/slide1.xml"], false);
+    let types = pptx_deck_types(
+        PPTX_MACRO_MAIN_TYPE,
+        PPTX_SLIDE_TYPE,
+        &["ppt/slides/slide1.xml"],
+        true,
+        false,
+        &[("ppt/vbaProject.bin", PPTX_VBA_TYPE)],
+    );
+    let mut parts = pptx_shell_parts(true);
+    parts.push(("ppt/presentation.xml".to_owned(), presentation.into_bytes()));
+    parts.push((
+        "ppt/_rels/presentation.xml.rels".to_owned(),
+        presentation_rels.into_bytes(),
+    ));
+    pptx_push_slides(&mut parts, &slides, &pptx_slide_rels_with(false, ""));
+    parts.push(("ppt/vbaProject.bin".to_owned(), b"macro project".to_vec()));
+    pptx_package_of(Some(&types), parts)
+}
+
+/// A deck whose `[Content_Types].xml` declares a slide part and no presentation main type, while
+/// the presentation part is present but declared only by the `xml` default: the slide is the one
+/// part a fill renders.
+#[must_use]
+pub fn pptx_fill_slide_only() -> Vec<u8> {
+    let slides = vec![pptx_slide(&format!(
+        "{}{}",
+        pptx_text_shape(2, "Title", r#"<p:ph type="title"/>"#, "Slide only"),
+        pptx_text_shape(
+            3,
+            "Body",
+            r#"<p:ph type="body" idx="1"/>"#,
+            "Slide body {name}"
+        ),
+    ))];
+    let presentation = pptx_presentation_of(r#"<p:sldId id="256" r:id="rId3"/>"#, None, PPTX_SIZES);
+    let presentation_rels = pptx_presentation_rels_of(&["slides/slide1.xml"], false);
+    let types = format!(
+        concat!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+            r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">"#,
+            r#"<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"#,
+            r#"<Default Extension="xml" ContentType="application/xml"/>"#,
+            r#"<Override PartName="/ppt/slides/slide1.xml" ContentType="{}"/>"#,
+            r#"</Types>"#,
+        ),
+        PPTX_SLIDE_TYPE,
+    );
+    let mut parts = pptx_shell_parts(true);
+    parts.push(("ppt/presentation.xml".to_owned(), presentation.into_bytes()));
+    parts.push((
+        "ppt/_rels/presentation.xml.rels".to_owned(),
+        presentation_rels.into_bytes(),
+    ));
+    pptx_push_slides(&mut parts, &slides, &pptx_slide_rels_with(false, ""));
+    pptx_package_of(Some(&types), parts)
 }
 
 #[cfg(test)]

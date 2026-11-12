@@ -65,19 +65,32 @@ pub(super) fn is_digits(value: &str) -> bool {
 
 /// One `.rels` part's relationships; an element without an id or a target names no part and is
 /// dropped, the way the reader's own scan keeps only complete ones.
+///
+/// Only a double-quoted attribute is read, as the kit's own `.rels` reader reads it.
 pub(super) fn relationships(xml_text: &str) -> Vec<Relationship> {
+    relationships_in(xml_text, xml::attribute_value)
+}
+
+/// [`relationships`] accepting either quote style, for the fill's target selection: the reference's
+/// template library parses a `.rels` part as XML, where both quotes are attribute quotes.
+pub(super) fn relationships_any_quote(xml_text: &str) -> Vec<Relationship> {
+    relationships_in(xml_text, xml::attribute_value_any_quote)
+}
+
+fn relationships_in(
+    xml_text: &str,
+    attribute: for<'a> fn(&'a str, &str) -> Option<&'a str>,
+) -> Vec<Relationship> {
     RELATIONSHIP_ELEMENT
         .find_iter(xml_text)
         .filter_map(|found| {
             let tag = found.as_str();
-            let id = xml::attribute_value(tag, "Id")?;
-            let target = xml::attribute_value(tag, "Target")?;
+            let id = attribute(tag, "Id")?;
+            let target = attribute(tag, "Target")?;
             Some(Relationship {
                 id: id.to_string(),
                 target: target.to_string(),
-                rel_type: xml::attribute_value(tag, "Type")
-                    .unwrap_or_default()
-                    .to_string(),
+                rel_type: attribute(tag, "Type").unwrap_or_default().to_string(),
             })
         })
         .collect()

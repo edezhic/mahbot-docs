@@ -122,16 +122,17 @@ carried out end to end — `pdf_merge` and `pdf_split` build a fresh document ou
 `pdf_rotate`, `pdf_crop` and `pdf_resize` change what the pages they name show and keep everything
 else the file holds, and `pdf_text`, `pdf_image` and `pdf_form_fill` draw text, a placed picture or a
 filled form into the pages they name, with one embedded general-text font subset to the glyphs the
-call draws. `create` and `fill_template` answer with the vocabulary's `reason_not_carried_out` for
-every family they accept until their port lands; the engine states which (operation, family) pairs
-it carries out as data, and the dispatch reads that statement and nothing else.
+call draws. `create` answers the vocabulary's `reason_not_carried_out` for every family it accepts,
+and `fill_template` for the workbook family, until their ports land; the Word and presentation fills
+are carried out. The engine states which (operation, family) pairs it carries out as data, and the
+dispatch reads that statement and nothing else.
 
-Every sentence the engine prints — an edit's refusals, notes and losses, the request surface's own
-shape refusals, a PDF action's refusals and its notes, a page-render refusal and the panic
-fallback — is a vocabulary mark (`edit_*`, `surface_*`, `pdf_page_*`, `pdf_text_*`, `pdf_image_*`,
-`pdf_form_*`, `note_*`, `render_*`, `engine_failed`), not a sentence in code, and
-`src/test_support/coverage.rs` records every writing mark as witnessed by a corpus case or as
-unreached with its reason.
+Every sentence the engine prints — an edit's refusals, notes and losses, a template fill's own
+refusals and the sentences of the library it ports, the request surface's own shape refusals, a PDF
+action's refusals and its notes, a page-render refusal and the panic fallback — is a vocabulary mark
+(`edit_*`, `fill_*`, `surface_*`, `write_*`, `pdf_page_*`, `pdf_text_*`, `pdf_image_*`, `pdf_form_*`,
+`note_*`, `render_*`, `engine_failed`), not a sentence in code, and `src/test_support/coverage.rs`
+records every writing mark as witnessed by a corpus case or as unreached with its reason.
 
 The document builders live in the crate's `test_support`, the one home shared by the crate's tests
 and the harness. `tests/standalone.rs` builds and tests the crate in a temporary copy with no

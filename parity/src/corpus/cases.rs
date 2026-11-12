@@ -13,9 +13,24 @@ use super::documents::{
     DAMAGED_LENGTH_ABSENT_PDF, DAMAGED_LENGTH_LONG_MANY_PDF, DAMAGED_LENGTH_LONG_PDF,
     DAMAGED_LENGTH_SHORT_PDF, DAMAGED_NO_INDEX_PDF, DAMAGED_OBJECT_STREAM_LENGTH_PDF,
     DAMAGED_OBJECT_STREAM_PDF, DAMAGED_POINTER_PDF, DAMAGED_ROOT_PDF, DAMAGED_SHIFTED_PDF,
-    DEGENERATE_PAGE_PDF, DIAGRAM_MEDIA_PPTX, DOCX_BODYLESS, DOCX_BREAKS, DOCX_BROKEN, DOCX_COLUMNS,
-    DOCX_EDIT, DOCX_MACRO, DOCX_REVISIONS, DOCX_STRICT, EMPTY_CHOICE_FORM_PDF, ENCRYPTED_PDF,
-    FORM_PDF, LISTED_FIELD_FORM_PDF, MAX_LENGTH_FORM_PDF, MERGE_A_PDF, MERGE_B_PDF, MERGE_C_PDF,
+    DECK_AS_DOCX, DEGENERATE_PAGE_PDF, DIAGRAM_MEDIA_PPTX, DOCX_BODYLESS, DOCX_BREAKS, DOCX_BROKEN,
+    DOCX_COLUMNS, DOCX_EDIT, DOCX_MACRO, DOCX_REVISIONS, DOCX_STRICT, EMPTY_CHOICE_FORM_PDF,
+    ENCRYPTED_PDF, FILL_ARCHIVE_DOCX, FILL_BAD_DELIMITERS_DOCX, FILL_COMPILE_BEFORE_RENDER_DOCX,
+    FILL_CORRUPT_DOCX, FILL_DELIMITER_DOCX, FILL_DUPLICATE_CLOSE_DOCX, FILL_DUPLICATE_OPEN_DOCX,
+    FILL_EMPTY_ZIP, FILL_HEADER_ONLY_DOCX, FILL_INVALID_XML_DOCX, FILL_LOOP_POSITION_DOCX,
+    FILL_MACRO_DOCM, FILL_MACRO_PPTM, FILL_MALFORMED_XML_DOCX, FILL_MISMATCH_CLOSE_DOCX,
+    FILL_MISSING_DOCX, FILL_MULTI_ERROR_DOCX, FILL_NEXT_PAGE_DOCX, FILL_NO_MAIN_DOCX,
+    FILL_NOTES_PPTX, FILL_PARTS_DOCX, FILL_PLAIN_DOCX, FILL_PREFIX_DELIMITERS_DOCX,
+    FILL_RAW_AND_SECTION_DOCX, FILL_RAW_NOT_IN_PARAGRAPH_DOCX, FILL_RAW_TEXT_DOCX,
+    FILL_RAW_TWO_IN_PARAGRAPH_DOCX, FILL_RAW_TWO_OUTSIDE_DOCX, FILL_RAW_VALUE_DOCX,
+    FILL_SCOPE_DOCX, FILL_SECTIONS_DOCX, FILL_SIGNED_DOCX, FILL_SLIDE_ONLY_PPTX, FILL_TABLES_DOCX,
+    FILL_TAG_NOT_FOUND_DOCX, FILL_TAGS_DOCX, FILL_TAGS_PPTX, FILL_TEMPLATE_DOCX,
+    FILL_THROWN_BEFORE_POSTPARSE_DOCX, FILL_TWO_MAIN_PARTS_DOCX, FILL_TWO_MAIN_SECTIONS_DOCX,
+    FILL_UNBALANCED_LOOPS_DOCX, FILL_UNCLOSED_DOCX, FILL_UNCLOSED_LOOP_DOCX, FILL_UNOPENED_DOCX,
+    FILL_UNOPENED_LOOP_DOCX, FILL_UNREADABLE_DOCX, FILL_UNTERMINATED_AFTER_TAG_DOCX,
+    FILL_UNTERMINATED_DELIMITER_DOCX, FILL_UNTERMINATED_DELIMITER_THEN_TAG_DOCX,
+    FILL_UNTERMINATED_UNCLOSED_DOCX, FILL_UNTERMINATED_UNOPENED_DOCX, FORM_PDF,
+    LISTED_FIELD_FORM_PDF, MAX_LENGTH_FORM_PDF, MERGE_A_PDF, MERGE_B_PDF, MERGE_C_PDF,
     MISPLACED_FORM_PDF, MULTILINE_FORM_PDF, NO_GEOMETRY_PDF, OBJECT_STREAM_ASCII_HEX_PDF,
     OBJECT_STREAM_INFLATED_PDF, OBJECT_STREAM_PDF, OPTION_FORM_PDF, PAIRED_OPTIONS_FORM_PDF,
     PAIRED_RADIO_FORM_PDF, PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_PDF, PICTURE_PNG,
@@ -28,9 +43,9 @@ use super::documents::{
     RECTLESS_FLAT_FORM_PDF, RECTLESS_FORM_PDF, REPEATED_PAGE_ANNOTATED_PDF, REPEATED_PAGE_PDF,
     RICH_PDF, RICH_PPTX, ROTATED_PDF, SIGNATURE_FORM_PDF, STATE_APPEARANCE_FORM_PDF,
     STATED_SIZE_FORM_PDF, TEMPLATE_DOCX, TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF,
-    TRUNCATED_XLSX, TWO_CATALOGS_PDF, XLSX_ALL_HIDDEN, XLSX_BAD_MERGE_REF, XLSX_BROKEN_MERGES,
-    XLSX_EDIT, XLSX_MACRO, XLSX_NO_CONTENT_TYPES, XLSX_NO_FAMILY, XLSX_ONE_VISIBLE,
-    XLSX_ONLY_SHEET, XLSX_SELF_CLOSING, XLSX_UNCLOSED_MERGE_CELL,
+    TRUNCATED_XLSX, TWO_CATALOGS_PDF, WORD_AS_PPTX, XLSX_ALL_HIDDEN, XLSX_BAD_MERGE_REF,
+    XLSX_BROKEN_MERGES, XLSX_EDIT, XLSX_MACRO, XLSX_NO_CONTENT_TYPES, XLSX_NO_FAMILY,
+    XLSX_ONE_VISIBLE, XLSX_ONLY_SHEET, XLSX_SELF_CLOSING, XLSX_UNCLOSED_MERGE_CELL,
 };
 use super::effect::{BoxKind, Scalar, Scope};
 use super::{Case, Document, Effect, Expect, Reason};
@@ -371,6 +386,1854 @@ fn fill_template_cases() -> Vec<Case> {
                 },
             ],
         ),
+        // A Word fill renders the parts the template library recognizes — the body, the header,
+        // the footer, the footnotes and the comments, the settings and the package's own
+        // properties, a diagram's data and drawing, and a `customXml` item in the cover-page
+        // namespace — and carries every other part through untouched: an endnote, a `customXml`
+        // item in another namespace, a field instruction and a deleted tracked-change run all keep
+        // the placeholder they were written with. The application and custom properties are
+        // excluded from the canonical model, so they are pinned by the parts beside them.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_PARTS_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-parts.docx",
+                "format": "docx",
+                "values": {
+                    "main": "Body value",
+                    "x": "V",
+                    "hdr": "Header value",
+                    "ftr": "Footer value",
+                    "ftn": "Footnote value",
+                    "cmt": "Comment value",
+                    "s": "Settings value",
+                    "core": "Core title",
+                    "app": "Company value",
+                    "custom": "Custom value",
+                    "diag": "Diagram data value",
+                    "draw": "Diagram drawing value",
+                    "cx": "Cover page abstract",
+                    "cx2": "Other namespace value",
+                    "e": "Endnote value",
+                },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: "Body value",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: "V",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: "{x}",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/header1.xml"),
+                    text: "Header value",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/header1.xml"),
+                    text: "{hdr}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/footer1.xml"),
+                    text: "Footer value",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/footer1.xml"),
+                    text: "{ftr}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/footnotes.xml"),
+                    text: "Footnote value",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/footnotes.xml"),
+                    text: "{ftn}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/comments.xml"),
+                    text: "Comment value",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/comments.xml"),
+                    text: "{cmt}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/settings.xml"),
+                    text: "Settings value",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/settings.xml"),
+                    text: "{s}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("docProps/core.xml"),
+                    text: "Core title",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("docProps/core.xml"),
+                    text: "{core}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("customXml/item1.xml"),
+                    text: "Cover page abstract",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("customXml/item1.xml"),
+                    text: "{cx}",
+                    present: false,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "word/endnotes.xml",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/endnotes.xml"),
+                    text: "{e}",
+                    present: true,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "customXml/item2.xml",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("customXml/item2.xml"),
+                    text: "{cx2}",
+                    present: true,
+                },
+            ],
+        )
+        .named("parts"),
+        // One paragraph per tag kind: a section in a paragraph of its own is the paragraph loop,
+        // so both its tags and the line they stood on leave no trace; a raw tag replaces its
+        // paragraph with the markup it was given; a dash section drops the paragraph holding it;
+        // `{.}` renders the value map itself; a placeholder split across two runs is read as the
+        // one tag it looks like; and a value with a line break is written as a break between two
+        // runs that both keep the run properties.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_TAGS_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-tags.docx",
+                "format": "docx",
+                "values": {
+                    "name": "Ada",
+                    "sec": true,
+                    "inv": false,
+                    "raw": "<w:p><w:r><w:t>Raw paragraph</w:t></w:r></w:p>",
+                    "dash": true,
+                    "lb": "a\nb",
+                },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Plain Ada",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Section body",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{#sec}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{/sec}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Inverted body",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{^inv}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Raw paragraph",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{@raw}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Dash body",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{-w:p dash}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "[object Object]",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{.}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{na",
+                    present: false,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: DOCX_BODY,
+                    element: "w:br",
+                    count: 1,
+                },
+            ],
+        )
+        .named("tags"),
+        // Five sections: the one no value answers for renders its body once, its inverted sibling
+        // is skipped, a present-falsy section is skipped and a present-falsy inverted one renders,
+        // and a section opened in one cell of a row and closed in the other makes the row its body.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_SECTIONS_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-sections.docx",
+                "format": "docx",
+                "values": { "off": false, "flip": false, "on": true, "row": true },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Absent body",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{#gone}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Inverted absent body",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{^noinv}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Falsy body",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{/off}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Inverted falsy body",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{/flip}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Inverted truthy body",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{/on}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Kept cell",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{#row}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{/row}",
+                    present: false,
+                },
+            ],
+        )
+        .named("sections"),
+        // A section whose properties sit in the paragraph that opens it and declare the next-page
+        // break: one rendered copy still inserts that section before itself and a page break at its
+        // end, so the produced body carries the section paragraph and the break.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_NEXT_PAGE_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-next-page.docx",
+                "format": "docx",
+                "values": { "page": true },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Next page body",
+                    present: true,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: DOCX_BODY,
+                    element: "w:sectPr",
+                    count: 1,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: DOCX_BODY,
+                    element: "w:br",
+                    count: 1,
+                },
+            ],
+        )
+        .named("next_page"),
+        // Every shape a name no value answers for takes: a plain placeholder is restated, an empty
+        // brace pair is a tag with an empty name — counted, and reported missing as `""` — an
+        // absent section renders its body, an absent inverted section is skipped, and a name that
+        // is a member of `Object.prototype` is a name the caller gave no value for rather than the
+        // prototype's own member.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_MISSING_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-missing.docx",
+                "format": "docx",
+                "values": {},
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Plain {plain} here",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Braces {}",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Gone body",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Noinv body",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Proto {toString}",
+                    present: true,
+                },
+            ],
+        )
+        .named("missing_shapes"),
+        // A sample holding no placeholder at all: the fill declares nothing, finds nothing, and
+        // carries the body through as it was written.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_PLAIN_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-plain.docx",
+                "format": "docx",
+                "values": {},
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Plain words and no placeholder",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{",
+                    present: false,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: DOCX_BODY,
+                    element: "w:p",
+                    count: 1,
+                },
+            ],
+        )
+        .named("zero"),
+        // The two table shapes a fill repairs whatever the sample declares: a cell holding no
+        // paragraph gets one, and a table holding no row is dropped. The body then ends with a
+        // table, so the paragraph a document must end with is added after it — one table and two
+        // paragraphs are what is left.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_TABLES_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-tables.docx",
+                "format": "docx",
+                "values": {},
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: DOCX_BODY,
+                    element: "w:tbl",
+                    count: 1,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: DOCX_BODY,
+                    element: "w:p",
+                    count: 2,
+                },
+            ],
+        )
+        .named("zero_table"),
+        // A macro-enabled sample: the main part's content type is the macro-enabled one, and the
+        // fill reads it as the body it renders. The name keeps its extension in the output.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_MACRO_DOCM],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-macro.docm",
+                "format": "docx",
+                "values": { "name": "Ada" },
+                "output": "$out/filled.docm",
+            }),
+            vec!["filled.docm"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Macro body Ada",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{name}",
+                    present: false,
+                },
+            ],
+        )
+        .named("macro"),
+        // A template's main type under a document's name: the family is the one the part declares,
+        // and the output keeps the name's extension.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_TEMPLATE_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-template.docx",
+                "format": "docx",
+                "values": { "name": "Ada" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Template body Ada",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{name}",
+                    present: false,
+                },
+            ],
+        )
+        .named("template_style"),
+        // A sample carrying a signature part: the fill renders the body and says nothing about the
+        // signature — the note an edit prints is the edit's own, and the transcript's notes are
+        // compared by the baseline.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_SIGNED_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-signed.docx",
+                "format": "docx",
+                "values": { "name": "Ada" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Signed body Ada",
+                    present: true,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "_xmlsignatures/sig1.xml",
+                    present: true,
+                },
+            ],
+        )
+        .named("signed"),
+        // The family is read from the package's parts, not from the name or the request: a deck
+        // asked for as a Word document is refused rather than rendered.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![DECK_AS_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/deck-as-docx.docx",
+                "format": "docx",
+                "values": { "name": "Ada" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                "the sample is really a .pptx package, not the .docx one its name says — hint: \
+                 rename it to match its content",
+            )),
+        )
+        .named("other_family"),
+        // A request naming no family is a document's: the template is rendered as the Word sample
+        // it is.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![TEMPLATE_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/template.docx",
+                "values": { "name": "Ada", "city": "Minsk" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Hello Ada from Minsk",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{name}",
+                    present: false,
+                },
+            ],
+        )
+        .named("no_format"),
+        // A family naming neither of the two a fill renders takes the Word path, whatever the
+        // template is.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![TEMPLATE_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/template.docx",
+                "format": "pdf",
+                "values": { "name": "Ada", "city": "Minsk" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Hello Ada from Minsk",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{city}",
+                    present: false,
+                },
+            ],
+        )
+        .named("format_other"),
+        // The main type is declared on a part the package does not hold, and the real body is
+        // declared only by the `xml` default: no main part is found, so nothing is rendered and the
+        // body keeps its placeholder.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_NO_MAIN_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-no-main.docx",
+                "format": "docx",
+                "values": { "b": "Body value" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Body {b}",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Body value",
+                    present: false,
+                },
+            ],
+        )
+        .named("no_main_type"),
+        // A package declaring a header part and no main type: the header is the one part a fill
+        // renders, and the body is carried through with its placeholder.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_HEADER_ONLY_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-header-only.docx",
+                "format": "docx",
+                "values": { "h": "Header value", "b": "Body value" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some("word/header1.xml"),
+                    text: "Header value",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/header1.xml"),
+                    text: "{h}",
+                    present: false,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Body {b}",
+                    present: true,
+                },
+            ],
+        )
+        .named("header_only"),
+        // A request with no values at all is not one the template library can render: the failure
+        // is the library's own message, so the case states the class and not the wording.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![TEMPLATE_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/template.docx",
+                "format": "docx",
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("no_values"),
+        // A value that is a structure has no place in a document: it is refused once, by name,
+        // before any part is rendered.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![TEMPLATE_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/template.docx",
+                "format": "docx",
+                "values": { "a": {} },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the value for "a" must be text, a number or a boolean, not a structure"#,
+            )),
+        )
+        .named("structure_value"),
+        // Bytes that are not a ZIP at all: the package is refused by the name it was given.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_UNREADABLE_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-unreadable.docx",
+                "format": "docx",
+                "values": { "a": "b" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::template(
+                "fill-unreadable.docx is not a readable .docx package: {}",
+            )),
+        )
+        .named("unreadable"),
+        // A ZIP holding no part of any document family: the archive is readable and its family is
+        // not, which the fill refuses by naming the parts it found.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_ARCHIVE_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-archive.docx",
+                "format": "docx",
+                "values": { "a": "b" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                "the sample cannot be filled: The filetype for this file could not be identified, \
+                 is this file corrupted ? Zip file contains : hello.txt",
+            )),
+        )
+        .named("no_filetype"),
+        // ── the samples a fill cannot compile ─────────────────────────────────────────────────
+        // Each is one paragraph and one mistake: the sentence is the library's own, and the part
+        // and the surrounding text follow it.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_UNCLOSED_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-unclosed.docx",
+                "format": "docx",
+                "values": {},
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: The tag beginning with "{name" is unclosed"#,
+            )),
+        )
+        .named("unclosed"),
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_DUPLICATE_OPEN_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-duplicate-open.docx",
+                "format": "docx",
+                "values": {},
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: The tag beginning with "{{name" has duplicate open tags"#,
+            )),
+        )
+        .named("duplicate_open"),
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_DUPLICATE_CLOSE_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-duplicate-close.docx",
+                "format": "docx",
+                "values": {},
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: The tag ending with "name}}" has duplicate close tags"#,
+            )),
+        )
+        .named("duplicate_close"),
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_UNOPENED_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-unopened.docx",
+                "format": "docx",
+                "values": {},
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: The tag beginning with "name" is unopened"#,
+            )),
+        )
+        .named("unopened"),
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_UNCLOSED_LOOP_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-unclosed-loop.docx",
+                "format": "docx",
+                "values": { "a": true },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: The loop with tag "a" is unclosed"#,
+            )),
+        )
+        .named("unclosed_loop"),
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_UNOPENED_LOOP_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-unopened-loop.docx",
+                "format": "docx",
+                "values": { "a": true },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: The loop with tag "a" is unopened"#,
+            )),
+        )
+        .named("unopened_loop"),
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_MISMATCH_CLOSE_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-mismatch-close.docx",
+                "format": "docx",
+                "values": { "a": true, "b": true },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: The tag "a" is closed by the tag "b""#,
+            )),
+        )
+        .named("mismatch_close"),
+        // A section opened in a cell beside text and closed after the table: no expansion of it
+        // keeps the row whole, so the position is refused rather than spliced.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_LOOP_POSITION_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-loop-position.docx",
+                "format": "docx",
+                "values": { "a": true },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: The tags "a" are misplaced in the document, for example one of them is in a table and the other one outside the table"#,
+            )),
+        )
+        .named("loop_position"),
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_RAW_TEXT_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-raw-text.docx",
+                "format": "docx",
+                "values": { "raw": "<w:p/>" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: The raw tag "raw" should be the only text in this paragraph."#,
+            )),
+        )
+        .named("raw_with_text"),
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_RAW_VALUE_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-raw-value.docx",
+                "format": "docx",
+                "values": { "raw": 5 },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: The value of the raw tag : "{@raw}" is not a string"#,
+            )),
+        )
+        .named("raw_value_not_text"),
+        // A value holding a character no XML document may carry is refused rather than escaped
+        // into one.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_CORRUPT_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-corrupt.docx",
+                "format": "docx",
+                "values": { "v": "a\u{1}b" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: There are some corrupt characters for the field "v""#,
+            )),
+        )
+        .named("corrupt_characters"),
+        // A tag that changes the delimiters halfway through: the names read after it are the ones
+        // in brackets, and one of them no value answers for is restated in the braces the sample
+        // began with.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_DELIMITER_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-delimiter.docx",
+                "format": "docx",
+                "values": { "name": "A" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Hi A, then A and {x}",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{name}",
+                    present: false,
+                },
+            ],
+        )
+        .named("delimiter_change"),
+        // A template answered by no value at all: the recorded answer's `missing` list pins the
+        // order the reference reports the unfilled names in — the common property parts first, then
+        // the family's parts, a custom XML item last.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_PARTS_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-parts.docx",
+                "format": "docx",
+                "values": {},
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{main}",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/header1.xml"),
+                    text: "{hdr}",
+                    present: true,
+                },
+            ],
+        )
+        .named("missing_order"),
+        // Two values the XML cannot carry in one part: the reference collects every render-time
+        // error it meets and joins them, so both are reported rather than the first alone.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_MULTI_ERROR_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-multi-error.docx",
+                "format": "docx",
+                "values": { "a": "\u{1}", "b": "\u{2}" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: There are some corrupt characters for the field "a" word/document.xml; There are some corrupt characters for the field "b" word/document.xml"#,
+            )),
+        )
+        .named("multi_error"),
+        // A delimiter tag naming no delimiters: the reference throws before it can parse the part,
+        // so the sentence names no part.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_BAD_DELIMITERS_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-bad-delimiters.docx",
+                "format": "docx",
+                "values": {},
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                "the sample cannot be filled: New Delimiters cannot be parsed",
+            )),
+        )
+        .named("bad_delimiters"),
+        // A body that is not well-formed XML: the parser's invalid-xml verdict.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_INVALID_XML_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-invalid-xml.docx",
+                "format": "docx",
+                "values": {},
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                "the sample cannot be filled: An XML file has invalid xml",
+            )),
+        )
+        .named("invalid_xml"),
+        // A body whose elements close the wrong way round: the parser's malformed-xml verdict.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_MALFORMED_XML_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-malformed-xml.docx",
+                "format": "docx",
+                "values": {},
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                "the sample cannot be filled: Malformed xml",
+            )),
+        )
+        .named("malformed_xml"),
+        // A ZIP with no entry at all: there is no content type to read a family from.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_EMPTY_ZIP],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-empty.zip",
+                "format": "docx",
+                "values": {},
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                "the sample cannot be filled: The filetype for this file could not be identified, \
+                 is this file corrupted ? Empty zip file",
+            )),
+        )
+        .named("empty_zip"),
+        // The reference compiles every part before it renders any: the settings part would render a
+        // corrupt value, but the main part does not compile, so only the compile failure is
+        // reported and the settings value is never substituted.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_COMPILE_BEFORE_RENDER_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-compile-before-render.docx",
+                "format": "docx",
+                "values": { "a": "\u{1}" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: The loop with tag "a" is unclosed word/document.xml"#,
+            )),
+        )
+        .named("compile_before_render"),
+        // A raw tag outside any paragraph: the raw module's own sentence, not the generic
+        // missing-tag one.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_RAW_NOT_IN_PARAGRAPH_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-raw-not-in-paragraph.docx",
+                "format": "docx",
+                "values": { "x": "<w:p/>" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: The tag "{@x}" is not inside a paragraph, putting raw tags inside an inline loop is disallowed."#,
+            )),
+        )
+        .named("raw_not_in_paragraph"),
+        // The reference lexes every part before it postparses any, so the main part's thrown
+        // sentence wins over the settings part's pairing failure, which is only found later.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_THROWN_BEFORE_POSTPARSE_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-thrown-before-postparse.docx",
+                "format": "docx",
+                "values": {},
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                "the sample cannot be filled: New Delimiters cannot be parsed",
+            )),
+        )
+        .named("thrown_before_postparse"),
+        // Two raw tags in one paragraph: the reference orders its limits by their left edge, the
+        // earlier tag first, and skips the one inside the other — so the first is the one named as
+        // the paragraph's only text.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_RAW_TWO_IN_PARAGRAPH_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-raw-two-in-paragraph.docx",
+                "format": "docx",
+                "values": { "a": "<w:p/>", "b": "<w:p/>" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: The raw tag "a" should be the only text in this paragraph. This means that this tag should not be surrounded by any text or spaces. word/document.xml"#,
+            )),
+        )
+        .named("raw_two_in_paragraph"),
+        // Two raw tags outside any paragraph: the module collects each misuse and the kit joins the
+        // sentences with `; `.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_RAW_TWO_OUTSIDE_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-raw-two-outside.docx",
+                "format": "docx",
+                "values": { "a": "<w:p/>", "b": "<w:p/>" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: The tag "{@a}" is not inside a paragraph, putting raw tags inside an inline loop is disallowed. word/document.xml; The tag "{@b}" is not inside a paragraph, putting raw tags inside an inline loop is disallowed. word/document.xml"#,
+            )),
+        )
+        .named("raw_two_outside"),
+        // A pairing failure and a raw failure in one part: the reference runs its modules one after
+        // the other and joins their errors, so both sentences are reported.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_RAW_AND_SECTION_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-raw-and-section.docx",
+                "format": "docx",
+                "values": { "a": "<w:p/>", "s": "x", "t": "y" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: The tag "s" is closed by the tag "t" word/document.xml; The raw tag "a" should be the only text in this paragraph. This means that this tag should not be surrounded by any text or spaces. word/document.xml"#,
+            )),
+        )
+        .named("raw_and_section"),
+        // A section expanding to a table row the sample does not hold: the reference looks the left
+        // and the right edge up separately and reports each failure.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_TAG_NOT_FOUND_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-tag-not-found.docx",
+                "format": "docx",
+                "values": { "a": "x" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: No tag "w:tr" was found at the left word/document.xml; No tag "w:tr" was found at the right word/document.xml"#,
+            )),
+        )
+        .named("tag_not_found"),
+        // Two top-level sections whose expanded rows overlap: the first opens in the first row and
+        // closes in the second, and the second opens in that same row, so its expansion starts
+        // inside the first's.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_UNBALANCED_LOOPS_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-unbalanced-loops.docx",
+                "format": "docx",
+                "values": { "a": "A", "b": "B" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: Unbalanced loop tags {#a}{/a}{#b}{/b} word/document.xml"#,
+            )),
+        )
+        .named("unbalanced_loops"),
+        // A change tag naming delimiters one of which is a prefix of the other: the reference
+        // searches both again from the position after the one it consumed, so one index yields an
+        // end and a start, and the three balance failures are collected.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_PREFIX_DELIMITERS_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-prefix-delimiters.docx",
+                "format": "docx",
+                "values": { "a": "x" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: The tag ending with "[[[=}[" has duplicate close tags …[[[=}[… word/document.xml; The tag beginning with "[[a" is unclosed …[[a… word/document.xml; The tag beginning with "[[x" is unclosed …[[x… word/document.xml"#,
+            )),
+        )
+        .named("prefix_delimiters"),
+        // An unterminated change still closes the delimiter being built and restarts the balance
+        // scan with the delimiters it named, so a tag the new delimiters leave open is reported
+        // even though nothing after the change is parsed.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_UNTERMINATED_UNCLOSED_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-unterminated-unclosed.docx",
+                "format": "docx",
+                "values": { "x": "V" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r#"the sample cannot be filled: The tag beginning with "@x" is unclosed …@x… word/document.xml"#,
+            )),
+        )
+        .named("unterminated_unclosed"),
+        // The same restart, with a tag the new delimiters close and never open.
+        declined(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_UNTERMINATED_UNOPENED_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-unterminated-unopened.docx",
+                "format": "docx",
+                "values": { "name": "V" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            Expect::Refused(Reason::contains(
+                r##"the sample cannot be filled: The tag beginning with "#= name" is unopened …#= name… word/document.xml"##,
+            )),
+        )
+        .named("unterminated_unopened"),
+        // Two main-type parts: every one of them is templated, so both are filled.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_TWO_MAIN_PARTS_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-two-main-parts.docx",
+                "format": "docx",
+                "values": { "first": "One", "second": "Two" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: "One",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document2.xml"),
+                    text: "Two",
+                    present: true,
+                },
+            ],
+        )
+        .named("two_main_parts"),
+        // Two main-type parts whose sections differ: the loop module keeps the last part's section
+        // list and every part's section walk reads it, so the first part's body carries the second
+        // part's `nextPage` section and a page break of its own.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_TWO_MAIN_SECTIONS_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-two-main-sections.docx",
+                "format": "docx",
+                "values": { "page": true },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "Body A",
+                    present: true,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: DOCX_BODY,
+                    element: "w:br",
+                    count: 1,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document2.xml",
+                    element: "w:br",
+                    count: 1,
+                },
+            ],
+        )
+        .named("two_main_sections"),
+        // An unterminated delimiter change: the reference records the change pair with its closing
+        // end outside the text, and its per-part split stops at that first out-of-range match, so
+        // nothing after the change is parsed and the sample is produced unchanged with a count of
+        // zero.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_UNTERMINATED_DELIMITER_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-unterminated-delimiter.docx",
+                "format": "docx",
+                "values": {},
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![Effect::Text {
+                output: None,
+                part: Some(DOCX_BODY),
+                text: "{=@ #=",
+                present: true,
+            }],
+        )
+        .named("unterminated_delimiter"),
+        // The same malformed change followed by text written in the delimiters it names: the split
+        // stopped before that text, so the tag it looks like is never parsed and the whole part is
+        // carried through unchanged.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_UNTERMINATED_DELIMITER_THEN_TAG_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-unterminated-delimiter-then-tag.docx",
+                "format": "docx",
+                "values": { "name": "Ada" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![Effect::Text {
+                output: None,
+                part: Some(DOCX_BODY),
+                text: "{=@ #= @name#",
+                present: true,
+            }],
+        )
+        .named("unterminated_then_text"),
+        // A tag before an unterminated change is still filled, and the text between it and the
+        // change appears twice: the change's opening half does not advance the reference's cursor,
+        // and the missing closing half never does.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_UNTERMINATED_AFTER_TAG_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-unterminated-after-tag.docx",
+                "format": "docx",
+                "values": { "a": "V" },
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![Effect::Text {
+                output: None,
+                part: Some(DOCX_BODY),
+                text: "V  {=@ #=",
+                present: true,
+            }],
+        )
+        .named("unterminated_after_tag"),
+        // A `values` value that is not an object: the reference hands it to the template library,
+        // whose lookup reads an array by index and length and a string by its characters, so a
+        // sample addressing those names is filled from it while one naming an object member is
+        // missing every one.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_SCOPE_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-scope.docx",
+                "format": "docx",
+                "values": "ab",
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![Effect::Text {
+                output: None,
+                part: Some(DOCX_BODY),
+                text: "ab2",
+                present: true,
+            }],
+        )
+        .named("values_string"),
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![FILL_SCOPE_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-scope.docx",
+                "format": "docx",
+                "values": ["A", "B"],
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![Effect::Text {
+                output: None,
+                part: Some(DOCX_BODY),
+                text: "AB2",
+                present: true,
+            }],
+        )
+        .named("values_array"),
+        // A `values` value that is not an object and names nothing the sample asks for: every
+        // placeholder is missing and the sample is produced unchanged.
+        produced(
+            Family::Docx,
+            "fill_template",
+            None,
+            vec![TEMPLATE_DOCX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/template.docx",
+                "format": "docx",
+                "values": [],
+                "output": "$out/filled.docx",
+            }),
+            vec!["filled.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{name}",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some(DOCX_BODY),
+                    text: "{city}",
+                    present: true,
+                },
+            ],
+        )
+        .named("values_not_a_map"),
+        // ── the presentation fill ─────────────────────────────────────────────────────────────
+        // The same tag kinds on a slide. A presentation has no space-preserving module, so the
+        // text element is written bare, and a line break is a break element between two runs.
+        produced(
+            Family::Pptx,
+            "fill_template",
+            None,
+            vec![FILL_TAGS_PPTX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-tags.pptx",
+                "format": "pptx",
+                "values": { "name": "Ada", "sec": true, "inv": false, "lb": "a\nb" },
+                "output": "$out/filled.pptx",
+            }),
+            vec!["filled.pptx"],
+            vec![
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Plain Ada",
+                    present: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Section body",
+                    present: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Inverted body",
+                    present: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "{name}",
+                    present: false,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "{#sec}",
+                    present: false,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: "ppt/slides/slide1.xml",
+                    element: "a:br",
+                    count: 1,
+                },
+            ],
+        )
+        .named("tags"),
+        // A notes page is not a part the template library renders, so the fill substitutes its
+        // placeholders itself — with the same syntax and none of its meaning: a section tag on a
+        // notes page is a name no value answers for, and is restated as the text it was written
+        // as. A `customXml` item is not a part a presentation renders at all.
+        produced(
+            Family::Pptx,
+            "fill_template",
+            None,
+            vec![FILL_NOTES_PPTX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-notes.pptx",
+                "format": "pptx",
+                "values": { "sec": true, "x": "X", "v": "V", "name": "Ada" },
+                "output": "$out/filled.pptx",
+            }),
+            vec!["filled.pptx"],
+            vec![
+                Effect::NotesText {
+                    output: None,
+                    slide: 1,
+                    text: "X",
+                    present: true,
+                },
+                Effect::NotesText {
+                    output: None,
+                    slide: 1,
+                    text: "{#sec}",
+                    present: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Notes body Ada",
+                    present: true,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "customXml/item1.xml",
+                    present: true,
+                },
+            ],
+        )
+        .named("notes"),
+        // A macro-enabled deck: the presentation's own part is declared as the macro-enabled main
+        // type, and the slide is rendered beside the macro project the package carries.
+        produced(
+            Family::Pptx,
+            "fill_template",
+            None,
+            vec![FILL_MACRO_PPTM],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-macro.pptm",
+                "format": "pptx",
+                "values": { "name": "Ada" },
+                "output": "$out/filled.pptm",
+            }),
+            vec!["filled.pptm"],
+            vec![
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Macro body Ada",
+                    present: true,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "ppt/vbaProject.bin",
+                    present: true,
+                },
+            ],
+        )
+        .named("macro"),
+        // A package declaring a slide part and no presentation main type, with the presentation
+        // part present but undeclared: the slide is the one part a fill renders.
+        produced(
+            Family::Pptx,
+            "fill_template",
+            None,
+            vec![FILL_SLIDE_ONLY_PPTX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-slide-only.pptx",
+                "format": "pptx",
+                "values": { "name": "Ada" },
+                "output": "$out/filled.pptx",
+            }),
+            vec!["filled.pptx"],
+            vec![
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Slide body Ada",
+                    present: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "{name}",
+                    present: false,
+                },
+            ],
+        )
+        .named("slide_only"),
+        // A Word package asked for as a deck: refused by the family its parts declare, naming both
+        // extensions.
+        declined(
+            Family::Pptx,
+            "fill_template",
+            None,
+            vec![WORD_AS_PPTX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/word-as-pptx.pptx",
+                "format": "pptx",
+                "values": { "name": "Ada" },
+                "output": "$out/filled.pptx",
+            }),
+            vec!["filled.pptx"],
+            Expect::Refused(Reason::contains(
+                "the sample is really a .docx package, not the .pptx one its name says — hint: \
+                 rename it to match its content",
+            )),
+        )
+        .named("other_family"),
     ]
 }
 

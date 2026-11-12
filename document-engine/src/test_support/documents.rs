@@ -417,6 +417,331 @@ pub const PPTX_NOTES_TWO: Document = Document {
     build: build::pptx_notes_two,
 };
 
+/// A Word sample with a placeholder in every part family a fill renders and in three it does not.
+pub const FILL_PARTS_DOCX: Document = Document {
+    name: "fill-parts.docx",
+    build: build::docx_fill_parts,
+};
+
+/// A Word sample with one paragraph per tag kind a fill reads.
+pub const FILL_TAGS_DOCX: Document = Document {
+    name: "fill-tags.docx",
+    build: build::docx_fill_tags,
+};
+
+/// A Word sample of the five section shapes a fill treats differently.
+pub const FILL_SECTIONS_DOCX: Document = Document {
+    name: "fill-sections.docx",
+    build: build::docx_fill_sections,
+};
+
+/// A Word package whose two main-type parts carry sections of different kinds.
+pub const FILL_TWO_MAIN_SECTIONS_DOCX: Document = Document {
+    name: "fill-two-main-sections.docx",
+    build: build::docx_fill_two_main_sections,
+};
+
+/// A Word sample whose section declares the next-page break inside the paragraph that opens it.
+pub const FILL_NEXT_PAGE_DOCX: Document = Document {
+    name: "fill-next-page.docx",
+    build: build::docx_fill_next_page,
+};
+
+/// A Word sample whose five tags no value answers for.
+pub const FILL_MISSING_DOCX: Document = Document {
+    name: "fill-missing.docx",
+    build: build::docx_fill_missing_shapes,
+};
+
+/// A Word sample holding no placeholder at all.
+pub const FILL_PLAIN_DOCX: Document = Document {
+    name: "fill-plain.docx",
+    build: build::docx_fill_plain,
+};
+
+/// A Word sample whose two tables are the shapes a fill repairs.
+pub const FILL_TABLES_DOCX: Document = Document {
+    name: "fill-tables.docx",
+    build: build::docx_fill_tables,
+};
+
+/// A macro-enabled Word sample, named as a macro-enabled document.
+pub const FILL_MACRO_DOCM: Document = Document {
+    name: "fill-macro.docm",
+    build: build::docx_fill_macro,
+};
+
+/// A Word sample whose body part is declared as a template's main type.
+pub const FILL_TEMPLATE_DOCX: Document = Document {
+    name: "fill-template.docx",
+    build: build::docx_fill_template_style,
+};
+
+/// A Word sample carrying a signature part beside its placeholder.
+pub const FILL_SIGNED_DOCX: Document = Document {
+    name: "fill-signed.docx",
+    build: build::docx_fill_signed,
+};
+
+/// A Word sample whose main type is declared on a part the package does not hold.
+pub const FILL_NO_MAIN_DOCX: Document = Document {
+    name: "fill-no-main.docx",
+    build: build::docx_fill_without_main_type,
+};
+
+/// A Word sample whose content types declare a header part and no main type.
+pub const FILL_HEADER_ONLY_DOCX: Document = Document {
+    name: "fill-header-only.docx",
+    build: build::docx_fill_header_only,
+};
+
+/// A file named as a Word document whose bytes are not a ZIP.
+pub const FILL_UNREADABLE_DOCX: Document = Document {
+    name: "fill-unreadable.docx",
+    build: build::docx_fill_unreadable,
+};
+
+/// A ZIP archive holding one text part and no part of any document family.
+pub const FILL_ARCHIVE_DOCX: Document = Document {
+    name: "fill-archive.docx",
+    build: build::docx_fill_plain_archive,
+};
+
+/// A Word sample whose one tag is never closed.
+pub const FILL_UNCLOSED_DOCX: Document = Document {
+    name: "fill-unclosed.docx",
+    build: build::docx_fill_unclosed,
+};
+
+/// A Word sample whose one tag is opened twice.
+pub const FILL_DUPLICATE_OPEN_DOCX: Document = Document {
+    name: "fill-duplicate-open.docx",
+    build: build::docx_fill_duplicate_open,
+};
+
+/// A Word sample whose one tag is closed twice.
+pub const FILL_DUPLICATE_CLOSE_DOCX: Document = Document {
+    name: "fill-duplicate-close.docx",
+    build: build::docx_fill_duplicate_close,
+};
+
+/// A Word sample whose one tag is closed and never opened.
+pub const FILL_UNOPENED_DOCX: Document = Document {
+    name: "fill-unopened.docx",
+    build: build::docx_fill_unopened,
+};
+
+/// A Word sample whose section is opened and never closed.
+pub const FILL_UNCLOSED_LOOP_DOCX: Document = Document {
+    name: "fill-unclosed-loop.docx",
+    build: build::docx_fill_unclosed_loop,
+};
+
+/// A Word sample whose section is closed and never opened.
+pub const FILL_UNOPENED_LOOP_DOCX: Document = Document {
+    name: "fill-unopened-loop.docx",
+    build: build::docx_fill_unopened_loop,
+};
+
+/// A Word sample whose section is opened under one name and closed under another.
+pub const FILL_MISMATCH_CLOSE_DOCX: Document = Document {
+    name: "fill-mismatch-close.docx",
+    build: build::docx_fill_mismatch_close,
+};
+
+/// A Word sample whose section is opened in a table cell and closed after the table.
+pub const FILL_LOOP_POSITION_DOCX: Document = Document {
+    name: "fill-loop-position.docx",
+    build: build::docx_fill_loop_position,
+};
+
+/// A Word sample whose raw tag shares its paragraph with text.
+pub const FILL_RAW_TEXT_DOCX: Document = Document {
+    name: "fill-raw-text.docx",
+    build: build::docx_fill_raw_with_text,
+};
+
+/// A Word sample whose raw tag is alone in its paragraph.
+pub const FILL_RAW_VALUE_DOCX: Document = Document {
+    name: "fill-raw-value.docx",
+    build: build::docx_fill_raw_value,
+};
+
+/// A Word sample whose one placeholder a case answers with a corrupt value.
+pub const FILL_CORRUPT_DOCX: Document = Document {
+    name: "fill-corrupt.docx",
+    build: build::docx_fill_corrupt,
+};
+
+/// A Word sample whose one paragraph changes the delimiters halfway through.
+pub const FILL_DELIMITER_DOCX: Document = Document {
+    name: "fill-delimiter.docx",
+    build: build::docx_fill_delimiter,
+};
+
+/// A Word sample whose one paragraph holds two placeholders a case answers with corrupt values.
+pub const FILL_MULTI_ERROR_DOCX: Document = Document {
+    name: "fill-multi-error.docx",
+    build: build::docx_fill_multi_error,
+};
+
+/// A Word sample whose one paragraph holds a delimiter tag that names no delimiters.
+pub const FILL_BAD_DELIMITERS_DOCX: Document = Document {
+    name: "fill-bad-delimiters.docx",
+    build: build::docx_fill_bad_delimiters,
+};
+
+/// A Word sample whose one paragraph is not well-formed XML.
+pub const FILL_INVALID_XML_DOCX: Document = Document {
+    name: "fill-invalid-xml.docx",
+    build: build::docx_fill_invalid_xml,
+};
+
+/// A Word sample whose one paragraph closes its elements in the wrong order.
+pub const FILL_MALFORMED_XML_DOCX: Document = Document {
+    name: "fill-malformed-xml.docx",
+    build: build::docx_fill_malformed_xml,
+};
+
+/// A Word sample whose settings part renders a corrupt value while its main part fails to compile.
+pub const FILL_COMPILE_BEFORE_RENDER_DOCX: Document = Document {
+    name: "fill-compile-before-render.docx",
+    build: build::docx_fill_compile_before_render,
+};
+
+/// A Word sample whose body holds a raw tag outside any paragraph.
+pub const FILL_RAW_NOT_IN_PARAGRAPH_DOCX: Document = Document {
+    name: "fill-raw-not-in-paragraph.docx",
+    build: build::docx_fill_raw_outside_paragraph,
+};
+
+/// A Word sample whose settings part fails to pair while its main part throws in the lexer.
+pub const FILL_THROWN_BEFORE_POSTPARSE_DOCX: Document = Document {
+    name: "fill-thrown-before-postparse.docx",
+    build: build::docx_fill_thrown_before_postparse,
+};
+
+/// A Word sample whose one paragraph holds two raw tags.
+pub const FILL_RAW_TWO_IN_PARAGRAPH_DOCX: Document = Document {
+    name: "fill-raw-two-in-paragraph.docx",
+    build: build::docx_fill_raw_two_in_paragraph,
+};
+
+/// A Word sample whose two raw tags sit outside any paragraph.
+pub const FILL_RAW_TWO_OUTSIDE_DOCX: Document = Document {
+    name: "fill-raw-two-outside.docx",
+    build: build::docx_fill_raw_two_outside,
+};
+
+/// A Word sample holding a raw tag and a section naming a close that does not match it.
+pub const FILL_RAW_AND_SECTION_DOCX: Document = Document {
+    name: "fill-raw-and-section.docx",
+    build: build::docx_fill_raw_and_section,
+};
+
+/// A Word sample whose section expands to a table row the sample does not hold.
+pub const FILL_TAG_NOT_FOUND_DOCX: Document = Document {
+    name: "fill-tag-not-found.docx",
+    build: build::docx_fill_tag_not_found,
+};
+
+/// A Word sample whose two top-level sections expand to overlapping rows.
+pub const FILL_UNBALANCED_LOOPS_DOCX: Document = Document {
+    name: "fill-unbalanced-loops.docx",
+    build: build::docx_fill_unbalanced_loops,
+};
+
+/// A Word sample whose change tag names delimiters one of which is a prefix of the other.
+pub const FILL_PREFIX_DELIMITERS_DOCX: Document = Document {
+    name: "fill-prefix-delimiters.docx",
+    build: build::docx_fill_prefix_delimiters,
+};
+
+/// A Word sample whose unterminated change is followed by a tag the new delimiters leave open.
+pub const FILL_UNTERMINATED_UNCLOSED_DOCX: Document = Document {
+    name: "fill-unterminated-unclosed.docx",
+    build: build::docx_fill_unterminated_unclosed,
+};
+
+/// A Word sample whose unterminated change is followed by a tag the new delimiters close unopened.
+pub const FILL_UNTERMINATED_UNOPENED_DOCX: Document = Document {
+    name: "fill-unterminated-unopened.docx",
+    build: build::docx_fill_unterminated_unopened,
+};
+
+/// A Word sample declaring two main-type parts.
+pub const FILL_TWO_MAIN_PARTS_DOCX: Document = Document {
+    name: "fill-two-main-parts.docx",
+    build: build::docx_fill_two_main_parts,
+};
+
+/// A Word sample whose paragraph holds an unterminated delimiter-change tag.
+pub const FILL_UNTERMINATED_DELIMITER_DOCX: Document = Document {
+    name: "fill-unterminated-delimiter.docx",
+    build: build::docx_fill_unterminated_delimiter,
+};
+
+/// A Word sample whose unterminated delimiter change is followed by text in the delimiters it
+/// names.
+pub const FILL_UNTERMINATED_DELIMITER_THEN_TAG_DOCX: Document = Document {
+    name: "fill-unterminated-delimiter-then-tag.docx",
+    build: build::docx_fill_unterminated_delimiter_then_tag,
+};
+
+/// A Word sample whose tag before an unterminated delimiter change is still filled.
+pub const FILL_UNTERMINATED_AFTER_TAG_DOCX: Document = Document {
+    name: "fill-unterminated-after-tag.docx",
+    build: build::docx_fill_unterminated_after_tag,
+};
+
+/// A Word sample addressing an array's or a string's own members.
+pub const FILL_SCOPE_DOCX: Document = Document {
+    name: "fill-scope.docx",
+    build: build::docx_fill_scope,
+};
+
+/// A ZIP archive holding no entry at all.
+pub const FILL_EMPTY_ZIP: Document = Document {
+    name: "fill-empty.zip",
+    build: build::fill_empty_zip,
+};
+
+/// A real presentation package under a `.docx` name.
+pub const DECK_AS_DOCX: Document = Document {
+    name: "deck-as-docx.docx",
+    build: build::pptx_deck_named_docx,
+};
+
+/// A real Word package under a `.pptx` name.
+pub const WORD_AS_PPTX: Document = Document {
+    name: "word-as-pptx.pptx",
+    build: build::docx_package_named_pptx,
+};
+
+/// A deck whose one slide carries the tag kinds a presentation reads.
+pub const FILL_TAGS_PPTX: Document = Document {
+    name: "fill-tags.pptx",
+    build: build::pptx_fill_tags,
+};
+
+/// A deck whose first slide has speaker notes and whose package holds a `customXml` item.
+pub const FILL_NOTES_PPTX: Document = Document {
+    name: "fill-notes.pptx",
+    build: build::pptx_fill_notes,
+};
+
+/// A macro-enabled deck, named as a macro-enabled presentation.
+pub const FILL_MACRO_PPTM: Document = Document {
+    name: "fill-macro.pptm",
+    build: build::pptx_fill_macro,
+};
+
+/// A deck whose content types declare a slide part and no presentation main type.
+pub const FILL_SLIDE_ONLY_PPTX: Document = Document {
+    name: "fill-slide-only.pptx",
+    build: build::pptx_fill_slide_only,
+};
+
 /// The PDF: two A4 pages, each drawing its own line.
 pub const BASIC_PDF: Document = Document {
     name: "basic.pdf",
@@ -1215,5 +1540,59 @@ pub fn writer_documents() -> Vec<Document> {
         PPTX_NO_SLIDE_LIST,
         PPTX_NOTES_TWO,
         PPTX_TWO_NOTES_MASTERS,
+        FILL_PARTS_DOCX,
+        FILL_TAGS_DOCX,
+        FILL_SECTIONS_DOCX,
+        FILL_NEXT_PAGE_DOCX,
+        FILL_MISSING_DOCX,
+        FILL_PLAIN_DOCX,
+        FILL_TABLES_DOCX,
+        FILL_MACRO_DOCM,
+        FILL_TEMPLATE_DOCX,
+        FILL_SIGNED_DOCX,
+        FILL_NO_MAIN_DOCX,
+        FILL_HEADER_ONLY_DOCX,
+        FILL_UNREADABLE_DOCX,
+        FILL_ARCHIVE_DOCX,
+        FILL_UNCLOSED_DOCX,
+        FILL_DUPLICATE_OPEN_DOCX,
+        FILL_DUPLICATE_CLOSE_DOCX,
+        FILL_UNOPENED_DOCX,
+        FILL_UNCLOSED_LOOP_DOCX,
+        FILL_UNOPENED_LOOP_DOCX,
+        FILL_MISMATCH_CLOSE_DOCX,
+        FILL_LOOP_POSITION_DOCX,
+        FILL_RAW_TEXT_DOCX,
+        FILL_RAW_VALUE_DOCX,
+        FILL_CORRUPT_DOCX,
+        FILL_DELIMITER_DOCX,
+        FILL_MULTI_ERROR_DOCX,
+        FILL_BAD_DELIMITERS_DOCX,
+        FILL_INVALID_XML_DOCX,
+        FILL_MALFORMED_XML_DOCX,
+        FILL_COMPILE_BEFORE_RENDER_DOCX,
+        FILL_RAW_NOT_IN_PARAGRAPH_DOCX,
+        FILL_THROWN_BEFORE_POSTPARSE_DOCX,
+        FILL_RAW_TWO_IN_PARAGRAPH_DOCX,
+        FILL_RAW_TWO_OUTSIDE_DOCX,
+        FILL_RAW_AND_SECTION_DOCX,
+        FILL_TAG_NOT_FOUND_DOCX,
+        FILL_UNBALANCED_LOOPS_DOCX,
+        FILL_PREFIX_DELIMITERS_DOCX,
+        FILL_UNTERMINATED_UNCLOSED_DOCX,
+        FILL_UNTERMINATED_UNOPENED_DOCX,
+        FILL_TWO_MAIN_PARTS_DOCX,
+        FILL_TWO_MAIN_SECTIONS_DOCX,
+        FILL_UNTERMINATED_DELIMITER_DOCX,
+        FILL_UNTERMINATED_DELIMITER_THEN_TAG_DOCX,
+        FILL_UNTERMINATED_AFTER_TAG_DOCX,
+        FILL_SCOPE_DOCX,
+        FILL_EMPTY_ZIP,
+        DECK_AS_DOCX,
+        WORD_AS_PPTX,
+        FILL_TAGS_PPTX,
+        FILL_NOTES_PPTX,
+        FILL_MACRO_PPTM,
+        FILL_SLIDE_ONLY_PPTX,
     ]
 }

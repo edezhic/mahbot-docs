@@ -191,7 +191,7 @@ fn case_sample() -> CaseTranscript {
         reason: None,
         notes: vec!["the package's signature no longer matches the file".to_string()],
         missing: Vec::new(),
-        placeholders: None,
+        placeholders: Some(2),
         unsupported: Vec::new(),
         losses: vec!["the chart keeps the values it was written with".to_string()],
         outputs: BTreeMap::from([(
@@ -239,6 +239,7 @@ enum CaseAlter {
     RenameOutput,
     ChangeOutput,
     AddMissing,
+    ChangePlaceholders,
 }
 
 impl CaseAlter {
@@ -266,6 +267,7 @@ impl CaseAlter {
             Self::AddMissing => transcript
                 .missing
                 .push("the image was not embedded".to_string()),
+            Self::ChangePlaceholders => transcript.placeholders = Some(3),
         }
     }
 }
@@ -289,6 +291,7 @@ fn every_single_altered_case_field_fails_the_comparison() {
         CaseAlter::RenameOutput,
         CaseAlter::ChangeOutput,
         CaseAlter::AddMissing,
+        CaseAlter::ChangePlaceholders,
     ] {
         let mut transcript = case_sample();
         alter.apply(&mut transcript);

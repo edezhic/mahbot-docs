@@ -30,6 +30,17 @@
 //!   its parent says `xml:space="preserve"`. Text content is otherwise kept exactly, and entities
 //!   are decoded, so two spellings of one character compare equal.
 //!
+//! # What the model cannot witness
+//!
+//! A fill's values are scalars, never lists, so a section renders exactly once or not at all. Two
+//! behaviours of the reference are therefore out of the model's reach: the continuous section break
+//! a paragraph loop would insert when it renders more than once, and a table section producing more
+//! than one row. They are stated here rather than left to a passing gate. A next-page section is
+//! not one of them: a section whose properties sit in the paragraph that opens it inserts that
+//! section before the rendered body with a scalar value too, and the corpus's `next_page` case
+//! records it — `two_main_sections` records which part's list it comes from, the last main-type
+//! part's, for every part.
+//!
 //! # What is compared byte for byte
 //!
 //! An embedded binary part (an image, a font, an embedded object) by its SHA-256 and length.

@@ -357,6 +357,24 @@ fn the_reference_engine_matches_the_recorded_baseline() {
 }
 
 #[test]
+fn the_readme_states_the_recorded_corpus_size() {
+    // The counts in the README's prose are the only place they are written down by hand, so a
+    // recorded case or reading without a matching sentence fails here rather than drifting.
+    let baseline = Baseline::load(&Baseline::default_path())
+        .expect("the baseline is recorded before the gate is used");
+    let readme = include_str!("../README.md");
+    let stated = format!(
+        "{} cases and {} readings",
+        baseline.cases.len(),
+        baseline.readings.len()
+    );
+    assert!(
+        readme.contains(&stated),
+        "the README should state `{stated}`"
+    );
+}
+
+#[test]
 fn a_no_op_engine_fails_every_verdict() {
     let baseline = Baseline::load(&Baseline::default_path())
         .expect("the baseline is recorded before the gate is used");

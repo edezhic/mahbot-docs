@@ -175,7 +175,6 @@ const UNRECOGNISABLE: &[&str] = &[
     "edit_image_label_jpeg",
     "edit_image_label_webp",
     "edit_null_value",
-    "edit_object_value",
     "edit_range_ignored_error",
     "edit_range_protected",
     "edit_range_selection",
@@ -183,6 +182,7 @@ const UNRECOGNISABLE: &[&str] = &[
     "edit_sheet_none",
     "edit_text_not_text",
     "pdf_form_catalogue_more",
+    "surface_object_value",
 ];
 
 /// A mark's sentence as a pattern covering one whole answer line, with each `{placeholder}`

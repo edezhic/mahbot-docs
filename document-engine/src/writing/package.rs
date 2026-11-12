@@ -12,7 +12,9 @@
 
 use std::collections::HashSet;
 use std::io::{Cursor, Read, Write};
+use std::path::Path;
 
+use crate::operation::Failure;
 use crate::reading::ooxml::{DOCX_BODY_PART, PPT_PRESENTATION_PART, WORKBOOK_PART};
 use crate::vocabulary::{Family, vocabulary};
 
@@ -49,7 +51,9 @@ pub(crate) fn read_package(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, Strin
 ///
 /// # Errors
 ///
-/// A part name is stated twice, or the archive cannot be written.
+/// A part name is stated twice, or the archive cannot be written. A sample whose archive states one
+/// name twice is refused rather than collapsed the way the reference's own ZIP writer collapses it:
+/// the crate does not silently drop a part it was handed, and no generated sample states one twice.
 pub(super) fn write_package(parts: &[(String, Vec<u8>)]) -> Result<Vec<u8>, String> {
     let mut seen = HashSet::with_capacity(parts.len());
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
@@ -59,7 +63,7 @@ pub(super) fn write_package(parts: &[(String, Vec<u8>)]) -> Result<Vec<u8>, Stri
         if !seen.insert(name.as_str()) {
             return Err(vocabulary()
                 .marks
-                .format("edit_part_duplicate", &[("name", name)]));
+                .format("write_part_duplicate", &[("name", name)]));
         }
         writer
             .start_file(name.as_str(), options)
@@ -91,6 +95,43 @@ pub(super) fn package_family(parts: &[(String, Vec<u8>)]) -> Option<Family> {
     } else {
         None
     }
+}
+
+/// One package read from a path, named as the open's sentences name it and identified by its own
+/// parts.
+pub(super) struct Opened {
+    /// The file's base name, as the open's sentences name it.
+    pub name: String,
+    /// The package's own bytes, which a presentation edit keeps as its source.
+    pub bytes: Vec<u8>,
+    pub parts: Vec<(String, Vec<u8>)>,
+    /// The family the parts really are, when they declare one.
+    pub family: Option<Family>,
+}
+
+/// Read the package at `path` for `family`, answering the shared open sentence when the file cannot
+/// be read. The wrong-family refusal stays with the caller: an edit and a fill word it differently.
+pub(super) fn read_named(path: &Path, family: Family) -> Result<Opened, Failure> {
+    let marks = &vocabulary().marks;
+    let name = crate::support::file_name_or_path(&path.to_string_lossy()).to_string();
+    let unreadable = |message: &str| {
+        Failure::usage(marks.format(
+            "edit_open_unreadable",
+            &[
+                ("name", &name),
+                ("kind", family.as_str()),
+                ("message", message),
+            ],
+        ))
+    };
+    let bytes = std::fs::read(path).map_err(|error| unreadable(&error.to_string()))?;
+    let parts = read_package(&bytes).map_err(|message| unreadable(&message))?;
+    Ok(Opened {
+        name,
+        bytes,
+        family: package_family(&parts),
+        parts,
+    })
 }
 
 #[cfg(test)]

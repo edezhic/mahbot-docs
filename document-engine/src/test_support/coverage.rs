@@ -2002,7 +2002,7 @@ pub const WRITING_WITNESSES: &[WritingWitness] = &[
         witness: "form field \"fruit\" offers no choice to select; this document has: note (text)",
     },
     WritingWitness {
-        mark: "pdf_form_value_kind",
+        mark: "surface_value_structure",
         case: "pdf/pdf_form_fill/structure@refused_structure",
         witness: "the value for \"name\" must be text, a number or a boolean, not a structure",
     },
@@ -2215,6 +2215,120 @@ pub const WRITING_WITNESSES: &[WritingWitness] = &[
         case: "pptx/pptx_edit/format_text@partial_run",
         witness: "[the named text is part of a longer run, so the formatting also applied to the rest of that run]",
     },
+    // ── the template fill ───────────────────────────────────────────────────────────────────────
+    // The wrong-family sentence is the edit path's (`edit_wrong_family`), witnessed there; the
+    // fill's own advice is its hint. The compile-failure frame and the library sentence inside it
+    // are two marks, each witnessed by the case that prints it.
+    WritingWitness {
+        mark: "fill_wrong_family_hint",
+        case: "docx/fill_template@other_family",
+        witness: "rename it to match its content",
+    },
+    WritingWitness {
+        mark: "fill_compile_failed",
+        case: "docx/fill_template@unclosed",
+        witness: "the sample cannot be filled: The tag beginning with \"{name\" is unclosed",
+    },
+    WritingWitness {
+        mark: "fill_tag_unclosed",
+        case: "docx/fill_template@unclosed",
+        witness: "The tag beginning with \"{name\" is unclosed",
+    },
+    WritingWitness {
+        mark: "fill_tag_duplicate_open",
+        case: "docx/fill_template@duplicate_open",
+        witness: "The tag beginning with \"{{name\" has duplicate open tags",
+    },
+    WritingWitness {
+        mark: "fill_tag_duplicate_close",
+        case: "docx/fill_template@duplicate_close",
+        witness: "The tag ending with \"name}}\" has duplicate close tags",
+    },
+    WritingWitness {
+        mark: "fill_tag_unopened",
+        case: "docx/fill_template@unopened",
+        witness: "The tag beginning with \"name\" is unopened",
+    },
+    WritingWitness {
+        mark: "fill_loop_unclosed",
+        case: "docx/fill_template@unclosed_loop",
+        witness: "The loop with tag \"a\" is unclosed",
+    },
+    WritingWitness {
+        mark: "fill_loop_unopened",
+        case: "docx/fill_template@unopened_loop",
+        witness: "The loop with tag \"a\" is unopened",
+    },
+    WritingWitness {
+        mark: "fill_closing_mismatch",
+        case: "docx/fill_template@mismatch_close",
+        witness: "The tag \"a\" is closed by the tag \"b\"",
+    },
+    WritingWitness {
+        mark: "fill_loop_position",
+        case: "docx/fill_template@loop_position",
+        witness: "The tags \"a\" are misplaced in the document, for example one of them is in a table and the other one outside the table",
+    },
+    WritingWitness {
+        mark: "fill_raw_not_alone",
+        case: "docx/fill_template@raw_with_text",
+        witness: "The raw tag \"raw\" should be the only text in this paragraph.",
+    },
+    WritingWitness {
+        mark: "fill_raw_not_in_paragraph",
+        case: "docx/fill_template@raw_not_in_paragraph",
+        witness: "The tag \"{@x}\" is not inside a paragraph, putting raw tags inside an inline loop is disallowed.",
+    },
+    WritingWitness {
+        mark: "fill_corrupt_characters",
+        case: "docx/fill_template@corrupt_characters",
+        witness: "There are some corrupt characters for the field \"v\"",
+    },
+    WritingWitness {
+        mark: "fill_raw_not_text",
+        case: "docx/fill_template@raw_value_not_text",
+        witness: "The value of the raw tag : \"{@raw}\" is not a string",
+    },
+    WritingWitness {
+        mark: "fill_filetype_not_identified",
+        case: "docx/fill_template@no_filetype",
+        witness: "The filetype for this file could not be identified, is this file corrupted ? Zip file contains : hello.txt",
+    },
+    WritingWitness {
+        mark: "fill_zip_contains",
+        case: "docx/fill_template@no_filetype",
+        witness: "Zip file contains : hello.txt",
+    },
+    WritingWitness {
+        mark: "fill_empty_zip",
+        case: "docx/fill_template@empty_zip",
+        witness: "Empty zip file",
+    },
+    WritingWitness {
+        mark: "fill_delimiters_invalid",
+        case: "docx/fill_template@bad_delimiters",
+        witness: "the sample cannot be filled: New Delimiters cannot be parsed",
+    },
+    WritingWitness {
+        mark: "fill_invalid_xml",
+        case: "docx/fill_template@invalid_xml",
+        witness: "the sample cannot be filled: An XML file has invalid xml",
+    },
+    WritingWitness {
+        mark: "fill_malformed_xml",
+        case: "docx/fill_template@malformed_xml",
+        witness: "the sample cannot be filled: Malformed xml",
+    },
+    WritingWitness {
+        mark: "fill_tag_not_found",
+        case: "docx/fill_template@tag_not_found",
+        witness: "the sample cannot be filled: No tag \"w:tr\" was found at the left",
+    },
+    WritingWitness {
+        mark: "fill_unbalanced_loops",
+        case: "docx/fill_template@unbalanced_loops",
+        witness: "the sample cannot be filled: Unbalanced loop tags {#a}{/a}{#b}{/b}",
+    },
 ];
 
 pub const WRITING_UNREACHED: &[Unreached] = &[
@@ -2246,11 +2360,14 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
             "edit_height_span",
             "edit_null_value",
             "edit_number_format_empty",
-            "edit_object_value",
             "edit_toggle_boolean",
             "edit_vertical_value",
             "edit_wrap_boolean",
         ],
+    },
+    Unreached {
+        reason: "the word JavaScript prints for a value that is not one: a `{.}` tag renders it into the produced body, and this ledger reads only the answers a case records; a structure a fill or a PDF form receives is refused before it renders",
+        marks: &["surface_object_value"],
     },
     Unreached {
         reason: "an address, range or format target the corpus never spells wrongly: every generated edit names a cell, range or target the workbook holds, and the port's own tests raise each shape refusal from a literal",
@@ -2374,12 +2491,12 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         ],
     },
     Unreached {
-        reason: "an environmental failure a generated case cannot force: a package stating a part twice, a call over the work budget, or a destination that refuses the write",
-        marks: &[
-            "edit_part_duplicate",
-            "edit_work_over_budget",
-            "edit_write_failed",
-        ],
+        reason: "an environmental failure a generated case cannot force: a call over the work budget, or a destination that refuses the write",
+        marks: &["edit_work_over_budget", "edit_write_failed"],
+    },
+    Unreached {
+        reason: "a package stating a part twice, which no generated sample does: the shared package writer refuses it rather than dropping a part, for every operation that writes one",
+        marks: &["write_part_duplicate"],
     },
     Unreached {
         reason: "an internal invariant of the styles engine: its block table is closed and its root is checked before any edit runs",
@@ -2492,7 +2609,23 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         marks: &["surface_merge_bytes_too_many"],
     },
     Unreached {
-        reason: "printed only for the seven (operation, family) pairs the writing half does not carry out — every family of create and the three OOXML families of fill_template; the recorded reference carries every one of them out, so no recorded answer prints it",
+        reason: "printed only for the five (operation, family) pairs the writing half does not carry out — every family of create and the workbook family of fill_template; the recorded reference carries every one of them out, so no recorded answer prints it",
         marks: &["reason_not_carried_out"],
+    },
+    Unreached {
+        reason: "the crate's own nesting bound: the reference has none, so it recurses where the crate refuses, and a corpus sample deep enough to reach the bound would compare the reference's stack with the crate's sentence; the port's own test builds one",
+        marks: &["fill_nested"],
+    },
+    Unreached {
+        reason: "an I/O failure while the filled package is written; the harness hands every case its own writable directory, so no recorded run met one",
+        marks: &["fill_write_failed"],
+    },
+    Unreached {
+        reason: "a sample whose delimiter changes return to a pair the scan has already restarted with: the reference re-enters that state forever and never answers, so no recorded answer can print the refusal; the port's own test pins the sentence and its internal class",
+        marks: &["fill_delimiters_repeat"],
+    },
+    Unreached {
+        reason: "a package that declares a workbook content type but holds no workbook part; the workbook family has not landed and no generated sample declares one",
+        marks: &["fill_xlsx_needs_module"],
     },
 ];

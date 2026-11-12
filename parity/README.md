@@ -26,7 +26,7 @@ crate the harness depends on. `cargo test -p document-engine` runs the crate's o
 its vocabulary restatement scan) without the harness.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 405 cases and 91 readings — takes about a minute; the whole
+managed runtime. A full pass — 466 cases and 91 readings — takes about a minute; the whole
 test suite, which runs the corpus twice for its determinism check, takes a couple of minutes.
 
 `parity --engine noop` runs the same corpus against the do-nothing engine. That engine exists only
@@ -58,7 +58,7 @@ landed yet is shown as `SKIP`, not failed, and a run that judged no case at all 
 | `tests/engine_contract.rs` | The engine crate's contract, proved from here: its vocabulary is the reference's data, its result shapes carry every recorded field, its closed operation set holds every corpus operation and edit, the reference copies are byte-for-byte the product's, and the host's media tables are the product's own. |
 | `tests/coverage.rs` | The corpus's depth: every reading mark is witnessed by a recorded reading or recorded as unproducible with its reason, every mark only the writing half prints is witnessed by a recorded case's answer or recorded unreached with its reason, neither ledger's "not produced" side names a mark a recorded answer really prints, every per-family failure verdict is witnessed, and every corpus document is in the baseline. |
 | `tests/teeth.rs` | The comparison has teeth: a reading or a produced case altered in any single compared field — a picture dropped, a note or a loss reworded, an output renamed, a produced file's content changed, a status flipped — fails it, and so does a detection answer changed for one input. |
-| `baseline/baseline.json` | The recorded reference (about 8.8 MB of canonical documents). |
+| `baseline/baseline.json` | The recorded reference (about 9.3 MB of canonical documents). |
 | `src/bin/parity.rs`, `src/bin/record-baseline.rs` | The gate and the deliberate recorder. |
 
 The reader sources are **copies** under `src/reference_sources/`, byte for byte those of
@@ -413,6 +413,15 @@ change compares unequal at a named path.
   so here rather than implying it compares them.
 - `w:id` values (bookmarks, footnotes) are compared as written; they are consistent within a
   document and the current writer preserves them.
+- `docProps/app.xml` and `docProps/custom.xml` are excluded entirely: every element they hold is a
+  statistic about the file or the writing application rather than content. A template fill still
+  substitutes in both — the reference renders them — so a wrong value there is not a difference
+  this model can see; the port's own test pins it instead.
+- Two behaviours of a template fill cannot be witnessed through the corpus, because no value the
+  operation accepts is a list: a paragraph loop that repeats inserts a continuous section break
+  between its copies, and a section over a table produces one row per value. Both are stated here
+  rather than left to a case that would have to invent a list; the first needs a value that
+  iterates, the second a section whose body is a table row.
 
 ## Effects
 

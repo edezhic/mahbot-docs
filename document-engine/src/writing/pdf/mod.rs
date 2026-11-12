@@ -4209,7 +4209,7 @@ mod tests {
             }),
             "out",
         );
-        assert_usage_refusal(&outcome, "pdf_form_value_kind", &[("name", "name")]);
+        assert_usage_refusal(&outcome, "surface_value_structure", &[("name", "name")]);
     }
 
     #[test]
