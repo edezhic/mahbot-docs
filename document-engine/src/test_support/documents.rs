@@ -1347,6 +1347,30 @@ pub const PICTURE_STALE_CRC_PNG: Document = Document {
     name: "stale-crc.png",
     build: build::stale_crc_png,
 };
+/// The smallest picture a page can hold: one pixel, so a case that gives each picture a page pays
+/// for the page count alone.
+pub const PICTURE_PIXEL: Document = Document {
+    name: "pixel.png",
+    build: build::pixel_png,
+};
+/// A picture taller than a page's text column, narrow enough that the column's width clamp cannot
+/// shorten it.
+pub const PICTURE_TALL: Document = Document {
+    name: "tall.png",
+    build: build::tall_png,
+};
+/// A picture at the PDF model's per-image charge: 4096 by 4096 pixels, its samples incompressible so
+/// the produced file is near the harness's read limit.
+pub const PICTURE_LARGE: Document = Document {
+    name: "large.png",
+    build: build::large_png,
+};
+/// The sample picture under a `.bmp` name: the extension the shared picture reader refuses before
+/// it reads a byte.
+pub const PICTURE_BMP: Document = Document {
+    name: "picture.bmp",
+    build: build::png,
+};
 
 /// Every document the reader reference is recorded on, in the order it is recorded: the original
 /// corpus first, the deeper-reading documents after it, and the fixed mutations last.
@@ -1519,6 +1543,10 @@ pub fn writer_documents() -> Vec<Document> {
         PICTURE_BROKEN_PNG,
         PICTURE_STALE_CRC_PNG,
         PICTURE_WEBP,
+        PICTURE_PIXEL,
+        PICTURE_TALL,
+        PICTURE_LARGE,
+        PICTURE_BMP,
         PPTX_NO_SIZE,
         PPTX_NO_LAYOUT,
         PPTX_NO_NOTES_MASTER,

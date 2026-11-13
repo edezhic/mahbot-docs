@@ -13,7 +13,8 @@ copy carries its licence beside it (`NotoSans-LICENSE.txt`).
 | `rules` | The shared writer/reader rules — a copy of `assets/docgen/rules.json`, value for value, the data the JavaScript kit inlines at build time. It is kept as data, not restated as a typed graph: the code that reads a rule adds the view it needs. |
 | `reading` | The bounds and constants of the reading surface: the prefix a caller peeks, the input size a caller caps, the pictures a caller delivers and the text a caller spills, the page-text floor, the crop-box slack, the raster envelope (target, quality, scale ceiling) and the raster decode envelope applied to an embedded image. |
 | `limits` | The reader and producer caps: the ZIP entry, XML depth, Word table/style/field/link, Excel range-probe, chart, number-format, PDF mark/field/catalogue, edit-work and multi-file bounds. Every entry is the reference's own number, read from its sources. |
-| `engine` | The bounds the engine states for itself, where the reference states none: the paragraph-nesting cap that keeps a Word edit's cost bounded on a deeply nested body, the template-nesting cap that keeps a fill's section walk off the stack, the page-tree and object-copy depth caps that keep the PDF writer's walks off the stack, the scan budget the PDF writer's body walk may spend on one file and on each object stream it expands, the bytes one look at what comes next may inspect, the bytes one PDF container may decode to, and the highest object number the writer can state in its index. Nothing here is the reference's number, so nothing here is pinned by the contract test. |
+| `engine` | The bounds the engine states for itself, where the reference states none: the paragraph-nesting cap that keeps a Word edit's cost bounded on a deeply nested body, the template-nesting cap that keeps a fill's section walk off the stack, the page-tree and object-copy depth caps that keep the PDF writer's walks off the stack, the scan budget the PDF writer's body walk may spend on one file and on each object stream it expands, the bytes one look at what comes next may inspect, the bytes one PDF container may decode to, the highest object number the writer can state in its index, and the most columns a table row may state as a length without holding cells. Nothing here is the reference's number, so nothing here is pinned by the contract test. |
+| `create` | The layout a created PDF lays its content out with, and the fragments its Word-only refusal is composed from. `heading_size_points` states one point size per level of `rules.heading_levels`, and the list of levels stays in `rules`, which is a value-for-value copy of the reference's file; a crate-side test holds the two to each other and holds the refusal sentence to the levels list, so neither can drift. `word_only_features` holds the words a block, a footnote, a running header and a running footer are named by; they are not marks — the sentence they are interpolated into is — but the restatement scan reads them too, so a fragment spelled in code fails it. |
 | `marks` | The fixed words, labels, templates and note fragments a reading or an operation prints, by key, each with the producers that print it. `{name}` placeholders are replaced with `Marks::format`. A mark the `rules` section already states (a Word tracked-change or chart label, a peripheral part's kind, a PDF form word) is not repeated here: `src/vocabulary.rs` reads it from `rules` under its key. A note with no values ("the workbook declares no sheets") is a fixed sentence and lives here; one that interpolates values is composed at the reporting site from this section's fragments and marks. |
 | `derived_marks` | The `rules` sections whose values are printed marks (Word marks and their chart labels, slide labels, PDF form words and field kinds, metadata keys, and peripheral parts), each naming the producers that print them today. The Word marks and peripheral parts are printed by both halves — a reading labels them and a Word edit names them in a refusal — and so are the presentation marks and slide labels, which a presentation edit names in a refusal and prints for a slide it could not read. The PDF form words and field kinds and the metadata keys are the reading’s alone; a chart’s labels live in `docx_marks`, so both halves print them. They live in `rules` because the kit needs them as request vocabulary; this section says they are marks too. |
 | `enforced` | Who enforces each entry of `reading`, `limits` and `engine`: `reading`, `writing` or `caller`. An entry may name more than one, because one number can be enforced in more than one place. `rules` stands for the whole rules section, which is request vocabulary rather than a bound. |
@@ -24,12 +25,13 @@ result names them through `Family::as_str`.
 One mark is interim: `reason_not_carried_out` is the engine's answer for a recognised
 (operation, family) pair it does not carry out. It is stated here rather than in code, and the pair's
 own reason replaces it once the dispatch carries the pair out. The writing half carries the three
-edits, the five PDF page actions, the three PDF drawing actions and the Word and presentation
-template fills out today, so that mark is the answer for the five pairs `create` and `fill_template`
-still accept without a handler: every family of `create`, and the workbook family of
-`fill_template`. The sentence names the operation and not the family because the engine is not
-wired into a product build while any family of an operation is unimplemented, so no user meets it
-for a sibling of a landed family; if that ever stops being true, it must name the family too.
+edits, the five PDF page actions, the three PDF drawing actions, `create`'s PDF family and the Word
+and presentation template fills out today, so that mark is the answer for the four pairs `create`
+and `fill_template` still accept without a handler: `create`'s Word, workbook and presentation
+families, and the workbook family of `fill_template`. The sentence names the operation and not the
+family because the engine is not wired into a product build while any family of an operation is
+unimplemented, so no user meets it for a sibling of a landed family; if that ever stops being true,
+it must name the family too.
 
 The writing half's marks have their own namespaces: a refusal or a value an edit names is an
 `edit_*` mark (a presentation edit's are `edit_pptx_*`; a sentence it shares with the Word edit
@@ -37,7 +39,9 @@ keeps that family's key), a note or a loss it raises is a `note_*` mark, every s
 surface prints before an operation runs is a `surface_*` mark, a PDF page action's refusals and its
 one note are `pdf_page_*` marks, the three drawing actions' own refusals are `pdf_text_*`,
 `pdf_image_*` and `pdf_form_*` marks (the image-size sentences are shared with the OOXML arms and
-live under `edit_*`), and a template fill's own refusals are `fill_*` marks — its compile-failure
+live under `edit_*`), a created document's own three sentences are `create_*` marks (the rest of what
+its blocks refuse is the shared `edit_*` vocabulary — a heading's text, a bullet's or a cell's kind,
+a picture's extension), and a template fill's own refusals are `fill_*` marks — its compile-failure
 frame, its nesting refusal, its refusal of a delimiter change that repeats, its write failure, its
 wrong-family hint and every sentence the ported template library prints, reproduced word for word. A
 sentence a fill shares with another surface keeps that surface's key: an unreadable sample is
@@ -102,12 +106,15 @@ The `enforced` map is the reading of every bound that matters to a caller:
   stream — may decode to (`engine.container_decode_max_bytes`, the same ceiling the OOXML package
   reader puts on one entry: the crate's own decoders check a run before they allocate it, while a
   filter lopdf decodes is bounded once it has decoded), the highest object number the writer can
-  state in its index (`engine.object_number_max`), and the three caps the crate owns for the PDF
-  page actions: the most inputs one merge may name, the most bytes one merge may read, and the most
-  parts one split may produce. The reference has none of these, so no corpus case can judge them:
-  the depth caps, the two scan and decode budgets and the object-number bound are the engine's own
-  internal refusals, the three request caps are usage refusals of the surface or the merge, and
-  each is read from the vocabulary and pinned by the crate's own tests;
+  state in its index (`engine.object_number_max`), and the four request numbers the crate refuses as
+  usage failures: the most columns a table row may state as a `length` without holding cells
+  (`engine.stated_columns_max`, refused because the reference draws one column per whole step below
+  the length and never returns from a large one), the most inputs one merge may name, the most bytes
+  one merge may read, and the most parts one split may produce. The reference has none of these, so
+  no corpus case can judge them: the depth caps, the two scan and decode budgets and the
+  object-number bound are the engine's own internal refusals, the stated-column bound and the three
+  request caps are usage refusals a caller can fix, and each is read from the vocabulary and pinned
+  by the crate's own tests;
 - `rules` is enforced by the writing half (the kit refuses out-of-range arguments) and by a caller
   (the tool validates before it builds a request).
 
@@ -171,11 +178,12 @@ fails on a match. It reads:
 The mark set is the `marks` section plus the `derived_marks` sections of `rules` a reading or the
 writing half prints (`ppt_marks`, `ppt_slide_labels`, `pdf_form_words`, `pdf_field_kinds`, each
 `docx_marks` example, each `docx_peripheral_parts` kind that names a part of its own, and each PDF
-metadata field's key). The marks read from `rules` are therefore scanned in their one home. The
-`marks` section includes the fixed note sentences, so a restated note fails the scan; a note the
-reader composes with values is composed from fragments and is not a whole sentence in the set. A
-rule that is request vocabulary — an alignment, a size, a header or footer part the engine asks
-for — is not a printed mark and is not scanned.
+metadata field's key), plus the fragments the `create` section states for its Word-only refusal,
+which are composed into a sentence rather than printed on their own. The marks read from `rules` are
+therefore scanned in their one home. The `marks` section includes the fixed note sentences, so a
+restated note fails the scan; a note the reader composes with values is composed from fragments and
+is not a whole sentence in the set. A rule that is request vocabulary — an alignment, a size, a
+header or footer part the engine asks for — is not a printed mark and is not scanned.
 
 Two reviewed lists carry what a test needs named rather than read, each entry tied to the file or
 bound it covers:

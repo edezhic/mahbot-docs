@@ -85,6 +85,19 @@ fn array_element(value: &Value) -> String {
     }
 }
 
+/// Whether a value is one JavaScript treats as true, which is not the same as a value with content:
+/// a list and a map are true however empty, and the number zero, the empty string, `false` and null
+/// are not. The kit reads every request flag this way.
+pub(super) fn js_truthy(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(value) => *value,
+        Value::Number(number) => number.as_f64().is_some_and(|number| number != 0.0),
+        Value::String(text) => !text.is_empty(),
+        Value::Array(_) | Value::Object(_) => true,
+    }
+}
+
 /// Whether a value is one of the shared rules' scalar kinds: text, a number or a boolean. A
 /// structure (and JSON's null, which the rules do not list) is not one.
 pub(super) fn scalar_value(value: &Value) -> bool {
@@ -166,7 +179,7 @@ pub(super) fn js_trim_start(text: &str) -> &str {
 /// Whether a character is one ECMAScript's `trim` strips. Its WhiteSpace and LineTerminator sets
 /// differ from Rust's `char::is_whitespace` at U+0085 (Rust strips it, JavaScript does not) and
 /// U+FEFF (JavaScript strips it, Rust does not).
-fn is_js_whitespace(character: char) -> bool {
+pub(super) fn is_js_whitespace(character: char) -> bool {
     matches!(
         character,
         '\u{9}'..='\u{d}'
@@ -218,21 +231,31 @@ pub(super) fn quoted(value: &str) -> String {
     serde_json::to_string(value).unwrap_or_default()
 }
 
+/// One value a caller must have spelled as text, refused in the shared sentence.
+///
+/// # Errors
+///
+/// The value is not text.
+pub(super) fn text_value<'a>(value: Option<&'a Value>, what: &str) -> Result<&'a str, Failure> {
+    value.and_then(Value::as_str).ok_or_else(|| {
+        Failure::usage(
+            vocabulary()
+                .marks
+                .format("edit_text_not_text", &[("what", what)]),
+        )
+    })
+}
+
 /// One string an edit names, as the kit's last line after the tool's own boundary.
 ///
 /// # Errors
 ///
 /// The value is not text, or it is longer than the edit-text rule allows.
 pub(super) fn edit_text(value: Option<&Value>, what: &str) -> Result<String, Failure> {
-    let marks = &vocabulary().marks;
-    let Some(text) = value.and_then(Value::as_str) else {
-        return Err(Failure::usage(
-            marks.format("edit_text_not_text", &[("what", what)]),
-        ));
-    };
+    let text = text_value(value, what)?;
     let max = *crate::vocabulary::edit_text_max();
     if u64::try_from(text.chars().count()).unwrap_or(u64::MAX) > max {
-        return Err(Failure::usage(marks.format(
+        return Err(Failure::usage(vocabulary().marks.format(
             "edit_text_too_long",
             &[("what", what), ("max", &max.to_string())],
         )));

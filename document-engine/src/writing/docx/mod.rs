@@ -47,6 +47,7 @@ use super::edit_text;
 use super::in_span;
 use super::js_number;
 use super::js_round;
+use super::js_truthy;
 use super::quoted;
 use super::span_bounds;
 use super::stringified;
@@ -192,17 +193,6 @@ static DOCX_TEXT: LazyLock<Arc<Regex>> = LazyLock::new(|| {
         xml::close_tag("w:t")
     ))
 });
-
-/// Whether a JSON value is truthy the way the kit reads a request's own flag.
-pub(super) fn js_truthy(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::Bool(value) => *value,
-        Value::Number(number) => number.as_f64().is_some_and(|number| number != 0.0),
-        Value::String(text) => !text.is_empty(),
-        Value::Array(_) | Value::Object(_) => true,
-    }
-}
 
 /// Carry out the Word edits, in the order the call states them, and raise the note a document with
 /// revisions tracking switched on owes when the call changed something.

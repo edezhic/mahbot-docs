@@ -404,12 +404,13 @@ const fn pair(family: Family, handler: Option<Handler>) -> Pair {
     Pair { family, handler }
 }
 
-/// `create` accepts every family: a document can be made of any of the four.
+/// `create` accepts every family: a document can be made of any of the four. The PDF family is
+/// carried out; the other three are later ports.
 const CREATE: &[Pair] = &[
     pair(Family::Docx, None),
     pair(Family::Xlsx, None),
     pair(Family::Pptx, None),
-    pair(Family::Pdf, None),
+    pair(Family::Pdf, Some(Handler::Action(pdf_create))),
 ];
 
 /// `fill_template` accepts the three OOXML families: a PDF has no placeholder template of its own.
@@ -466,6 +467,9 @@ fn pdf_image(request: &Request, outputs: &[PathBuf]) -> Outcome {
 }
 fn pdf_form_fill(request: &Request, outputs: &[PathBuf]) -> Outcome {
     crate::writing::pdf::fill_form(request, &outputs[0])
+}
+fn pdf_create(request: &Request, outputs: &[PathBuf]) -> Outcome {
+    crate::writing::pdf::create(request, &outputs[0])
 }
 
 /// What the engine's statement says about one (operation, family) pair.
@@ -1052,6 +1056,7 @@ mod tests {
             Answer::UnacceptedFamily
         );
         assert_eq!(answer("create", Family::Docx), Answer::NotCarriedOut);
+        assert_eq!(answer("create", Family::Pdf), Answer::CarriedOut);
         assert_eq!(answer("pdf_merge", Family::Pdf), Answer::CarriedOut);
     }
 
@@ -1343,7 +1348,16 @@ mod tests {
     #[test]
     fn the_destination_holds_only_what_the_outcome_names() {
         let dir = scratch();
-        let outcome = execute(&request(dir.path(), "create", json!({ "format": "pdf" })));
+        // A request that produces a file: a create with no content faults, which would leave the
+        // destination empty and the check vacuous.
+        let outcome = execute(&request(
+            dir.path(),
+            "create",
+            json!({
+                "format": "pdf",
+                "content": [{ "type": "paragraph", "text": "written" }],
+            }),
+        ));
         let written: BTreeSet<PathBuf> = outcome.outputs.iter().cloned().collect();
         let present: BTreeSet<PathBuf> = std::fs::read_dir(dir.path())
             .expect("read the destination")

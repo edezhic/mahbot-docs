@@ -156,6 +156,20 @@ fn all_marks() -> Vec<String> {
     {
         marks.extend(derived_marks(section, &json["rules"][section]));
     }
+    // The fragments a created document's Word-only refusal is composed from are not marks of their
+    // own, but a fragment spelled in code is a second statement of it, so they are scanned as one.
+    for fragment in json["create"]["word_only_features"]
+        .as_object()
+        .expect("the vocabulary states the Word-only features")
+        .values()
+    {
+        marks.push(
+            fragment
+                .as_str()
+                .expect("a Word-only feature is a fragment")
+                .to_string(),
+        );
+    }
     marks.sort();
     marks.dedup();
     marks
@@ -297,6 +311,19 @@ const FORMAT_NAMES: &[(&str, &[(&str, &str)])] = &[
             "null",
             "the PDF keyword that states a null object, which the body walk matches rather than prints",
         )],
+    ),
+    (
+        "src/writing/pdf/create.rs",
+        &[
+            (
+                "text",
+                "the `text` key a content block names, format knowledge rather than a printed word",
+            ),
+            (
+                "footnote",
+                "the `footnote` key a block carries, which the shared rules name as a peripheral part kind",
+            ),
+        ],
     ),
     (
         "src/writing/pdf/page.rs",
@@ -713,6 +740,30 @@ const SPEC_CONSTANTS: &[(&str, f64, usize, &str)] = &[
         4.0,
         1,
         "the smallest font size the reference's own fitter tries",
+    ),
+    (
+        "src/writing/pdf/create.rs",
+        10.0,
+        1,
+        "a table cell's point size, not a bound the vocabulary names",
+    ),
+    (
+        "src/writing/pdf/create.rs",
+        8.0,
+        1,
+        "the gap under a table row, in points",
+    ),
+    (
+        "src/writing/pdf/create.rs",
+        3.0,
+        1,
+        "a table cell's text indent, in points",
+    ),
+    (
+        "src/writing/pdf/create.rs",
+        0.5,
+        1,
+        "a table rule's thickness, in points",
     ),
     (
         "src/writing/pdf/mod.rs",

@@ -180,7 +180,6 @@ const UNRECOGNISABLE: &[&str] = &[
     "edit_range_selection",
     "edit_row_address",
     "edit_sheet_none",
-    "edit_text_not_text",
     "pdf_form_catalogue_more",
     "surface_object_value",
 ];

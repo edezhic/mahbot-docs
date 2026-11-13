@@ -19,9 +19,9 @@ use crate::writing::js_number;
 /// number appended when the page already states that name.
 pub(super) const FONT_BASE: &str = "NotoSans-Regular";
 
-/// The margin a default placement gets: the same breathing room the reference gives one, kept to a
-/// quarter of a small page by [`inset`].
-const MARGIN: f64 = 56.0;
+/// The margin the reference gives a page: a streaming layout starts and ends its text column at it,
+/// and a default placement is inset by it, kept to a quarter of a small page by [`inset`].
+pub(super) const MARGIN: f64 = 56.0;
 
 /// The name a placed picture's XObject is given before it is made unique on its page.
 pub(super) const IMAGE_BASE: &str = "Image";
@@ -33,10 +33,10 @@ pub(super) const FLATTEN_BASE: &str = "FlatWidget";
 /// glyph does not name a loss the pipeline itself performed.
 pub(super) const LAYOUT_CODE_POINTS: [u32; 7] = [0x09, 0x0a, 0x0c, 0x0d, 0x85, 0x2028, 0x2029];
 
-/// The lines pdf-lib's own text pipeline draws for a value: a tab, the next-line character and the
-/// two Unicode line separators become four spaces, a backspace and a vertical tab are removed, and
-/// a line break splits the value.
-pub(super) fn lines_of(text: &str) -> Vec<String> {
+/// The value pdf-lib's own text pipeline hands its line splitter: a tab, the next-line character
+/// and the two Unicode line separators become four spaces, and a backspace and a vertical tab are
+/// removed.
+pub(super) fn clean(text: &str) -> String {
     let mut cleaned = String::with_capacity(text.len());
     for character in text.chars() {
         match character {
@@ -46,6 +46,12 @@ pub(super) fn lines_of(text: &str) -> Vec<String> {
         }
     }
     cleaned
+}
+
+/// The lines pdf-lib's own text pipeline draws for a value: the cleaned value, split on its line
+/// breaks.
+pub(super) fn lines_of(text: &str) -> Vec<String> {
+    clean(text)
         .split(['\n', '\u{0C}', '\r'])
         .map(str::to_string)
         .collect()
@@ -433,18 +439,6 @@ pub(super) fn color(value: Option<&Value>) -> Result<(f64, f64, f64), Failure> {
         u8::from_str_radix(&digits_text[start..end], 16).map_or(0.0, |byte| f64::from(byte) / 255.0)
     };
     Ok((channel(0), channel(1), channel(2)))
-}
-
-/// Whether a request value is JavaScript-truthy.
-pub(super) fn truthy(value: Option<&Value>) -> bool {
-    match value {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(value)) => *value,
-        Some(Value::Number(number)) => number.as_f64().is_some_and(|number| number != 0.0),
-        Some(Value::String(text)) => !text.is_empty(),
-        Some(Value::Array(values)) => !values.is_empty(),
-        Some(Value::Object(_)) => true,
-    }
 }
 
 /// The note a mark that reached past the visible area carries.

@@ -6,7 +6,7 @@
 //! for a literal that repeats one (see `tests/vocabulary.rs` and `VOCABULARY.md`). The font is
 //! `assets/NotoSans-Regular.ttf`, embedded as [`FONT`].
 //!
-//! The file has seven sections:
+//! The file has eight sections:
 //!
 //! - `rules`: the shared writer/reader rules — a copy of the producing kit's `rules.json`, value
 //!   for value. It is kept as data: the typed views below read it, so the shape of an external
@@ -16,6 +16,9 @@
 //! - `limits`: the reader and producer caps (container, XML, chart, form, edit-work and
 //!   multi-file bounds), each the reference's own number.
 //! - `engine`: the bounds the engine states for itself, where the reference states none.
+//! - `create`: the layout a created PDF lays its content out with, and the fragments its Word-only
+//!   refusal is composed from. The heading sizes are one per level of `rules.heading_levels`, which
+//!   stays the list's one home; the fragments are not marks — they are the words a mark interpolates.
 //! - `enforced`: which side enforces each bound, by entry name.
 //! - `marks` and `derived_marks`: the fixed words, labels, templates and note fragments a reading
 //!   or an operation prints, each saying which side prints it. A mark the `rules` section already
@@ -226,6 +229,9 @@ pub struct Vocabulary {
     pub limits: Limits,
     /// The bounds the engine states for itself, where the reference states none.
     pub engine: EngineBounds,
+    /// The layout a created PDF lays its content out with, and the fragments its Word-only refusal
+    /// is composed from.
+    pub create: CreateLayout,
     /// The fixed words, labels, templates and note fragments a reading or an operation prints.
     pub marks: Marks,
     /// Who prints the marks the `rules` section states, by the section they derive from.
@@ -421,6 +427,62 @@ pub struct EngineBounds {
     /// reports success over a file that lost its index. A real file numbers its objects in the
     /// thousands; the reference's writer renumbers what it holds, so it has no such bound.
     pub object_number_max: usize,
+    /// The most columns a table row may state as a `length` without being a list of cells. The
+    /// reference's column loop runs `c < cols` over the widest row's length, so a row that states a
+    /// billion draws a billion columns and never returns; a row that holds cells is bounded by the
+    /// file it arrives in, and a page shows far fewer columns than this. A stated length past the
+    /// bound is refused with the engine's own sentence, which loses no behaviour to match: the
+    /// reference produces nothing from that input.
+    pub stated_columns_max: usize,
+}
+
+/// The layout a created PDF lays its content out with, and the fragments its Word-only refusal is
+/// composed from. The sizes are the reference's own, one per level of `rules.heading_levels` — the
+/// list of levels stays there, because the rules are a value-for-value copy of the reference's own
+/// file, so this section names sizes rather than restating which levels exist.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateLayout {
+    /// The point size of a heading, indexed by its level: `heading_size_points[level - 1]`.
+    pub heading_size_points: Vec<f64>,
+    /// The words a Word-only block, footnote, header or footer is named by in the refusal a
+    /// document of another family answers with. They are not marks: the sentence is one mark, and
+    /// these are the fragments it interpolates.
+    pub word_only_features: WordOnlyFeatures,
+}
+
+/// The fragments a created document's Word-only refusal interpolates, one per feature.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WordOnlyFeatures {
+    /// A running header the request names.
+    pub header: String,
+    /// A running footer the request names.
+    pub footer: String,
+    /// A paragraph's footnote.
+    pub footnote: String,
+    /// Any other block, with `{type}` replaced by the block's own type word.
+    pub block: String,
+}
+
+/// The heading sizes a created PDF draws with, one per level.
+///
+/// # Panics
+///
+/// The embedded vocabulary does not state them: a defect in this crate, never caller input.
+#[must_use]
+pub(crate) fn heading_size_points() -> &'static [f64] {
+    &vocabulary().create.heading_size_points
+}
+
+/// The fragments a created document's Word-only refusal interpolates.
+///
+/// # Panics
+///
+/// The embedded vocabulary does not state them: a defect in this crate, never caller input.
+#[must_use]
+pub(crate) fn word_only_features() -> &'static WordOnlyFeatures {
+    &vocabulary().create.word_only_features
 }
 
 /// One mark: the text it prints and the sides that print it.

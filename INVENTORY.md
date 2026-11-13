@@ -117,15 +117,17 @@ at the wrong place changes nothing. `scan.rs` states what the walk recovers, wha
 engine's own bounds on it; `page.rs` states the shapes the page model refuses rather than write what
 it cannot carry, and the divergence from the reference by outcome: where the reference's own code
 refuses or produces a file that lost what the input held, this engine either carries the file or
-refuses it. The harness judges only the shapes where both sides produce. The eight PDF actions are
-carried out end to end — `pdf_merge` and `pdf_split` build a fresh document out of the pages,
+refuses it. The harness judges only the shapes where both sides produce. The nine PDF operations
+are carried out end to end — `pdf_merge` and `pdf_split` build a fresh document out of the pages,
 `pdf_rotate`, `pdf_crop` and `pdf_resize` change what the pages they name show and keep everything
-else the file holds, and `pdf_text`, `pdf_image` and `pdf_form_fill` draw text, a placed picture or a
+else the file holds, `pdf_text`, `pdf_image` and `pdf_form_fill` draw text, a placed picture or a
 filled form into the pages they name, with one embedded general-text font subset to the glyphs the
-call draws. `create` answers the vocabulary's `reason_not_carried_out` for every family it accepts,
-and `fill_template` for the workbook family, until their ports land; the Word and presentation fills
-are carried out. The engine states which (operation, family) pairs it carries out as data, and the
-dispatch reads that statement and nothing else.
+call draws, and `create` makes a new PDF from one ordered content list — one page per picture when
+the list is pictures alone, a text column otherwise. `create` answers the vocabulary's
+`reason_not_carried_out` for its Word, workbook and presentation families, and `fill_template` for
+the workbook family, until their ports land; the Word and presentation fills are carried out. The
+engine states which (operation, family) pairs it carries out as data, and the dispatch reads that
+statement and nothing else.
 
 Every sentence the engine prints — an edit's refusals, notes and losses, a template fill's own
 refusals and the sentences of the library it ports, the request surface's own shape refusals, a PDF

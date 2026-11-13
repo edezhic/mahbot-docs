@@ -1217,7 +1217,7 @@ pub const UNPRODUCIBLE: &[Unproducible] = &[
         marks: &["reason_old_office_version"],
     },
     Unproducible {
-        reason: "the engine prints it only when its own code panics inside a contained region. A synthesized document never makes the engine panic — that is the invariant every reader holds — so only a defect can raise it.",
+        reason: "the engine prints it when its own code panics inside a contained region, and the writing half also prints it where the reference faults on a request's malformed shape — a content list that is absent, null or not a list, a null block, a list block with no items, an image that is not a path, a null description on a fresh-document path — which no synthesized document can make a reader do; only a defect or one of those shapes raises it.",
         marks: &["engine_failed"],
     },
     Unproducible {
@@ -1946,6 +1946,34 @@ pub const WRITING_WITNESSES: &[WritingWitness] = &[
         case: "pdf/pdf_image/webp@refused_webp",
         witness: "a PDF cannot embed picture.webp: a PDF holds a picture as PNG or JPEG — convert the WebP picture first",
     },
+    // ── the created document's marks ──────────────────────────────────────────────────────────────
+    // The fragments `create_word_only` interpolates are not marks of their own; the sentence that
+    // carries them is witnessed here, and the fragments are held by the restatement scan.
+    WritingWitness {
+        mark: "create_word_only",
+        case: "pdf/create@word_only_link",
+        witness: "a link block is a Word document's own, and pdf holds none",
+    },
+    WritingWitness {
+        mark: "create_heading_level",
+        case: "pdf/create@heading_level_out_of_range",
+        witness: "a heading's level must be 1, 2 or 3, got: 9",
+    },
+    WritingWitness {
+        mark: "edit_text_not_text",
+        case: "pdf/create@heading_text_number",
+        witness: "a heading's text must be text",
+    },
+    WritingWitness {
+        mark: "edit_value_kind",
+        case: "pdf/create@bullet_null",
+        witness: "a bullet must be text, a number or a boolean",
+    },
+    WritingWitness {
+        mark: "edit_image_extension",
+        case: "pdf/create@image_extension",
+        witness: "only PNG, JPEG or WebP images can be embedded, got: picture.bmp",
+    },
     WritingWitness {
         mark: "pdf_form_no_field",
         case: "pdf/pdf_form_fill/missing_field@refused_missing_field",
@@ -2333,6 +2361,10 @@ pub const WRITING_WITNESSES: &[WritingWitness] = &[
 
 pub const WRITING_UNREACHED: &[Unreached] = &[
     Unreached {
+        reason: "the bound is the crate's own: the reference draws one column per whole step below a stated length and never returns from a large one, so a case would hang the recorder instead of recording an answer; the writer's own test raises the refusal from a literal",
+        marks: &["create_row_length"],
+    },
+    Unreached {
         reason: "no generated document carries more fillable fields than the shared cap, so no corpus case reaches the truncation; the port's own test builds one past the cap and raises the mark",
         marks: &["pdf_form_catalogue_more"],
     },
@@ -2462,13 +2494,12 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         ],
     },
     Unreached {
-        reason: "a picture request the corpus does not make: a WebP or unreadable file, or a size outside the rule; the recorded picture is a PNG of the stated size",
-        marks: &[
-            "edit_image_extension",
-            "edit_image_label_jpeg",
-            "edit_image_label_webp",
-            "edit_image_unreadable",
-        ],
+        reason: "a JPEG or a WebP label: every picture a case hands the writer whose bytes it cannot read is a PNG — the truncated one included, because a truncated JPEG or WebP would witness the label this reason covers rather than the refusal the case is for",
+        marks: &["edit_image_label_jpeg", "edit_image_label_webp"],
+    },
+    Unreached {
+        reason: "an input picture the engine cannot read at all: the harness materialises every file a case names, so no recorded run met one that was gone or unreadable between the request and the read",
+        marks: &["edit_image_unreadable"],
     },
     Unreached {
         reason: "the noun a shift prints for a range-carrying element it empties; the recorded delete empties a data validation's range, which prints a different noun",
@@ -2508,10 +2539,6 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
     Unreached {
         reason: "a workbook whose relationships cannot name a styles part; every generated workbook names one",
         marks: &["edit_styles_no_relationship"],
-    },
-    Unreached {
-        reason: "a value of the wrong kind for a field the corpus always fills: text where text is needed, and a scalar for a cell value; the port's own tests raise each from a literal",
-        marks: &["edit_text_not_text", "edit_value_kind"],
     },
     Unreached {
         reason: "a caller naming a worksheet child the sequence does not list; every arm here names one it does",
@@ -2609,7 +2636,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         marks: &["surface_merge_bytes_too_many"],
     },
     Unreached {
-        reason: "printed only for the five (operation, family) pairs the writing half does not carry out — every family of create and the workbook family of fill_template; the recorded reference carries every one of them out, so no recorded answer prints it",
+        reason: "printed only for the four (operation, family) pairs the writing half does not carry out — every family of create but PDF, and the workbook family of fill_template; the recorded reference carries every one of them out, so no recorded answer prints it",
         marks: &["reason_not_carried_out"],
     },
     Unreached {

@@ -499,7 +499,21 @@
     "pdf_scan_passes_max": 8,
     "scan_look_bytes_max": 512,
     "container_decode_max_bytes": 67108864,
-    "object_number_max": 1000000
+    "object_number_max": 1000000,
+    "stated_columns_max": 1000
+  },
+  "create": {
+    "heading_size_points": [
+      22,
+      17,
+      14
+    ],
+    "word_only_features": {
+      "header": "a running header",
+      "footer": "a running footer",
+      "footnote": "a paragraph's footnote",
+      "block": "a {type} block"
+    }
   },
   "marks": {
     "block_annotations": {
@@ -824,6 +838,24 @@
       "text": "Chart: {mark}",
       "printed_by": [
         "reading"
+      ]
+    },
+    "create_heading_level": {
+      "text": "a heading's level must be {levels}, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "create_row_length": {
+      "text": "a table row's stated length must be at most {max}, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "create_word_only": {
+      "text": "{feature} is a Word document's own, and {format} holds none",
+      "printed_by": [
+        "writing"
       ]
     },
     "docx_cell_part_of": {
@@ -3965,6 +3997,9 @@
       "writing"
     ],
     "object_number_max": [
+      "writing"
+    ],
+    "stated_columns_max": [
       "writing"
     ],
     "rules": [

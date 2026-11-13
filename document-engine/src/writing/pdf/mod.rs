@@ -1,26 +1,33 @@
-//! The PDF page actions: building a document out of pages, changing what a page shows, and drawing
-//! into it.
+//! The PDF operations: building a document out of pages, changing what a page shows, drawing into it,
+//! and making a new one from a content list.
 //!
-//! Eight operations share one substrate: `pdf_merge` and `pdf_split` build a fresh document and copy
-//! the pages into it, so a produced file holds its pages and nothing of the source's catalog — no
-//! form, outline, labels, tags or name tree; `pdf_rotate`, `pdf_crop`, `pdf_resize`, `pdf_text`,
-//! `pdf_image` and `pdf_form_fill` load the file and change the pages they name, so everything else
-//! it holds survives. [`page`] is the object model all eight work through, and [`scan`] is how it
-//! reads a file: the way the reference's library reads one, from the body and never through the
-//! cross-reference index, so a file whose index is damaged or absent is answered from what its body
-//! holds. A file whose pages — or, for the in-place actions, whose streams — cannot be read at all is
-//! refused rather than rewritten. The three drawing actions share [`draw`] for the embedded font, the
-//! subset it carries and the content stream they append; [`font`] is the bundled face and its
-//! glyph-level subset.
+//! Nine operations share one substrate: `create` makes a document from an ordered content list,
+//! `pdf_merge` and `pdf_split` build a fresh document and copy the pages into it, so a produced file
+//! holds its pages and nothing of the source's catalog — no form, outline, labels, tags or name tree;
+//! `pdf_rotate`, `pdf_crop`, `pdf_resize`, `pdf_text`, `pdf_image` and `pdf_form_fill` load the file
+//! and change the pages they name, so everything else it holds survives. [`page`] is the object model
+//! all nine work through, and [`scan`] is how it reads a file: the way the reference's library reads
+//! one, from the body and never through the cross-reference index, so a file whose index is damaged
+//! or absent is answered from what its body holds. A file whose pages — or, for the in-place actions,
+//! whose streams — cannot be read at all is refused rather than rewritten. The three drawing actions
+//! share [`draw`] for the embedded font, the subset it carries and the content stream they append;
+//! [`create`] shares it too, and [`font`] is the bundled face and its glyph-level subset.
 //!
 //! The reference's answers for these actions carry notes and no losses — a resize says which
 //! annotations could not follow the content, and a drawing says which pages a mark reached past —
 //! and its refusals are its own words, read from the vocabulary under the `pdf_page_`, `pdf_text_`,
 //! `pdf_image_` and `pdf_form_` namespaces (the image-size sentences are shared with the OOXML
-//! arms). A page list the reference's library faults on is the engine's own failure here rather
-//! than an invented refusal. A page value the reference coerces rather than taking as a page number
-//! is the request surface's business: the product's tool layer builds the list as numbers and
+//! arms), while a created document's refusals are the `create_*` marks and the shared `edit_*` ones
+//! its blocks earn. A page list the reference's library faults on is the engine's own failure here
+//! rather than an invented refusal. A page value the reference coerces rather than taking as a page
+//! number is the request surface's business: the product's tool layer builds the list as numbers and
 //! refuses anything else before the engine runs, so this module does not reproduce the coercion.
+//!
+//! Three fresh-document paths — `create`, `pdf_merge` and `pdf_split` — answer a null description as
+//! the reference's own fault rather than as an absent one: its own metadata applier reads a field of
+//! the value it is handed, and only the in-place actions normalise a null away first. The guard sits
+//! in [`page::fresh_metadata`], which is the one function all three call, so the six in-place actions
+//! cannot reach it.
 //!
 //! Every call writes each part as it is built and removes every part it wrote when a later one
 //! fails: a call that fails partway leaves nothing behind, including a split that had already
@@ -64,6 +71,7 @@ use super::{
 use crate::operation::{Failure, Outcome, Request};
 use crate::vocabulary::{self, vocabulary};
 
+mod create;
 mod date;
 mod draw;
 mod font;
@@ -214,6 +222,13 @@ pub(crate) fn place_image(request: &Request, output: &Path) -> Outcome {
 pub(crate) fn fill_form(request: &Request, output: &Path) -> Outcome {
     produce(vec![output.to_path_buf()], |produced| {
         form::run(request, produced)
+    })
+}
+
+/// Build a new document from the request's content list.
+pub(crate) fn create(request: &Request, output: &Path) -> Outcome {
+    produce(vec![output.to_path_buf()], |produced| {
+        create::run(request, produced)
     })
 }
 
@@ -3694,6 +3709,75 @@ mod tests {
                     .is_some_and(|title| title == name)
             })
             .expect("the field the call names")
+    }
+
+    #[test]
+    fn a_null_description_is_refused_on_the_fresh_paths_and_accepted_on_the_edits() {
+        // The reference's own applier reads a field of the value it is handed, so a null description
+        // faults where a document is being built; the six actions that load an input normalise one
+        // away first. The guard therefore sits on the fresh paths alone, and this test is what keeps
+        // a later change to the shared applier from reaching the edits.
+        let directory = scratch();
+        let input = fixture(directory.path(), "basic.pdf", build::pdf_basic());
+        let picture = fixture(directory.path(), "picture.png", build::png());
+        let form = fixture(directory.path(), "form.pdf", build::pdf_form());
+        let source = input.to_string_lossy().into_owned();
+        for (operation, base, values) in [
+            (
+                "create",
+                "created",
+                json!({ "format": "pdf", "content": [], "metadata": null }),
+            ),
+            (
+                "pdf_merge",
+                "merged",
+                json!({ "inputs": [source], "metadata": null }),
+            ),
+            (
+                "pdf_split",
+                "split",
+                json!({ "input": source, "groups": [[1]], "metadata": null }),
+            ),
+        ] {
+            let outcome = run(directory.path(), operation, values, base);
+            let failure = outcome.failure.expect("a null description faults");
+            assert!(!failure.is_usage(), "{operation}: {failure:?}");
+            assert!(
+                std::fs::read_dir(directory.path())
+                    .expect("the destination")
+                    .all(|entry| !entry
+                        .expect("an entry")
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(base)),
+                "{operation} wrote a file it refused"
+            );
+        }
+        for (operation, values) in [
+            ("pdf_rotate", json!({ "degrees": 90 })),
+            (
+                "pdf_crop",
+                json!({ "area": { "x": 0, "y": 0, "width": 0.5, "height": 0.5 } }),
+            ),
+            ("pdf_resize", json!({ "width": 100, "height": 100 })),
+            ("pdf_text", json!({ "text": "x" })),
+            ("pdf_image", json!({ "image": picture.to_string_lossy() })),
+            ("pdf_form_fill", json!({ "values": {} })),
+        ] {
+            let mut values = values;
+            values["input"] = json!(if operation == "pdf_form_fill" {
+                form.to_string_lossy().into_owned()
+            } else {
+                source.clone()
+            });
+            values["metadata"] = Value::Null;
+            let outcome = run(directory.path(), operation, values, operation);
+            assert!(
+                outcome.failure.is_none(),
+                "{operation} refuses a null description: {:?}",
+                outcome.failure
+            );
+        }
     }
 
     #[test]

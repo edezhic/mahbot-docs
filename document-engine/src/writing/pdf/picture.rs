@@ -110,7 +110,7 @@ fn rotation(quarter_turns: i64) -> &'static str {
 
 /// The picture as a PDF image XObject: a JPEG is carried through as DCTDecode, a PNG's samples are
 /// decoded and written as raw samples (with an SMask when the picture has alpha).
-fn embed(
+pub(super) fn embed(
     document: &mut lopdf::Document,
     picture: &Picture,
     name: &str,

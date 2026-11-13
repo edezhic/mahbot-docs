@@ -240,6 +240,17 @@
 //!
 //! An unreadable PDF is an `Err`, never an empty value: a comparison must not pass because the
 //! model could not read what it was given.
+//!
+//! # One divergence the model cannot judge
+//!
+//! A PNG whose image data ends early, inside a container whose chunk structure is whole, is embedded
+//! with the partial samples its decoder could inflate by the reference, and refused by the engine
+//! crate, whose decoder validates the stream. That divergence is deliberate and kept rather than
+//! reproducing a partial-sample artefact or refusing the file in the tool layer, which checks a
+//! picture's extension and not its bytes — so a product user can reach it. It is stated here rather
+//! than left to a case because a case cannot be recorded: the two engines do not both produce, and a
+//! recorded transcript would have to compare a refusal with a file. The truncated container, which
+//! both sides refuse, is the one shape of the two the corpus holds.
 
 use crate::util::hex_string;
 use anyhow::{Result, anyhow, bail};

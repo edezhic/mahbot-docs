@@ -1,6 +1,6 @@
 {
   "note": "Recorded from the reference engine by `cargo run --bin record-baseline`. The harness never rewrites this file: recording is a deliberate act.",
-  "recorded_at_unix": 1794446693,
+  "recorded_at_unix": 1794524772,
   "writer": {
     "engine": "reference-writer",
     "build": "d92ee6931fa8ccd1f223d8e1e7f50870924739131121cdbd887c110b0a623b7c",
@@ -84896,6 +84896,2229 @@
         }
       }
     },
+    "pdf/create@block_null": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
+    "pdf/create@bullet_null": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "a bullet must be text, a number or a boolean"
+    },
+    "pdf/create@bullet_structure": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "a bullet must be text, a number or a boolean"
+    },
+    "pdf/create@cell_null": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "a table cell must be text, a number or a boolean"
+    },
+    "pdf/create@cell_structure": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "a table cell must be text, a number or a boolean"
+    },
+    "pdf/create@content_absent": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
+    "pdf/create@content_not_a_list": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
+    "pdf/create@content_null": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
+    "pdf/create@empty_content": {
+      "status": "produced",
+      "outputs": {
+        "blank.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@empty_headers": {
+      "status": "produced",
+      "outputs": {
+        "empty-headers.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "x"
+              ],
+              "vector": {
+                "count": 4,
+                "sha256": "67361e4ba3a1000f8f2bfc06f3860753a52d86f410131aea08202c928b445632"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@empty_list_items": {
+      "status": "produced",
+      "outputs": {
+        "empty-list.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "after"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@heading_level_default": {
+      "status": "produced",
+      "outputs": {
+        "levels.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "no level",
+                "null level"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@heading_level_out_of_range": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "a heading's level must be 1, 2 or 3, got: 9"
+    },
+    "pdf/create@heading_level_string": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "a heading's level must be 1, 2 or 3, got: 2"
+    },
+    "pdf/create@heading_text_null": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "a heading's text must be text"
+    },
+    "pdf/create@heading_text_number": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "a heading's text must be text"
+    },
+    "pdf/create@heading_text_structure": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "a heading's text must be text"
+    },
+    "pdf/create@ignored_blocks": {
+      "status": "produced",
+      "outputs": {
+        "ignored.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "after"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@image_extension": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "only PNG, JPEG or WebP images can be embedded, got: picture.bmp"
+    },
+    "pdf/create@image_not_a_string": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
+    "pdf/create@image_truncated": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "cannot embed broken.png as a PNG image: the file's bytes are not a whole PNG image"
+    },
+    "pdf/create@image_webp": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "a PDF cannot embed picture.webp: a PDF holds a picture as PNG or JPEG — convert the WebP picture first"
+    },
+    "pdf/create@large_picture": {
+      "status": "produced",
+      "outputs": {
+        "large-picture.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [
+                {
+                  "height": 4096,
+                  "placement": [
+                    483.28,
+                    0.0,
+                    0.0,
+                    483.28,
+                    56.0,
+                    179.305
+                  ],
+                  "sha256": "1a8fd39485176b9425bf6572f8953031de2530b3c92cfbef6407bab5411ff7dc",
+                  "width": 4096
+                }
+              ],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@list_items_absent": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
+    "pdf/create@lists": {
+      "status": "produced",
+      "outputs": {
+        "lists.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "1. One",
+                "2. Two",
+                "• Alpha"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@metadata_before_fields": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "\"title\" must be text"
+    },
+    "pdf/create@metadata_cleared_title": {
+      "status": "produced",
+      "outputs": {
+        "metadata-cleared.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": "Ada",
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@metadata_empty_object": {
+      "status": "produced",
+      "outputs": {
+        "metadata-empty.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@metadata_field_null": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "\"title\" must be text"
+    },
+    "pdf/create@metadata_non_object": {
+      "status": "produced",
+      "outputs": {
+        "metadata-text.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@metadata_null": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
+    "pdf/create@metadata_unknown_key": {
+      "status": "produced",
+      "outputs": {
+        "unknown-key.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": "Known"
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@midword_wrap": {
+      "status": "produced",
+      "outputs": {
+        "wrap.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "alpha",
+                "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW",
+                "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW",
+                "WWWWWWWWWWWWWW"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@nel_and_bom": {
+      "status": "produced",
+      "outputs": {
+        "whitespace-codes.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "a    b c"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@notes_breaks_picture_only": {
+      "status": "produced",
+      "outputs": {
+        "notes-mix.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [
+                {
+                  "height": 1,
+                  "placement": [
+                    0.75,
+                    0.0,
+                    0.0,
+                    0.75,
+                    56.0,
+                    785.14
+                  ],
+                  "sha256": "5ae7e6a42304dc6e4176210b83c43024f99a0bce9a870c3b6d2c95fc8ebfb74c",
+                  "width": 1
+                },
+                {
+                  "height": 1,
+                  "placement": [
+                    0.75,
+                    0.0,
+                    0.0,
+                    0.75,
+                    56.0,
+                    772.39
+                  ],
+                  "sha256": "5ae7e6a42304dc6e4176210b83c43024f99a0bce9a870c3b6d2c95fc8ebfb74c",
+                  "width": 1
+                }
+              ],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@null_size_header_footer": {
+      "status": "produced",
+      "outputs": {
+        "nulls.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "after"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@number_row": {
+      "status": "produced",
+      "outputs": {
+        "number-row.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A",
+                "B"
+              ],
+              "vector": {
+                "count": 4,
+                "sha256": "67361e4ba3a1000f8f2bfc06f3860753a52d86f410131aea08202c928b445632"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@ordered_empty_list": {
+      "status": "produced",
+      "outputs": {
+        "ordered.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "1. a",
+                "2. b"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@ordered_not_boolean": {
+      "status": "produced",
+      "outputs": {
+        "ordered.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "1. a",
+                "2. b"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@paragraph_over_the_edit_text_cap": {
+      "status": "produced",
+      "outputs": {
+        "long-paragraph.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word word word word word",
+                "word word word word word word word word word word word"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@picture_box": {
+      "status": "produced",
+      "outputs": {
+        "picture-box.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [
+                {
+                  "height": 2,
+                  "placement": [
+                    100.0,
+                    0.0,
+                    0.0,
+                    50.0,
+                    247.64,
+                    395.945
+                  ],
+                  "sha256": "f3d3918dcdb3ddb1b3505fde03f91e7d0e0f28ffc30b3af3f578ceee1144be58",
+                  "width": 4
+                }
+              ],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@picture_scan_before_metadata": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
+    "pdf/create@ragged_table": {
+      "status": "produced",
+      "outputs": {
+        "table.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A",
+                "B",
+                "1",
+                "2",
+                "three",
+                ""
+              ],
+              "vector": {
+                "count": 12,
+                "sha256": "900f608e59be612fe6bf04310147827cc698a692a9a09ec4fdfa8f90e4492183"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@scalar_values": {
+      "status": "produced",
+      "outputs": {
+        "scalars.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "• 1",
+                "• true",
+                "true",
+                "2"
+              ],
+              "vector": {
+                "count": 4,
+                "sha256": "55e341d80805592f4da0f5e60ea1dfd9f49a6a65caf060c829c150d4318beed6"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@size_ignored": {
+      "status": "produced",
+      "outputs": {
+        "size.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "after"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@string_row": {
+      "status": "produced",
+      "outputs": {
+        "string-row.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A",
+                "B",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "s",
+                "t",
+                "r",
+                "",
+                "r",
+                "o",
+                "w"
+              ],
+              "vector": {
+                "count": 8,
+                "sha256": "72613682f38b976e6677f73552a55ea68ae9afba145fa45ea12ecd19ab9e9f20"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@table_no_rows": {
+      "status": "produced",
+      "outputs": {
+        "empty-table.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "after"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@tall_picture": {
+      "status": "produced",
+      "outputs": {
+        "tall-picture.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "intro"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [
+                {
+                  "height": 2000,
+                  "placement": [
+                    2.0,
+                    0.0,
+                    0.0,
+                    2000.0,
+                    56.0,
+                    -1214.11
+                  ],
+                  "sha256": "660d55493491b4c120eb309a836fd8338df7a994695bdf0e6d29c288fbb67e67",
+                  "width": 2
+                }
+              ],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@text_page_break": {
+      "status": "produced",
+      "outputs": {
+        "flow.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "line 0",
+                "line 1",
+                "line 2",
+                "line 3",
+                "line 4",
+                "line 5",
+                "line 6",
+                "line 7",
+                "line 8",
+                "line 9",
+                "line 10",
+                "line 11",
+                "line 12",
+                "line 13",
+                "line 14",
+                "line 15",
+                "line 16",
+                "line 17",
+                "line 18",
+                "line 19",
+                "line 20",
+                "line 21",
+                "line 22",
+                "line 23",
+                "line 24",
+                "line 25",
+                "line 26",
+                "line 27",
+                "line 28",
+                "line 29",
+                "line 30",
+                "line 31",
+                "line 32",
+                "line 33"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "line 34",
+                "line 35",
+                "line 36",
+                "line 37",
+                "line 38",
+                "line 39",
+                "line 40",
+                "line 41",
+                "line 42",
+                "line 43",
+                "line 44",
+                "line 45",
+                "line 46",
+                "line 47",
+                "line 48",
+                "line 49",
+                "line 50",
+                "line 51",
+                "line 52",
+                "line 53",
+                "line 54",
+                "line 55",
+                "line 56",
+                "line 57",
+                "line 58",
+                "line 59"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@two_pictures": {
+      "status": "produced",
+      "outputs": {
+        "pictures.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [
+                {
+                  "height": 1,
+                  "placement": [
+                    0.75,
+                    0.0,
+                    0.0,
+                    0.75,
+                    297.265,
+                    420.57
+                  ],
+                  "sha256": "5ae7e6a42304dc6e4176210b83c43024f99a0bce9a870c3b6d2c95fc8ebfb74c",
+                  "width": 1
+                }
+              ],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [
+                {
+                  "height": 1,
+                  "placement": [
+                    0.75,
+                    0.0,
+                    0.0,
+                    0.75,
+                    297.265,
+                    420.57
+                  ],
+                  "sha256": "5ae7e6a42304dc6e4176210b83c43024f99a0bce9a870c3b6d2c95fc8ebfb74c",
+                  "width": 1
+                }
+              ],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@undrawable": {
+      "status": "produced",
+      "unsupported": [
+        "漢",
+        "字",
+        "𐀀"
+      ],
+      "outputs": {
+        "undrawable.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "\u0000\u0000\u0000 \u0000"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@whitespace_paragraph": {
+      "status": "produced",
+      "outputs": {
+        "whitespace.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "",
+                "after"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@wide_table": {
+      "status": "produced",
+      "outputs": {
+        "wide-table.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "h",
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+                "9",
+                "1",
+                "1",
+                "1",
+                "1",
+                "1",
+                "1",
+                "1",
+                "1",
+                "1",
+                "1",
+                "2",
+                "2",
+                "2",
+                "2",
+                "2",
+                "2",
+                "2",
+                "2",
+                "2",
+                "2",
+                "3",
+                "3",
+                "3",
+                "3",
+                "3",
+                "3",
+                "3",
+                "3",
+                "3",
+                "3",
+                "4",
+                "4",
+                "4",
+                "4",
+                "4",
+                "4",
+                "4",
+                "4",
+                "4",
+                "4",
+                "5",
+                "5",
+                "5",
+                "5",
+                "5",
+                "5",
+                "5",
+                "5",
+                "5",
+                "5",
+                "6",
+                "6",
+                "6",
+                "6",
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+                "9",
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+                "9",
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+                "9",
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+                "9",
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+                "9",
+                "0",
+                "1",
+                "2",
+                "3",
+                "x",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ],
+              "vector": {
+                "count": 8,
+                "sha256": "7fa897e2f479d3e765b1ee6b139ca8a77b12df550c9e50613ab55dfedd2237c4"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/create@word_only_contents": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "a contents block is a Word document's own, and pdf holds none"
+    },
+    "pdf/create@word_only_footer": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "a running footer is a Word document's own, and pdf holds none"
+    },
+    "pdf/create@word_only_footnote": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "a paragraph's footnote is a Word document's own, and pdf holds none"
+    },
+    "pdf/create@word_only_header": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "a running header is a Word document's own, and pdf holds none"
+    },
+    "pdf/create@word_only_link": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "a link block is a Word document's own, and pdf holds none"
+    },
+    "pdf/create@word_only_page_break": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "a page_break block is a Word document's own, and pdf holds none"
+    },
     "pdf/pdf_crop": {
       "status": "produced",
       "outputs": {
@@ -85832,6 +88055,49 @@
       }
     },
     "pdf/pdf_form_fill/flatten": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [
+                "Ada",
+                "green"
+              ],
+              "crop": null,
+              "forms": 5,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A form with one field of each kind"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/flatten@flatten_empty_list": {
       "status": "produced",
       "outputs": {
         "filled.pdf": {
@@ -89135,6 +91401,11 @@
       "class": "usage",
       "reason": "cannot read truncated.pdf as a PDF — its bytes do not form a PDF this tool can read"
     },
+    "pdf/pdf_merge@metadata_null": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
     "pdf/pdf_resize": {
       "status": "produced",
       "outputs": {
@@ -91284,6 +93555,11 @@
         }
       }
     },
+    "pdf/pdf_split@metadata_null": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
     "pdf/pdf_text": {
       "status": "produced",
       "outputs": {
@@ -91621,6 +93897,68 @@
       "reason": "\"size\" must be greater than 0 and at most 20000 points, got 0"
     },
     "pdf/pdf_text/stamp@stamp": {
+      "status": "produced",
+      "outputs": {
+        "stamped.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text",
+                "AVATAR"
+              ],
+              "vector": {
+                "count": 6,
+                "sha256": "efc4a05af199c7ef3fb51c89c7742e09e602fc16d8b1c66856b0b628ccb379db"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_text/stamp@stamp_empty_list": {
       "status": "produced",
       "outputs": {
         "stamped.pdf": {

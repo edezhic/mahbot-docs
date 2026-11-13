@@ -26,7 +26,7 @@ crate the harness depends on. `cargo test -p document-engine` runs the crate's o
 its vocabulary restatement scan) without the harness.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 466 cases and 91 readings — takes about a minute; the whole
+managed runtime. A full pass — 529 cases and 91 readings — takes a minute or two; the whole
 test suite, which runs the corpus twice for its determinism check, takes a couple of minutes.
 
 `parity --engine noop` runs the same corpus against the do-nothing engine. That engine exists only
@@ -58,7 +58,8 @@ landed yet is shown as `SKIP`, not failed, and a run that judged no case at all 
 | `tests/engine_contract.rs` | The engine crate's contract, proved from here: its vocabulary is the reference's data, its result shapes carry every recorded field, its closed operation set holds every corpus operation and edit, the reference copies are byte-for-byte the product's, and the host's media tables are the product's own. |
 | `tests/coverage.rs` | The corpus's depth: every reading mark is witnessed by a recorded reading or recorded as unproducible with its reason, every mark only the writing half prints is witnessed by a recorded case's answer or recorded unreached with its reason, neither ledger's "not produced" side names a mark a recorded answer really prints, every per-family failure verdict is witnessed, and every corpus document is in the baseline. |
 | `tests/teeth.rs` | The comparison has teeth: a reading or a produced case altered in a field its sample populates — a picture dropped, a note or a loss reworded, an output renamed, a produced file's content changed, a status flipped — fails it, and so does a detection answer changed for one input. |
-| `baseline/baseline.json` | The recorded reference (about 9.3 MB of canonical documents). |
+| `tests/pdf_create_shapes.rs` | What the PDF model cannot see about a created document: one request driven through both writers, both produced files walked with the same parser, and every drawn string's position, size and fill colour, every path's geometry, and the description entries the model drops compared. Permanent and outside the baseline. |
+| `baseline/baseline.json` | The recorded reference (about 9.5 MB of canonical documents). |
 | `src/bin/parity.rs`, `src/bin/record-baseline.rs` | The gate and the deliberate recorder. |
 
 The reader sources are **copies** under `src/reference_sources/`, byte for byte those of
@@ -204,6 +205,16 @@ builders have one home in `document_engine::test_support`, which the crate's own
 `corpus` re-exports them rather than holding a copy. Coverage is by behaviour:
 
 - `create` for all four output formats;
+- `create`'s PDF family in depth, since it is the one family of that operation the crate's writer
+  carries out: the two layouts (one page per picture, and the text column that breaks pages), every
+  block it draws at every heading level, a numbered list beside a bulleted one, a ragged table, a
+  table past the writer's Word-only column bound of 63, a word cut mid-way, a whitespace-only
+  paragraph, the two code points the two languages' whitespace definitions disagree on, a picture
+  given both sides and one taller than the page, the characters the bundled face cannot draw, and the
+  answer's unsupported list; the metadata shapes (an unknown key, an empty object, a non-object
+  value, a cleared entry, and a null object on each of the three fresh-document paths); and the
+  shapes the reference faults on, each with the class it answers, beside the two pairs of adjacent
+  checks a case can straddle;
 - `fill_template` for all three template families;
 - every `docx_edit` sub-operation (9), every `xlsx_edit` sub-operation (14) and every `pptx_edit`
   sub-operation (14), each with the precondition it needs — a second sheet to move, a merged range
@@ -402,6 +413,14 @@ documents compare equal, every field a table names is shown sensitive or shown i
 single meaningful change compares unequal at a named path. Each table row constructs the one change
 it names, and the OOXML model's self-tests iterate the tables that state its normalisations, so a
 rule added to a table without a test fails the table.
+
+`tests/pdf_create_shapes.rs` holds what the PDF model cannot see about a created document. It drives
+one `pdf/create` request through the crate's writer and through the kit, walks both produced files
+with the same parser, and compares every drawn string's position, size and fill colour, every path's
+points, width, colour and dash, and the description entries the model drops: the producer, the
+creator, both dates, an unknown key, an unvalidated date and a cleared entry. It is permanent and
+outside the baseline, it hard-fails when the managed runtime is absent rather than skipping, and it
+does not touch the reference writer module, which is part of the recorded identity.
 
 ## Effects
 

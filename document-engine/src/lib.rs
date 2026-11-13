@@ -14,17 +14,29 @@
 //!   content it had, so a chart, a comment, a macro or a media file the caller never mentioned
 //!   survives. A PDF page action builds a document out of the pages a merge or a split names, changes
 //!   the box or the turn of the pages it names, or draws text, a picture or a filled form into them,
-//!   and keeps everything else the file holds. A template fill renders a Word or presentation
-//!   sample part by part from a value map. What the writing half carries out is a statement of
-//!   (operation, family) pairs — the Word, workbook and presentation edits, the five PDF page
-//!   actions, the three PDF drawing actions and the Word and presentation fills today, with every
-//!   family of `create` and the workbook family of `fill_template` answering the vocabulary's
-//!   `reason_not_carried_out` until their ports land — and the dispatch reads that statement and
-//!   nothing else.
+//!   and keeps everything else the file holds; `create` makes a new PDF from one ordered content
+//!   list, as one page per picture or as a text column. A template fill renders a Word or
+//!   presentation sample part by part from a value map. What the writing half carries out is a
+//!   statement of (operation, family) pairs — the Word, workbook and presentation edits, the five
+//!   PDF page actions, the three PDF drawing actions, `create`'s PDF family and the Word and
+//!   presentation fills today, with `create`'s other three families and the workbook family of
+//!   `fill_template` answering the vocabulary's `reason_not_carried_out` until their ports land —
+//!   and the dispatch reads that statement and nothing else.
 //! - [`vocabulary`]: every reading bound the engine enforces, every mark it prints, who enforces
 //!   and who prints each one, the enumerations it shares between reading and producing, and the
 //!   embedded font the producing half draws with — one file, embedded at build time, read from
 //!   there rather than restated in code.
+//!
+//! Three of the writer's own limits are stated rather than implied. A created PDF has no page bound:
+//! the reference's `create` has none, and the shared cap bounds the pages a *request* may name, not
+//! the pages a document may hold, so a content list of any length is produced — the crate's own test
+//! asks for ten thousand and one pages, a size the harness's model will not judge. A table row that
+//! states a `length` instead of holding cells is refused past a thousand columns, because the
+//! reference draws one column per whole step below the length and never returns from a larger one.
+//! And a PNG whose image data is short is refused where the reference embeds the partial samples its
+//! decoder inflates; that divergence is a user's to reach through the tool layer, which checks a
+//! picture's extension and not its bytes, and `writing::pdf` states it beside the rest of that half's
+//! notes.
 //!
 //! What the crate deliberately does not own is the tool interface: the model-facing description,
 //! the argument schema, the answer rendered around a result and its phrasing, registration, the

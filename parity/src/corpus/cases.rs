@@ -2,9 +2,16 @@
 //! and the failure side. The documents they address are declared in [`super::documents`].
 //!
 //! A case's request is the one the product's tool layer would hand the kit, with `$in/<name>` and
-//! `$out/<name>` standing for the harness's own paths. The effect lists are what the operation
-//! promises, read off the kit's own semantics (`assets/docgen/kit.js`) and confirmed against the
-//! produced document: an effect that only a no-op could satisfy is not a check.
+//! `$out/<name>` standing for the harness's own paths — with one deliberate exception, stated beside
+//! the cases that break it. The PDF family of `create` accepts shapes the tool layer refuses or
+//! normalises above the engine: an empty, absent, null or non-list content, a block that is not an
+//! object, a notes or unknown block, a heading, bullet or cell value of the wrong kind, a non-string
+//! image, a `size`, a header or footer, a link, page-break or contents block, a footnote, and every
+//! metadata shape the tool validates. Those cases exist because the engine must reproduce the
+//! reference's sentences and outcomes for them even where no product user can reach them, and the
+//! comments above them say which is which. The effect lists are what the operation promises, read
+//! off the kit's own semantics (`assets/docgen/kit.js`) and confirmed against the produced document:
+//! an effect that only a no-op could satisfy is not a check.
 
 use super::documents::{
     BASIC_DOCX, BASIC_PDF, BASIC_PPTX, BASIC_XLSX, BROKEN_FORM_PDF, BROKEN_PAIR_OPTIONS_FORM_PDF,
@@ -33,19 +40,20 @@ use super::documents::{
     LISTED_FIELD_FORM_PDF, MAX_LENGTH_FORM_PDF, MERGE_A_PDF, MERGE_B_PDF, MERGE_C_PDF,
     MISPLACED_FORM_PDF, MULTILINE_FORM_PDF, NO_GEOMETRY_PDF, OBJECT_STREAM_ASCII_HEX_PDF,
     OBJECT_STREAM_INFLATED_PDF, OBJECT_STREAM_PDF, OPTION_FORM_PDF, PAIRED_OPTIONS_FORM_PDF,
-    PAIRED_RADIO_FORM_PDF, PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_PDF, PICTURE_PNG,
-    PICTURE_STALE_CRC_PNG, PICTURE_WEBP, PPTX_ASSETS, PPTX_BOXES, PPTX_BROKEN_SLOT,
-    PPTX_LIST_DISAGREES, PPTX_LIST_REORDERED, PPTX_MACRO, PPTX_MISSING_NOTES,
-    PPTX_NO_CONTENT_TYPES, PPTX_NO_LAYOUT, PPTX_NO_NOTES_MASTER, PPTX_NO_SHAPE_TREE, PPTX_NO_SIZE,
-    PPTX_NO_SLIDE_LIST, PPTX_NOTES_NO_BODY, PPTX_NOTES_TWO, PPTX_RUNS, PPTX_SECTIONS, PPTX_SIGNED,
-    PPTX_SLIDE_OUTSIDE, PPTX_TABLE, PPTX_TWO_NOTES_MASTERS, PUSHBUTTON_CAPTION_FORM_PDF,
-    PUSHBUTTON_FORM_PDF, RADIO_OPTIONS_FORM_PDF, RADIO_OUTRUN_FORM_PDF, RECTLESS_BUTTON_FORM_PDF,
-    RECTLESS_FLAT_FORM_PDF, RECTLESS_FORM_PDF, REPEATED_PAGE_ANNOTATED_PDF, REPEATED_PAGE_PDF,
-    RICH_PDF, RICH_PPTX, ROTATED_PDF, SIGNATURE_FORM_PDF, STATE_APPEARANCE_FORM_PDF,
-    STATED_SIZE_FORM_PDF, TEMPLATE_DOCX, TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF,
-    TRUNCATED_XLSX, TWO_CATALOGS_PDF, WORD_AS_PPTX, XLSX_ALL_HIDDEN, XLSX_BAD_MERGE_REF,
-    XLSX_BROKEN_MERGES, XLSX_EDIT, XLSX_MACRO, XLSX_NO_CONTENT_TYPES, XLSX_NO_FAMILY,
-    XLSX_ONE_VISIBLE, XLSX_ONLY_SHEET, XLSX_SELF_CLOSING, XLSX_UNCLOSED_MERGE_CELL,
+    PAIRED_RADIO_FORM_PDF, PICTURE_BMP, PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_LARGE,
+    PICTURE_PDF, PICTURE_PIXEL, PICTURE_PNG, PICTURE_STALE_CRC_PNG, PICTURE_TALL, PICTURE_WEBP,
+    PPTX_ASSETS, PPTX_BOXES, PPTX_BROKEN_SLOT, PPTX_LIST_DISAGREES, PPTX_LIST_REORDERED,
+    PPTX_MACRO, PPTX_MISSING_NOTES, PPTX_NO_CONTENT_TYPES, PPTX_NO_LAYOUT, PPTX_NO_NOTES_MASTER,
+    PPTX_NO_SHAPE_TREE, PPTX_NO_SIZE, PPTX_NO_SLIDE_LIST, PPTX_NOTES_NO_BODY, PPTX_NOTES_TWO,
+    PPTX_RUNS, PPTX_SECTIONS, PPTX_SIGNED, PPTX_SLIDE_OUTSIDE, PPTX_TABLE, PPTX_TWO_NOTES_MASTERS,
+    PUSHBUTTON_CAPTION_FORM_PDF, PUSHBUTTON_FORM_PDF, RADIO_OPTIONS_FORM_PDF,
+    RADIO_OUTRUN_FORM_PDF, RECTLESS_BUTTON_FORM_PDF, RECTLESS_FLAT_FORM_PDF, RECTLESS_FORM_PDF,
+    REPEATED_PAGE_ANNOTATED_PDF, REPEATED_PAGE_PDF, RICH_PDF, RICH_PPTX, ROTATED_PDF,
+    SIGNATURE_FORM_PDF, STATE_APPEARANCE_FORM_PDF, STATED_SIZE_FORM_PDF, TEMPLATE_DOCX,
+    TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF, TRUNCATED_XLSX, TWO_CATALOGS_PDF, WORD_AS_PPTX,
+    XLSX_ALL_HIDDEN, XLSX_BAD_MERGE_REF, XLSX_BROKEN_MERGES, XLSX_EDIT, XLSX_MACRO,
+    XLSX_NO_CONTENT_TYPES, XLSX_NO_FAMILY, XLSX_ONE_VISIBLE, XLSX_ONLY_SHEET, XLSX_SELF_CLOSING,
+    XLSX_UNCLOSED_MERGE_CELL,
 };
 use super::effect::{BoxKind, Scalar, Scope};
 use super::{Case, Document, Effect, Expect, Reason};
@@ -114,6 +122,8 @@ fn inputs(sub_operation: &str, basic: Document) -> Vec<Document> {
 // ── create ────────────────────────────────────────────────────────────────────────────────────
 
 fn create_cases() -> Vec<Case> {
+    // A table past the writer's Word-only column bound: 64 columns, one header each.
+    let wide_headers: Vec<String> = (0..64).map(|index| format!("h{index}")).collect();
     vec![
         produced(
             Family::Docx,
@@ -288,6 +298,1475 @@ fn create_cases() -> Vec<Case> {
                 },
             ],
         ),
+        // ── create: the PDF family ───────────────────────────────────────────────────────────────
+        //
+        // The reference checks, in this order: a scan over the blocks for a Word-only shape, then the
+        // verdict on the requested format, then the picture-only scan, then the metadata object, then
+        // the fields of each block. Only the pairs a case can actually straddle are pinned:
+        //
+        // - the picture-only scan before the metadata (`picture_scan_before_metadata`): the scan's
+        //   fault is internal and the metadata's is a usage refusal, so the class tells them apart;
+        // - the metadata before the per-block fields (`metadata_before_fields`): both are usage
+        //   refusals, and their sentences differ.
+        //
+        // Three pairs are unpinnable and are named here rather than left to look forgotten. The two
+        // involving the format verdict cannot be exposed at all: the crate's surface answers an
+        // unknown format before the arm runs, so a case carrying one is refused there and pins
+        // nothing. The first scan against the picture-only scan cannot be violated at once either: a
+        // non-list content faults in the first scan and never reaches the picture-only one, and the
+        // shapes that fault in the picture-only scan — an absent or null list — do not fault in the
+        // first, which reads them as no list at all.
+        //
+        // The notes below say which of these cases pin behaviour the product's tool layer refuses,
+        // normalises or rewrites above the engine, so a reader can tell a user-reachable case from
+        // an engine-only one. They are comments and nothing enforces them.
+        //
+        // Tool-refused or tool-normalised: an empty, absent, null or non-list content; a block that
+        // is not an object (a string, a number, null); a notes or unknown block type; a non-boolean
+        // `ordered`; a heading level given as a string, or out of range; a heading, bullet or cell
+        // value of the wrong kind; a non-string image; a WebP or non-PNG/JPEG picture; a table row
+        // given as a string, a number or an object; an empty or absent `items`; a `size`; a header
+        // or footer; a link, page-break or contents block; a paragraph footnote; every metadata
+        // shape the tool validates (unknown key, non-object, null field, empty object) and every
+        // date it rewrites. A table past 63 columns is user-reachable: the tool applies that bound
+        // to Word alone.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "list", "items": ["One", "Two"], "ordered": true },
+                    { "type": "list", "items": ["Alpha"] },
+                ],
+                "output": "$out/lists.pdf",
+            }),
+            vec!["lists.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "1. One",
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "2. Two",
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "\u{2022} Alpha",
+                },
+            ],
+        )
+        .named("lists"),
+        // This case pins the ragged table: its short row leaves an empty cell that is still drawn.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    {
+                        "type": "table",
+                        "headers": ["A", "B"],
+                        "rows": [["1", "2"], ["three"]],
+                    },
+                ],
+                "output": "$out/table.pdf",
+            }),
+            vec!["table.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "three",
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "A",
+                },
+            ],
+        )
+        .named("ragged_table"),
+        // A word wider than the column is cut mid-way. The cut is by UTF-16 unit, which no case can
+        // drive through a surrogate pair (see the crate's own note); this one cuts a plain word.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "paragraph", "text": format!("alpha {}", "W".repeat(100)) },
+                ],
+                "output": "$out/wrap.pdf",
+            }),
+            vec!["wrap.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "alpha",
+                },
+                // The word's first cut line, so the case fails if the wrapper stops cutting where
+                // the column ends.
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW",
+                },
+            ],
+        )
+        .named("midword_wrap"),
+        // A paragraph longer than the shared edit-text cap (20,000 characters) is laid out in full:
+        // the reference's layout has no such cap, and the product's own is the tool layer's, which
+        // bounds an edit's string fields and not a block's text. A port that reused the capped edit
+        // helper would refuse this case, and one that truncated the text would lose its last page.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "paragraph", "text": "word ".repeat(4_001) },
+                ],
+                "output": "$out/long-paragraph.pdf",
+            }),
+            vec!["long-paragraph.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 6,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 5,
+                    text: "word word word word word word word word word word",
+                },
+            ],
+        )
+        .named("paragraph_over_the_edit_text_cap"),
+        // A paragraph of nothing but whitespace is pushed through as one empty drawn string, which
+        // still advances the column: the paragraph after it is drawn below it.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "paragraph", "text": "   \t  " },
+                    { "type": "paragraph", "text": "after" },
+                ],
+                "output": "$out/whitespace.pdf",
+            }),
+            vec!["whitespace.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "after",
+                },
+            ],
+        )
+        .named("whitespace_paragraph"),
+        // The two code points the two languages' whitespace definitions disagree on. JavaScript does
+        // not split on U+0085, so it survives the wrapper and the text pipeline draws it as four
+        // spaces; it does split on U+FEFF, so that one is a word separator. A port that used its own
+        // language's predicate draws a different string.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "paragraph", "text": "a\u{85}b\u{feff}c" },
+                ],
+                "output": "$out/whitespace-codes.pdf",
+            }),
+            vec!["whitespace-codes.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "a    b c",
+                },
+            ],
+        )
+        .named("nel_and_bom"),
+        // Two pictures, so "one page per picture" is distinguishable from "one page in total".
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            vec![PICTURE_PIXEL],
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "image", "image": "$in/pixel.png" },
+                    { "type": "image", "image": "$in/pixel.png" },
+                ],
+                "output": "$out/pictures.pdf",
+            }),
+            vec!["pictures.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 2,
+                },
+                Effect::PageImages {
+                    output: None,
+                    page: 0,
+                    count: 1,
+                },
+                Effect::PageImages {
+                    output: None,
+                    page: 1,
+                    count: 1,
+                },
+            ],
+        )
+        .named("two_pictures"),
+        // A picture that names both sides names a box it is fitted inside whole: the 4 by 2 picture
+        // asked for 100 by 2000 points is drawn 100 by 50, not stretched to the box.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            vec![PICTURE_PNG],
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "image", "image": "$in/picture.png", "width": 100, "height": 2000 },
+                ],
+                "output": "$out/picture-box.pdf",
+            }),
+            vec!["picture-box.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageImages {
+                    output: None,
+                    page: 0,
+                    count: 1,
+                },
+                Effect::ImagePlacement {
+                    output: None,
+                    page: 0,
+                    index: 0,
+                    matrix: [100.0, 0.0, 0.0, 50.0, 247.64, 395.945],
+                },
+            ],
+        )
+        .named("picture_box"),
+        // A streaming picture taller than the text column is drawn past the page's bottom edge on a
+        // page of its own, and the answer carries no note about it: the drawing action's note about a
+        // mark that reaches past the page is not this arm's. The height is named, because a picture
+        // that names no side is fitted whole into the column and could never overflow it.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            vec![PICTURE_TALL],
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "paragraph", "text": "intro" },
+                    { "type": "image", "image": "$in/tall.png", "height": 2000 },
+                ],
+                "output": "$out/tall-picture.pdf",
+            }),
+            vec!["tall-picture.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 2,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "intro",
+                },
+                Effect::PageImages {
+                    output: None,
+                    page: 1,
+                    count: 1,
+                },
+            ],
+        )
+        .named("tall_picture"),
+        // A picture at the PDF model's per-image charge: 4096 by 4096 pixels is exactly 64 MiB of
+        // declared samples. Its samples do not compress, so each engine's produced file is about
+        // fifty megabytes — inside the harness's read limit and near enough to it that the limit is
+        // exercised rather than assumed. The samples have to be incompressible: the reference
+        // decodes a picture and re-deflates its samples rather than carrying the file's own bytes,
+        // so a picture of one repeated colour produces a file of tens of kilobytes however large it
+        // is. The builder states what the case costs; this comment does not restate it.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            vec![PICTURE_LARGE],
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "image", "image": "$in/large.png" },
+                ],
+                "output": "$out/large-picture.pdf",
+            }),
+            vec!["large-picture.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageImages {
+                    output: None,
+                    page: 0,
+                    count: 1,
+                },
+            ],
+        )
+        .named("large_picture"),
+        // An empty content list is a one-page blank file, not a refusal: the product's own tool
+        // layer is what refuses it above the engine.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [],
+                "output": "$out/blank.pdf",
+            }),
+            vec!["blank.pdf"],
+            vec![Effect::PageCount {
+                output: None,
+                count: 1,
+            }],
+        )
+        .named("empty_content"),
+        // A list block with an empty items list is produced; one whose items is absent faults (see
+        // the failed case below). The two shapes are not the same.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "list", "items": [] },
+                    { "type": "paragraph", "text": "after" },
+                ],
+                "output": "$out/empty-list.pdf",
+            }),
+            vec!["empty-list.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "after",
+                },
+            ],
+        )
+        .named("empty_list_items"),
+        // A table with no rows draws nothing but still advances the column by one body line, so the
+        // paragraph after it is drawn below where it would otherwise be. The recorded model cannot
+        // see a text position, which is why the permanent parity test pins this advance.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "table" },
+                    { "type": "paragraph", "text": "after" },
+                ],
+                "output": "$out/empty-table.pdf",
+            }),
+            vec!["empty-table.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "after",
+                },
+            ],
+        )
+        .named("table_no_rows"),
+        // A string block and a number block are ignored, and so is a block whose type this family
+        // does not know; a null block faults (see below).
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    "a string block",
+                    5,
+                    { "type": "notes", "text": "notes are ignored here" },
+                    { "type": "unknown" },
+                    { "type": "paragraph", "text": "after" },
+                ],
+                "output": "$out/ignored.pdf",
+            }),
+            vec!["ignored.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "after",
+                },
+            ],
+        )
+        .named("ignored_blocks"),
+        // A picture-only list with a notes block is not picture-only: the notes block sends the whole
+        // list through the streaming layout, where the two pictures are stacked down one column on
+        // one page rather than given a page each.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            vec![PICTURE_PIXEL],
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "image", "image": "$in/pixel.png" },
+                    { "type": "notes", "text": "ignored" },
+                    { "type": "image", "image": "$in/pixel.png" },
+                ],
+                "output": "$out/notes-mix.pdf",
+            }),
+            vec!["notes-mix.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageImages {
+                    output: None,
+                    page: 0,
+                    count: 2,
+                },
+            ],
+        )
+        .named("notes_breaks_picture_only"),
+        // Text alone breaks pages: sixty one-line paragraphs fill two columns, so the second page is
+        // the streaming layout's own and not a picture's.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": (0..60)
+                    .map(|index| json!({ "type": "paragraph", "text": format!("line {index}") }))
+                    .collect::<Vec<Value>>(),
+                "output": "$out/flow.pdf",
+            }),
+            vec!["flow.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 2,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "line 33",
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 1,
+                    text: "line 34",
+                },
+            ],
+        )
+        .named("text_page_break"),
+        // A bullet and a cell accept a scalar and stringify it the way JavaScript does, where a
+        // heading's text refuses one (see the refusals below).
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "list", "items": [1, true] },
+                    { "type": "table", "rows": [[true, 2]] },
+                ],
+                "output": "$out/scalars.pdf",
+            }),
+            vec!["scalars.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "\u{2022} 1",
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "\u{2022} true",
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "true",
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "2",
+                },
+            ],
+        )
+        .named("scalar_values"),
+        // `ordered` is read for truth, not for identity with `true`, so a non-empty string numbers
+        // the list.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "list", "items": ["a", "b"], "ordered": "yes" },
+                ],
+                "output": "$out/ordered.pdf",
+            }),
+            vec!["ordered.pdf"],
+            vec![
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "1. a",
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "2. b",
+                },
+            ],
+        )
+        .named("ordered_not_boolean"),
+        // An empty list is true in JavaScript, so `ordered: []` numbers the list: a port that read a
+        // list for its content, or for identity with `true`, would draw bullets.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "list", "items": ["a", "b"], "ordered": [] },
+                ],
+                "output": "$out/ordered.pdf",
+            }),
+            vec!["ordered.pdf"],
+            vec![
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "1. a",
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "2. b",
+                },
+            ],
+        )
+        .named("ordered_empty_list"),
+        // An empty headers list is a row of its own that the row filter drops, so the table is its
+        // one body row.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "table", "headers": [], "rows": [["x"]] },
+                ],
+                "output": "$out/empty-headers.pdf",
+            }),
+            vec!["empty-headers.pdf"],
+            vec![
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "x",
+                },
+            ],
+        )
+        .named("empty_headers"),
+        // A row given as a string is kept and drawn character by character, one cell each, while a
+        // row given as a number is dropped (the next case). Two outcomes, two cases.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "table", "headers": ["A", "B"], "rows": ["str row"] },
+                ],
+                "output": "$out/string-row.pdf",
+            }),
+            vec!["string-row.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "s",
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "w",
+                },
+            ],
+        )
+        .named("string_row"),
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "table", "headers": ["A", "B"], "rows": [5] },
+                ],
+                "output": "$out/number-row.pdf",
+            }),
+            vec!["number-row.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "A",
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "B",
+                },
+            ],
+        )
+        .named("number_row"),
+        // A table past the writer's column bound of 63. That bound is the product's own and applies
+        // to Word alone, so this shape is user-reachable here, and this arm applies no cap.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "table", "headers": wide_headers, "rows": [["x"]] },
+                ],
+                "output": "$out/wide-table.pdf",
+            }),
+            vec!["wide-table.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "h",
+                },
+            ],
+        )
+        .named("wide_table"),
+        // A metadata key the description has no entry for is ignored, and the call is produced. The
+        // model reads only the content-bearing entries, so the key's absence is held by the
+        // permanent parity test rather than by a case.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [],
+                "metadata": { "title": "Known", "bogus": "ignored" },
+                "output": "$out/unknown-key.pdf",
+            }),
+            vec!["unknown-key.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::Info {
+                    output: None,
+                    key: "title",
+                    value: "Known",
+                },
+            ],
+        )
+        .named("metadata_unknown_key"),
+        // A non-object metadata value that is not null is ignored, not refused; the product's tool
+        // layer refuses it above the engine.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [],
+                "metadata": "not an object",
+                "output": "$out/metadata-text.pdf",
+            }),
+            vec!["metadata-text.pdf"],
+            vec![Effect::PageCount {
+                output: None,
+                count: 1,
+            }],
+        )
+        .named("metadata_non_object"),
+        // An empty metadata object is produced; the tool refuses it as empty.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [],
+                "metadata": {},
+                "output": "$out/metadata-empty.pdf",
+            }),
+            vec!["metadata-empty.pdf"],
+            vec![Effect::PageCount {
+                output: None,
+                count: 1,
+            }],
+        )
+        .named("metadata_empty_object"),
+        // An empty string clears the entry instead of writing it: the title is absent and the author
+        // beside it survives.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [],
+                "metadata": { "title": "", "author": "Ada" },
+                "output": "$out/metadata-cleared.pdf",
+            }),
+            vec!["metadata-cleared.pdf"],
+            vec![
+                Effect::Info {
+                    output: None,
+                    key: "title",
+                    value: "",
+                },
+                Effect::Info {
+                    output: None,
+                    key: "author",
+                    value: "Ada",
+                },
+            ],
+        )
+        .named("metadata_cleared_title"),
+        // A heading with no level and one with a null level both take the first level.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "heading", "text": "no level" },
+                    { "type": "heading", "level": null, "text": "null level" },
+                ],
+                "output": "$out/levels.pdf",
+            }),
+            vec!["levels.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "no level",
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "null level",
+                },
+            ],
+        )
+        .named("heading_level_default"),
+        // A null size, header and footer each count as absent, and `size` is never read by this
+        // family at all.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "paragraph", "text": "after" },
+                ],
+                "size": null,
+                "header": null,
+                "footer": null,
+                "output": "$out/nulls.pdf",
+            }),
+            vec!["nulls.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "after",
+                },
+            ],
+        )
+        .named("null_size_header_footer"),
+        // A size this family does not read is accepted and ignored; the tool refuses it for a
+        // non-presentation format.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "paragraph", "text": "after" },
+                ],
+                "size": "16:9",
+                "output": "$out/size.pdf",
+            }),
+            vec!["size.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "after",
+                },
+            ],
+        )
+        .named("size_ignored"),
+        // Two distinct characters the bundled face cannot draw, one of them repeated, and an astral
+        // character: the answer's unsupported list is in first-encounter order and holds each once.
+        produced(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [
+                    { "type": "paragraph", "text": "\u{6f22}\u{5b57}\u{6f22} \u{10000}" },
+                ],
+                "output": "$out/undrawable.pdf",
+            }),
+            vec!["undrawable.pdf"],
+            vec![Effect::PageCount {
+                output: None,
+                count: 1,
+            }],
+        )
+        .named("undrawable"),
+        // A picture whose extension the shared reader refuses.
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            vec![PICTURE_BMP],
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "image", "image": "$in/picture.bmp" }],
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains(
+                "only PNG, JPEG or WebP images can be embedded, got: picture.bmp",
+            )),
+        )
+        .named("image_extension"),
+        // A WebP is a sentence of its own; the existing image action's case already witnesses it.
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            vec![PICTURE_WEBP],
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "image", "image": "$in/picture.webp" }],
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains(
+                "a PDF cannot embed picture.webp: a PDF holds a picture as PNG or JPEG",
+            )),
+        )
+        .named("image_webp"),
+        // A truncated container is refused by both sides, and this one is a PNG: a truncated JPEG or
+        // WebP would witness a label mark the writing ledger records as unreached.
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            vec![PICTURE_BROKEN_PNG],
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "image", "image": "$in/broken.png" }],
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains(
+                "cannot embed broken.png as a PNG image: the file's bytes are not a whole PNG image",
+            )),
+        )
+        .named("image_truncated"),
+        // The content shapes the reference faults on. An absent or null list faults where the
+        // reference asks it for its length — the picture-only scan — and a non-list where its first
+        // scan asks it for `find`; all are the engine's own class, and the recorded transcript
+        // carries the class rather than the runtime's wording.
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({ "op": "create", "format": "pdf", "output": "$out/fault.pdf" }),
+            vec!["fault.pdf"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("content_absent"),
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": null,
+                "output": "$out/fault.pdf",
+            }),
+            vec!["fault.pdf"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("content_null"),
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": "not a list",
+                "output": "$out/fault.pdf",
+            }),
+            vec!["fault.pdf"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("content_not_a_list"),
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "list" }],
+                "output": "$out/fault.pdf",
+            }),
+            vec!["fault.pdf"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("list_items_absent"),
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [null],
+                "output": "$out/fault.pdf",
+            }),
+            vec!["fault.pdf"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("block_null"),
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "image", "image": 5 }],
+                "output": "$out/fault.pdf",
+            }),
+            vec!["fault.pdf"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("image_not_a_string"),
+        // A null metadata object is the reference's own fault on every fresh-document path; the
+        // edit actions normalise one away before the shared applier sees it.
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [],
+                "metadata": null,
+                "output": "$out/fault.pdf",
+            }),
+            vec!["fault.pdf"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("metadata_null"),
+        // The picture-only scan runs before the metadata: a null content list answers its fault even
+        // though the metadata would be refused too, and the two classes differ.
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": null,
+                "metadata": { "title": 5 },
+                "output": "$out/fault.pdf",
+            }),
+            vec!["fault.pdf"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("picture_scan_before_metadata"),
+        // The metadata runs before the blocks' own fields: both are usage refusals, and this one
+        // carries the metadata's sentence.
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "heading", "level": 9, "text": "x" }],
+                "metadata": { "title": 5 },
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains("\"title\" must be text")),
+        )
+        .named("metadata_before_fields"),
+        // A null field value inside the metadata object is a usage refusal, unlike the null object.
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [],
+                "metadata": { "title": null },
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains("\"title\" must be text")),
+        )
+        .named("metadata_field_null"),
+        // Which values count as text is not one rule: a heading's text refuses a number, a null and
+        // a structure, where a bullet and a cell accept a scalar (see `scalar_values` above).
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "heading", "text": 5 }],
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains("a heading's text must be text")),
+        )
+        .named("heading_text_number"),
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "heading", "text": null }],
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains("a heading's text must be text")),
+        )
+        .named("heading_text_null"),
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "heading", "text": { "a": 1 } }],
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains("a heading's text must be text")),
+        )
+        .named("heading_text_structure"),
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "list", "items": [null] }],
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains(
+                "a bullet must be text, a number or a boolean",
+            )),
+        )
+        .named("bullet_null"),
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "list", "items": [{ "a": 1 }] }],
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains(
+                "a bullet must be text, a number or a boolean",
+            )),
+        )
+        .named("bullet_structure"),
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "table", "rows": [[null]] }],
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains(
+                "a table cell must be text, a number or a boolean",
+            )),
+        )
+        .named("cell_null"),
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "table", "rows": [[{ "a": 1 }]] }],
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains(
+                "a table cell must be text, a number or a boolean",
+            )),
+        )
+        .named("cell_structure"),
+        // A heading's level is one of the rules' own, refused rather than clamped; the string form
+        // of a number is not one of them.
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "heading", "level": "2", "text": "L" }],
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains(
+                "a heading's level must be 1, 2 or 3, got: 2",
+            )),
+        )
+        .named("heading_level_string"),
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "heading", "level": 9, "text": "L" }],
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains(
+                "a heading's level must be 1, 2 or 3, got: 9",
+            )),
+        )
+        .named("heading_level_out_of_range"),
+        // Each block kind only a Word document holds is refused, and so is a running header or
+        // footer.
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "link", "url": "https://example.com" }],
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains(
+                "a link block is a Word document's own, and pdf holds none",
+            )),
+        )
+        .named("word_only_link"),
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "page_break" }],
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains(
+                "a page_break block is a Word document's own, and pdf holds none",
+            )),
+        )
+        .named("word_only_page_break"),
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "contents" }],
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains(
+                "a contents block is a Word document's own, and pdf holds none",
+            )),
+        )
+        .named("word_only_contents"),
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [{ "type": "paragraph", "text": "x", "footnote": "a note" }],
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains(
+                "a paragraph's footnote is a Word document's own, and pdf holds none",
+            )),
+        )
+        .named("word_only_footnote"),
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [],
+                "header": "Running header",
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains(
+                "a running header is a Word document's own, and pdf holds none",
+            )),
+        )
+        .named("word_only_header"),
+        declined(
+            Family::Pdf,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pdf",
+                "content": [],
+                "footer": "Running footer",
+                "output": "$out/refused.pdf",
+            }),
+            vec!["refused.pdf"],
+            Expect::Refused(Reason::contains(
+                "a running footer is a Word document's own, and pdf holds none",
+            )),
+        )
+        .named("word_only_footer"),
     ]
 }
 
@@ -7282,6 +8761,46 @@ fn pdf_cases() -> Vec<Case> {
                 },
             ],
         ),
+        // `flatten` is read for JavaScript truth, so an empty list flattens as `true` does. The
+        // product's tool types `flatten` as a boolean, so this shape is engine-only.
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("flatten"),
+            vec![FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/form.pdf",
+                "values": {
+                    "name": "Ada",
+                    "agree": true,
+                    "choice": "two",
+                    "colour": "green",
+                },
+                "flatten": [],
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![
+                Effect::FormFlattened { output: None },
+                Effect::PageForms {
+                    output: None,
+                    page: 0,
+                    count: 5,
+                },
+                Effect::PageAppearanceText {
+                    output: None,
+                    page: 0,
+                    text: "Ada",
+                },
+                Effect::PageAppearanceText {
+                    output: None,
+                    page: 0,
+                    text: "green",
+                },
+            ],
+        )
+        .named("flatten_empty_list"),
         // ── drawing text into a page ────────────────────────────────────────────────────────────
         produced(
             Family::Pdf,
@@ -7316,6 +8835,42 @@ fn pdf_cases() -> Vec<Case> {
             ],
         )
         .named("stamp"),
+        // A flag is read for JavaScript truth, so an empty list is a stamp as much as `true` is: a
+        // port that tested for content, or for identity with `true`, would draw no border. The
+        // product's tool types `stamp` as a boolean, so this shape is engine-only.
+        produced(
+            Family::Pdf,
+            "pdf_text",
+            Some("stamp"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_text",
+                "input": "$in/basic.pdf",
+                "text": "AVATAR",
+                "pages": [1],
+                "x": 100,
+                "y": 200,
+                "size": 24,
+                "color": "FF0000",
+                "rotate": 0,
+                "stamp": [],
+                "output": "$out/stamped.pdf",
+            }),
+            vec!["stamped.pdf"],
+            vec![
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "AVATAR",
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 1,
+                    text: "Page two text",
+                },
+            ],
+        )
+        .named("stamp_empty_list"),
         produced(
             Family::Pdf,
             "pdf_text",
@@ -8667,6 +10222,41 @@ fn pdf_cases() -> Vec<Case> {
                 },
             ],
         ),
+        // A null description is the reference's own fault on the two fresh-document paths a page
+        // action has, exactly as on `create`: its applier reads a field of the value it is handed.
+        // The six actions that load an input normalise a null away first, which is why the guard
+        // cannot reach them.
+        declined(
+            Family::Pdf,
+            "pdf_merge",
+            None,
+            vec![MERGE_A_PDF, MERGE_B_PDF],
+            json!({
+                "op": "pdf_merge",
+                "inputs": ["$in/a.pdf", "$in/b.pdf"],
+                "metadata": null,
+                "output": "$out/merged.pdf",
+            }),
+            vec!["merged.pdf"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("metadata_null"),
+        declined(
+            Family::Pdf,
+            "pdf_split",
+            None,
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_split",
+                "input": "$in/basic.pdf",
+                "groups": [[1], [2]],
+                "metadata": null,
+                "outputs": ["$out/basic_part1.pdf", "$out/basic_part2.pdf"],
+            }),
+            vec!["basic_part1.pdf", "basic_part2.pdf"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("metadata_null"),
     ]);
     cases
 }

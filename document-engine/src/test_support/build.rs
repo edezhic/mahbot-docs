@@ -62,6 +62,111 @@ pub fn png() -> Vec<u8> {
     bytes
 }
 
+/// A one-pixel RGB PNG: the smallest picture a page can hold, so a case that gives each picture a
+/// page pays for the page count alone.
+#[must_use]
+pub fn pixel_png() -> Vec<u8> {
+    rgb_png(1, 1, &[255, 255, 255])
+}
+
+/// A two-pixel-wide, two-thousand-pixel-tall RGB PNG: at 96 dpi it is 1.5 by 1500 points, taller
+/// than a page's 730-point text column. A streaming layout that names no side fits it whole into the
+/// column, so only a block that states a side taller than the column draws it past the page's bottom
+/// edge — which is what the tall-picture case states.
+#[must_use]
+pub fn tall_png() -> Vec<u8> {
+    let row: Vec<u8> = (0..2).flat_map(|_| [0x20, 0x60, 0xa0]).collect();
+    let samples: Vec<u8> = std::iter::repeat_n(row, 2000).flatten().collect();
+    rgb_png(2, 2000, &samples)
+}
+
+/// A 4096 by 4096 RGB PNG: at four bytes a declared pixel it sits exactly on the PDF model's
+/// per-image charge, and its samples do not compress, so the PDF either engine writes from it is
+/// about fifty megabytes — inside the harness's sixty-four megabyte read limit, and near enough to
+/// it that the limit is exercised rather than assumed. The samples must be incompressible for the
+/// second half: the reference decodes a PNG and re-deflates its samples rather than carrying the
+/// file's own bytes, so a picture of one repeated colour produces a file of a few tens of kilobytes
+/// however large it is.
+///
+/// Measured in a debug build (the figures are machine-dependent): the picture builds in about a
+/// second, the reference's own run takes about two, and the crate's own about ten, which is the
+/// deflate of fifty megabytes; the crate's file is 50,347,995 bytes. The samples are the same bytes
+/// on every run.
+#[must_use]
+pub fn large_png() -> Vec<u8> {
+    /// The picture's side in pixels: 4096 x 4096 x 4 bytes is exactly the model's 64 MiB charge.
+    const SIDE: usize = 4096;
+    rgb_png(SIDE as u32, SIDE as u32, &noise(SIDE * SIDE * 3))
+}
+
+/// Deterministic noise, from a 32-bit linear congruential generator: samples that do not compress,
+/// the same on every run.
+fn noise(len: usize) -> Vec<u8> {
+    let mut state: u32 = 0x1234_5678;
+    let mut out = Vec::with_capacity(len);
+    for _ in 0..len {
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        out.push((state >> 24) as u8);
+    }
+    out
+}
+
+/// A zlib stream of stored blocks: the two-byte header, one block per 65,535 bytes with its
+/// length and its complement, and the Adler-32 checksum of the data. A stored stream is what the
+/// format calls an uncompressed one, and building it is a copy.
+fn stored_zlib(data: &[u8]) -> Vec<u8> {
+    /// The most bytes one stored block may carry.
+    const BLOCK: usize = 65_535;
+    let mut out = Vec::with_capacity(data.len() + data.len() / BLOCK * 5 + 6);
+    out.extend_from_slice(&[0x78, 0x01]);
+    let mut rest = data;
+    loop {
+        let take = rest.len().min(BLOCK);
+        let last = take == rest.len();
+        out.push(u8::from(last));
+        let length = u16::try_from(take).expect("a stored block's length");
+        out.extend_from_slice(&length.to_le_bytes());
+        out.extend_from_slice(&(!length).to_le_bytes());
+        out.extend_from_slice(&rest[..take]);
+        rest = &rest[take..];
+        if last {
+            break;
+        }
+    }
+    out.extend_from_slice(&adler32(data).to_be_bytes());
+    out
+}
+
+/// A PNG of `width` by `height` RGB pixels whose samples are `samples`, row by row, in a stored
+/// zlib stream. Encoded by hand rather than through the `image` crate's encoder — [`png`] above uses
+/// that — because a stored stream is what makes a picture's own file as large as its samples, which
+/// is what [`large_png`] needs, and the `image` encoder offers no way to write one.
+#[must_use]
+fn rgb_png(width: u32, height: u32, samples: &[u8]) -> Vec<u8> {
+    let stride = width as usize * 3;
+    // Every row is prefixed by its filter byte, which is zero: no filter.
+    let mut raw = Vec::with_capacity((stride + 1) * height as usize);
+    for row in samples.chunks(stride) {
+        raw.push(0);
+        raw.extend_from_slice(row);
+    }
+    let idat = stored_zlib(&raw);
+    let mut header = Vec::with_capacity(13);
+    header.extend_from_slice(&width.to_be_bytes());
+    header.extend_from_slice(&height.to_be_bytes());
+    header.extend_from_slice(&[8, 2, 0, 0, 0]);
+    let mut bytes = vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    for (kind, data) in [(b"IHDR", header), (b"IDAT", idat), (b"IEND", Vec::new())] {
+        bytes.extend_from_slice(&u32::try_from(data.len()).unwrap_or(u32::MAX).to_be_bytes());
+        bytes.extend_from_slice(kind);
+        bytes.extend_from_slice(&data);
+        let mut checked = kind.to_vec();
+        checked.extend_from_slice(&data);
+        bytes.extend_from_slice(&png_crc(&checked).to_be_bytes());
+    }
+    bytes
+}
+
 /// A file named as a PNG whose bytes are not one: the format's signature and nothing a decoder can
 /// read, so an edit that places it refuses rather than embedding bytes no reader can open.
 #[must_use]
@@ -116,16 +221,26 @@ fn png_crc(bytes: &[u8]) -> u32 {
     const POLYNOMIAL: u32 = 0xedb8_8320;
     /// The bits one byte holds.
     const BITS: u32 = 8;
+    /// The one-byte-at-a-time table: a fifty-megabyte picture's chunk is checksummed byte by byte,
+    /// and the bit-at-a-time loop would spend seconds on it in a debug build.
+    static TABLE: std::sync::LazyLock<[u32; 256]> = std::sync::LazyLock::new(|| {
+        let mut table = [0_u32; 256];
+        for (index, entry) in table.iter_mut().enumerate() {
+            let mut crc = u32::try_from(index).expect("a byte's own value");
+            for _ in 0..BITS {
+                crc = if crc & 1 == 0 {
+                    crc >> 1
+                } else {
+                    POLYNOMIAL ^ (crc >> 1)
+                };
+            }
+            *entry = crc;
+        }
+        table
+    });
     let mut crc = u32::MAX;
     for &byte in bytes {
-        crc ^= u32::from(byte);
-        for _ in 0..BITS {
-            crc = if crc & 1 == 0 {
-                crc >> 1
-            } else {
-                POLYNOMIAL ^ (crc >> 1)
-            };
-        }
+        crc = TABLE[usize::try_from((crc ^ u32::from(byte)) & 0xff).expect("a byte")] ^ (crc >> 8);
     }
     !crc
 }
@@ -5208,8 +5323,8 @@ fn find(bytes: &[u8], needle: &[u8]) -> Option<usize> {
 
 /// A zlib stream of one fixed-Huffman block, coding a run of three or more identical bytes as a
 /// distance-1 match: the smallest encoder that lets a fixture state a container which decodes to far
-/// more than the file that holds it. `flate2` is only a dev-dependency of the crate, so test support —
-/// compiled into a normal build — cannot use it.
+/// more than the file that holds it. `flate2`'s own encoder chooses its blocks, so it cannot state this
+/// one.
 fn deflate_fixed(data: &[u8]) -> Vec<u8> {
     let mut out = vec![0x78, 0x01];
     let mut writer = DeflateBits::default();

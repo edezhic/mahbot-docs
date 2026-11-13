@@ -25,7 +25,7 @@ use super::page;
 use super::{Produced, editable};
 use crate::operation::{Failure, Request};
 use crate::vocabulary::{self, vocabulary};
-use crate::writing::scalar_value;
+use crate::writing::{js_truthy, scalar_value};
 
 /// One terminal field: its object, the name it is addressed by, its kind and the widgets it draws.
 struct Field {
@@ -159,7 +159,7 @@ pub(super) fn run(request: &Request, produced: &mut Produced) -> Result<(), Fail
     let subset = face.subset(&characters);
     let font = draw::embed_font(&mut document, &subset, face);
     write_appearances(&mut document, &chains, &fields, font, &subset, &layouts)?;
-    if draw::truthy(request.values.get("flatten")) {
+    if request.values.get("flatten").is_some_and(js_truthy) {
         flatten(&mut document, &chains, &ids, &fields)?;
     }
     produced.push(&page::save(document, !ids.is_empty())?)?;

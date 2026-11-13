@@ -161,6 +161,9 @@ pub(super) fn frame_rect(frame: &Frame, x: f64, y: f64, width: f64, height: f64)
 /// The entries a page may inherit from the page tree.
 const INHERITABLE: [&[u8]; 4] = [b"Resources", b"MediaBox", b"CropBox", b"Rotate"];
 
+/// A4 in points: the size the reference's library gives a page it makes.
+pub(super) const A4: [f64; 2] = [595.28, 841.89];
+
 /// Where each node's `/Parent` path first states an inheritable entry, per entry: filled as pages
 /// ask, so a path named from many pages is walked once per document and inherited entry.
 ///
@@ -1418,10 +1421,18 @@ const PRODUCER: &str = "mahbot";
 
 /// A document built by this engine names itself as the producer and dates the file it just made; a
 /// caller's description then overrides or clears any of that.
+///
+/// A null description is the reference's own fault here, not an absent one: its applier reads a
+/// field of the value it is handed, and only the in-place actions normalise a null away before
+/// calling it. The three fresh-document paths share this function, so the guard is scoped to them
+/// by construction.
 pub(super) fn fresh_metadata(
     document: &mut Document,
     metadata: Option<&Value>,
 ) -> Result<(), Failure> {
+    if metadata == Some(&Value::Null) {
+        return Err(Failure::engine());
+    }
     let now = super::date::now();
     let fresh = Value::Object(Map::from_iter([
         ("producer".to_string(), Value::String(PRODUCER.to_string())),
@@ -1545,15 +1556,14 @@ pub(super) fn save(mut document: Document, has_pages: bool) -> Result<Vec<u8>, F
     Ok(bytes)
 }
 
-/// A blank A4 page: the size the reference's library gives a page it makes, with an empty resource
-/// dictionary and no content.
-fn blank_page(document: &mut Document) -> ObjectId {
+/// A blank A4 page, with an empty resource dictionary and no content.
+pub(super) fn blank_page(document: &mut Document) -> ObjectId {
     document.add_object(Dictionary::from_iter([
         ("Type".to_string(), Object::Name(b"Page".to_vec())),
         (
             "MediaBox".to_string(),
             Object::Array(
-                [0.0, 0.0, 595.28, 841.89]
+                [0.0, 0.0, A4[0], A4[1]]
                     .into_iter()
                     .map(object_number)
                     .collect(),

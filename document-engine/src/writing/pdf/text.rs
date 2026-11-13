@@ -11,6 +11,7 @@ use super::page;
 use super::{Produced, editable, page_indices};
 use crate::operation::{Failure, Request};
 use crate::vocabulary;
+use crate::writing::js_truthy;
 
 /// The leading a multi-line run states: pdf-lib's `PDFPage.lineHeight`, fixed whatever the size.
 const LINE_HEIGHT: f64 = 24.0;
@@ -56,7 +57,7 @@ pub(super) fn run(request: &Request, produced: &mut Produced) -> Result<(), Fail
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default()
         .to_string();
-    let stamp = draw::truthy(request.values.get("stamp"));
+    let stamp = request.values.get("stamp").is_some_and(js_truthy);
 
     let indices = page_indices(&ids, request.values.get("pages"))?;
     let any_page = !indices.is_empty();
