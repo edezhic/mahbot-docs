@@ -25,10 +25,10 @@ result names them through `Family::as_str`.
 One mark is interim: `reason_not_carried_out` is the engine's answer for a recognised
 (operation, family) pair it does not carry out. It is stated here rather than in code, and the pair's
 own reason replaces it once the dispatch carries the pair out. The writing half carries the three
-edits, the five PDF page actions, the three PDF drawing actions, `create`'s PDF and presentation
-families and the Word and presentation template fills out today, so that mark is the answer for the
-three pairs `create` and `fill_template` still accept without a handler: `create`'s Word and
-workbook families, and the workbook family of `fill_template`. The sentence names the operation and
+edits, the five PDF page actions, the three PDF drawing actions, `create`'s PDF, presentation and
+workbook families and the Word and presentation template fills out today, so that mark is the answer
+for the two pairs `create` and `fill_template` still accept without a handler: `create`'s Word
+family, and the workbook family of `fill_template`. The sentence names the operation and
 not the family because the engine is not wired into a product build while any family of an
 operation is unimplemented, so no user meets it for a sibling of a landed family; if that ever stops
 being true, it must name the family too.
@@ -40,8 +40,10 @@ surface prints before an operation runs is a `surface_*` mark, a PDF page action
 one note are `pdf_page_*` marks, the three drawing actions' own refusals are `pdf_text_*`,
 `pdf_image_*` and `pdf_form_*` marks (the image-size sentences are shared with the OOXML arms and
 live under `edit_*`), a created document's own sentences are `create_*` marks —
-`create_word_only`, `create_heading_level`, `create_row_length` and `create_unknown_size` (the rest
-of what a block refuses is the shared `edit_*` vocabulary, reused by key rather than copied:
+`create_word_only`, `create_heading_level`, `create_row_length`, `create_unknown_size`,
+`create_sheet_object`, `create_merges_list`, `create_sheet_name_unique` and
+`create_merge_overlap` (the rest of what a block or a sheet refuses is the shared `edit_*`
+vocabulary, reused by key rather than copied:
 `edit_text_not_text` for a block's text, `edit_value_kind` for a bullet, a table heading or a cell,
 `edit_image_extension`, `edit_image_not_whole` with the label it interpolates
 (`edit_image_label_png`, `edit_image_label_jpeg` or `edit_image_label_webp`) and

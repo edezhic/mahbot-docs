@@ -32,7 +32,7 @@ pdf-extract = { version = "=0.12.1", default-features = false }
 quick-xml = { version = "=0.39.4", default-features = false }
 regex = "1.13"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["preserve_order"] }
 sha2 = "0.10"
 strum = { version = "0.27", features = ["derive"] }
 tokio = { version = "1.50", default-features = false, features = ["fs", "macros", "process", "rt-multi-thread", "sync", "time"] }

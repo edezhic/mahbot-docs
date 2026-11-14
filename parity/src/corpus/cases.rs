@@ -4679,6 +4679,727 @@ fn create_cases() -> Vec<Case> {
     ]
 }
 
+// ── create: the workbook family ───────────────────────────────────────────────────────────────
+
+/// One `create` request for the workbook family, written to `$out/report.xlsx`.
+fn xlsx_request(values: Value) -> Value {
+    let Value::Object(values) = values else {
+        panic!("a workbook case's own values are an object");
+    };
+    let mut request = json!({ "op": "create", "format": "xlsx", "output": "$out/report.xlsx" });
+    request
+        .as_object_mut()
+        .expect("a request object")
+        .extend(values);
+    request
+}
+
+/// A workbook the request produces, with the effects its case declares.
+fn xlsx_created(id: &'static str, values: Value, effects: Vec<Effect>) -> Case {
+    produced(
+        Family::Xlsx,
+        "create",
+        None,
+        Vec::new(),
+        xlsx_request(values),
+        vec!["report.xlsx"],
+        effects,
+    )
+    .named(id)
+}
+
+/// A workbook request the engine refuses as the caller's, with the reason it must give.
+fn xlsx_refused(id: &'static str, values: Value, reason: &'static str) -> Case {
+    declined(
+        Family::Xlsx,
+        "create",
+        None,
+        Vec::new(),
+        xlsx_request(values),
+        vec!["report.xlsx"],
+        Expect::Refused(Reason::contains(reason)),
+    )
+    .named(id)
+}
+
+/// A workbook request the reference's own runtime faults over: the engine's own failure, never a
+/// usage refusal. A fault and a contained panic answer the same sentence, so the class is all a
+/// case can assert.
+fn xlsx_faulted(id: &'static str, values: Value) -> Case {
+    declined(
+        Family::Xlsx,
+        "create",
+        None,
+        Vec::new(),
+        xlsx_request(values),
+        vec!["report.xlsx"],
+        Expect::Failed(Reason::third_party()),
+    )
+    .named(id)
+}
+
+/// The sheets a workbook case names, as its request's `sheets` value.
+fn sheets(value: Value) -> Value {
+    json!({ "sheets": value })
+}
+
+/// `create`'s workbook family. The shapes here are the ones a port can get wrong while every other
+/// case still passes: the two prefixes a sheet is named by, the five orderings two faults can be
+/// paired in, the five number spellings, the empty-cell and empty-row omissions, and every malformed
+/// shape the reference faults on rather than refusing.
+///
+/// What the product above the engine does with these requests is stated here rather than left to
+/// the reader, because the corpus records behaviour and not reachability: a cell past the column
+/// bound, a merge past the product's cell bound and a large rounded number are all reachable through
+/// the tool layer, which caps neither a row's width nor a merge's area; the empty workbook and every
+/// malformed shape are shadowed by it; and the merge-overlap refusal is the one refusal of this
+/// family's workbook shape a product user can actually see — the content-side refusals are shadowed
+/// by the tool layer just as the malformed shapes are.
+fn xlsx_create_cases() -> Vec<Case> {
+    // A row padded out to the column bound the reference's own rules state, so the cell past it is
+    // the only one written: the padding is empty strings, which a created sheet leaves out of its
+    // row.
+    let columns = crate::docgen::rules()["sheet_column_max"]
+        .as_u64()
+        .and_then(|max| usize::try_from(max).ok())
+        .expect("the column bound the reference's rules state");
+    let mut padded = vec![json!(""); columns];
+    padded.push(json!("past"));
+    // The five number spellings, each built from a literal so both sides receive the same bits: a
+    // float shape parsed from a decimal tie would be one the harness's parser and the reference's
+    // runtime may read differently, which no case could then fix.
+    // Past 2^53, and printed as the shortest spelling of the double it rounds to — a 17-digit
+    // spelling, because the determinism check reads a sixteen-character run of hex digits as a
+    // possible nonce and a transcript must carry none.
+    let rounded_integer = 18_014_398_509_481_985_i64;
+    let past_range = 9_223_372_036_854_775_807_i64;
+    let rounded_float = 1_234_567_890_123_456_768.0_f64;
+    vec![
+        xlsx_created(
+            "one_sheet",
+            sheets(json!([{
+                "name": "Data",
+                "rows": [["Name", "Value"], ["Alpha", 1], ["Beta", true]],
+            }])),
+            vec![
+                Effect::SheetNames {
+                    output: None,
+                    names: &["Data"],
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "Data",
+                    cell: "B2",
+                    value: Scalar::Number(1.0),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "Data",
+                    cell: "B3",
+                    value: Scalar::Bool(true),
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "xl/worksheets/sheet1.xml",
+                    present: true,
+                },
+            ],
+        ),
+        xlsx_created(
+            "several_sheets",
+            sheets(json!([
+                { "name": "First", "rows": [["a"]] },
+                { "name": "Second", "rows": [["b"]] },
+                { "name": "Third", "rows": [["c"]] },
+            ])),
+            vec![
+                Effect::SheetNames {
+                    output: None,
+                    names: &["First", "Second", "Third"],
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "Third",
+                    cell: "A1",
+                    value: Scalar::Text("c"),
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "xl/worksheets/sheet3.xml",
+                    present: true,
+                },
+            ],
+        ),
+        // A sheet with no name takes the one its position derives, counting from one.
+        xlsx_created(
+            "default_name",
+            sheets(json!([{}, { "name": "Two" }])),
+            vec![
+                Effect::SheetNames {
+                    output: None,
+                    names: &["Sheet1", "Two"],
+                },
+                Effect::CellAbsent {
+                    output: None,
+                    sheet: "Sheet1",
+                    cell: "A1",
+                },
+            ],
+        ),
+        // The format's schema requires at least one sheet; the reference writes none.
+        xlsx_created(
+            "empty_sheets",
+            sheets(json!([])),
+            vec![
+                Effect::SheetNames {
+                    output: None,
+                    names: &[],
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "xl/worksheets/sheet1.xml",
+                    present: false,
+                },
+            ],
+        ),
+        xlsx_created(
+            "empty_row",
+            sheets(json!([{ "name": "E", "rows": [[], ["", ""], ["", "a", ""]] }])),
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "xl/worksheets/sheet1.xml",
+                    element: "row",
+                    count: 1,
+                },
+                Effect::CellAbsent {
+                    output: None,
+                    sheet: "E",
+                    cell: "A1",
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "E",
+                    cell: "B3",
+                    value: Scalar::Text("a"),
+                },
+            ],
+        ),
+        xlsx_created(
+            "empty_cell",
+            sheets(json!([{ "name": "E", "rows": [["", "a", ""]] }])),
+            vec![
+                Effect::CellAbsent {
+                    output: None,
+                    sheet: "E",
+                    cell: "A1",
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "E",
+                    cell: "B1",
+                    value: Scalar::Text("a"),
+                },
+            ],
+        ),
+        // The all-empty row is the create loop's own omission, not the cell serialiser's.
+        xlsx_created(
+            "all_empty_row",
+            sheets(json!([{ "name": "E", "rows": [["", ""]] }])),
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "xl/worksheets/sheet1.xml",
+                    element: "row",
+                    count: 0,
+                },
+                Effect::CellAbsent {
+                    output: None,
+                    sheet: "E",
+                    cell: "A1",
+                },
+            ],
+        ),
+        xlsx_created(
+            "two_merges",
+            sheets(json!([{ "name": "M", "merges": ["A1:B2", "C3:D4"] }])),
+            vec![
+                Effect::Merged {
+                    output: None,
+                    sheet: "M",
+                    range: "A1:B2",
+                    present: true,
+                },
+                Effect::Merged {
+                    output: None,
+                    sheet: "M",
+                    range: "C3:D4",
+                    present: true,
+                },
+            ],
+        ),
+        // The merge path applies no cell bound, and the tool layer above applies none either.
+        xlsx_created(
+            "merge_past_bound",
+            sheets(json!([{ "name": "M", "merges": ["A1:AAA1000"] }])),
+            vec![Effect::Merged {
+                output: None,
+                sheet: "M",
+                range: "A1:AAA1000",
+                present: true,
+            }],
+        ),
+        // A cell's column is named by its position, so one past the bound is written.
+        xlsx_created(
+            "cell_past_bound",
+            sheets(json!([{ "name": "P", "rows": [padded] }])),
+            vec![Effect::Cell {
+                output: None,
+                sheet: "P",
+                cell: "XFE1",
+                value: Scalar::Text("past"),
+            }],
+        ),
+        // A formula cell stores the formula, where a string that begins with `=` stores the text.
+        xlsx_created(
+            "formula",
+            sheets(json!([{ "name": "F", "rows": [[{ "formula": "=SUM(A1:A2)" }]] }])),
+            vec![Effect::Cell {
+                output: None,
+                sheet: "F",
+                cell: "A1",
+                value: Scalar::Formula("SUM(A1:A2)"),
+            }],
+        ),
+        xlsx_created(
+            "text_formula",
+            sheets(json!([{ "name": "F", "rows": [["=SUM(A1:A2)"]] }])),
+            vec![Effect::Cell {
+                output: None,
+                sheet: "F",
+                cell: "A1",
+                value: Scalar::Text("=SUM(A1:A2)"),
+            }],
+        ),
+        xlsx_created(
+            "number_rounded_integer",
+            sheets(json!([{ "name": "N", "rows": [[rounded_integer]] }])),
+            vec![Effect::Cell {
+                output: None,
+                sheet: "N",
+                cell: "A1",
+                value: Scalar::Number(18_014_398_509_481_984.0),
+            }],
+        ),
+        xlsx_created(
+            "number_rounded_float",
+            sheets(json!([{ "name": "N", "rows": [[rounded_float]] }])),
+            vec![Effect::Cell {
+                output: None,
+                sheet: "N",
+                cell: "A1",
+                value: Scalar::Number(1_234_567_890_123_456_800.0),
+            }],
+        ),
+        xlsx_created(
+            "number_past_range",
+            sheets(json!([{ "name": "N", "rows": [[past_range]] }])),
+            vec![Effect::Cell {
+                output: None,
+                sheet: "N",
+                cell: "A1",
+                value: Scalar::Number(9_223_372_036_854_776_000.0),
+            }],
+        ),
+        xlsx_created(
+            "number_exponent",
+            sheets(json!([{ "name": "N", "rows": [[1e21_f64]] }])),
+            vec![Effect::Cell {
+                output: None,
+                sheet: "N",
+                cell: "A1",
+                value: Scalar::Number(1e21),
+            }],
+        ),
+        // Between the fraction and exponent thresholds: the fraction branch, not the exponent one.
+        xlsx_created(
+            "number_fraction",
+            sheets(json!([{ "name": "N", "rows": [[1.5e-6_f64]] }])),
+            vec![Effect::Cell {
+                output: None,
+                sheet: "N",
+                cell: "A1",
+                value: Scalar::Number(1.5e-6),
+            }],
+        ),
+        // A block this family does not draw is ignored, never refused: the product's tool layer
+        // refuses every block beside the sheets, so only a case can pin the reference's behaviour.
+        xlsx_created(
+            "harmless_block",
+            json!({
+                "sheets": [{ "name": "H", "rows": [["x"]] }],
+                "content": [
+                    { "type": "paragraph", "text": "ignored" },
+                    { "type": "table", "headers": ["a"], "rows": [["b"]] },
+                ],
+            }),
+            vec![Effect::Cell {
+                output: None,
+                sheet: "H",
+                cell: "A1",
+                value: Scalar::Text("x"),
+            }],
+        ),
+        xlsx_created(
+            "null_header_footer",
+            json!({
+                "sheets": [{ "name": "H", "rows": [["x"]] }],
+                "header": null,
+                "footer": null,
+            }),
+            vec![Effect::SheetNames {
+                output: None,
+                names: &["H"],
+            }],
+        ),
+        // A sheet object's unknown keys are ignored, where the tool layer and parts of the edit
+        // path refuse one.
+        xlsx_created(
+            "unknown_key",
+            sheets(json!([{ "name": "H", "rows": [["x"]], "colour": "red" }])),
+            vec![Effect::Cell {
+                output: None,
+                sheet: "H",
+                cell: "A1",
+                value: Scalar::Text("x"),
+            }],
+        ),
+        // A sheet given as a list is an object to the reference and states none of its fields.
+        xlsx_created(
+            "array_sheet",
+            sheets(json!([[["a"]]])),
+            vec![
+                Effect::SheetNames {
+                    output: None,
+                    names: &["Sheet1"],
+                },
+                Effect::CellAbsent {
+                    output: None,
+                    sheet: "Sheet1",
+                    cell: "A1",
+                },
+            ],
+        ),
+        // A falsy `rows` value is no rows at all, whatever shape it has.
+        xlsx_created(
+            "falsy_rows",
+            sheets(json!([
+                { "name": "Zero", "rows": 0 },
+                { "name": "Empty", "rows": "" },
+                { "name": "False", "rows": false },
+                { "name": "Null", "rows": null },
+            ])),
+            vec![
+                Effect::SheetNames {
+                    output: None,
+                    names: &["Zero", "Empty", "False", "Null"],
+                },
+                Effect::CellAbsent {
+                    output: None,
+                    sheet: "Null",
+                    cell: "A1",
+                },
+            ],
+        ),
+        // A content entry that is neither null nor an object carries no type and no footnote, so it
+        // offends nothing — the opposite of a null one.
+        xlsx_created(
+            "non_object_block",
+            json!({
+                "sheets": [{ "name": "H" }],
+                "content": ["a paragraph that is not a block", 5],
+            }),
+            vec![Effect::SheetNames {
+                output: None,
+                names: &["H"],
+            }],
+        ),
+        // A null content list is no list at all, exactly as an absent one is.
+        xlsx_created(
+            "null_content",
+            json!({ "sheets": [{ "name": "H" }], "content": null }),
+            vec![Effect::SheetNames {
+                output: None,
+                names: &["H"],
+            }],
+        ),
+        // A null footnote is accepted: the reference tests for presence, not for null alone.
+        xlsx_created(
+            "null_footnote",
+            json!({
+                "sheets": [{ "name": "H" }],
+                "content": [{ "type": "paragraph", "text": "x", "footnote": null }],
+            }),
+            vec![Effect::SheetNames {
+                output: None,
+                names: &["H"],
+            }],
+        ),
+        // ── refusals ────────────────────────────────────────────────────────────────────────────
+        xlsx_refused(
+            "null_sheet",
+            sheets(json!([null])),
+            "sheet 1 must be an object, got: null",
+        ),
+        xlsx_refused(
+            "non_object_sheet",
+            sheets(json!(["Data"])),
+            "sheet 1 must be an object, got: \"Data\"",
+        ),
+        xlsx_refused(
+            "number_sheet",
+            sheets(json!([5])),
+            "sheet 1 must be an object, got: 5",
+        ),
+        // A name that is present and null is refused; only a missing one takes the default.
+        xlsx_refused(
+            "null_name",
+            sheets(json!([{ "name": null }])),
+            "sheet 1: a sheet name must be text, got: null",
+        ),
+        xlsx_refused(
+            "empty_name",
+            sheets(json!([{ "name": "" }])),
+            "sheet 1: a sheet name must be 1 to 31 characters, got:",
+        ),
+        xlsx_refused(
+            "name_case",
+            sheets(json!([{ "name": "Data" }, { "name": "data" }])),
+            "sheet 2: a sheet name must be unique, ignoring case, got: data",
+        ),
+        // A defaulted name goes through the same uniqueness check an explicit one does.
+        xlsx_refused(
+            "default_collision",
+            sheets(json!([{ "name": "Sheet2" }, {}])),
+            "sheet 2: a sheet name must be unique, ignoring case, got: Sheet2",
+        ),
+        // A null `merges` is a refusal, not an absent list — the opposite of `rows`.
+        xlsx_refused(
+            "null_merges",
+            sheets(json!([{ "merges": null }])),
+            "sheet 1: merges must be a list of A1:B2 ranges",
+        ),
+        xlsx_refused(
+            "merges_object",
+            sheets(json!([{ "merges": { "a": 1.0 } }])),
+            "sheet 1: merges must be a list of A1:B2 ranges",
+        ),
+        xlsx_refused(
+            "merges_string",
+            sheets(json!([{ "merges": "A1:B2" }])),
+            "sheet 1: merges must be a list of A1:B2 ranges",
+        ),
+        // A merge fault names its sheet in quotes; a name fault names it by position.
+        xlsx_refused(
+            "merge_one_cell",
+            sheets(json!([{ "name": "Data", "merges": ["A1"] }])),
+            "sheet \"Data\": the range A1 covers one cell, and a merge needs at least two — hint: name a range like A1:B2",
+        ),
+        // The two address marks need two malformed ranges: one row part, one column part.
+        xlsx_refused(
+            "merge_row_out_of_range",
+            sheets(json!([{ "name": "Data", "merges": ["A0:B2"] }])),
+            "sheet \"Data\": range A0: the row must be between 1 and 1048576",
+        ),
+        xlsx_refused(
+            "merge_column_out_of_range",
+            sheets(json!([{ "name": "Data", "merges": ["XFE1:XFF2"] }])),
+            "sheet \"Data\": range XFE1: the column must be between A and XFD",
+        ),
+        // The two routes a structure takes into a refusal: a merge entry that is an object and one
+        // that is an array. Both are stringified, so both pin the JS-faithful JSON writer: a
+        // whole-valued double keeps no fraction, and a magnitude the exponent form covers is
+        // written with a signed exponent.
+        xlsx_refused(
+            "merge_shape_object",
+            sheets(json!([{ "name": "Data", "merges": [{ "a": 1.0 }] }])),
+            "sheet \"Data\": range must be an A1 address or an A1:B2 range, got: {\"a\":1}",
+        ),
+        xlsx_refused(
+            "merge_shape_array",
+            sheets(json!([{ "name": "Data", "merges": [[1e21_f64]] }])),
+            "sheet \"Data\": range must be an A1 address or an A1:B2 range, got: [1e+21]",
+        ),
+        // A structure's key order is the request's own, not a sorted one: the request keeps the
+        // order it was written in, and so does the refusal.
+        xlsx_refused(
+            "merge_shape_key_order",
+            sheets(json!([{ "name": "Data", "merges": [{ "z": 1.0, "a": 2.0 }] }])),
+            "sheet \"Data\": range must be an A1 address or an A1:B2 range, got: {\"z\":1,\"a\":2}",
+        ),
+        // Every range is converted before an overlap is looked for, so a malformed later range wins
+        // over the overlap an earlier pair makes.
+        xlsx_refused(
+            "merge_shape_before_overlap",
+            sheets(json!([{ "name": "Data", "merges": ["A1:B2", "B2:C3", "nonsense"] }])),
+            "sheet \"Data\": range must be an A1 address like B7, got: \"nonsense\"",
+        ),
+        xlsx_refused(
+            "merge_overlap",
+            sheets(json!([{ "name": "Data", "merges": ["A1:B2", "B2:C3"] }])),
+            "sheet \"Data\": the merge A1:B2 overlaps B2:C3, and a workbook with two merges over one cell needs repairing",
+        ),
+        // A legal name carrying a quote or a newline, quoted by a merge refusal: a name fault would
+        // be refused at the name check and quote nothing.
+        xlsx_refused(
+            "merge_name_quoted",
+            sheets(json!([{ "name": "O'Brien", "merges": ["A1"] }])),
+            "sheet \"O'Brien\": the range A1 covers one cell",
+        ),
+        xlsx_refused(
+            "merge_name_newline",
+            sheets(json!([{ "name": "a\nb", "merges": ["A1"] }])),
+            "sheet \"a\\nb\": the range A1 covers one cell",
+        ),
+        xlsx_refused(
+            "header",
+            json!({ "sheets": [{ "name": "H" }], "header": "Run" }),
+            "a running header is a Word document's own, and xlsx holds none",
+        ),
+        xlsx_refused(
+            "footer",
+            json!({ "sheets": [{ "name": "H" }], "footer": "Page" }),
+            "a running footer is a Word document's own, and xlsx holds none",
+        ),
+        // An empty string is present: the reference tests for presence, not for null alone.
+        xlsx_refused(
+            "header_empty",
+            json!({ "sheets": [{ "name": "H" }], "header": "" }),
+            "a running header is a Word document's own, and xlsx holds none",
+        ),
+        xlsx_refused(
+            "footer_empty",
+            json!({ "sheets": [{ "name": "H" }], "footer": "" }),
+            "a running footer is a Word document's own, and xlsx holds none",
+        ),
+        // The header is refused before any block is named.
+        xlsx_refused(
+            "header_before_block",
+            json!({
+                "sheets": [{ "name": "H" }],
+                "content": [{ "type": "link", "text": "x", "url": "https://example.com" }],
+                "header": "h",
+            }),
+            "a running header is a Word document's own",
+        ),
+        // The header wins where both are present.
+        xlsx_refused(
+            "header_and_footer",
+            json!({ "sheets": [{ "name": "H" }], "header": "h", "footer": "f" }),
+            "a running header is a Word document's own",
+        ),
+        // A footnote is a property of a paragraph, and the refusal says so rather than naming a
+        // block kind.
+        xlsx_refused(
+            "footnote",
+            json!({
+                "sheets": [{ "name": "H" }],
+                "content": [{ "type": "paragraph", "text": "x", "footnote": "a note" }],
+            }),
+            "a paragraph's footnote is a Word document's own, and xlsx holds none",
+        ),
+        xlsx_refused(
+            "link_block",
+            json!({
+                "sheets": [{ "name": "H" }],
+                "content": [{ "type": "link", "text": "x", "url": "https://example.com" }],
+            }),
+            "a link block is a Word document's own, and xlsx holds none",
+        ),
+        // The fragment is transcribed from the reference, which spells the type `page_break`.
+        xlsx_refused(
+            "page_break_block",
+            json!({
+                "sheets": [{ "name": "H" }],
+                "content": [{ "type": "page_break" }],
+            }),
+            "a page_break block is a Word document's own, and xlsx holds none",
+        ),
+        xlsx_refused(
+            "contents_block",
+            json!({
+                "sheets": [{ "name": "H" }],
+                "content": [{ "type": "contents" }],
+            }),
+            "a contents block is a Word document's own, and xlsx holds none",
+        ),
+        xlsx_refused(
+            "cell_null",
+            sheets(json!([{ "name": "C", "rows": [[null]] }])),
+            "cell A1 must be text, a number or a boolean",
+        ),
+        xlsx_refused(
+            "formula_shape",
+            sheets(json!([{ "name": "F", "rows": [[{ "formula": "SUM(A1)", "extra": 1 }]] }])),
+            "cell A1: an object value must be {\"formula\": \"SUM(A1:A2)\"}",
+        ),
+        // ── the five orderings two faults can be paired in ──────────────────────────────────────
+        // The content side runs before any sheet is read.
+        xlsx_refused(
+            "order_content_before_name",
+            json!({ "sheets": [{ "name": null }], "header": "h" }),
+            "a running header is a Word document's own",
+        ),
+        // The `merges` container is refused before any sheet's name is checked.
+        xlsx_refused(
+            "order_merges_before_name",
+            sheets(json!([{ "name": null, "merges": "A1:B2" }])),
+            "sheet 1: merges must be a list of A1:B2 ranges",
+        ),
+        // A merge range loses to a name check.
+        xlsx_refused(
+            "order_name_before_range",
+            sheets(json!([{ "name": null, "merges": ["A0:B2"] }])),
+            "sheet 1: a sheet name must be text, got: null",
+        ),
+        // Every sheet's ranges are read before any cell is written, so a range fault wins.
+        xlsx_refused(
+            "order_range_before_cell",
+            sheets(json!([{ "name": "D", "merges": ["A0:B2"], "rows": [[null]] }])),
+            "sheet \"D\": range A0: the row must be between 1 and 1048576",
+        ),
+        // Both are read in one loop, sheet by sheet, so an earlier sheet's `merges` wins.
+        xlsx_refused(
+            "order_merges_before_sheet_object",
+            sheets(json!([{ "name": "A", "merges": "x" }, 5])),
+            "sheet 1: merges must be a list of A1:B2 ranges",
+        ),
+        // ── faults: the reference's own runtime, never a refusal ───────────────────────────────
+        xlsx_faulted("absent_sheets", json!({})),
+        xlsx_faulted("null_sheets", sheets(json!(null))),
+        xlsx_faulted("string_sheets", sheets(json!("Data"))),
+        xlsx_faulted(
+            "row_not_list",
+            sheets(json!([{ "name": "R", "rows": [["a"], "b"] }])),
+        ),
+        xlsx_faulted("truthy_rows", sheets(json!([{ "name": "R", "rows": 5 }]))),
+        xlsx_faulted(
+            "null_block",
+            json!({ "sheets": [{ "name": "H" }], "content": [null] }),
+        ),
+        // The content scan reads every block before the header is looked at, so a null block faults
+        // even when a header is present.
+        xlsx_faulted(
+            "null_block_before_header",
+            json!({ "sheets": [{ "name": "H" }], "content": [null], "header": "h" }),
+        ),
+        xlsx_faulted(
+            "non_array_content",
+            json!({ "sheets": [{ "name": "H" }], "content": "a paragraph" }),
+        ),
+    ]
+}
+
 // ── fill_template ─────────────────────────────────────────────────────────────────────────────
 
 fn fill_template_cases() -> Vec<Case> {
@@ -13643,6 +14364,7 @@ fn failure_cases() -> Vec<Case> {
 pub fn all() -> Vec<Case> {
     let mut cases = Vec::new();
     cases.extend(create_cases());
+    cases.extend(xlsx_create_cases());
     cases.extend(fill_template_cases());
     cases.extend(docx_edit_cases());
     cases.extend(xlsx_edit_cases());

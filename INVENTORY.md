@@ -131,10 +131,12 @@ filled form into the pages they name, with one embedded general-text font subset
 call draws, and `create` makes a new PDF from one ordered content list — one page per picture when
 the list is pictures alone, a text column otherwise — or a PowerPoint deck from the same kind of
 list, laid out down a slide's flow and written through the pinned presentation library's own
-serialiser. `create` answers the vocabulary's `reason_not_carried_out` for its Word and workbook
-families, and `fill_template` for the workbook family, until their ports land; the Word and
-presentation fills are carried out. The engine states which (operation, family) pairs it carries out
-as data, and the dispatch reads that statement and nothing else.
+serialiser, or a workbook made from one list of sheets, each with its name, rows and merge ranges,
+written part by part and sharing the edit path's styles part and merge reading. `create` answers the
+vocabulary's `reason_not_carried_out` for its Word family, and `fill_template` for the workbook
+family, until their ports land; the Word and presentation fills are carried out. The engine states
+which (operation, family) pairs it carries out as data, and the dispatch reads that statement and
+nothing else.
 
 Every sentence the engine prints — an edit's refusals, notes and losses, a template fill's own
 refusals and the sentences of the library it ports, the request surface's own shape refusals, a PDF

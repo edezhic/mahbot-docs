@@ -27,7 +27,7 @@ crate the harness depends on. `cargo test -p document-engine` runs the crate's o
 its vocabulary restatement scan) without the harness.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 653 cases and 91 readings — takes a minute or two; the whole
+managed runtime. A full pass — 723 cases and 91 readings — takes a minute or two; the whole
 test suite, which runs the corpus twice for its determinism check, takes a couple of minutes.
 
 `parity --engine noop` runs the same corpus against the do-nothing engine. That engine exists only
@@ -218,21 +218,33 @@ builders have one home in `document_engine::test_support`, which the crate's own
   value, a cleared entry, and a null object on each of the three fresh-document paths); and the
   shapes the reference faults on, each with the class it answers, beside the two pairs of adjacent
   checks a case can straddle;
-- `create`'s presentation family in depth, since it is the other one the crate's writer carries
-  out: every block the family accepts at every heading level, the blocks it silently ignores and
-  the ones it refuses, each naming the block it was on; the internal faults a wrong-shaped value
-  answers, beside every adjacent pair of checks a caller can violate at once; the four size
-  spellings (the default reached by omitting the value and by passing null, the three the rules
-  name, a non-string and an unknown name refused); a table with headers, one left empty, one
-  carrying only headers, a ragged one, one whose grid width rounds, and each wrong-shaped table
-  value; a numbered list beside a bulleted one and one longer than the product's bullet bound;
-  pictures at their natural size and fitted, given one side, broken, of a refused extension, WebP
-  and JPEG, beside the extension-to-content-type-to-media-name chain, and a picture the flow takes
-  before the wrap beside the one it takes after it; speaker notes, a slide carrying two notes
-  blocks, a notes-only slide, a blank notes block that produces no page, and a deck whose first
-  slide carries none; a character outside the basic multilingual plane; a paragraph past the edit
-  path's text bound; the blocks that push a deck past a slide edge; and the sheets and metadata
-  values the family never reads;
+- `create`'s presentation family in depth, since it is another of the families of that operation
+  the crate's writer carries out: every block the family accepts at every heading level, the
+  blocks it silently ignores and the ones it refuses, each naming the block it was on; the
+  internal faults a wrong-shaped value answers, beside every adjacent pair of checks a caller can
+  violate at once; the four size spellings (the default reached by omitting the value and by
+  passing null, the three the rules name, a non-string and an unknown name refused); a table with
+  headers, one left empty, one carrying only headers, a ragged one, one whose grid width rounds,
+  and each wrong-shaped table value; a numbered list beside a bulleted one and one longer than the
+  product's bullet bound; pictures at their natural size and fitted, given one side, broken, of a
+  refused extension, WebP and JPEG, beside the extension-to-content-type-to-media-name chain, and
+  a picture the flow takes before the wrap beside the one it takes after it; speaker notes, a
+  slide carrying two notes blocks, a notes-only slide, a blank notes block that produces no page,
+  and a deck whose first slide carries none; a character outside the basic multilingual plane; a
+  paragraph past the edit path's text bound; the blocks that push a deck past a slide edge; and
+  the sheets and metadata values the family never reads;
+- `create`'s workbook family in depth, since it is one of the families of that operation the
+  crate's writer carries out: one sheet and several, a sheet that takes the name its position
+  derives, rows of text, numbers and booleans, an empty row beside an all-empty one and the empty
+  cell both serialisers treat differently, two non-overlapping merges and a merge past the cell
+  bound, a cell past the column bound, a formula cell beside a string that begins with `=`, the
+  five number spellings (an integer and a float rounded past 2^53, one past the 64-bit range, one
+  in the exponent branch and one between the fraction and exponent thresholds), the two prefixes a
+  sheet is named by, the five orderings two faults can be paired in, a content list carrying a
+  harmless block, a null header and footer, a null footnote and a block that is neither null nor
+  an object, and every refusal and fault the family prints — a null name, a null `merges`, a name
+  used twice ignoring case, a malformed range with its row and its column out of range, an
+  overlap, a header and a footer (empty strings included), and a block only a Word document holds;
 - `fill_template` for all three template families;
 - every `docx_edit` sub-operation (9), every `xlsx_edit` sub-operation (14) and every `pptx_edit`
   sub-operation (14), each with the precondition it needs — a second sheet to move, a merged range

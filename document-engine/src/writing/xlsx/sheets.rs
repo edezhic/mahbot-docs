@@ -66,7 +66,7 @@ const NEW_WORKSHEET: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone
 /// has.
 pub(super) fn merge_cells(editor: &mut Editor, edit: &Value) -> Result<(), Failure> {
     let sheet = sheet_part(editor, edit.get("sheet").and_then(Value::as_str))?;
-    let rect = merge_rect(edit.get(RANGE))?;
+    let rect = merge_rect(edit.get(RANGE), "")?;
     let label = rect_label(&rect);
     let name = sheet.name;
     sheet_edit(editor, &sheet.part, |sheet_text, _| {

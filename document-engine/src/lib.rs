@@ -16,11 +16,12 @@
 //!   the box or the turn of the pages it names, or draws text, a picture or a filled form into them,
 //!   and keeps everything else the file holds; `create` makes a new document or deck from one
 //!   ordered content list — a PDF, as one page per picture or as a text column, or a deck at one of
-//!   the sizes the presentation family offers. A template fill renders a Word or presentation sample
-//!   part by part from a value map. What the writing half carries out is a statement of (operation,
-//!   family) pairs — the Word, workbook and presentation edits, the five PDF page actions, the three
-//!   PDF drawing actions, `create`'s PDF and presentation families and the Word and presentation
-//!   fills today, with `create`'s Word and workbook families and the workbook family of
+//!   the sizes the presentation family offers — or a workbook from one list of sheets, each with its
+//!   name, rows and merge ranges. A template fill renders a Word or presentation sample part by part
+//!   from a value map. What the writing half carries out is a statement of (operation, family)
+//!   pairs — the Word, workbook and presentation edits, the five PDF page actions, the three PDF
+//!   drawing actions, `create`'s PDF, workbook and presentation families and the Word and
+//!   presentation fills today, with `create`'s Word family and the workbook family of
 //!   `fill_template` answering the vocabulary's `reason_not_carried_out` until their ports land —
 //!   and the dispatch reads that statement and nothing else.
 //! - [`vocabulary`]: every reading bound the engine enforces, every mark it prints, who enforces

@@ -87,10 +87,16 @@ impl CaseTranscript {
                 .failure
                 .as_ref()
                 .map(|failure| failure.class.clone()),
+            // A reason's surrounding whitespace is not part of what is compared, and trimming it here
+            // is symmetry rather than a rule of its own: the reference adapter strips the kit's
+            // reported text before the transcript sees it, so this — the one place both engines pass
+            // through — reads the two sides the same way. The crate's own sentences are the
+            // reference's character for character (an empty sheet name's ends with the space its
+            // `got:` leaves), so no wording difference is hidden; no other compared field is trimmed.
             reason: outcome
                 .failure
                 .as_ref()
-                .map(|failure| failure.reason.clone()),
+                .map(|failure| failure.reason.trim().to_string()),
             notes: outcome.notes.clone(),
             missing: outcome.missing.clone(),
             placeholders: outcome.placeholders,

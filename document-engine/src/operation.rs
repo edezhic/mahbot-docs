@@ -56,7 +56,7 @@ use crate::vocabulary::Family;
 const USAGE: &str = "usage";
 
 /// The class of a failure the engine could not complete.
-const INTERNAL: &str = "internal";
+pub(crate) const INTERNAL: &str = "internal";
 
 /// One call's request.
 #[derive(Clone, Debug, PartialEq)]
@@ -404,11 +404,11 @@ const fn pair(family: Family, handler: Option<Handler>) -> Pair {
     Pair { family, handler }
 }
 
-/// `create` accepts every family: a document can be made of any of the four. The PDF and
-/// presentation families are carried out; the Word and workbook families are later ports.
+/// `create` accepts every family: a document can be made of any of the four. The PDF, presentation
+/// and workbook families are carried out; the Word family is a later port.
 const CREATE: &[Pair] = &[
     pair(Family::Docx, None),
-    pair(Family::Xlsx, None),
+    pair(Family::Xlsx, Some(Handler::Action(xlsx_create))),
     pair(Family::Pptx, Some(Handler::Action(pptx_create))),
     pair(Family::Pdf, Some(Handler::Action(pdf_create))),
 ];
@@ -473,6 +473,9 @@ fn pdf_create(request: &Request, outputs: &[PathBuf]) -> Outcome {
 }
 fn pptx_create(request: &Request, outputs: &[PathBuf]) -> Outcome {
     crate::writing::pptx::create(request, &outputs[0])
+}
+fn xlsx_create(request: &Request, outputs: &[PathBuf]) -> Outcome {
+    crate::writing::xlsx::create(request, &outputs[0])
 }
 
 /// What the engine's statement says about one (operation, family) pair.

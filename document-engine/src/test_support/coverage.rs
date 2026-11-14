@@ -1217,7 +1217,7 @@ pub const UNPRODUCIBLE: &[Unproducible] = &[
         marks: &["reason_old_office_version"],
     },
     Unproducible {
-        reason: "the engine prints it when its own code panics inside a contained region, and the writing half also prints it where the reference faults on a request's malformed shape — a content list that is absent, null or not a list, a null block, an image that is not a path, a null description on a fresh-document path. No recorded transcript prints it: a synthesized document cannot make a reader do any of that, and a writing case that expects a fault records the whole reason as the recorder's placeholder rather than the sentence. Only a defect raises it.",
+        reason: "the engine prints it when its own code panics inside a contained region, and the writing half also prints it where the reference faults on a request's malformed shape — a content list that is absent, null or not a list, a null block, an image that is not a path, a null description on a fresh-document path, a sheet list that is absent, null or not a list, a row that is not a list, and a truthy `rows` value that is not one. No recorded transcript prints it: a synthesized document cannot make a reader do any of that, and a writing case that expects a fault records the whole reason as the recorder's placeholder rather than the sentence.",
         marks: &["engine_failed"],
     },
     Unproducible {
@@ -1632,6 +1632,56 @@ pub const WRITING_WITNESSES: &[WritingWitness] = &[
         mark: "edit_no_content_types",
         case: "xlsx/xlsx_edit/add_sheet@no_content_types",
         witness: "cannot edit no-types.xlsx: it has no [Content_Types].xml part",
+    },
+    WritingWitness {
+        mark: "edit_address_column",
+        case: "xlsx/create@merge_column_out_of_range",
+        witness: "sheet \"Data\": range XFE1: the column must be between A and XFD",
+    },
+    WritingWitness {
+        mark: "edit_address_row",
+        case: "xlsx/create@merge_row_out_of_range",
+        witness: "sheet \"Data\": range A0: the row must be between 1 and 1048576",
+    },
+    WritingWitness {
+        mark: "edit_range_shape",
+        case: "xlsx/create@merge_shape_object",
+        witness: "sheet \"Data\": range must be an A1 address or an A1:B2 range, got: {\"a\":1}",
+    },
+    WritingWitness {
+        mark: "edit_sheet_name_length",
+        case: "xlsx/create@empty_name",
+        witness: "sheet 1: a sheet name must be 1 to 31 characters, got:",
+    },
+    WritingWitness {
+        mark: "edit_sheet_name_text",
+        case: "xlsx/create@null_name",
+        witness: "sheet 1: a sheet name must be text, got: null",
+    },
+    WritingWitness {
+        mark: "edit_null_value",
+        case: "xlsx/create@null_name",
+        witness: "a sheet name must be text, got: null",
+    },
+    WritingWitness {
+        mark: "create_merge_overlap",
+        case: "xlsx/create@merge_overlap",
+        witness: "sheet \"Data\": the merge A1:B2 overlaps B2:C3, and a workbook with two merges over one cell needs repairing",
+    },
+    WritingWitness {
+        mark: "create_merges_list",
+        case: "xlsx/create@merges_string",
+        witness: "sheet 1: merges must be a list of A1:B2 ranges",
+    },
+    WritingWitness {
+        mark: "create_sheet_name_unique",
+        case: "xlsx/create@name_case",
+        witness: "sheet 2: a sheet name must be unique, ignoring case, got: data",
+    },
+    WritingWitness {
+        mark: "create_sheet_object",
+        case: "xlsx/create@non_object_sheet",
+        witness: "sheet 1 must be an object, got: \"Data\"",
     },
     WritingWitness {
         mark: "edit_formula_shape",
@@ -2395,7 +2445,6 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
             "edit_border_side",
             "edit_font_empty",
             "edit_height_span",
-            "edit_null_value",
             "edit_number_format_empty",
             "edit_toggle_boolean",
             "edit_vertical_value",
@@ -2403,17 +2452,14 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         ],
     },
     Unreached {
-        reason: "the word JavaScript prints for a value that is not one: a `{.}` tag renders it into the produced body, and this ledger reads only the answers a case records; a structure a fill or a PDF form receives is refused before it renders",
+        reason: "the word JavaScript prints for a value that is not one; it is fifteen characters, below the sixteen the ledger's reverse check needs to recognise a mark, so no recorded answer can witness it even where a refusal renders a value — and no case sends a structure where one does",
         marks: &["surface_object_value"],
     },
     Unreached {
-        reason: "an address, range or format target the corpus never spells wrongly: every generated edit names a cell, range or target the workbook holds, and the port's own tests raise each shape refusal from a literal",
+        reason: "no case sends a column letter or a row number outside the grid, or a format_cells edit naming no target at all: every generated edit names a cell or target the workbook holds, and a created workbook names its own columns by position; the merge ranges a create case does spell wrongly reach the address refusals (`A0:B2`, `XFE1`) rather than these three; the port's own tests raise each of them from a literal",
         marks: &[
-            "edit_address_column",
-            "edit_address_row",
             "edit_column_letters",
             "edit_format_target_missing",
-            "edit_range_shape",
             "edit_row_number",
         ],
     },
@@ -2429,12 +2475,8 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         ],
     },
     Unreached {
-        reason: "a sheet name the corpus never spells badly: every generated name is text of the allowed length with none of the forbidden characters",
-        marks: &[
-            "edit_sheet_name_forbidden",
-            "edit_sheet_name_length",
-            "edit_sheet_name_text",
-        ],
+        reason: "a sheet name holding a forbidden character: the corpus names none — a short name such as `a/b` would reach this refusal, so no length check shields it — and the port's own test raises it from a literal",
+        marks: &["edit_sheet_name_forbidden"],
     },
     Unreached {
         reason: "the refusal a written sheet part earns when it states one address twice, and the labels it names that address by; no recorded edit leaves a duplicate — the mis-ported element pattern that did is fixed and covered by the port's own tests",
@@ -2641,7 +2683,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         marks: &["surface_merge_bytes_too_many"],
     },
     Unreached {
-        reason: "printed only for an accepted (operation, family) pair the writing half does not carry out — today create's Word and workbook families and fill_template's workbook family; the recorded reference carries every one of them out, so no recorded answer prints it",
+        reason: "printed only for an accepted (operation, family) pair the writing half does not carry out — today create's Word family and fill_template's workbook family; the recorded reference carries every one of them out, so no recorded answer prints it",
         marks: &["reason_not_carried_out"],
     },
     Unreached {
@@ -2657,7 +2699,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         marks: &["fill_delimiters_repeat"],
     },
     Unreached {
-        reason: "a package that declares a workbook content type but holds no workbook part; the workbook family has not landed and no generated sample declares one",
+        reason: "a package that declares a workbook content type but holds no workbook part; `fill_template`'s workbook family has not landed and no generated sample declares one",
         marks: &["fill_xlsx_needs_module"],
     },
 ];

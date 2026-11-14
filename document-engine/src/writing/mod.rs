@@ -42,7 +42,7 @@ mod package;
 pub(crate) mod pdf;
 pub(crate) mod pptx;
 mod text;
-mod xlsx;
+pub(crate) mod xlsx;
 mod xml;
 
 /// The package reader, for the test scaffolding that reads a produced part the way the engine does.
@@ -127,22 +127,55 @@ pub(super) fn stringified(value: Option<&Value>) -> String {
 
 /// A value as the kit's `JSON.stringify` renders it — the spelling a refusal quotes a value by when
 /// the reference stringifies rather than coerces it: a string keeps its quotes, a number prints the
-/// way `String()` prints it, and a structure is its JSON.
+/// way `String()` prints it, and a structure is its JSON with every number inside printed that same
+/// way.
 pub(super) fn json_literal(value: &Value) -> String {
+    let mut out = String::new();
+    write_json(value, &mut out);
+    out
+}
+
+/// [`json_literal`]'s body. `serde_json`'s own serialiser is not used for a structure because it
+/// prints a number the way it was written rather than the way the reference's runtime prints one:
+/// a whole-valued double keeps its `.0`, and a magnitude the exponent form covers is written with
+/// a bare `e`. A structure's key order is the request's own — `serde_json` is built with
+/// `preserve_order`, so the map walks the order the caller wrote, which is the order the reference's
+/// runtime keeps.
+fn write_json(value: &Value, out: &mut String) {
     match value {
-        Value::Number(number) => number_text(number),
-        other => serde_json::to_string(other).unwrap_or_default(),
+        Value::Null => out.push_str(vocabulary().marks.get("edit_null_value")),
+        Value::Bool(flag) => out.push_str(if *flag { "true" } else { "false" }),
+        Value::Number(number) => out.push_str(&number_text(number)),
+        Value::String(text) => out.push_str(&quoted(text)),
+        Value::Array(items) => {
+            out.push('[');
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                write_json(item, out);
+            }
+            out.push(']');
+        }
+        Value::Object(map) => {
+            out.push('{');
+            for (index, (key, item)) in map.iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                out.push_str(&quoted(key));
+                out.push(':');
+                write_json(item, out);
+            }
+            out.push('}');
+        }
     }
 }
 
-/// A number as JavaScript prints it: a whole-valued double carries no fraction.
+/// A number as JavaScript prints it. A request is JSON, so the reference's runtime parses every
+/// number into a double before the writer sees it: an integer beyond the range a double holds
+/// exactly is rounded on the way in, which is why the exact 64-bit accessors are not used here.
 pub(super) fn number_text(value: &serde_json::Number) -> String {
-    if let Some(whole) = value.as_i64() {
-        return whole.to_string();
-    }
-    if let Some(whole) = value.as_u64() {
-        return whole.to_string();
-    }
     js_number(value.as_f64().unwrap_or_default())
 }
 
@@ -155,11 +188,10 @@ pub(super) fn js_number(value: f64) -> String {
     }
     let magnitude = value.abs();
     if (1e-6..1e21).contains(&magnitude) {
-        return if value.fract() == 0.0 {
-            format!("{value:.0}")
-        } else {
-            format!("{value}")
-        };
+        // Rust's own `Display` is the shortest spelling that round-trips, written without an
+        // exponent: the same fixed form JavaScript uses over this range, whose digits pad a whole
+        // value out with zeros rather than expanding the double's exact binary value.
+        return format!("{value}");
     }
     let text = format!("{value:e}");
     match text.split_once('e') {
@@ -968,6 +1000,51 @@ mod tests {
         );
         assert_eq!(js_number(1e-7), "1e-7");
         assert_eq!(js_number(1e21), "1e+21");
+        // A whole value is printed from the digits its shortest spelling needs, padded with zeros,
+        // not from the double's exact binary value: the two differ past 2^53.
+        assert_eq!(js_number(1.234_567_890_123_456_8e18), "1234567890123456800");
+        assert_eq!(js_number(1e20), "100000000000000000000");
+        // Between the fraction and exponent thresholds the fixed form is used, however small.
+        assert_eq!(js_number(1.5e-6), "0.0000015");
+    }
+
+    #[test]
+    fn an_integer_beyond_the_double_range_is_rounded_before_it_is_printed() {
+        // The reference's runtime parses a request's number into a double, so a 64-bit integer
+        // reaches its writer already rounded; the crate holds it exactly and must round it itself.
+        for (value, printed) in [
+            (9_007_199_254_740_993_i64, "9007199254740992"),
+            (9_223_372_036_854_775_807, "9223372036854776000"),
+        ] {
+            assert_eq!(
+                number_text(&json!(value).as_number().expect("a number").clone()),
+                printed
+            );
+        }
+        assert_eq!(
+            number_text(
+                &json!(18_446_744_073_709_551_615_u64)
+                    .as_number()
+                    .expect("a number")
+                    .clone()
+            ),
+            "18446744073709552000"
+        );
+    }
+
+    #[test]
+    fn a_structure_is_its_json_with_every_number_printed_as_javascript_prints_it() {
+        // `serde_json` would print `1.0` and `1e21`; the reference's runtime prints `1` and `1e+21`.
+        assert_eq!(json_literal(&json!({ "a": 1.0 })), r#"{"a":1}"#);
+        assert_eq!(json_literal(&json!([1e21_f64])), "[1e+21]");
+        assert_eq!(
+            json_literal(&json!([2.5, "x", true, null])),
+            r#"[2.5,"x",true,null]"#
+        );
+        assert_eq!(
+            json_literal(&json!({ "a": 9_007_199_254_740_993_i64 })),
+            r#"{"a":9007199254740992}"#
+        );
     }
 
     #[test]

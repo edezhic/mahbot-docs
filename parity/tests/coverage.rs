@@ -174,7 +174,6 @@ const UNRECOGNISABLE: &[&str] = &[
     "edit_cell_address",
     "edit_image_label_jpeg",
     "edit_image_label_webp",
-    "edit_null_value",
     "edit_range_ignored_error",
     "edit_range_protected",
     "edit_range_selection",

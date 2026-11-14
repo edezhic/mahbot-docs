@@ -1,4 +1,5 @@
-//! The SpreadsheetML edit port: `xlsx_edit`, one sub-operation at a time.
+//! The SpreadsheetML half of the writer: the edit port `xlsx_edit`, one sub-operation at a time,
+//! and `create`'s workbook family in [`create()`].
 //!
 //! This is the kit's `xlsx_edit` arm, carried across function for function so the two can be
 //! read side by side: [`edit`] is `xlsxEdit`, this module holds the sheet/address/value reading
@@ -27,9 +28,12 @@
 //! - No part of a malformed package makes this module panic: a part whose rows, cells or root
 //!   cannot be read is refused in the kit's own words.
 //!
+mod create;
 mod sheets;
 mod shift;
 mod styles;
+
+pub(crate) use create::create;
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -766,7 +770,7 @@ fn column_number(value: Option<&Value>) -> Result<u64, Failure> {
 /// # Errors
 ///
 /// The name is not text, is outside the length the rule states, or holds a forbidden character.
-fn check_sheet_name(value: Option<&Value>, where_: &str) -> Result<String, Failure> {
+pub(super) fn check_sheet_name(value: Option<&Value>, where_: &str) -> Result<String, Failure> {
     let marks = &vocabulary().marks;
     let Some(name) = value.and_then(Value::as_str) else {
         return Err(Failure::usage(marks.format(
@@ -826,11 +830,20 @@ fn formula_of(reference: &str, value: &Value) -> Result<String, Failure> {
 /// own. Every attribute but the style is dropped: a `cm`/`vm` metadata reference names a value the
 /// cell no longer holds.
 ///
+/// `omit_empty` is the only difference between the two writers that share this routine: a created
+/// sheet leaves an empty text cell out of its row, while an edit writes one — that is how
+/// `set_cell` empties a cell — so the two serialisers cannot drift apart.
+///
 /// # Errors
 ///
 /// The value is a structure that is not a formula cell, or a `null`, which is neither a scalar nor
 /// a formula.
-fn value_cell(reference: &str, value: &Value, style: Option<&str>) -> Result<String, Failure> {
+pub(super) fn value_cell(
+    reference: &str,
+    value: &Value,
+    style: Option<&str>,
+    omit_empty: bool,
+) -> Result<String, Failure> {
     let attribute = style.map_or_else(String::new, |style| format!(" s=\"{style}\""));
     if matches!(value, Value::Object(_) | Value::Array(_)) {
         let formula = formula_of(reference, value)?;
@@ -848,6 +861,7 @@ fn value_cell(reference: &str, value: &Value, style: Option<&str>) -> Result<Str
             "<c r=\"{reference}\"{attribute} t=\"b\"><v>{}</v></c>",
             u8::from(*flag)
         )),
+        Value::String(text) if omit_empty && text.is_empty() => Ok(String::new()),
         Value::String(text) => Ok(format!(
             "<c r=\"{reference}\"{attribute} t=\"inlineStr\"><is><t xml:space=\"preserve\">{}</t></is></c>",
             xml::xml_escape(text)
@@ -953,7 +967,7 @@ fn write_cell(
         let element = format!(
             "<row r=\"{}\">{}</row>",
             address.row,
-            value_cell(reference, value, style)?
+            value_cell(reference, value, style, false)?
         );
         let written = insert_sheet_row(sheet, &rows, address.row, &element)?;
         return widen_dimension(&written, address.row, address.column);
@@ -965,7 +979,7 @@ fn write_cell(
     let cell_style = style
         .map(str::to_string)
         .or_else(|| existing.and_then(|cell| style_of(&cell.xml)));
-    let element = value_cell(reference, value, cell_style.as_deref())?;
+    let element = value_cell(reference, value, cell_style.as_deref(), false)?;
     let cell_xml = match existing {
         Some(cell) => format!(
             "{}{element}{}",
@@ -1645,19 +1659,19 @@ pub(super) fn same_rect(a: &Rect, b: &Rect) -> bool {
 }
 
 /// The rectangle a merge's range names, refused when it covers a single cell: a merge joins at
-/// least two.
+/// least two. `where_` names the place the range was written in, which the reference prefixes both
+/// refusals with; an edit passes `""`, because its refusal names no place.
 ///
 /// # Errors
 ///
 /// The range cannot be read, or it covers one cell.
-pub(super) fn merge_rect(range: Option<&Value>) -> Result<Rect, Failure> {
-    let rect = grid_rect(range).map_err(Failure::usage)?;
+pub(super) fn merge_rect(range: Option<&Value>, where_: &str) -> Result<Rect, Failure> {
+    let rect = grid_rect(range).map_err(|reason| Failure::usage(format!("{where_}{reason}")))?;
     if rect.first_row == rect.last_row && rect.first_column == rect.last_column {
-        return Err(Failure::usage(
-            vocabulary()
-                .marks
-                .format("edit_merge_one_cell", &[("label", &rect_label(&rect))]),
-        ));
+        let message = vocabulary()
+            .marks
+            .format("edit_merge_one_cell", &[("label", &rect_label(&rect))]);
+        return Err(Failure::usage(format!("{where_}{message}")));
     }
     Ok(rect)
 }
@@ -1937,19 +1951,19 @@ mod tests {
     #[test]
     fn a_written_cell_carries_its_value_and_a_refused_one_is_not_written() {
         assert_eq!(
-            value_cell("A1", &json!(3), None).expect("a number"),
+            value_cell("A1", &json!(3), None, false).expect("a number"),
             "<c r=\"A1\"><v>3</v></c>"
         );
         assert_eq!(
-            value_cell("A1", &json!(true), Some("2")).expect("a boolean"),
+            value_cell("A1", &json!(true), Some("2"), false).expect("a boolean"),
             "<c r=\"A1\" s=\"2\" t=\"b\"><v>1</v></c>"
         );
         assert_eq!(
-            value_cell("A1", &value("a & b"), None).expect("a text"),
+            value_cell("A1", &value("a & b"), None, false).expect("a text"),
             "<c r=\"A1\" t=\"inlineStr\"><is><t xml:space=\"preserve\">a &amp; b</t></is></c>"
         );
-        assert!(value_cell("A1", &Value::Null, None).is_err());
-        assert!(value_cell("A1", &json!({ "x": 1 }), None).is_err());
+        assert!(value_cell("A1", &Value::Null, None, false).is_err());
+        assert!(value_cell("A1", &json!({ "x": 1 }), None, false).is_err());
     }
 
     #[test]

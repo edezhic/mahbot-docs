@@ -1,5 +1,5 @@
 //! The PresentationML half of the writer: the edit port `pptx_edit`, one sub-operation at a time,
-//! and `create`'s presentation family in [`create`].
+//! and `create`'s presentation family in [`create()`].
 //!
 //! The edit is the kit's `pptx_edit` arm, carried across function for function so the two can be
 //! read side by side: [`edit`] is `pptxEdit`, and this module holds the deck's own machinery — the

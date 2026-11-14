@@ -123,7 +123,7 @@ fn style_block(block: &str) -> String {
 /// order: one font, the "none" fill, no border and the `<cellStyleXfs>`/`<cellXfs>` pair every
 /// `<styleSheet>` states. The default style `<cellStyles>` holds is not among them: an edit writes
 /// the blocks an entry's ids resolve into, `<cellStyles>` included, when it grows a part.
-static MINIMAL_STYLES: LazyLock<String> = LazyLock::new(|| {
+pub(super) static MINIMAL_STYLES: LazyLock<String> = LazyLock::new(|| {
     let mut blocks = STYLE_PART_BLOCKS.to_vec();
     blocks.sort_by_key(|block| stylesheet_rank(block));
     let body: String = blocks

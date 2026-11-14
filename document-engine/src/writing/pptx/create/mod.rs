@@ -93,7 +93,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use super::super::image::{Picture as PictureFile, Pixels, image_size, read_create_image};
-use super::super::{create, js_round, js_trim, js_truthy, package, scalar_text, write_new};
+use super::super::{create, js_round, js_trim, js_truthy, package, scalar_text};
 use super::draw::{BODY_WIDTH_INCHES, TITLE_INCHES, TITLE_POINTS, TITLE_SHAPE};
 use super::{EMU_PER_INCH, FIRST_SLIDE_ID, PRESENTATION, PRESENTATION_RELS};
 
@@ -298,17 +298,6 @@ fn listed(value: Option<&Value>) -> Result<Option<&[Value]>, Failure> {
             _ => Ok(None),
         },
         None | Some(_) => Ok(None),
-    }
-}
-
-/// `(block.rows || [])`: a falsy value is no rows at all, a list is itself, and a truthy value that
-/// is not one is what the library calls `.map` on and faults over.
-fn rows_of(value: Option<&Value>) -> Result<&[Value], Failure> {
-    match value {
-        None | Some(Value::Null) => Ok(&[]),
-        Some(Value::Array(rows)) => Ok(rows.as_slice()),
-        Some(value) if !js_truthy(value) => Ok(&[]),
-        Some(_) => Err(Failure::engine()),
     }
 }
 
@@ -537,7 +526,7 @@ impl Walk {
             }
             all.push(row);
         }
-        for row in rows_of(block.get("rows"))? {
+        for row in create::rows_of(block.get("rows"))? {
             let Some(cells) = row.as_array() else {
                 return Err(Failure::engine());
             };
@@ -661,32 +650,14 @@ pub(super) fn counted(count: usize, offset: u64) -> u64 {
 
 /// Carry out a `create` request for a presentation.
 pub(crate) fn create(request: &Request, output: &Path) -> Outcome {
-    match run(request, output) {
-        Ok(()) => Outcome {
-            outputs: vec![output.to_path_buf()],
-            ..Outcome::default()
-        },
-        Err(failure) => Outcome {
-            failure: Some(failure),
-            ..Outcome::default()
-        },
-    }
+    create::single_output(output, run(request, output))
 }
 
 /// The body: build the deck, assemble its parts, hand them through the post-pass and write it.
 fn run(request: &Request, output: &Path) -> Result<(), Failure> {
     // The reference refuses a Word-only shape before it looks at the size or a block's fields.
     create::refuse_word_only(request, Family::Pptx)?;
-    let parts = assemble(build(request)?);
-    let bytes = package::write_package(&parts).map_err(|failure| match failure {
-        // A part named twice is the crate's own defect and states its own sentence; the archive
-        // library's failure is one the reference prints nothing for, so the engine's own answers it.
-        package::WriteFailure::Duplicate(reason) => Failure::internal(reason),
-        package::WriteFailure::Archive(_) => Failure::engine(),
-    })?;
-    // A created deck's answer carries no notes and no losses, and the reference prints no sentence
-    // for a write it could not make: the engine's own internal sentence answers one.
-    write_new(output, &bytes, "engine_failed")
+    create::write_parts(output, &assemble(build(request)?))
 }
 
 /// The archive's parts, in the order the library writes them. The deck is taken by value because

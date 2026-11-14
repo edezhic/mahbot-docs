@@ -846,8 +846,32 @@
         "writing"
       ]
     },
+    "create_merge_overlap": {
+      "text": "{where}the merge {first} overlaps {second}, and a workbook with two merges over one cell needs repairing",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "create_merges_list": {
+      "text": "sheet {index}: merges must be a list of A1:B2 ranges",
+      "printed_by": [
+        "writing"
+      ]
+    },
     "create_row_length": {
       "text": "a table row's stated length must be at most {max}, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "create_sheet_name_unique": {
+      "text": "sheet {index}: a sheet name must be unique, ignoring case, got: {name}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "create_sheet_object": {
+      "text": "sheet {index} must be an object, got: {value}",
       "printed_by": [
         "writing"
       ]

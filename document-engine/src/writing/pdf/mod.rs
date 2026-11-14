@@ -11,7 +11,7 @@
 //! or absent is answered from what its body holds. A file whose pages — or, for the in-place actions,
 //! whose streams — cannot be read at all is refused rather than rewritten. The three drawing actions
 //! share [`draw`] for the embedded font, the subset it carries and the content stream they append;
-//! [`create`] shares it too, and [`font`] is the bundled face and its glyph-level subset.
+//! [`create()`] shares it too, and [`font`] is the bundled face and its glyph-level subset.
 //!
 //! The reference's answers for these actions carry notes and no losses — a resize says which
 //! annotations could not follow the content, and a drawing says which pages a mark reached past —

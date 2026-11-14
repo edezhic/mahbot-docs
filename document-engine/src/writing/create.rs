@@ -1,10 +1,14 @@
-//! The checks every `create` family shares: the Word-only refusal, which runs before the arm's own
-//! format, and the heading-level refusal the two block-driven arms both print.
+//! What the `create` families share: the Word-only refusal, which runs before an arm's own format;
+//! the heading-level refusal the two block-driven arms both print; the `rows` reading a block's rows
+//! and a sheet's own share; and the tail the two OOXML arms end with — their parts written as a
+//! package, and the answer stated around the file they wrote.
+
+use std::path::Path;
 
 use serde_json::Value;
 
-use super::{interpolated, text_value};
-use crate::operation::{Failure, Request};
+use super::{interpolated, package, text_value, write_new};
+use crate::operation::{Failure, Outcome, Request};
 use crate::vocabulary::{self, Family, vocabulary};
 
 /// Refuse a block, footnote, header or footer only a Word document holds, in the reference's own
@@ -125,4 +129,48 @@ pub(crate) fn block_text(value: Option<&Value>, what: &str) -> Result<String, Fa
 /// The value the reference treats as present: everything but an absent value and a null.
 pub(crate) fn present(value: Option<&Value>) -> Option<&Value> {
     value.filter(|value| !value.is_null())
+}
+
+/// `value || []` as the rows the reference then walks: a falsy value is no rows at all, a list is
+/// its rows, and any other truthy value is one the reference's runtime faults over. A block's
+/// `rows` and a sheet's own are read the same way, at the point each arm first walks them.
+///
+/// # Errors
+///
+/// The value is truthy and not a list.
+pub(crate) fn rows_of(value: Option<&Value>) -> Result<&[Value], Failure> {
+    match value {
+        None | Some(Value::Null) => Ok(&[]),
+        Some(Value::Array(rows)) => Ok(rows.as_slice()),
+        Some(value) if !super::js_truthy(value) => Ok(&[]),
+        Some(_) => Err(Failure::engine()),
+    }
+}
+
+/// Write `parts` as the package at `output`, which must not already exist. Both OOXML `create` arms
+/// end here, so the answer to a failed write is stated once.
+///
+/// # Errors
+///
+/// A part is named twice, which is the crate's own defect and states its own sentence; the archive
+/// library refuses the package, which the reference prints no product sentence for, so the engine's
+/// own internal sentence answers it; or the file cannot be written.
+pub(crate) fn write_parts(output: &Path, parts: &[(String, Vec<u8>)]) -> Result<(), Failure> {
+    let bytes = package::write_package(parts).map_err(|failure| match failure {
+        package::WriteFailure::Duplicate(reason) => Failure::internal(reason),
+        package::WriteFailure::Archive(_) => Failure::engine(),
+    })?;
+    write_new(output, &bytes, "engine_failed")
+}
+
+/// The answer a `create` arm that writes one package gives: the file `run` wrote, or the failure it
+/// met. A created file's answer carries no notes and no losses.
+pub(crate) fn single_output(output: &Path, result: Result<(), Failure>) -> Outcome {
+    match result {
+        Ok(()) => Outcome::produced(vec![output.to_path_buf()]),
+        Err(failure) => Outcome {
+            failure: Some(failure),
+            ..Outcome::default()
+        },
+    }
 }
