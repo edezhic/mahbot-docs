@@ -7,8 +7,11 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 // The codec list has one home, shared with the crate and its contract test. A build script cannot
-// depend on the crate it builds, so it includes the same source file.
+// depend on the crate it builds, so it includes the same source file. The captured parts' licence
+// notices are shared the same way: their names decide what the identity leaves out, so the build
+// script must read the list the harness's comparison skips.
 include!("src/codecs.rs");
+include!("src/notices.rs");
 
 /// Every source of the reference reader: the product's reader modules copied under
 /// `reference_sources/` and the minimal host beside them.
@@ -47,12 +50,16 @@ const WRITER_RUNNER: &str = "parity/src/reference/writer.rs";
 
 fn main() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    // `include!` does not register its target with cargo, so the codec list is watched explicitly:
-    // editing it must rerun this script, or the recorded versions and both build digests go stale
-    // while the gate still reports that the identity matches.
+    // `include!` does not register its target with cargo, so the codec list and the notices are
+    // watched explicitly: editing either must rerun this script, or the recorded versions and both
+    // build digests go stale while the gate still reports that the identity matches.
     println!(
         "cargo:rerun-if-changed={}",
         manifest.join("src/codecs.rs").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest.join("src/notices.rs").display()
     );
     let workspace = manifest
         .parent()
@@ -103,7 +110,7 @@ fn main() {
         crate_root.join("src").display()
     );
     let mut crate_sources = Vec::new();
-    collect_rust_sources(&crate_root.join("src"), &mut crate_sources);
+    collect(&crate_root.join("src"), Some("rs"), &mut crate_sources);
     crate_sources.push(crate_root.join("vocabulary.json"));
     crate_sources.push(crate_root.join("assets/NotoSans-Regular.ttf"));
     crate_sources.sort();
@@ -120,6 +127,34 @@ fn main() {
             .replace('\\', "/");
         crate_combined.update(&bytes);
         crate_components.push_str(&format!("{name}={:x};", Sha256::digest(&bytes)));
+    }
+    // The parts a created deck is captured from: a captured byte is a byte the crate's writer
+    // produces, so a change there is a change to what it writes. The crate's reader and writer
+    // share one build digest — one crate, one digest — so this component moves both identities, and
+    // a part re-captured from the reference is never silently read as the same build.
+    //
+    // The directory itself is watched as well as each file: a part added there must rerun this
+    // script rather than be left out of the identity it belongs to.
+    let captured_root = crate_root.join("assets/pptx-create");
+    println!("cargo:rerun-if-changed={}", captured_root.display());
+    let mut captured = Vec::new();
+    collect(&captured_root, None, &mut captured);
+    captured.sort();
+    for path in &captured {
+        let name = path
+            .strip_prefix(&captured_root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        // A licence notice is not a part a deck holds, so it is not a byte the writer produces.
+        if NOTICES.contains(&name.as_str()) {
+            continue;
+        }
+        println!("cargo:rerun-if-changed={}", path.display());
+        let bytes =
+            std::fs::read(path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        crate_combined.update(&bytes);
+        crate_components.push_str(&format!("pptx-create:{name}={:x};", Sha256::digest(&bytes)));
     }
     crate_components.push_str(&format!("codecs={:x};", Sha256::digest(codecs.as_bytes())));
     crate_combined.update(codecs.as_bytes());
@@ -140,8 +175,9 @@ fn main() {
     println!("cargo:rustc-env=PARITY_READER_RUNTIME={version}");
 }
 
-/// Every `.rs` file under `directory`, recursively.
-fn collect_rust_sources(directory: &Path, out: &mut Vec<PathBuf>) {
+/// Every file under `directory`, recursively, whose extension is `extension` — or every file when
+/// it is `None`.
+fn collect(directory: &Path, extension: Option<&str>, out: &mut Vec<PathBuf>) {
     let entries = std::fs::read_dir(directory)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", directory.display()));
     for entry in entries {
@@ -149,8 +185,10 @@ fn collect_rust_sources(directory: &Path, out: &mut Vec<PathBuf>) {
             .unwrap_or_else(|e| panic!("cannot read {}: {e}", directory.display()))
             .path();
         if path.is_dir() {
-            collect_rust_sources(&path, out);
-        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            collect(&path, extension, out);
+        } else if extension
+            .is_none_or(|extension| path.extension().is_some_and(|own| own == extension))
+        {
             out.push(path);
         }
     }

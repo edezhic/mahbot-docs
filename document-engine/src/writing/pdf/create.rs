@@ -39,8 +39,8 @@ use super::page;
 use super::{Produced, interpolated, js_round};
 use crate::operation::{Failure, Request};
 use crate::vocabulary::{self, Family, vocabulary};
-use crate::writing::image::{PX_TO_POINTS, Picture, Pixels, image_size, read_image};
-use crate::writing::{is_js_whitespace, js_truthy, scalar_text, text_value, xml};
+use crate::writing::image::{PX_TO_POINTS, Picture, Pixels, image_size, read_create_image};
+use crate::writing::{create, is_js_whitespace, js_truthy, scalar_text};
 
 /// A body line's size, the leading it is drawn on, and the space a body block leaves under itself.
 const BODY_SIZE: f64 = 12.0;
@@ -130,7 +130,7 @@ struct Font {
 pub(super) fn run(request: &Request, produced: &mut Produced) -> Result<(), Failure> {
     // The reference refuses a Word-only shape before it looks at the format or the content, so a
     // request wrong in both ways answers what is wrong with the shape.
-    refuse_word_only(request)?;
+    create::refuse_word_only(request, Family::Pdf)?;
     let (content, pictures_only) = picture_only(request)?;
     let mut document = page::fresh();
     page::fresh_metadata(&mut document, request.values.get("metadata"))?;
@@ -143,65 +143,6 @@ pub(super) fn run(request: &Request, produced: &mut Produced) -> Result<(), Fail
     produced.push(&bytes)?;
     produced.unsupported = layout.unsupported;
     Ok(())
-}
-
-/// Refuse a block, footnote, header or footer only a Word document holds, in the reference's own
-/// order: a header first, then a footer, then the first offending block.
-fn refuse_word_only(request: &Request) -> Result<(), Failure> {
-    let features = vocabulary::word_only_features();
-    // `req.content ?? []`: an absent or null list is no list at all here. A value that is not a list
-    // is one the reference's own scan faults on, not a request it refuses.
-    let content: &[Value] = match request.values.get("content") {
-        None | Some(Value::Null) => &[],
-        Some(Value::Array(values)) => values,
-        Some(_) => return Err(Failure::engine()),
-    };
-    let mut offending = None;
-    for block in content {
-        let Some(object) = block.as_object() else {
-            // A null block is one the reference reads a field of and faults on; a string or a
-            // number block carries no type and no footnote, so it offends nothing.
-            if block.is_null() {
-                return Err(Failure::engine());
-            }
-            continue;
-        };
-        let kind = object.get("type").and_then(Value::as_str);
-        if matches!(kind, Some("link" | "page_break" | "contents"))
-            || given(object.get("footnote")).is_some()
-        {
-            offending = Some(block);
-            break;
-        }
-    }
-    let feature = if given(request.values.get("header")).is_some() {
-        features.header.clone()
-    } else if given(request.values.get("footer")).is_some() {
-        features.footer.clone()
-    } else {
-        let Some(block) = offending else {
-            return Ok(());
-        };
-        let kind = block.get("type");
-        if kind.and_then(Value::as_str) == Some("paragraph") {
-            features.footnote.clone()
-        } else {
-            // The reference interpolates the type as the value it is: a block whose type is not
-            // text prints it the way `String()` does, and an absent one prints `undefined`.
-            vocabulary::format_template(&features.block, &[("type", &interpolated(kind))])
-        }
-    };
-    Err(Failure::usage(vocabulary().marks.format(
-        "create_word_only",
-        // The refusal names the requested format, which this arm answers for one family alone: the
-        // surface refuses a create request that names another, or none at all.
-        &[("feature", &feature), ("format", Family::Pdf.as_str())],
-    )))
-}
-
-/// The value the reference treats as present: everything but an absent value and a null.
-fn given(value: Option<&Value>) -> Option<&Value> {
-    value.filter(|value| !value.is_null())
 }
 
 /// Whether every block in a non-empty list is a picture, and the list itself. An absent or null
@@ -265,11 +206,7 @@ fn layout_pictures(content: &[Value]) -> Result<Layout, Failure> {
 /// Read one block's picture. A block whose image is not a path is the reference's own fault; every
 /// other refusal is the shared picture reader's.
 fn read_picture(block: &Value) -> Result<Picture, Failure> {
-    let image = block.get("image");
-    if !matches!(image, Some(Value::String(_))) {
-        return Err(Failure::engine());
-    }
-    let picture = read_image(image)?;
+    let picture = read_create_image(block.get("image"))?;
     if picture.kind == "webp" {
         return Err(Failure::usage(
             vocabulary()
@@ -349,7 +286,7 @@ impl Walk {
 
     fn heading(&mut self, block: &Value) -> Result<(), Failure> {
         let size = heading_size(block.get("level"))?;
-        let text = text_of(block.get("text"), "a heading's text")?;
+        let text = create::block_text(block.get("text"), "a heading's text")?;
         self.y -= size * HEADING_BEFORE;
         for line in wrap_text(self.face, &text, size, 0.0, self.width) {
             self.draw(&line, size, size * HEADING_LEADING, 0.0);
@@ -359,7 +296,7 @@ impl Walk {
     }
 
     fn paragraph(&mut self, block: &Value) -> Result<(), Failure> {
-        let text = text_of(block.get("text"), "a paragraph's text")?;
+        let text = create::block_text(block.get("text"), "a paragraph's text")?;
         for line in wrap_text(self.face, &text, BODY_SIZE, 0.0, self.width) {
             self.draw(&line, BODY_SIZE, BODY_SIZE * BODY_LEADING, 0.0);
         }
@@ -717,53 +654,16 @@ fn render(mut document: lopdf::Document, layout: &Layout) -> Result<Vec<u8>, Fai
 /// A heading's size: the size at the level's own position in the rules' list of levels, so the two
 /// lists cannot drift apart unobserved. An absent or null level is the first level; a value the
 /// rules' list does not hold is refused rather than clamped.
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "the cast follows the check that the value is a whole, non-negative number"
-)]
 fn heading_size(value: Option<&Value>) -> Result<f64, Failure> {
-    let levels = vocabulary::heading_levels();
-    let sizes = vocabulary::heading_size_points();
-    let size = match given(value) {
-        // An absent or null level names the first level, whose size is the section's first.
-        None => sizes.first(),
-        Some(value) => value
-            .as_f64()
-            .filter(|number| number.is_finite() && number.fract() == 0.0 && *number >= 0.0)
-            .map(|level| level as u64)
-            .and_then(|level| {
-                levels
-                    .iter()
-                    .zip(sizes)
-                    .find(|(allowed, _)| **allowed == level)
-            })
-            .map(|(_, size)| size),
-    };
-    size.copied().ok_or_else(|| {
-        Failure::usage(vocabulary().marks.format(
-            "create_heading_level",
-            &[
-                ("levels", &levels_listed()),
-                ("value", &interpolated(value)),
-            ],
-        ))
-    })
-}
-
-/// The rules' levels as the refusal names them: `1, 2 or 3`.
-fn levels_listed() -> String {
-    let levels: Vec<String> = vocabulary::heading_levels()
+    let level = create::heading_level(value)?;
+    // The level was checked against this list a line ago; a size table that disagreed with it would
+    // be the vocabulary's own defect rather than the caller's.
+    vocabulary::heading_levels()
         .iter()
-        .map(u64::to_string)
-        .collect();
-    xml::listed(&levels, "or")
-}
-
-/// A block's text. Unlike `edit_text` this deliberately applies no length cap: the reference's
-/// layout takes text of any length, and the product's own cap is the tool layer's.
-fn text_of(value: Option<&Value>, what: &str) -> Result<String, Failure> {
-    text_value(value, what).map(str::to_string)
+        .zip(vocabulary::heading_size_points())
+        .find(|(allowed, _)| **allowed == level)
+        .map(|(_, size)| *size)
+        .ok_or_else(Failure::engine)
 }
 
 /// The reference's wrapper: split a value into paragraphs on a line break, and each paragraph into
@@ -882,11 +782,11 @@ mod tests {
         let levels = vocabulary::heading_levels();
         let sizes = vocabulary::heading_size_points();
         assert_eq!(levels.len(), sizes.len());
-        assert_eq!(levels_listed(), "1, 2 or 3");
+        assert_eq!(create::levels_listed(), "1, 2 or 3");
         assert_eq!(
             vocabulary().marks.format(
                 "create_heading_level",
-                &[("levels", &levels_listed()), ("value", "9")]
+                &[("levels", &create::levels_listed()), ("value", "9")]
             ),
             "a heading's level must be 1, 2 or 3, got: 9"
         );

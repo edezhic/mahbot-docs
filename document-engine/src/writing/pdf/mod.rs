@@ -72,7 +72,6 @@ use crate::operation::{Failure, Outcome, Request};
 use crate::vocabulary::{self, vocabulary};
 
 mod create;
-mod date;
 mod draw;
 mod font;
 mod form;

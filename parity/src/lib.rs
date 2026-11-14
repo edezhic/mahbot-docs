@@ -42,5 +42,7 @@ pub mod contract;
 pub mod corpus;
 pub mod engine;
 pub mod harness;
+pub mod notices;
+pub mod pptx_capture;
 pub mod reference;
 pub mod transcript;

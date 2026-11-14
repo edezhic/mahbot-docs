@@ -646,6 +646,26 @@ pub struct SlideSize {
     pub height_emu: u64,
 }
 
+/// One size a created deck may name: the word the request spells it with and the EMU it is.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct NamedSlideSize {
+    pub name: String,
+    pub width_emu: u64,
+    pub height_emu: u64,
+}
+
+impl NamedSlideSize {
+    /// The size in EMU, which is what a layout is defined with.
+    #[must_use]
+    pub const fn size(&self) -> SlideSize {
+        SlideSize {
+            width_emu: self.width_emu,
+            height_emu: self.height_emu,
+        }
+    }
+}
+
 /// The word a form list prints for each field kind.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -788,6 +808,12 @@ rule_view!(
     SlideSize,
     "pptx_default_size",
     "The size a created deck gets when the request names none, which every self-placed measurement is drawn on."
+);
+rule_view!(
+    pub pptx_sizes,
+    Vec<NamedSlideSize>,
+    "pptx_sizes",
+    "The sizes a created deck may name, in the order the unknown-size refusal lists them."
 );
 rule_view!(
     pub(crate) slide_alignments,

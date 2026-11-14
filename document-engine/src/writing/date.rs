@@ -1,23 +1,40 @@
-//! The current time as the format's date.
+//! The current time as a format states it.
 //!
 //! The reference dates the file it wrote, so a produced file carries the moment it was made and an
-//! edited file's modification date advances. The conversion is Howard Hinnant's `civil_from_days`,
-//! repeated from the reading's own number-format module because that module keeps it private to its
-//! port: the writing half cannot reach across the boundary, and the algorithm is short.
+//! edited file's modification date advances. Two spellings of one moment are needed: the PDF
+//! dialect `D:YYYYMMDDHHMMSSZ` and the W3CDTF `YYYY-MM-DDTHH:MM:SSZ` a package's core properties
+//! state. The conversion is Howard Hinnant's `civil_from_days`, repeated from the reading's own
+//! number-format module because that module keeps it private to its port: the writing half cannot
+//! reach across the boundary, and the algorithm is short.
 
 /// The current time as `D:YYYYMMDDHHMMSSZ`, in UTC.
-pub(super) fn now() -> String {
+pub(super) fn now_pdf() -> String {
+    let (year, month, day, hour, minute, second) = now();
+    format!("D:{year:04}{month:02}{day:02}{hour:02}{minute:02}{second:02}Z")
+}
+
+/// The current time as `YYYY-MM-DDTHH:MM:SSZ`, in UTC — the spelling a package's core properties
+/// state, with the trailing `Z` meaning UTC rather than a local time wearing one.
+pub(super) fn now_w3cdtf() -> String {
+    let (year, month, day, hour, minute, second) = now();
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
+}
+
+/// The current UTC time as its parts: the civil date and the time of day.
+fn now() -> (i64, u32, u32, u64, u64, u64) {
     let seconds = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
         .unwrap_or_default();
     let of_day = seconds % 86_400;
     let (year, month, day) = civil(seconds);
-    format!(
-        "D:{year:04}{month:02}{day:02}{:02}{:02}{:02}Z",
+    (
+        year,
+        month,
+        day,
         of_day / 3600,
         of_day % 3600 / 60,
-        of_day % 60
+        of_day % 60,
     )
 }
 

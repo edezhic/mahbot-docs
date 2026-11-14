@@ -113,7 +113,7 @@ fn slide_paragraphs(xml_text: &str) -> Vec<(usize, usize)> {
 
 /// The slide's own top-level `<p:sp>` shapes, in part order: the shape tree's direct children that
 /// are not inside a table's frame or a group. This is the set the slide's own text lives in.
-fn slide_shape_spans(xml_text: &str) -> Vec<(usize, usize)> {
+pub(super) fn slide_shape_spans(xml_text: &str) -> Vec<(usize, usize)> {
     let Some(tree) = tag_spans(xml_text, &SLIDE_SHAPE_TREE)
         .into_iter()
         .find(|span| !span.self_closing)
@@ -249,7 +249,7 @@ fn map_slide_paragraphs(
 
 /// A part's text as a reading prints it: one line per paragraph, so a find copied across paragraphs
 /// matches the part that holds it.
-fn paragraph_lines(xml_text: &str) -> String {
+pub(super) fn paragraph_lines(xml_text: &str) -> String {
     slide_paragraphs(xml_text)
         .into_iter()
         .map(|(start, end)| slide_paragraph_text(xml_text.get(start..end).unwrap_or_default()))
@@ -1181,7 +1181,7 @@ pub(super) fn edit_slide_notes(
 pub(super) fn notes_paragraph(text: &str) -> String {
     format!(
         "<a:p><a:r><a:rPr lang=\"{}\" dirty=\"0\"/>{}</a:r></a:p>",
-        super::draw::SLIDE_LANG,
+        super::SLIDE_LANG,
         Markup::Drawing.text_element(&xml::xml_escape(text))
     )
 }

@@ -1371,6 +1371,12 @@ pub const PICTURE_BMP: Document = Document {
     name: "picture.bmp",
     build: build::png,
 };
+/// An 800 by 600 picture: both sides past the created deck's 400 by 374 pixel fit box, so a picture
+/// that names no side is scaled down inside it.
+pub const PICTURE_OVERSIZE: Document = Document {
+    name: "oversize.png",
+    build: build::oversize_png,
+};
 
 /// Every document the reader reference is recorded on, in the order it is recorded: the original
 /// corpus first, the deeper-reading documents after it, and the fixed mutations last.
@@ -1622,5 +1628,6 @@ pub fn writer_documents() -> Vec<Document> {
         FILL_NOTES_PPTX,
         FILL_MACRO_PPTM,
         FILL_SLIDE_ONLY_PPTX,
+        PICTURE_OVERSIZE,
     ]
 }

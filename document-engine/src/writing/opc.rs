@@ -384,16 +384,17 @@ pub(super) fn remove_override(editor: &mut Editor, part: &str) -> Result<(), Fai
 /// The package's `<base>N.xml` parts: the number each carries and the name it really has. A
 /// package that numbers with a leading zero holds no `slideLayout1.xml`, so only a name for a part
 /// about to be written may be built from the number.
-pub(super) fn numbered_parts(names: &[String], base: &str) -> Vec<(u64, String)> {
+pub(super) fn numbered_parts(names: &[impl AsRef<str>], base: &str) -> Vec<(u64, String)> {
     names
         .iter()
         .filter_map(|name| {
+            let name = name.as_ref();
             let rest = name.strip_prefix(base)?;
             let digits = rest.strip_suffix(".xml")?;
             if !is_digits(digits) {
                 return None;
             }
-            Some((digits.parse().ok()?, name.clone()))
+            Some((digits.parse().ok()?, name.to_string()))
         })
         .collect()
 }

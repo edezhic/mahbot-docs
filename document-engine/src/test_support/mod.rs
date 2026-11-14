@@ -43,3 +43,11 @@ pub fn mutations() -> Vec<Document> {
 pub fn writer_documents() -> Vec<Document> {
     documents::writer_documents()
 }
+
+/// The part names a created deck's captured table holds, in the crate's own order: the harness's
+/// parts test compares them with the set the reference measures and with the files the asset
+/// directory ships.
+#[must_use]
+pub fn pptx_captured_parts() -> Vec<&'static str> {
+    crate::writing::pptx::captured_parts()
+}

@@ -404,12 +404,12 @@ const fn pair(family: Family, handler: Option<Handler>) -> Pair {
     Pair { family, handler }
 }
 
-/// `create` accepts every family: a document can be made of any of the four. The PDF family is
-/// carried out; the other three are later ports.
+/// `create` accepts every family: a document can be made of any of the four. The PDF and
+/// presentation families are carried out; the Word and workbook families are later ports.
 const CREATE: &[Pair] = &[
     pair(Family::Docx, None),
     pair(Family::Xlsx, None),
-    pair(Family::Pptx, None),
+    pair(Family::Pptx, Some(Handler::Action(pptx_create))),
     pair(Family::Pdf, Some(Handler::Action(pdf_create))),
 ];
 
@@ -470,6 +470,9 @@ fn pdf_form_fill(request: &Request, outputs: &[PathBuf]) -> Outcome {
 }
 fn pdf_create(request: &Request, outputs: &[PathBuf]) -> Outcome {
     crate::writing::pdf::create(request, &outputs[0])
+}
+fn pptx_create(request: &Request, outputs: &[PathBuf]) -> Outcome {
+    crate::writing::pptx::create(request, &outputs[0])
 }
 
 /// What the engine's statement says about one (operation, family) pair.

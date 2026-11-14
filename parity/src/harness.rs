@@ -67,7 +67,9 @@ pub struct Harness {
 }
 
 impl Harness {
-    /// A fresh root under the OS temporary directory, which the harness owns and removes.
+    /// A fresh root under the OS temporary directory, named the way [`Harness::at`] requires. A
+    /// harness creates it and removes it; another caller — the capture command — creates and
+    /// removes it itself.
     #[must_use]
     pub fn temp_root() -> PathBuf {
         std::env::temp_dir().join(format!(

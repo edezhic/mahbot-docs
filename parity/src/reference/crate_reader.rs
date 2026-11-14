@@ -9,8 +9,10 @@
 use crate::engine::{EngineIdentity, Kind, Reader, Reading};
 use std::path::Path;
 
-/// The identity of the crate's reading sources, computed by `build.rs` over every Rust source in
-/// `../document-engine/src`, its `vocabulary.json` and the font it rasterises with.
+/// The identity of the crate's build, computed by `build.rs` over every Rust source in
+/// `../document-engine/src`, its `vocabulary.json`, the font it rasterises with and the parts a
+/// created deck is captured from. One crate is one digest: the reader and the writer share it, so a
+/// captured part — a byte the writer produces — moves both identities rather than only one.
 const BUILD: &str = env!("PARITY_CRATE_READER_BUILD");
 const COMPONENTS: &str = env!("PARITY_CRATE_READER_COMPONENTS");
 

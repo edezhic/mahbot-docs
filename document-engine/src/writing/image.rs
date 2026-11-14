@@ -92,6 +92,22 @@ pub(super) fn read_image(value: Option<&Value>) -> Result<Picture, Failure> {
     })
 }
 
+/// The picture a *created* document embeds: the same reader, with the reference's own answer for a
+/// value that is not a path. The reference calls a string method on the value before it reads
+/// anything, so a non-string is a fault of its own rather than a refusal — which is why the create
+/// arms cannot use [`read_image`], whose answer for the same shape is the caller's to fix.
+///
+/// # Errors
+///
+/// The value is not text (the engine's own), or the file cannot be read, its extension is not one
+/// the shared rules list, or its bytes are not a whole image of the kind the name claims.
+pub(super) fn read_create_image(value: Option<&Value>) -> Result<Picture, Failure> {
+    if value.and_then(Value::as_str).is_none() {
+        return Err(Failure::engine());
+    }
+    read_image(value)
+}
+
 /// A 32-bit word's four bytes, the unit the image formats' own offsets are counted in.
 const U32_BYTES: usize = 4;
 

@@ -25,13 +25,13 @@ result names them through `Family::as_str`.
 One mark is interim: `reason_not_carried_out` is the engine's answer for a recognised
 (operation, family) pair it does not carry out. It is stated here rather than in code, and the pair's
 own reason replaces it once the dispatch carries the pair out. The writing half carries the three
-edits, the five PDF page actions, the three PDF drawing actions, `create`'s PDF family and the Word
-and presentation template fills out today, so that mark is the answer for the four pairs `create`
-and `fill_template` still accept without a handler: `create`'s Word, workbook and presentation
-families, and the workbook family of `fill_template`. The sentence names the operation and not the
-family because the engine is not wired into a product build while any family of an operation is
-unimplemented, so no user meets it for a sibling of a landed family; if that ever stops being true,
-it must name the family too.
+edits, the five PDF page actions, the three PDF drawing actions, `create`'s PDF and presentation
+families and the Word and presentation template fills out today, so that mark is the answer for the
+three pairs `create` and `fill_template` still accept without a handler: `create`'s Word and
+workbook families, and the workbook family of `fill_template`. The sentence names the operation and
+not the family because the engine is not wired into a product build while any family of an
+operation is unimplemented, so no user meets it for a sibling of a landed family; if that ever stops
+being true, it must name the family too.
 
 The writing half's marks have their own namespaces: a refusal or a value an edit names is an
 `edit_*` mark (a presentation edit's are `edit_pptx_*`; a sentence it shares with the Word edit
@@ -39,21 +39,29 @@ keeps that family's key), a note or a loss it raises is a `note_*` mark, every s
 surface prints before an operation runs is a `surface_*` mark, a PDF page action's refusals and its
 one note are `pdf_page_*` marks, the three drawing actions' own refusals are `pdf_text_*`,
 `pdf_image_*` and `pdf_form_*` marks (the image-size sentences are shared with the OOXML arms and
-live under `edit_*`), a created document's own three sentences are `create_*` marks (the rest of what
-its blocks refuse is the shared `edit_*` vocabulary — a heading's text, a bullet's or a cell's kind,
-a picture's extension), and a template fill's own refusals are `fill_*` marks — its compile-failure
-frame, its nesting refusal, its refusal of a delimiter change that repeats, its write failure, its
-wrong-family hint and every sentence the ported template library prints, reproduced word for word. A
-sentence a fill shares with another surface keeps that surface's key: an unreadable sample is
-`edit_open_unreadable`, a wrong family is `edit_wrong_family`, and a value that is a structure is
-`surface_value_structure` (named for no operation because the fill and the PDF form fill both refuse
-it), while the word JavaScript prints for a value that is not one is `surface_object_value` (an
-edit's value rendering and a fill's `.` scope both print it). A write that fails after it created
-files and cannot remove one of them is `write_leftover`, whichever half was writing, and a package
-that states one part twice is `write_part_duplicate`, for every operation that writes one. The page
-actions' namespace is separate from the reading's `pdf_*` marks because the reading already owns
-that prefix for what it prints about a PDF; the drawing actions' marks are named for their operation
-so the two halves stay readable.
+live under `edit_*`), a created document's own sentences are `create_*` marks —
+`create_word_only`, `create_heading_level`, `create_row_length` and `create_unknown_size` (the rest
+of what a block refuses is the shared `edit_*` vocabulary, reused by key rather than copied:
+`edit_text_not_text` for a block's text, `edit_value_kind` for a bullet, a table heading or a cell,
+`edit_image_extension`, `edit_image_not_whole` with the label it interpolates
+(`edit_image_label_png`, `edit_image_label_jpeg` or `edit_image_label_webp`) and
+`edit_image_unreadable` for a picture, `edit_image_side_span` and `edit_image_implied_span` for
+the side a picture is sized from and the one it derives, and `edit_absent_value`, `edit_null_value`
+and `surface_object_value` for the value a refusal quotes — a block stating no type prints
+`undefined`, a null one `null`, an object `[object Object]`), and a template fill's own refusals
+are `fill_*` marks — its compile-failure frame, its nesting refusal, its refusal of a delimiter
+change that repeats, its write failure, its wrong-family hint and every sentence the ported
+template library prints, reproduced word for word. A sentence a fill shares with another surface
+keeps that surface's key: an unreadable sample is `edit_open_unreadable`, a wrong family is
+`edit_wrong_family`, and a value that is a structure is `surface_value_structure` (named for no
+operation because the fill and the PDF form fill both refuse it), while the word JavaScript prints
+for a value that is not one is `surface_object_value` (an edit's value rendering, a fill's `.`
+scope and a create refusal's quoted block all print it). A write
+that fails after it created files and cannot remove one of them is `write_leftover`, whichever half
+was writing, and a package that states one part twice is `write_part_duplicate`, for every operation
+that writes one. The page actions' namespace is separate from the reading's `pdf_*` marks because
+the reading already owns that prefix for what it prints about a PDF; the drawing actions' marks are
+named for their operation so the two halves stay readable.
 A sentence that is operation-agnostic is shared rather than copied: `edit_input_missing` names the
 operation and is the one sentence an operation with a single input refuses with, whichever half
 carries it out, and the crate's own caps on a merge extend the `surface_*` namespace that already

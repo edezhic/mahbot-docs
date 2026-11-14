@@ -1433,7 +1433,7 @@ pub(super) fn fresh_metadata(
     if metadata == Some(&Value::Null) {
         return Err(Failure::engine());
     }
-    let now = super::date::now();
+    let now = crate::writing::date::now_pdf();
     let fresh = Value::Object(Map::from_iter([
         ("producer".to_string(), Value::String(PRODUCER.to_string())),
         ("created".to_string(), Value::String(now.clone())),
@@ -1455,7 +1455,10 @@ pub(super) fn edit_metadata(
         .cloned()
         .unwrap_or_default();
     if !entries.contains_key("modified") && info_holds(document, "ModDate") {
-        entries.insert("modified".to_string(), Value::String(super::date::now()));
+        entries.insert(
+            "modified".to_string(),
+            Value::String(crate::writing::date::now_pdf()),
+        );
     }
     apply_metadata(document, Some(&Value::Object(entries)))
 }

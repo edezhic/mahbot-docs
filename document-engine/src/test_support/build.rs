@@ -99,6 +99,20 @@ pub fn large_png() -> Vec<u8> {
     rgb_png(SIDE as u32, SIDE as u32, &noise(SIDE * SIDE * 3))
 }
 
+/// An 800 by 600 RGB PNG of one colour: wider and taller than the create arm's 400 by 374 pixel fit
+/// box, so a picture that names no side is scaled down inside it rather than drawn at its own size.
+/// One colour, so the produced media part stays a few hundred bytes rather than the fifty megabytes
+/// [`large_png`] costs.
+#[must_use]
+pub fn oversize_png() -> Vec<u8> {
+    /// The picture's sides in pixels: both past the fit box's 400 by 374.
+    const WIDTH: u32 = 800;
+    const HEIGHT: u32 = 600;
+    let samples: Vec<u8> =
+        std::iter::repeat_n(0x33, WIDTH as usize * HEIGHT as usize * 3).collect();
+    rgb_png(WIDTH, HEIGHT, &samples)
+}
+
 /// Deterministic noise, from a 32-bit linear congruential generator: samples that do not compress,
 /// the same on every run.
 fn noise(len: usize) -> Vec<u8> {

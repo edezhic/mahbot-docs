@@ -32,13 +32,15 @@ use serde_json::Value;
 use crate::operation::{Failure, Outcome, Request};
 use crate::vocabulary::{Family, Span, vocabulary};
 
+pub(crate) mod create;
+mod date;
 mod docx;
 mod fill;
 mod image;
 mod opc;
 mod package;
 pub(crate) mod pdf;
-mod pptx;
+pub(crate) mod pptx;
 mod text;
 mod xlsx;
 mod xml;
@@ -114,8 +116,8 @@ pub(super) fn scalar_value(value: &Value) -> bool {
         .any(|allowed| allowed == kind)
 }
 
-/// A value as the kit's `JSON.stringify` renders it, which is what a refusal quotes a name by: a
-/// string keeps its quotes, and an absent value is the kit's own `undefined`.
+/// A value as the kit's `JSON.stringify` renders it, with an absent value as the kit's own
+/// `undefined`.
 pub(super) fn stringified(value: Option<&Value>) -> String {
     value.map_or_else(
         || vocabulary().marks.get("edit_absent_value").to_string(),
@@ -123,8 +125,10 @@ pub(super) fn stringified(value: Option<&Value>) -> String {
     )
 }
 
-/// A value as JSON text, the way `JSON.stringify` spells it.
-fn json_literal(value: &Value) -> String {
+/// A value as the kit's `JSON.stringify` renders it — the spelling a refusal quotes a value by when
+/// the reference stringifies rather than coerces it: a string keeps its quotes, a number prints the
+/// way `String()` prints it, and a structure is its JSON.
+pub(super) fn json_literal(value: &Value) -> String {
     match value {
         Value::Number(number) => number_text(number),
         other => serde_json::to_string(other).unwrap_or_default(),
@@ -657,11 +661,11 @@ impl Editor {
             let note = vocabulary().marks.get("edit_signature_note").to_string();
             self.note(note, false);
         }
-        let bytes = package::write_package(&self.parts).map_err(|message| {
+        let bytes = package::write_package(&self.parts).map_err(|failure| {
             Failure::internal(
                 vocabulary()
                     .marks
-                    .format("edit_write_failed", &[("message", &message)]),
+                    .format("edit_write_failed", &[("message", &failure.to_string())]),
             )
         })?;
         Ok(Finished {

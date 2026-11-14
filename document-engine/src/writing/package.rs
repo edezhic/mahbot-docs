@@ -47,6 +47,23 @@ pub(crate) fn read_package(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, Strin
     Ok(parts)
 }
 
+/// Why a package could not be written.
+#[derive(Debug)]
+pub(super) enum WriteFailure {
+    /// Two parts claim the same name: the crate built the package wrong, and the sentence says so.
+    Duplicate(String),
+    /// The archive library could not write: its own message, which no mark states.
+    Archive(String),
+}
+
+impl std::fmt::Display for WriteFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Duplicate(message) | Self::Archive(message) => formatter.write_str(message),
+        }
+    }
+}
+
 /// Write `parts` back as one package, in the order given, every part DEFLATEd.
 ///
 /// # Errors
@@ -54,25 +71,29 @@ pub(crate) fn read_package(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, Strin
 /// A part name is stated twice, or the archive cannot be written. A sample whose archive states one
 /// name twice is refused rather than collapsed the way the reference's own ZIP writer collapses it:
 /// the crate does not silently drop a part it was handed, and no generated sample states one twice.
-pub(super) fn write_package(parts: &[(String, Vec<u8>)]) -> Result<Vec<u8>, String> {
+pub(super) fn write_package(parts: &[(String, Vec<u8>)]) -> Result<Vec<u8>, WriteFailure> {
     let mut seen = HashSet::with_capacity(parts.len());
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated);
     for (name, bytes) in parts {
         if !seen.insert(name.as_str()) {
-            return Err(vocabulary()
-                .marks
-                .format("write_part_duplicate", &[("name", name)]));
+            return Err(WriteFailure::Duplicate(
+                vocabulary()
+                    .marks
+                    .format("write_part_duplicate", &[("name", name)]),
+            ));
         }
         writer
             .start_file(name.as_str(), options)
-            .map_err(|error| error.to_string())?;
-        writer.write_all(bytes).map_err(|error| error.to_string())?;
+            .map_err(|error| WriteFailure::Archive(error.to_string()))?;
+        writer
+            .write_all(bytes)
+            .map_err(|error| WriteFailure::Archive(error.to_string()))?;
     }
     writer
         .finish()
-        .map_err(|error| error.to_string())
+        .map_err(|error| WriteFailure::Archive(error.to_string()))
         .map(Cursor::into_inner)
 }
 
@@ -208,7 +229,7 @@ mod tests {
             ("a.xml".to_string(), b"<b/>".to_vec()),
         ];
         let failure = write_package(&parts).expect_err("a duplicate");
-        assert!(failure.contains("twice"), "{failure}");
+        assert!(failure.to_string().contains("twice"), "{failure}");
     }
 
     #[test]

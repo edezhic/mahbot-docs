@@ -19,6 +19,7 @@ cargo run --bin parity            # the gate: the crate's writer and reader agai
 cargo run --bin parity -- --engine reference  # the recorded engine: the product's own reader
 cargo test                        # every test, including the gate and the model's self-tests
 cargo run --bin record-baseline   # deliberately re-record the baseline
+cargo run --bin capture-pptx-parts # re-capture a created deck's invariant parts from the reference
 ```
 
 The workspace at the root holds two packages: this harness and `../document-engine`, the engine
@@ -26,7 +27,7 @@ crate the harness depends on. `cargo test -p document-engine` runs the crate's o
 its vocabulary restatement scan) without the harness.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 529 cases and 91 readings — takes a minute or two; the whole
+managed runtime. A full pass — 653 cases and 91 readings — takes a minute or two; the whole
 test suite, which runs the corpus twice for its determinism check, takes a couple of minutes.
 
 `parity --engine noop` runs the same corpus against the do-nothing engine. That engine exists only
@@ -52,15 +53,17 @@ landed yet is shown as `SKIP`, not failed, and a run that judged no case at all 
 | `src/host/` | The minimal host the reader sources need: `rules.json` and its typed views, `contain_panics`, and the handful of `util` helpers the readers call. |
 | `src/corpus/` | The writer scenarios (`cases.rs`) and their declared effects (`effect.rs`); `ledger.rs` records, per (operation, family) pair, what the crate's writer delivers — checked against the engine's statement and compiled for the tests only, never read by the gate; the document builders are re-exported from `document_engine::test_support`, their one home. |
 | `src/canonical/` | The canonical model, one module per format; each states what it compares, normalises, does not compare and refuses, and the diff. |
+| `src/pptx_capture.rs`, `src/notices.rs` | The created deck's invariant parts: the matrix, the two-halves rule and the set the crate captures, driven by both the capture command and the parts test; and the one home of the licence notices' names, which `build.rs` includes so the crate's identity leaves them out. |
 | `src/harness.rs` | Runs a corpus against an engine, compares, and produces verdicts. |
 | `src/baseline.rs` | The recorded reference, with the identity of the engine that produced it. |
 | `src/transcript.rs` | The normalised transcript: no paths, no nonces, no timings. |
 | `tests/engine_contract.rs` | The engine crate's contract, proved from here: its vocabulary is the reference's data, its result shapes carry every recorded field, its closed operation set holds every corpus operation and edit, the reference copies are byte-for-byte the product's, and the host's media tables are the product's own. |
 | `tests/coverage.rs` | The corpus's depth: every reading mark is witnessed by a recorded reading or recorded as unproducible with its reason, every mark only the writing half prints is witnessed by a recorded case's answer or recorded unreached with its reason, neither ledger's "not produced" side names a mark a recorded answer really prints, every per-family failure verdict is witnessed, and every corpus document is in the baseline. |
 | `tests/teeth.rs` | The comparison has teeth: a reading or a produced case altered in a field its sample populates — a picture dropped, a note or a loss reworded, an output renamed, a produced file's content changed, a status flipped — fails it, and so does a detection answer changed for one input. |
+| `tests/pptx_create_parts.rs`, `tests/pptx_create.rs` | What the model cannot see about a created deck: the captured parts really are invariant and really are the reference's bytes, the core properties carry fixed strings, two stamps and the reference's revision, the application properties agree over decks differing in slide count, notes count, titles and size, the archive states exactly the entry set the reference writes, a `.jpg` and a `.jpeg` source both arrive as a `.jpeg` media part, and a deck that compares equal to the reference's is the one fed to the crate's editor, so a failure there is the editor's. Permanent and outside the baseline. |
 | `tests/pdf_create_shapes.rs` | What the PDF model cannot see about a created document: one request driven through both writers, both produced files walked with the same parser, and every drawn string's position, size and fill colour, every path's geometry, and the description entries the model drops compared. Permanent and outside the baseline. |
-| `baseline/baseline.json` | The recorded reference (about 9.5 MB of canonical documents). |
-| `src/bin/parity.rs`, `src/bin/record-baseline.rs` | The gate and the deliberate recorder. |
+| `baseline/baseline.json` | The recorded reference (about 24 MB of canonical documents). |
+| `src/bin/parity.rs`, `src/bin/record-baseline.rs`, `src/bin/capture-pptx-parts.rs` | The gate, the deliberate recorder, and the command that re-captures a created deck's invariant parts from the reference's output. |
 
 The reader sources are **copies** under `src/reference_sources/`, byte for byte those of
 `../../src/`. Nothing here is a link, so nothing in this workspace can rewrite the product's
@@ -205,16 +208,31 @@ builders have one home in `document_engine::test_support`, which the crate's own
 `corpus` re-exports them rather than holding a copy. Coverage is by behaviour:
 
 - `create` for all four output formats;
-- `create`'s PDF family in depth, since it is the one family of that operation the crate's writer
-  carries out: the two layouts (one page per picture, and the text column that breaks pages), every
-  block it draws at every heading level, a numbered list beside a bulleted one, a ragged table, a
-  table past the writer's Word-only column bound of 63, a word cut mid-way, a whitespace-only
+- `create`'s PDF family in depth, since it is one of the families of that operation the crate's
+  writer carries out: the two layouts (one page per picture, and the text column that breaks pages),
+  every block it draws at every heading level, a numbered list beside a bulleted one, a ragged table,
+  a table past the writer's Word-only column bound of 63, a word cut mid-way, a whitespace-only
   paragraph, the two code points the two languages' whitespace definitions disagree on, a picture
   given both sides and one taller than the page, the characters the bundled face cannot draw, and the
   answer's unsupported list; the metadata shapes (an unknown key, an empty object, a non-object
   value, a cleared entry, and a null object on each of the three fresh-document paths); and the
   shapes the reference faults on, each with the class it answers, beside the two pairs of adjacent
   checks a case can straddle;
+- `create`'s presentation family in depth, since it is the other one the crate's writer carries
+  out: every block the family accepts at every heading level, the blocks it silently ignores and
+  the ones it refuses, each naming the block it was on; the internal faults a wrong-shaped value
+  answers, beside every adjacent pair of checks a caller can violate at once; the four size
+  spellings (the default reached by omitting the value and by passing null, the three the rules
+  name, a non-string and an unknown name refused); a table with headers, one left empty, one
+  carrying only headers, a ragged one, one whose grid width rounds, and each wrong-shaped table
+  value; a numbered list beside a bulleted one and one longer than the product's bullet bound;
+  pictures at their natural size and fitted, given one side, broken, of a refused extension, WebP
+  and JPEG, beside the extension-to-content-type-to-media-name chain, and a picture the flow takes
+  before the wrap beside the one it takes after it; speaker notes, a slide carrying two notes
+  blocks, a notes-only slide, a blank notes block that produces no page, and a deck whose first
+  slide carries none; a character outside the basic multilingual plane; a paragraph past the edit
+  path's text bound; the blocks that push a deck past a slide edge; and the sheets and metadata
+  values the family never reads;
 - `fill_template` for all three template families;
 - every `docx_edit` sub-operation (9), every `xlsx_edit` sub-operation (14) and every `pptx_edit`
   sub-operation (14), each with the precondition it needs — a second sheet to move, a merged range
@@ -483,8 +501,10 @@ of the JPEG encoder and decoder, the PDF parser and object model, rasterizer and
 legacy and OOXML parsers and the ZIP/deflate layer, read from `Cargo.lock`; every codec a manifest
 names is pinned exactly, and every resolved copy — direct or transitive — is recorded, so a codec
 bump changes the identity rather than silently changing every compared digest. The crate's own
-reader is identified separately, by a digest of every Rust source in `document-engine/src`, its
-`vocabulary.json` and its font. A difference is therefore attributable to a build, not merely
+reader and writer are identified separately from the reference by one build digest — every Rust
+source in `document-engine/src`, its `vocabulary.json`, its font and the parts a created deck is
+captured from, each recorded as its own component, so the two are one crate and one digest and a
+re-captured part moves both. A difference is therefore attributable to a build, not merely
 observed. The gate always prints both identities and states whether they match; passing means every
 verdict matches the baseline. Only the reference gate — `parity --engine reference`, and the
 baseline test — treats a differing identity as a failure, because there the question is whether the

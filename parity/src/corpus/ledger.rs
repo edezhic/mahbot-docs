@@ -36,11 +36,12 @@ const fn entry(operation: &'static str, family: Family, coverage: Coverage) -> R
 
 /// Every pair the crate's writer answers for today.
 const CRATE_WRITER: &[Record] = &[
-    // `create`'s PDF family is carried out; its other three families are still being ported, and so
-    // is `fill_template`'s workbook family. The Word and presentation fills are carried out.
+    // `create`'s PDF and presentation families are carried out; its Word and workbook families are
+    // still being ported, and so is `fill_template`'s workbook family. The Word and presentation
+    // fills are carried out.
     entry("create", Family::Docx, Coverage::NotCarriedOut),
     entry("create", Family::Xlsx, Coverage::NotCarriedOut),
-    entry("create", Family::Pptx, Coverage::NotCarriedOut),
+    entry("create", Family::Pptx, Coverage::Delivered),
     entry("create", Family::Pdf, Coverage::Delivered),
     entry("fill_template", Family::Docx, Coverage::Delivered),
     entry("fill_template", Family::Xlsx, Coverage::NotCarriedOut),

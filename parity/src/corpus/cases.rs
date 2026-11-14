@@ -3,15 +3,19 @@
 //!
 //! A case's request is the one the product's tool layer would hand the kit, with `$in/<name>` and
 //! `$out/<name>` standing for the harness's own paths — with one deliberate exception, stated beside
-//! the cases that break it. The PDF family of `create` accepts shapes the tool layer refuses or
+//! the cases that break it. `create`'s PDF family accepts shapes the tool layer refuses or
 //! normalises above the engine: an empty, absent, null or non-list content, a block that is not an
 //! object, a notes or unknown block, a heading, bullet or cell value of the wrong kind, a non-string
 //! image, a `size`, a header or footer, a link, page-break or contents block, a footnote, and every
-//! metadata shape the tool validates. Those cases exist because the engine must reproduce the
-//! reference's sentences and outcomes for them even where no product user can reach them, and the
-//! comments above them say which is which. The effect lists are what the operation promises, read
-//! off the kit's own semantics (`assets/docgen/kit.js`) and confirmed against the produced document:
-//! an effect that only a no-op could satisfy is not a check.
+//! metadata shape the tool validates. Its presentation family accepts the same kind of shapes: an
+//! empty content list, a missing or null content value, a string, number, boolean or array block, an
+//! unknown block type, an out-of-range level, a non-array `items` value, a non-scalar item or cell, a
+//! numeric `headers` value, a falsy `rows` value, a non-string image, a non-string or unknown `size`,
+//! and the `sheets` and `metadata` values a deck request never reads. Those cases exist because the
+//! engine must reproduce the reference's sentences and outcomes for them even where no product user
+//! can reach them, and the comments above them say which is which. The effect lists are what the
+//! operation promises, read off the kit's own semantics (`assets/docgen/kit.js`) and confirmed
+//! against the produced document: an effect that only a no-op could satisfy is not a check.
 
 use super::documents::{
     BASIC_DOCX, BASIC_PDF, BASIC_PPTX, BASIC_XLSX, BROKEN_FORM_PDF, BROKEN_PAIR_OPTIONS_FORM_PDF,
@@ -41,19 +45,19 @@ use super::documents::{
     MISPLACED_FORM_PDF, MULTILINE_FORM_PDF, NO_GEOMETRY_PDF, OBJECT_STREAM_ASCII_HEX_PDF,
     OBJECT_STREAM_INFLATED_PDF, OBJECT_STREAM_PDF, OPTION_FORM_PDF, PAIRED_OPTIONS_FORM_PDF,
     PAIRED_RADIO_FORM_PDF, PICTURE_BMP, PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_LARGE,
-    PICTURE_PDF, PICTURE_PIXEL, PICTURE_PNG, PICTURE_STALE_CRC_PNG, PICTURE_TALL, PICTURE_WEBP,
-    PPTX_ASSETS, PPTX_BOXES, PPTX_BROKEN_SLOT, PPTX_LIST_DISAGREES, PPTX_LIST_REORDERED,
-    PPTX_MACRO, PPTX_MISSING_NOTES, PPTX_NO_CONTENT_TYPES, PPTX_NO_LAYOUT, PPTX_NO_NOTES_MASTER,
-    PPTX_NO_SHAPE_TREE, PPTX_NO_SIZE, PPTX_NO_SLIDE_LIST, PPTX_NOTES_NO_BODY, PPTX_NOTES_TWO,
-    PPTX_RUNS, PPTX_SECTIONS, PPTX_SIGNED, PPTX_SLIDE_OUTSIDE, PPTX_TABLE, PPTX_TWO_NOTES_MASTERS,
-    PUSHBUTTON_CAPTION_FORM_PDF, PUSHBUTTON_FORM_PDF, RADIO_OPTIONS_FORM_PDF,
-    RADIO_OUTRUN_FORM_PDF, RECTLESS_BUTTON_FORM_PDF, RECTLESS_FLAT_FORM_PDF, RECTLESS_FORM_PDF,
-    REPEATED_PAGE_ANNOTATED_PDF, REPEATED_PAGE_PDF, RICH_PDF, RICH_PPTX, ROTATED_PDF,
-    SIGNATURE_FORM_PDF, STATE_APPEARANCE_FORM_PDF, STATED_SIZE_FORM_PDF, TEMPLATE_DOCX,
-    TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF, TRUNCATED_XLSX, TWO_CATALOGS_PDF, WORD_AS_PPTX,
-    XLSX_ALL_HIDDEN, XLSX_BAD_MERGE_REF, XLSX_BROKEN_MERGES, XLSX_EDIT, XLSX_MACRO,
-    XLSX_NO_CONTENT_TYPES, XLSX_NO_FAMILY, XLSX_ONE_VISIBLE, XLSX_ONLY_SHEET, XLSX_SELF_CLOSING,
-    XLSX_UNCLOSED_MERGE_CELL,
+    PICTURE_OVERSIZE, PICTURE_PDF, PICTURE_PIXEL, PICTURE_PNG, PICTURE_STALE_CRC_PNG, PICTURE_TALL,
+    PICTURE_WEBP, PPTX_ASSETS, PPTX_BOXES, PPTX_BROKEN_SLOT, PPTX_LIST_DISAGREES,
+    PPTX_LIST_REORDERED, PPTX_MACRO, PPTX_MISSING_NOTES, PPTX_NO_CONTENT_TYPES, PPTX_NO_LAYOUT,
+    PPTX_NO_NOTES_MASTER, PPTX_NO_SHAPE_TREE, PPTX_NO_SIZE, PPTX_NO_SLIDE_LIST, PPTX_NOTES_NO_BODY,
+    PPTX_NOTES_TWO, PPTX_RUNS, PPTX_SECTIONS, PPTX_SIGNED, PPTX_SLIDE_OUTSIDE, PPTX_TABLE,
+    PPTX_TWO_NOTES_MASTERS, PUSHBUTTON_CAPTION_FORM_PDF, PUSHBUTTON_FORM_PDF,
+    RADIO_OPTIONS_FORM_PDF, RADIO_OUTRUN_FORM_PDF, RECTLESS_BUTTON_FORM_PDF,
+    RECTLESS_FLAT_FORM_PDF, RECTLESS_FORM_PDF, REPEATED_PAGE_ANNOTATED_PDF, REPEATED_PAGE_PDF,
+    RICH_PDF, RICH_PPTX, ROTATED_PDF, SIGNATURE_FORM_PDF, STATE_APPEARANCE_FORM_PDF,
+    STATED_SIZE_FORM_PDF, TEMPLATE_DOCX, TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF,
+    TRUNCATED_XLSX, TWO_CATALOGS_PDF, WORD_AS_PPTX, XLSX_ALL_HIDDEN, XLSX_BAD_MERGE_REF,
+    XLSX_BROKEN_MERGES, XLSX_EDIT, XLSX_MACRO, XLSX_NO_CONTENT_TYPES, XLSX_NO_FAMILY,
+    XLSX_ONE_VISIBLE, XLSX_ONLY_SHEET, XLSX_SELF_CLOSING, XLSX_UNCLOSED_MERGE_CELL,
 };
 use super::effect::{BoxKind, Scalar, Scope};
 use super::{Case, Document, Effect, Expect, Reason};
@@ -124,6 +128,13 @@ fn inputs(sub_operation: &str, basic: Document) -> Vec<Document> {
 fn create_cases() -> Vec<Case> {
     // A table past the writer's Word-only column bound: 64 columns, one header each.
     let wide_headers: Vec<String> = (0..64).map(|index| format!("h{index}")).collect();
+    // A list past the product's bullet bound (100): the create path applies no cap of its own.
+    let long_list: Vec<String> = (0..120).map(|index| format!("item {index}")).collect();
+    // A list whose own height reaches the library's hundred-inch threshold on the default deck.
+    let threshold_list: Vec<String> = (0..200).map(|index| format!("item {index}")).collect();
+    // A paragraph past the shared edit-text cap (20,000 characters), with a marker at each end so a
+    // truncated one loses its tail.
+    let long_paragraph = format!("start {} end", "x".repeat(20_050));
     vec![
         produced(
             Family::Docx,
@@ -1767,6 +1778,2904 @@ fn create_cases() -> Vec<Case> {
             )),
         )
         .named("word_only_footer"),
+        // ── create: the presentation family ───────────────────────────────────────────────────────
+        //
+        // The reference's check sequence is stated in the port's own module
+        // (`document-engine/src/writing/pptx/create/mod.rs`), not restated here. What these cases
+        // record is the measured winner of each pair of faults a caller can violate at once, in the
+        // comment above it, and the shapes the product's tool layer refuses or normalises above the
+        // engine, which no product user reaches: a null block; a block that is a string, a number, a
+        // boolean or an array; an empty content list; a content value that is absent, null or not a
+        // list; an unknown block type; a text value that is not text; a heading level the rules do
+        // not list; a list's `items` that is not a list; an item or a cell that is not a scalar; a
+        // `headers` value that is a number; a `rows` value that is falsy or not a list; an image that
+        // is not a string; a size that is not a string or not a named one; and a sheets or metadata
+        // value. A list block with an empty `items` array is the one shape of that kind the product
+        // does let through, so its case is a produced one. A produced deck's size and a picture's
+        // fitted extent are pinned by the baseline, which compares the package element for element;
+        // an effect states what the canonical model can see.
+        //
+        // The ordinary deck: a heading, a paragraph, a bulleted list and a numbered one, a table, a
+        // picture and speaker notes. The table, the picture and the notes land on the second slide,
+        // so the case pins both slides rather than one.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            vec![PICTURE_PNG],
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "Deck title" },
+                    { "type": "paragraph", "text": "First body" },
+                    { "type": "list", "items": ["one", "two"] },
+                    { "type": "list", "items": ["a", "b"], "ordered": true },
+                    { "type": "table", "headers": ["A", "B"], "rows": [["1", "2"]] },
+                    { "type": "image", "image": "$in/picture.png" },
+                    { "type": "notes", "text": "Speaker note" },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 2,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Deck title",
+                    present: true,
+                },
+                // What separates a bulleted list from a numbered one is the bullet element each
+                // paragraph carries: a character for one, automatic numbering for the other.
+                Effect::ElementCount {
+                    output: None,
+                    part: "ppt/slides/slide1.xml",
+                    element: "a:buChar",
+                    count: 2,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: "ppt/slides/slide1.xml",
+                    element: "a:buAutoNum",
+                    count: 2,
+                },
+                Effect::SlideHas {
+                    output: None,
+                    slide: 2,
+                    element: "a:tbl",
+                    on: true,
+                },
+                Effect::SlideHas {
+                    output: None,
+                    slide: 2,
+                    element: "p:pic",
+                    on: true,
+                },
+                Effect::NotesText {
+                    output: None,
+                    slide: 2,
+                    text: "Speaker note",
+                    present: true,
+                },
+            ],
+        )
+        .named("ordinary_deck"),
+        // A list block with no `items`: the reference reads `block.items.length`, so an absent list
+        // is its own fault rather than an empty one.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "list" }],
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("list_items_absent"),
+        // An empty `items` array does not leave the shape with no paragraph: the library's own
+        // `addText` substitutes one empty text item for an empty array, so the block draws an
+        // unbulleted empty paragraph rather than nothing at all. The paragraph's own properties —
+        // `<a:buNone/>` and the shape's closing size — are what this effect pins.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "list", "items": [] }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: "ppt/slides/slide1.xml",
+                    element: "a:buNone",
+                    count: 1,
+                },
+            ],
+        )
+        .named("list_items_empty"),
+        // The create path applies no cap to a list: the product's bullet bound is an edit's, not a
+        // block's. All 120 items are drawn, and the list is long enough to open a second slide.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "Long list" },
+                    { "type": "list", "items": long_list },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 2,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: "ppt/slides/slide2.xml",
+                    element: "a:p",
+                    count: 120,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 2,
+                    text: "item 119",
+                    present: true,
+                },
+            ],
+        )
+        .named("list_over_bullet_cap"),
+        // The library takes a length of a hundred inches or more to be EMU already and writes it as
+        // it stands, so this list's own height — 200 items of half an inch each on the default deck
+        // — reaches the slide as `cy="100"` rather than as the ninety-one million an inch-to-EMU
+        // conversion would write. Measured against the reference, which writes the same.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "Past the threshold" },
+                    { "type": "list", "items": threshold_list },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 2,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: "ppt/slides/slide2.xml",
+                    element: "a:p",
+                    count: 200,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 2,
+                    text: "item 199",
+                    present: true,
+                },
+            ],
+        )
+        .named("list_past_emu_threshold"),
+        // An absent level is the first level: the block opens a slide and is declared its title.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "text": "No level" }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::SlideHas {
+                    output: None,
+                    slide: 1,
+                    element: "p:ph",
+                    on: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "No level",
+                    present: true,
+                },
+            ],
+        )
+        .named("heading_level_absent"),
+        // A null level is the first level too.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": null, "text": "Null level" }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::SlideHas {
+                    output: None,
+                    slide: 1,
+                    element: "p:ph",
+                    on: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Null level",
+                    present: true,
+                },
+            ],
+        )
+        .named("heading_level_null"),
+        // A level given as text is refused, and the sentence prints the value without quotes.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": "two", "text": "x" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a heading's level must be 1, 2 or 3, got: two",
+            )),
+        )
+        .named("heading_level_string"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": 9, "text": "x" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a heading's level must be 1, 2 or 3, got: 9",
+            )),
+        )
+        .named("heading_level_out_of_range"),
+        // A level that is not a number at all still prints the value the reference interpolates:
+        // `String(true)`, and `String([1])` for a one-element array, which reads like a level the
+        // sentence would accept.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": true, "text": "x" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a heading's level must be 1, 2 or 3, got: true",
+            )),
+        )
+        .named("heading_level_boolean"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": [1], "text": "x" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a heading's level must be 1, 2 or 3, got: 1",
+            )),
+        )
+        .named("heading_level_array"),
+        // The first block opens the slide whatever its level: a level-2 heading with no slide yet is
+        // declared the slide's title, not drawn as an ordinary block.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": 2, "text": "Topic two" }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::SlideHas {
+                    output: None,
+                    slide: 1,
+                    element: "p:ph",
+                    on: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Topic two",
+                    present: true,
+                },
+            ],
+        )
+        .named("first_heading_level_two"),
+        // A blank first heading opens a slide and declares no title: the shape stays an ordinary text
+        // box, so no title placeholder is written.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": 1, "text": "" }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::SlideHas {
+                    output: None,
+                    slide: 1,
+                    element: "p:ph",
+                    on: false,
+                },
+            ],
+        )
+        .named("first_heading_blank"),
+        // A level-2 heading once a slide is open is an ordinary block: only the slide's first
+        // heading is declared a title, so the slide holds exactly one placeholder.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "Deck" },
+                    { "type": "heading", "level": 2, "text": "Section" },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: "ppt/slides/slide1.xml",
+                    element: "p:ph",
+                    count: 1,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Section",
+                    present: true,
+                },
+            ],
+        )
+        .named("heading_level_two_mid_deck"),
+        // A footnote is a Word document's own on every block kind, and the refusal names the block
+        // it sits on — the heading's own noun, a paragraph's footnote, or the type as written.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": 1, "text": "x", "footnote": "note" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a heading block is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("footnote_heading"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "paragraph", "text": "x", "footnote": "note" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a paragraph's footnote is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("footnote_paragraph"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "link", "url": "https://example.com", "footnote": "note" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a link block is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("footnote_link"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "page_break", "footnote": "note" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a page_break block is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("footnote_page_break"),
+        // The same block with no footnote at all: the type alone is what a Word document owns.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "page_break" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a page_break block is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("page_break_block"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "contents", "footnote": "note" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a contents block is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("footnote_contents"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "contents" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a contents block is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("contents_block"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "mystery", "footnote": "note" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a mystery block is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("footnote_unknown"),
+        // A null footnote is no footnote, so the block is produced.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": 1, "text": "x", "footnote": null }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::SlideCount {
+                output: None,
+                count: 1,
+            }],
+        )
+        .named("null_footnote"),
+        // A running header or footer is a Word document's own, refused by name.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [],
+                "header": "Running header",
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a running header is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("running_header"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [],
+                "footer": "Running footer",
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a running footer is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("running_footer"),
+        // A header and a footer on one request: the reference names the header first, which is the
+        // adjacent pair its check sequence states and the only way to observe the order.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [],
+                "header": "Running header",
+                "footer": "Running footer",
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a running header is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("header_and_footer"),
+        // A null header is no header at all.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": 1, "text": "x" }],
+                "header": null,
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::SlideCount {
+                output: None,
+                count: 1,
+            }],
+        )
+        .named("null_header"),
+        // A block type this family does not know is ignored when it carries no footnote.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "T" },
+                    { "type": "mystery", "text": "Unknown body" },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Unknown body",
+                    present: false,
+                },
+            ],
+        )
+        .named("unknown_block"),
+        // A null block is read for its type and faults; a string, a number, a boolean and an array
+        // block carry no type and no footnote, so they are ignored rather than refused.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [null],
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("block_null"),
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "T" },
+                    "a string block",
+                    5,
+                    true,
+                    [1, 2],
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "a string block",
+                    present: false,
+                },
+            ],
+        )
+        .named("ignored_non_object_blocks"),
+        // A bullet accepts a scalar and stringifies it the way JavaScript does; a structure is
+        // refused, because the writer would otherwise draw nothing for it.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "list", "items": [1, true, "x"] }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "1",
+                    present: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "true",
+                    present: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "x",
+                    present: true,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: "ppt/slides/slide1.xml",
+                    element: "a:buChar",
+                    count: 3,
+                },
+            ],
+        )
+        .named("bullet_scalar"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "list", "items": [{ "text": "object" }] }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a bullet must be text, a number or a boolean",
+            )),
+        )
+        .named("bullet_object"),
+        // A block's text is text alone: a number, and an absent value, are both refused — a heading,
+        // a paragraph and a speaker-notes block each print their own sentence.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": 1, "text": 5 }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains("a heading's text must be text")),
+        )
+        .named("heading_text_number"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": 1 }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains("a heading's text must be text")),
+        )
+        .named("heading_text_absent"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "paragraph", "text": 5 }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains("a paragraph's text must be text")),
+        )
+        .named("paragraph_text_number"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "paragraph" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains("a paragraph's text must be text")),
+        )
+        .named("paragraph_text_absent"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "notes", "text": 5 }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains("speaker notes must be text")),
+        )
+        .named("notes_text_number"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "notes" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains("speaker notes must be text")),
+        )
+        .named("notes_text_absent"),
+        // An `items` value that is not a list is mapped over and faults; an absent one faults on
+        // its length (see above). The two are the reference's own class, not a refusal.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "list", "items": 5 }],
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("list_items_not_a_list"),
+        // A picture's value must be a path: a number, and an absent value, both fault in the reader
+        // before any refusal could name them.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "image", "image": 5 }],
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("image_not_a_string"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "image" }],
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("image_absent"),
+        // `ordered` is read for truth, not for identity with `true`, so a non-empty string numbers
+        // the list.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "list", "items": ["a", "b"], "ordered": "yes" }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::ElementCount {
+                output: None,
+                part: "ppt/slides/slide1.xml",
+                element: "a:buAutoNum",
+                count: 2,
+            }],
+        )
+        .named("ordered_not_boolean"),
+        // The content value itself: absent, null and non-list each fault in the reference's walk,
+        // while an empty list produces a deck of one blank slide.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({ "op": "create", "format": "pptx", "output": "$out/fault.pptx" }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("content_absent"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": null,
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("content_null"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": "not a list",
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("content_not_a_list"),
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::SlideCount {
+                output: None,
+                count: 1,
+            }],
+        )
+        .named("empty_content"),
+        // A deck request's `sheets` and `metadata` are never read. This is `size_default_omitted`'s
+        // request with the two values beside it, so the produced package is the twin's.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": 1, "text": "T" }],
+                "sheets": [{ "name": "Ignored" }],
+                "metadata": { "title": "Ignored" },
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "T",
+                    present: true,
+                },
+            ],
+        )
+        .named("sheets_and_metadata"),
+        // A paragraph past the shared edit-text cap is produced in full: the reference's layout has
+        // no such cap, and a port that reused the capped edit helper would refuse this one while one
+        // that truncated the text would lose its tail.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "T" },
+                    { "type": "paragraph", "text": long_paragraph },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "start",
+                    present: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "end",
+                    present: true,
+                },
+            ],
+        )
+        .named("paragraph_over_edit_text_cap"),
+        // A character outside the basic multilingual plane is one run of text, not a lost glyph.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "T" },
+                    { "type": "paragraph", "text": "astral \u{1F600} text" },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::SlideText {
+                output: None,
+                slide: 1,
+                text: "astral \u{1F600} text",
+                present: true,
+            }],
+        )
+        .named("astral_character"),
+        // Enough paragraphs to push the flow past the slide's floor: the deck grows a slide rather
+        // than reporting a caveat or a loss.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "T" },
+                    { "type": "paragraph", "text": "p0" },
+                    { "type": "paragraph", "text": "p1" },
+                    { "type": "paragraph", "text": "p2" },
+                    { "type": "paragraph", "text": "p3" },
+                    { "type": "paragraph", "text": "p4" },
+                    { "type": "paragraph", "text": "p5" },
+                    { "type": "paragraph", "text": "p6" },
+                    { "type": "paragraph", "text": "p7" },
+                    { "type": "paragraph", "text": "p8" },
+                    { "type": "paragraph", "text": "p9" },
+                    { "type": "paragraph", "text": "p10" },
+                    { "type": "paragraph", "text": "p11" },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::SlideCount {
+                output: None,
+                count: 4,
+            }],
+        )
+        .named("overflowing_deck"),
+        // ── create: the presentation family's tables ──────────────────────────────────────────────
+        // A table with a header row and a body row draws both, in one table.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "table", "headers": ["A", "B"], "rows": [["1", "2"]] }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideHas {
+                    output: None,
+                    slide: 1,
+                    element: "a:tbl",
+                    on: true,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: "ppt/slides/slide1.xml",
+                    element: "a:tc",
+                    count: 4,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "A",
+                    present: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "2",
+                    present: true,
+                },
+            ],
+        )
+        .named("table"),
+        // A table with nothing to draw is skipped: it opens no slide of its own, and a content list
+        // that holds only it still produces the deck's one blank slide.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "table", "headers": [], "rows": [] }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::SlideHas {
+                    output: None,
+                    slide: 1,
+                    element: "a:tbl",
+                    on: false,
+                },
+            ],
+        )
+        .named("table_empty"),
+        // A table whose rows are all cell-less is skipped the same way.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "table", "headers": [], "rows": [[], []] }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::SlideHas {
+                    output: None,
+                    slide: 1,
+                    element: "a:tbl",
+                    on: false,
+                },
+            ],
+        )
+        .named("table_rows_empty"),
+        // `headers` is read for its length: a number has none, so no header row is produced and the
+        // body row is the table's only row.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "table", "headers": 5, "rows": [["x"]] }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "ppt/slides/slide1.xml",
+                    element: "a:tc",
+                    count: 1,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "x",
+                    present: true,
+                },
+            ],
+        )
+        .named("table_numeric_headers"),
+        // A cell that is a scalar is stringified by the writer: a number arrives as its own text.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "table", "rows": [[7, true]] }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "7",
+                    present: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "true",
+                    present: true,
+                },
+            ],
+        )
+        .named("table_scalar_cells"),
+        // A heading that is not a scalar is refused by the shared sentence.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "table", "headers": [null], "rows": [["x"]] }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a table heading must be text, a number or a boolean",
+            )),
+        )
+        .named("table_headers_not_scalar"),
+        // A cell that is not a scalar is refused by the shared sentence, and it names the cell rather
+        // than the heading: `scalarOf(cell, "a table cell")`.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "table", "headers": ["A"], "rows": [[null]] }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a table cell must be text, a number or a boolean",
+            )),
+        )
+        .named("table_cell_not_scalar"),
+        // A row that is not an array is mapped over and faults.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "table", "headers": ["A"], "rows": ["not a row"] }],
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("table_row_not_a_list"),
+        // `rows` is read as `rows || []`: a falsy value is no rows at all. With no headers either,
+        // the block has nothing to draw and is skipped; with headers it is a header-only table.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "table", "headers": [], "rows": null }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::SlideHas {
+                output: None,
+                slide: 1,
+                element: "a:tbl",
+                on: false,
+            }],
+        )
+        .named("table_falsy_rows_no_headers"),
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "table", "headers": ["H"], "rows": null }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "ppt/slides/slide1.xml",
+                    element: "a:tc",
+                    count: 1,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "H",
+                    present: true,
+                },
+            ],
+        )
+        .named("table_falsy_rows_headers"),
+        // A truthy value that is not a list is mapped over and faults.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "table", "headers": [], "rows": "not rows" }],
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("table_rows_not_a_list"),
+        // A ragged table writes exactly the cells each row holds: the short row is not padded, so
+        // the table's cell count is the sum of the rows' own lengths.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{
+                    "type": "table",
+                    "headers": ["A", "B"],
+                    "rows": [["1"], ["2", "3", "4"]],
+                }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "ppt/slides/slide1.xml",
+                    element: "a:tc",
+                    count: 6,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "4",
+                    present: true,
+                },
+            ],
+        )
+        .named("table_ragged"),
+        // The grid's column width is the library's `Math.round(w / intColCnt)`: a frame width that
+        // does not divide evenly rounds up. Seven columns on the reference deck divide 8,412,480
+        // into 1,201,782.86, which the reference writes as `w="1201783"`; a truncating port writes
+        // `1201782` and the model sees it.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{
+                    "type": "table",
+                    "headers": ["A", "B", "C", "D", "E", "F", "G"],
+                    "rows": [["1", "2", "3", "4", "5", "6", "7"]],
+                }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "ppt/slides/slide1.xml",
+                    element: "a:gridCol",
+                    count: 7,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "G",
+                    present: true,
+                },
+            ],
+        )
+        .named("table_columns_seven"),
+        // The same rounding on a scaled frame: eleven columns at the widescreen width divide
+        // 11,216,640 into 1,019,694.5454…, which rounds up where a truncating port rounds down.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "size": "widescreen",
+                "content": [{
+                    "type": "table",
+                    "headers": ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K"],
+                    "rows": [["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]],
+                }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "ppt/slides/slide1.xml",
+                    element: "a:gridCol",
+                    count: 11,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "K",
+                    present: true,
+                },
+            ],
+        )
+        .named("table_columns_widescreen"),
+        // ── create: the presentation family's notes ───────────────────────────────────────────────
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "T" },
+                    { "type": "notes", "text": "Speaker note" },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::NotesText {
+                output: None,
+                slide: 1,
+                text: "Speaker note",
+                present: true,
+            }],
+        )
+        .named("speaker_notes"),
+        // Two notes blocks on one slide are concatenated in order with no separator, so both texts
+        // are in the one notes run.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "T" },
+                    { "type": "notes", "text": "first" },
+                    { "type": "notes", "text": "second" },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::NotesText {
+                    output: None,
+                    slide: 1,
+                    text: "first",
+                    present: true,
+                },
+                Effect::NotesText {
+                    output: None,
+                    slide: 1,
+                    text: "second",
+                    present: true,
+                },
+            ],
+        )
+        .named("notes_two_blocks"),
+        // A notes block whose text is blank once trimmed is no notes page at all: the reference's own
+        // post-pass drops the page, and this port never writes one. The page and the relationship
+        // naming it are one rule, so both are asserted absent.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "T" },
+                    { "type": "notes", "text": "" },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "ppt/notesSlides/notesSlide1.xml",
+                    present: false,
+                },
+                // The layout is the slide's only relationship: no notes page is named.
+                Effect::ElementCount {
+                    output: None,
+                    part: "ppt/slides/_rels/slide1.xml.rels",
+                    element: "Relationship",
+                    count: 1,
+                },
+            ],
+        )
+        .named("notes_text_empty"),
+        // A notes-only list still opens a slide for the notes page to hang from.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "notes", "text": "only" }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 1,
+                },
+                Effect::NotesText {
+                    output: None,
+                    slide: 1,
+                    text: "only",
+                    present: true,
+                },
+            ],
+        )
+        .named("notes_only_slide"),
+        // The notes part keeps its own slide's number: a deck whose first slide carries no notes
+        // puts the later slide's notes on the later slide, not on the first.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "One" },
+                    { "type": "heading", "level": 1, "text": "Two" },
+                    { "type": "notes", "text": "later" },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::NotesText {
+                    output: None,
+                    slide: 1,
+                    text: "later",
+                    present: false,
+                },
+                Effect::NotesText {
+                    output: None,
+                    slide: 2,
+                    text: "later",
+                    present: true,
+                },
+            ],
+        )
+        .named("notes_on_later_slide"),
+        // A newline in notes text stays inside one run: the notes body holds the notes' single run
+        // (the page's slide-number field is not a run), so a port that split it into paragraphs
+        // would count more.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "T" },
+                    { "type": "notes", "text": "line one\nline two" },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "ppt/notesSlides/notesSlide1.xml",
+                    element: "a:r",
+                    count: 1,
+                },
+                Effect::NotesText {
+                    output: None,
+                    slide: 1,
+                    text: "line one",
+                    present: true,
+                },
+            ],
+        )
+        .named("notes_newline"),
+        // A lone carriage return is not a line break to either half: it stays in the text as it was
+        // written, in the notes and on the slide.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "T" },
+                    { "type": "notes", "text": "car\rreturn" },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::NotesText {
+                output: None,
+                slide: 1,
+                text: "car\rreturn",
+                present: true,
+            }],
+        )
+        .named("notes_carriage_return"),
+        // A run of carriage returns before a line feed is one break, which is the library's own
+        // `/\r*\n/g`: the two carriage returns below collapse into the single break, and the notes
+        // text the reading shows is `a` and `b` around it rather than an extra return.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "T" },
+                    { "type": "notes", "text": "a\r\r\nb" },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "ppt/notesSlides/notesSlide1.xml",
+                    element: "a:r",
+                    count: 1,
+                },
+                Effect::NotesText {
+                    output: None,
+                    slide: 1,
+                    text: "a\r\nb",
+                    present: true,
+                },
+            ],
+        )
+        .named("notes_carriage_returns"),
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "T" },
+                    { "type": "paragraph", "text": "car\rreturn" },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::SlideText {
+                output: None,
+                slide: 1,
+                text: "car\rreturn",
+                present: true,
+            }],
+        )
+        .named("slide_carriage_return"),
+        // A newline in slide text becomes a paragraph break: the slide holds the title's paragraph
+        // and the two lines' own, rather than one run carrying a newline.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "T" },
+                    { "type": "paragraph", "text": "line one\nline two" },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "ppt/slides/slide1.xml",
+                    element: "a:p",
+                    count: 3,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "line one",
+                    present: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "line two",
+                    present: true,
+                },
+            ],
+        )
+        .named("slide_newline"),
+        // A notes block draws nothing but still takes a position in the object list, so the shapes
+        // after it take later identifiers — which the baseline's element-for-element comparison
+        // pins; the effect can only say both blocks are there.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "T" },
+                    { "type": "notes", "text": "note" },
+                    { "type": "paragraph", "text": "after" },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::NotesText {
+                    output: None,
+                    slide: 1,
+                    text: "note",
+                    present: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "after",
+                    present: true,
+                },
+            ],
+        )
+        .named("notes_then_block"),
+        // ── create: the presentation family's pictures ────────────────────────────────────────────
+        // A picture larger than the flow's 400 by 374 pixel box is fitted inside it rather than
+        // drawn at its own size; the baseline pins the fitted frame.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            vec![PICTURE_OVERSIZE],
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "image", "image": "$in/oversize.png" }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::SlideHas {
+                output: None,
+                slide: 1,
+                element: "p:pic",
+                on: true,
+            }],
+        )
+        .named("picture_over_fit_box"),
+        // A picture that already fits keeps its own size.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            vec![PICTURE_PNG],
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "image", "image": "$in/picture.png" }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::SlideHas {
+                output: None,
+                slide: 1,
+                element: "p:pic",
+                on: true,
+            }],
+        )
+        .named("picture_inside_fit_box"),
+        // A picture the flow takes before the wrap: the block after it still fits, and the one after
+        // that opens the next slide. `ordinary_deck` pins the other order, where the wrap comes first.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            vec![PICTURE_PNG],
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "T" },
+                    { "type": "image", "image": "$in/picture.png" },
+                    { "type": "paragraph", "text": "One" },
+                    { "type": "paragraph", "text": "Two" },
+                    { "type": "paragraph", "text": "Three" },
+                    { "type": "paragraph", "text": "Four" },
+                ],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideCount {
+                    output: None,
+                    count: 2,
+                },
+                Effect::SlideHas {
+                    output: None,
+                    slide: 1,
+                    element: "p:pic",
+                    on: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 1,
+                    text: "Three",
+                    present: true,
+                },
+                Effect::SlideText {
+                    output: None,
+                    slide: 2,
+                    text: "Four",
+                    present: true,
+                },
+            ],
+        )
+        .named("picture_before_wrap"),
+        // A picture given one side only takes the other from its own proportions, and a picture
+        // given only a width never consults the fit box at all.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            vec![PICTURE_PNG],
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "image", "image": "$in/picture.png", "width": 100 }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::SlideHas {
+                output: None,
+                slide: 1,
+                element: "p:pic",
+                on: true,
+            }],
+        )
+        .named("picture_width_only"),
+        // The same rule for a picture: a stated width of 7 200 points is a hundred inches, so the
+        // library writes `cx="100"` while the height it derives — fifty inches — is still converted.
+        // Measured against the reference, which writes `cx="100"` and `cy="45720000"`.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            vec![PICTURE_PNG],
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "image", "image": "$in/picture.png", "width": 7200 }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::SlideHas {
+                output: None,
+                slide: 1,
+                element: "p:pic",
+                on: true,
+            }],
+        )
+        .named("picture_past_emu_threshold"),
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            vec![PICTURE_PNG],
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "image", "image": "$in/picture.png", "height": 100 }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::SlideHas {
+                output: None,
+                slide: 1,
+                element: "p:pic",
+                on: true,
+            }],
+        )
+        .named("picture_height_only"),
+        // A picture whose bytes are not a whole image of the kind its name claims is refused before
+        // it is embedded.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            vec![PICTURE_BROKEN_PNG],
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "image", "image": "$in/broken.png" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "cannot embed broken.png as a PNG image: the file's bytes are not a whole PNG image",
+            )),
+        )
+        .named("picture_broken"),
+        // A picture under an extension the shared reader does not name is refused before it reads a
+        // byte.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            vec![PICTURE_BMP],
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "image", "image": "$in/picture.bmp" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "only PNG, JPEG or WebP images can be embedded, got: picture.bmp",
+            )),
+        )
+        .named("picture_extension"),
+        // The source extension, its content type and the media part's extension form one chain: a
+        // WebP and a JPEG are embedded as their own types, and `[Content_Types].xml` keeps only the
+        // defaults its parts use — the two fixed ones and the picture's.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            vec![PICTURE_WEBP],
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "image", "image": "$in/picture.webp" }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideHas {
+                    output: None,
+                    slide: 1,
+                    element: "p:pic",
+                    on: true,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: "[Content_Types].xml",
+                    element: "Default",
+                    count: 3,
+                },
+            ],
+        )
+        .named("picture_webp"),
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            vec![PICTURE_JPEG],
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "image", "image": "$in/picture.jpg" }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![
+                Effect::SlideHas {
+                    output: None,
+                    slide: 1,
+                    element: "p:pic",
+                    on: true,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: "[Content_Types].xml",
+                    element: "Default",
+                    count: 3,
+                },
+            ],
+        )
+        .named("picture_jpeg"),
+        // ── create: the presentation family's sizes ───────────────────────────────────────────────
+        // Each named size is its own deck; the slide size itself is pinned by the baseline.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "size": "widescreen",
+                "content": [{ "type": "heading", "level": 1, "text": "T" }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::SlideCount {
+                output: None,
+                count: 1,
+            }],
+        )
+        .named("size_widescreen"),
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "size": "standard",
+                "content": [{ "type": "heading", "level": 1, "text": "T" }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::SlideCount {
+                output: None,
+                count: 1,
+            }],
+        )
+        .named("size_standard"),
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "size": "portrait",
+                "content": [{ "type": "heading", "level": 1, "text": "T" }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::SlideCount {
+                output: None,
+                count: 1,
+            }],
+        )
+        .named("size_portrait"),
+        // The default deck is the one an omitted key and a null key both reach.
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": 1, "text": "T" }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::SlideCount {
+                output: None,
+                count: 1,
+            }],
+        )
+        .named("size_default_omitted"),
+        produced(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "size": null,
+                "content": [{ "type": "heading", "level": 1, "text": "T" }],
+                "output": "$out/deck.pptx",
+            }),
+            vec!["deck.pptx"],
+            vec![Effect::SlideCount {
+                output: None,
+                count: 1,
+            }],
+        )
+        .named("size_default_null"),
+        // A size that is not a name the rules hold is refused, and the sentence quotes the value as
+        // `JSON.stringify` renders it: a number without quotes, an unknown name with them.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "size": 5,
+                "content": [{ "type": "heading", "level": 1, "text": "T" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "unknown slide size 5 — hint: use widescreen, standard or portrait",
+            )),
+        )
+        .named("size_not_a_string"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "size": "huge",
+                "content": [{ "type": "heading", "level": 1, "text": "T" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "unknown slide size \"huge\" — hint: use widescreen, standard or portrait",
+            )),
+        )
+        .named("size_unknown"),
+        // ── create: the presentation family's ordering pairs ──────────────────────────────────────
+        //
+        // Each case below violates two checks at once and records the winner the reference
+        // measured; the name reads "the winner before the loser". A pair is only a witness when the
+        // two answers differ in class or in sentence.
+        //
+        // The Word-only scan reads a block before it reads the header, so a null block's fault
+        // (internal) wins over the header's refusal (usage).
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [null],
+                "header": "Running header",
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("null_block_before_header"),
+        // And before the requested size: the scan runs whole before the size is looked up, so the
+        // null block's fault wins over the unknown name's refusal.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [null],
+                "size": "huge",
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("null_block_before_unknown_size"),
+        // A null *list* is no list at all to the scan (`content ?? []`), so the header is the only
+        // check that fires: the header's sentence, where the walk would have faulted on the content.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": null,
+                "header": "Running header",
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a running header is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("header_before_null_content"),
+        // The same for the footer, and for the size: the scan and the size lookup both run before
+        // the walk reads the content list.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": null,
+                "footer": "Running footer",
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a running footer is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("footer_before_null_content"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": null,
+                "size": "huge",
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "unknown slide size \"huge\" — hint: use widescreen, standard or portrait",
+            )),
+        )
+        .named("unknown_size_before_null_content"),
+        // The scan finds the offending block but names the header first: the header's sentence.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "link", "url": "https://example.com" }],
+                "header": "Running header",
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a running header is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("header_before_word_only"),
+        // The footer is named after the header and before the block: the footer's sentence.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "link", "url": "https://example.com" }],
+                "footer": "Running footer",
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a running footer is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("footer_before_word_only"),
+        // The Word-only scan runs before the requested size is looked up: the block's sentence.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "link", "url": "https://example.com" }],
+                "size": "huge",
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a link block is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("word_only_before_unknown_size"),
+        // And before the walk reaches a heading's level: the block's sentence.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "link", "url": "https://example.com" },
+                    { "type": "heading", "level": 9, "text": "x" },
+                ],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a link block is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("word_only_before_heading_level"),
+        // The size is looked up before the walk: the size's sentence, not the level's.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": 9, "text": "x" }],
+                "size": "huge",
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "unknown slide size \"huge\" — hint: use widescreen, standard or portrait",
+            )),
+        )
+        .named("unknown_size_before_heading_level"),
+        // A heading's level is read before its text: the level's sentence, not the text's.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": 9, "text": 5 }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a heading's level must be 1, 2 or 3, got: 9",
+            )),
+        )
+        .named("heading_level_before_text"),
+        // The walk is in list order: the first block's paragraph text is refused before the second
+        // block's level is read.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "paragraph", "text": 5 },
+                    { "type": "heading", "level": 9, "text": "x" },
+                ],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains("a paragraph's text must be text")),
+        )
+        .named("first_block_text_before_second_level"),
+        // The Word-only scan stops at the first offending block, so a later null block is never
+        // read: the block's sentence, not the fault.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "link", "url": "https://example.com" },
+                    null,
+                ],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a link block is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("word_only_before_later_null_block"),
+        // A table's headers are read before its rows: the heading's sentence, not the row's fault.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "table", "headers": [null], "rows": "not rows" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a table heading must be text, a number or a boolean",
+            )),
+        )
+        .named("table_headers_before_rows"),
+        // Falsy headers produce no row and no refusal, so the fault is the rows': internal.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "table", "headers": [], "rows": "not rows" }],
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("table_falsy_headers_before_rows"),
+        // The walk is in list order here too: the first block's picture value faults (internal)
+        // before the second block's level would be refused (usage).
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "image", "image": 5 },
+                    { "type": "heading", "level": 9, "text": "x" },
+                ],
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("image_value_before_later_level"),
+        // The Word-only scan reads the content list before it reads the header, the footer or the
+        // size, so a content value that is not a list faults (internal) whatever else is wrong: the
+        // reference calls `.find` on it. Only a null or absent list is no list at all.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": "not a list",
+                "header": "Running header",
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("content_not_a_list_before_header"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": 5,
+                "footer": "Running footer",
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("content_not_a_list_before_footer"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": "not a list",
+                "size": "huge",
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("content_not_a_list_before_unknown_size"),
+        // The null block is found by the same scan that finds a Word-only block, and it faults
+        // before the footer is read, as it does before the header.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [null],
+                "footer": "Running footer",
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("null_block_before_footer"),
+        // The scan stops at the first block that offends, so a null block ahead of a Word-only one
+        // faults where the reverse order refuses. `word_only_before_later_null_block` is that order.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    null,
+                    { "type": "link", "url": "https://example.com" },
+                ],
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("null_block_before_later_word_only"),
+        // And before a block the walk would refuse: the scan runs whole before the walk reads
+        // anything, so the null block's fault wins over a later heading's out-of-range level.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    null,
+                    { "type": "heading", "level": 9, "text": "x" },
+                ],
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("null_block_before_later_level"),
+        // The header, the footer and a block's footnote are all read before the size is looked up:
+        // the scan is step 1 and the size step 2, so each refusal wins over an unknown name.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": 1, "text": "T" }],
+                "header": "Running header",
+                "size": "huge",
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a running header is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("header_before_unknown_size"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": 1, "text": "T" }],
+                "footer": "Running footer",
+                "size": "huge",
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a running footer is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("footer_before_unknown_size"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "paragraph", "text": "x", "footnote": "n" }],
+                "size": "huge",
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a paragraph's footnote is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("footnote_before_unknown_size"),
+        // And before the walk: the scan is step 1 and the walk step 3, so the header's refusal wins
+        // over a heading level the rules do not list.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": 9, "text": "T" }],
+                "header": "Running header",
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a running header is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("header_before_heading_level"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": 9, "text": "T" }],
+                "footer": "Running footer",
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a running footer is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("footer_before_heading_level"),
+        // A block's own footnote is refused after the header and the footer are named, so a header
+        // wins over the footnote the same request carries: measured, the reference prints the
+        // header's sentence.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "paragraph", "text": "P", "footnote": "n" }],
+                "header": "Running header",
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a running header is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("header_before_footnote_block"),
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "paragraph", "text": "P", "footnote": "n" }],
+                "footer": "Running footer",
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a running footer is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("footer_before_footnote_block"),
+        // A heading that carries a footnote is the block the scan stops on, and the sentence names
+        // the heading rather than a paragraph — measured against the reference, which prints "a
+        // heading block is a Word document's own" for this request.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "heading", "level": 9, "text": "T", "footnote": "n" }],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a heading block is a Word document's own, and pptx holds none",
+            )),
+        )
+        .named("footnote_before_heading_level"),
+        // The walk is in list order, and an earlier block's refusal wins over a later block's
+        // fault: the level is read before the picture is.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [
+                    { "type": "heading", "level": 9, "text": "T" },
+                    { "type": "image", "image": 5 },
+                ],
+                "output": "$out/refused.pptx",
+            }),
+            vec!["refused.pptx"],
+            Expect::Refused(Reason::contains(
+                "a heading's level must be 1, 2 or 3, got: 9",
+            )),
+        )
+        .named("heading_level_before_later_image_fault"),
+        // Within one block, the picture's own value is read before the side it states: a value that
+        // is not a path faults even when the width is wrong too.
+        declined(
+            Family::Pptx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "pptx",
+                "content": [{ "type": "image", "image": 5, "width": "wide" }],
+                "output": "$out/fault.pptx",
+            }),
+            vec!["fault.pptx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("image_value_before_size"),
     ]
 }
 

@@ -192,6 +192,13 @@ const FORMAT_NAMES: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "src/writing/pptx/create/complete.rs",
+        &[(
+            "title",
+            "the `<p:ph type=\"title\">` value a slide's title placeholder is matched by",
+        )],
+    ),
+    (
         "src/writing/pptx/text.rs",
         &[
             ("text", "the `text` value an edit names"),
@@ -314,16 +321,24 @@ const FORMAT_NAMES: &[(&str, &[(&str, &str)])] = &[
     ),
     (
         "src/writing/pdf/create.rs",
-        &[
-            (
-                "text",
-                "the `text` key a content block names, format knowledge rather than a printed word",
-            ),
-            (
-                "footnote",
-                "the `footnote` key a block carries, which the shared rules name as a peripheral part kind",
-            ),
-        ],
+        &[(
+            "text",
+            "the `text` key a content block names, format knowledge rather than a printed word",
+        )],
+    ),
+    (
+        "src/writing/create.rs",
+        &[(
+            "footnote",
+            "the `footnote` key a block carries, which the shared rules name as a peripheral part kind",
+        )],
+    ),
+    (
+        "src/writing/pptx/create/mod.rs",
+        &[(
+            "text",
+            "the `text` key a content block names, format knowledge rather than a printed word",
+        )],
     ),
     (
         "src/writing/pdf/page.rs",
@@ -484,22 +499,24 @@ fn marks_for(path: &Path) -> Vec<String> {
 const SPEC_CONSTANTS: &[(&str, f64, usize, &str)] = &[
     // ── the presentation edit's geometry ────────────────────────────────────────────────────────
     (
-        "src/writing/pptx/draw.rs",
+        "src/writing/pptx/mod.rs",
         100.0,
         1,
-        "DrawingML states a text size in hundredths of a point, not a bound the vocabulary names",
+        "DrawingML states a text size in hundredths of a point, not a bound the vocabulary names: \
+         the edit path's title and table and the created deck's runs each convert with it",
+    ),
+    (
+        "src/writing/pptx/mod.rs",
+        256.0,
+        1,
+        "the lowest `<p:sldId>` id a real deck uses, which a created deck's first slide takes and \
+         an entry the edit path adds steps past; not a bound",
     ),
     (
         "src/writing/pptx/draw.rs",
         3.0,
         1,
         "the shape id the body placeholder of a generated slide takes, after the group's own id 1",
-    ),
-    (
-        "src/writing/pptx/mod.rs",
-        255.0,
-        1,
-        "the lowest `<p:sldId>` id a real deck uses, which a new entry steps past; not a bound",
     ),
     (
         "src/writing/pptx/text.rs",
@@ -765,6 +782,54 @@ const SPEC_CONSTANTS: &[(&str, f64, usize, &str)] = &[
         1,
         "a table rule's thickness, in points",
     ),
+    // ── the created deck's own geometry ─────────────────────────────────────────────────────────
+    (
+        "src/writing/pptx/create/mod.rs",
+        0.5,
+        4,
+        "the half-inch a list item and a mid-deck heading each take of the flow, in inches on the \
+         reference deck: the reference's own layout, not a bound the vocabulary states",
+    ),
+    (
+        "src/writing/pptx/create/mod.rs",
+        16.0,
+        2,
+        "a paragraph's and a list's point size, which the reference states; not the reading's \
+         shortest page text",
+    ),
+    (
+        "src/writing/pptx/create/mod.rs",
+        100.0,
+        1,
+        "the length at which the pinned library takes a measurement to be EMU already, in inches: \
+         the library's own threshold, not a bound the vocabulary states",
+    ),
+    (
+        "src/writing/pptx/create/complete.rs",
+        3.0,
+        1,
+        "the third capture of the heading-variant pattern, which is the close tag's kind",
+    ),
+    (
+        "src/writing/pptx/create/parts.rs",
+        10.0,
+        1,
+        "the nine levels of a presentation's default text style, counted one past the last",
+    ),
+    (
+        "src/writing/pptx/create/parts.rs",
+        3.0,
+        2,
+        "the presentation relationships' first free id after the master and the slides, and the \
+         three fixed parts its vector's size counts above the titles",
+    ),
+    (
+        "src/writing/pptx/create/parts.rs",
+        4.0,
+        1,
+        "the presentation relationships' first free id after the master, the slides and the notes \
+         master",
+    ),
     (
         "src/writing/pdf/mod.rs",
         4.0,
@@ -779,34 +844,34 @@ const SPEC_CONSTANTS: &[(&str, f64, usize, &str)] = &[
          of a page box's four corners; not a scale",
     ),
     (
-        "src/writing/pdf/date.rs",
+        "src/writing/date.rs",
         3.0,
         1,
         "the three months the algorithm adds to a March-based month to reach the civil month from \
          March on",
     ),
     (
-        "src/writing/pdf/date.rs",
+        "src/writing/date.rs",
         4.0,
         1,
         "the leap year every fourth year in the algorithm's day-of-year correction",
     ),
     (
-        "src/writing/pdf/date.rs",
+        "src/writing/date.rs",
         9.0,
         1,
         "the nine months the algorithm subtracts for January and February, which belong to the year \
          before its March-based one",
     ),
     (
-        "src/writing/pdf/date.rs",
+        "src/writing/date.rs",
         10.0,
         1,
         "the ten March-based months from March to December, after which the month is January or \
          February",
     ),
     (
-        "src/writing/pdf/date.rs",
+        "src/writing/date.rs",
         100.0,
         1,
         "the century correction in the algorithm's day-of-year count, a century not being a leap year",

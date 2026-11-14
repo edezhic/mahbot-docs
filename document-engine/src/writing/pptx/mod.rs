@@ -1,12 +1,18 @@
-//! The PresentationML edit port: `pptx_edit`, one sub-operation at a time.
+//! The PresentationML half of the writer: the edit port `pptx_edit`, one sub-operation at a time,
+//! and `create`'s presentation family in [`create`].
 //!
-//! This is the kit's `pptx_edit` arm, carried across function for function so the two can be read
-//! side by side: [`edit`] is `pptxEdit`, and this module holds the deck's own machinery — the slide
-//! list the reader numbers and the slide a position addresses (`slide_parts`, `addressed_slide`,
-//! `numbered_slide_list`), the slides a call adds, removes, moves and copies (`add_slide`,
-//! `delete_slide`, `move_slide`, `duplicate_slide`) and the speaker notes (`related_part`,
-//! `add_slide_notes`, `create_notes_part`, `notes_text_body`). [`text`] carries the five slide-text
-//! operations and [`draw`] the slide, picture and table a call writes.
+//! The edit is the kit's `pptx_edit` arm, carried across function for function so the two can be
+//! read side by side: [`edit`] is `pptxEdit`, and this module holds the deck's own machinery — the
+//! slide list the reader numbers and the slide a position addresses (`slide_parts`,
+//! `addressed_slide`, `numbered_slide_list`), the slides a call adds, removes, moves and copies
+//! (`add_slide`, `delete_slide`, `move_slide`, `duplicate_slide`) and the speaker notes
+//! (`related_part`, `add_slide_notes`, `create_notes_part`, `notes_text_body`). [`text`] carries the
+//! five slide-text operations and [`draw`] the slide, picture and table a call writes.
+//!
+//! The constants below are the ones both writers state — the EMU in an inch, the hundredths of a
+//! point a text size is given in, a table cell's points, the first `<p:sldId>` id a deck uses, the
+//! run language and the relationship base — so they are declared here once rather than in either
+//! path.
 //!
 //! A slide is addressed by its 1-based position in the deck's own order — the order the kit's own
 //! resolution produces, which is the reading's in the ordinary case. Moving, duplicating and placing
@@ -18,8 +24,14 @@
 //! diagram or a media file the edit never mentions is carried into the produced file — which is why
 //! a deleted slide's chart and media stay behind, and a copied slide shares them with its source.
 
+mod create;
 mod draw;
 mod text;
+
+/// The part names a created deck's captured table holds, for the harness's parts test.
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) use create::captured_parts;
+pub(crate) use create::create;
 
 use std::cell::OnceCell;
 use std::collections::HashMap;
@@ -36,10 +48,10 @@ use crate::operation::Failure;
 use crate::vocabulary::vocabulary;
 
 /// The presentation part every slide, notes part and content type is reached through.
-const PRESENTATION: &str = "ppt/presentation.xml";
+pub(super) const PRESENTATION: &str = "ppt/presentation.xml";
 
 /// The presentation's own relationship list.
-const PRESENTATION_RELS: &str = "ppt/_rels/presentation.xml.rels";
+pub(super) const PRESENTATION_RELS: &str = "ppt/_rels/presentation.xml.rels";
 
 /// The directory a relationship of the presentation resolves against.
 const PPT_BASE: &str = "ppt/";
@@ -60,7 +72,25 @@ const NOTES_CONTENT_TYPE: &str =
     "application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml";
 
 /// The base of every relationship type these parts are wired with.
-const REL_BASE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
+pub(super) const REL_BASE: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
+/// The run language of a slide this engine writes. A placeholder inherits its type, size and
+/// bullets from the layout, so nothing else about it is stated.
+pub(super) const SLIDE_LANG: &str = "en-US";
+
+/// The EMU in an inch, the unit a slide's measurements and a shape's frame are stated in. The edit
+/// and create paths both convert with it, so it is stated once.
+pub(super) const EMU_PER_INCH: f64 = 914_400.0;
+
+/// The hundredths of a point DrawingML states a text size in, stated once for both writers.
+pub(super) const HUNDREDTHS: f64 = 100.0;
+
+/// The size a table's cells state, in points: the library's own default, which both writers state.
+pub(super) const TABLE_TEXT_POINTS: f64 = 14.0;
+
+/// The lowest `<p:sldId>` id a real deck uses: the id a created deck's first slide takes, and the
+/// floor an entry the edit path adds steps past. Stated once for both.
+pub(super) const FIRST_SLIDE_ID: u64 = 256;
 
 /// The size a presentation stating no `<p:sldSz>` is read at, in EMU: the 10in × 7½in one
 /// MS-OI29500 Part 1 §19.2.1.39 states PowerPoint assumes. It is not the size a created deck gets
@@ -368,8 +398,8 @@ fn notes_master_part(editor: &Editor) -> Option<String> {
     opc::first_part_name(&editor.part_names(), &format!("{NOTES_MASTERS}notesMaster"))
 }
 
-/// The next free `<p:sldId id>`: one past the largest the presentation uses, and never below 256,
-/// the value real decks start at.
+/// The next free `<p:sldId id>`: one past the largest the presentation uses, and never below the id
+/// a real deck starts at.
 fn next_sld_id(editor: &Editor) -> u64 {
     let used = editor.peek(PRESENTATION).map_or(0, |presentation| {
         SLD_ID_NUMBER
@@ -379,7 +409,7 @@ fn next_sld_id(editor: &Editor) -> u64 {
             .max()
             .unwrap_or(0)
     });
-    used.max(255).saturating_add(1)
+    used.saturating_add(1).max(FIRST_SLIDE_ID)
 }
 
 /// The presentation part with a `<p:sldId>` for `element` inserted into its `<p:sldIdLst>` as its

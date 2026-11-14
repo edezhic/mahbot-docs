@@ -852,6 +852,12 @@
         "writing"
       ]
     },
+    "create_unknown_size": {
+      "text": "unknown slide size {size} — hint: use {sizes}",
+      "printed_by": [
+        "writing"
+      ]
+    },
     "create_word_only": {
       "text": "{feature} is a Word document's own, and {format} holds none",
       "printed_by": [

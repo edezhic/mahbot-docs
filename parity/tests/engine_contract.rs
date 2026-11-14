@@ -454,3 +454,32 @@ fn the_identities_record_the_codec_versions() {
         }
     }
 }
+
+/// The crate's build identity covers the parts a created deck is captured from: a captured byte is
+/// a byte the writer produces, so a re-captured part must move the identity rather than pass as the
+/// same build. The licence notices beside the parts are not parts, so they stay out of it.
+#[test]
+fn the_crate_identity_covers_the_captured_parts() {
+    use document_parity::engine::Reader as _;
+
+    let identity = document_parity::reference::CrateReader.identity();
+    let parts = document_engine::test_support::pptx_captured_parts();
+    assert!(
+        !parts.is_empty(),
+        "a created deck captures the parts it shares"
+    );
+    for name in parts {
+        assert!(
+            identity
+                .components
+                .contains_key(&format!("pptx-create:{name}")),
+            "the crate's identity does not cover the captured part `{name}`"
+        );
+    }
+    for notice in document_parity::notices::NOTICES {
+        assert!(
+            !identity.components.keys().any(|key| key.ends_with(notice)),
+            "a licence notice is not a part a deck holds: `{notice}`"
+        );
+    }
+}

@@ -1217,7 +1217,7 @@ pub const UNPRODUCIBLE: &[Unproducible] = &[
         marks: &["reason_old_office_version"],
     },
     Unproducible {
-        reason: "the engine prints it when its own code panics inside a contained region, and the writing half also prints it where the reference faults on a request's malformed shape — a content list that is absent, null or not a list, a null block, a list block with no items, an image that is not a path, a null description on a fresh-document path — which no synthesized document can make a reader do; only a defect or one of those shapes raises it.",
+        reason: "the engine prints it when its own code panics inside a contained region, and the writing half also prints it where the reference faults on a request's malformed shape — a content list that is absent, null or not a list, a null block, an image that is not a path, a null description on a fresh-document path. No recorded transcript prints it: a synthesized document cannot make a reader do any of that, and a writing case that expects a fault records the whole reason as the recorder's placeholder rather than the sentence. Only a defect raises it.",
         marks: &["engine_failed"],
     },
     Unproducible {
@@ -1960,6 +1960,11 @@ pub const WRITING_WITNESSES: &[WritingWitness] = &[
         witness: "a heading's level must be 1, 2 or 3, got: 9",
     },
     WritingWitness {
+        mark: "create_unknown_size",
+        case: "pptx/create@size_unknown",
+        witness: "unknown slide size \"huge\" — hint: use widescreen, standard or portrait",
+    },
+    WritingWitness {
         mark: "edit_text_not_text",
         case: "pdf/create@heading_text_number",
         witness: "a heading's text must be text",
@@ -2494,7 +2499,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         ],
     },
     Unreached {
-        reason: "a JPEG or a WebP label: every picture a case hands the writer whose bytes it cannot read is a PNG — the truncated one included, because a truncated JPEG or WebP would witness the label this reason covers rather than the refusal the case is for",
+        reason: "a JPEG or a WebP label, which the engine prints for a picture whose bytes it cannot sniff: the corpus's WebP picture is a whole one, so it reads and prints no label, and every picture a case hands the writer whose bytes it cannot read is a PNG — the truncated one included, because a truncated JPEG or WebP would witness the label this reason covers rather than the refusal the case is for",
         marks: &["edit_image_label_jpeg", "edit_image_label_webp"],
     },
     Unreached {
@@ -2636,7 +2641,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         marks: &["surface_merge_bytes_too_many"],
     },
     Unreached {
-        reason: "printed only for the four (operation, family) pairs the writing half does not carry out — every family of create but PDF, and the workbook family of fill_template; the recorded reference carries every one of them out, so no recorded answer prints it",
+        reason: "printed only for an accepted (operation, family) pair the writing half does not carry out — today create's Word and workbook families and fill_template's workbook family; the recorded reference carries every one of them out, so no recorded answer prints it",
         marks: &["reason_not_carried_out"],
     },
     Unreached {

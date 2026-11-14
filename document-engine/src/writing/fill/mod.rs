@@ -120,8 +120,8 @@ fn run(request: &Request, family: Family, output: &Path) -> Result<(Vec<String>,
         &mut answer,
     )?;
     fill_presenter_notes(&mut filled, selection.config.family, &scope, &mut answer);
-    let written = package::write_package(&filled).map_err(|message| {
-        Failure::internal(marks.format(FILL_WRITE_FAILED, &[("message", &message)]))
+    let written = package::write_package(&filled).map_err(|failure| {
+        Failure::internal(marks.format(FILL_WRITE_FAILED, &[("message", &failure.to_string())]))
     })?;
     write_new(output, &written, FILL_WRITE_FAILED)?;
     Ok((answer.missing, answer.tags.len()))

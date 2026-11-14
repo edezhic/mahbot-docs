@@ -1,0 +1,6 @@
+# A created deck's captured parts are stored and written exactly as the reference produced them, and
+# their line endings differ part by part, so each must keep its own bytes (the crate's
+# `writing/pptx/create/parts.rs` records the measured mix). The rule is scoped to that directory
+# alone — a blanket setting would also rewrite `assets/docgen/document-kit.js`, whose digest is part
+# of the reference writer's identity.
+/document-engine/assets/pptx-create/** -text

@@ -23,48 +23,47 @@ use super::super::text::{Markup, TagSpan, tag_spans};
 use super::super::{
     Editor, in_span, js_number, js_round, js_trim, opc, scalar_text, span_bounds, stringified, xml,
 };
-use super::{MEDIA, REL_BASE, SLIDES, addressed_slide, slide_size};
+use super::{
+    EMU_PER_INCH, HUNDREDTHS, MEDIA, REL_BASE, SLIDE_LANG, SLIDES, TABLE_TEXT_POINTS,
+    addressed_slide, slide_size,
+};
 use crate::operation::Failure;
 use crate::vocabulary::{
     pptx_default_size, slide_position_fraction, slide_size_fraction, vocabulary,
 };
 
-/// The run language of a slide this engine writes; a placeholder inherits its type, size and
-/// bullets from the layout, so nothing else about it is stated here.
-pub(super) const SLIDE_LANG: &str = "en-US";
+/// The name the writer gives a slide's title shape.
+pub(super) const TITLE_SHAPE: &str = "Title";
 
-/// The shape a created deck names its title, and the placeholder that declares it the slide's title.
-const TITLE_SHAPE: &str = "Title";
-const TITLE_PLACEHOLDER: &str = "<p:ph type=\"title\"/>";
+/// The placeholder that declares that shape the slide's title. A created deck's title states the
+/// same placeholder inside its own `<p:nvPr>`, so it is stated once here.
+pub(super) const TITLE_PLACEHOLDER: &str = "<p:ph type=\"title\"/>";
 
 /// The title's frame on the 16:9 deck every self-placed measurement was drawn on, in inches, and
 /// the points, colour and fonts a title states there. A created deck's opening block and a slide
 /// this port adds state the same ones.
-const TITLE_INCHES: (f64, f64, f64, f64) = (0.4, 0.3, 9.2, 0.8);
-const TITLE_POINTS: i64 = 28;
-const TITLE_COLOR: &str = "000000";
+pub(super) const TITLE_INCHES: (f64, f64, f64, f64) = (0.4, 0.3, 9.2, 0.8);
+pub(super) const TITLE_POINTS: f64 = 28.0;
+/// The library's default font colour, which it writes for a run the caller gave no colour: the
+/// title's run in the edit path and every run a created deck writes state it.
+pub(super) const FONT_COLOR: &str = "000000";
 const TITLE_ALIGNMENT: &str = "l";
-const TITLE_FONTS: &str =
+pub(super) const TITLE_FONTS: &str =
     "<a:latin typeface=\"+mn-lt\"/><a:ea typeface=\"+mn-ea\"/><a:cs typeface=\"+mn-cs\"/>";
 
 /// The width of the flow a created deck's blocks take: the title's own, so the flow and the title
 /// stay aligned.
-const BODY_WIDTH_INCHES: f64 = TITLE_INCHES.2;
+pub(super) const BODY_WIDTH_INCHES: f64 = TITLE_INCHES.2;
 
-/// The text a table's cells carry, in points, and the row heights its own text needs: one line at
-/// 1.2 leading plus DrawingML's default cell insets, the row a table placed into a slide takes (a
-/// fifth taller than that shortest row), and the shortest row a slide may hold.
-const TABLE_TEXT_POINTS: i64 = 14;
+/// The row heights a table's own text needs: one line at 1.2 leading plus DrawingML's default cell
+/// insets, the row a table placed into a slide takes (a fifth taller than that shortest row), and
+/// the shortest row a slide may hold.
 const TABLE_LINE_EMU: i64 = 213_360;
 const TABLE_MIN_ROW_EMU: i64 = TABLE_LINE_EMU + 2 * 45_720;
 const TABLE_ROW_EMU: i64 = TABLE_MIN_ROW_EMU + TABLE_MIN_ROW_EMU / 5;
 
 /// The `graphicData` URI a DrawingML table is held under in a slide.
 const TABLE_GRAPHIC_URI: &str = "http://schemas.openxmlformats.org/drawingml/2006/table";
-
-/// EMU in an inch, and the hundredths of a point DrawingML states a text size in.
-const EMU_PER_INCH: f64 = 914_400.0;
-const HUNDREDTHS: i64 = 100;
 
 /// The shape id the body placeholder a generated slide carries takes, after the group's own id.
 const BODY_SHAPE_ID: u64 = 3;
@@ -159,11 +158,16 @@ fn titled_text(title: Option<&str>) -> Option<&str> {
     title.filter(|text| !js_trim(text).is_empty())
 }
 
-/// The title a generated slide opens with: the shape a created deck's opening block is declared in,
-/// written out in full — the frame, the vertical centring, the left alignment and the run's size,
-/// weight, colour and fonts. A slide named into an existing deck has no layout of this engine's to
-/// inherit them from, and a title that states neither its frame nor its formatting is drawn as a
-/// broken one.
+/// The title a generated slide opens with: the frame, the vertical centring, the left alignment and
+/// the run's size, weight, colour and fonts, written out in full. A slide named into an existing deck
+/// has no layout of this engine's to inherit them from, and a title that states neither its frame nor
+/// its formatting is drawn as a broken one.
+///
+/// A *created* deck's opening block is not this shape: the library that writes a created slide
+/// states `<p:cNvSpPr/>` where this states the lock, and the create arm carries the library's own
+/// serialiser (see `create::shapes`). What the two share is the frame, the points, the colour, the
+/// fonts, the title's name and placeholder, and the flow's own width, which is why the constants
+/// above live here.
 fn title_shape(text: &str, slide: Slide) -> String {
     let (x, y, w, h) = title_frame_emu(slide);
     format!(
@@ -186,8 +190,8 @@ fn title_shape(text: &str, slide: Slide) -> String {
         h = js_number(h),
         align = TITLE_ALIGNMENT,
         lang = SLIDE_LANG,
-        size = TITLE_POINTS * HUNDREDTHS,
-        color = TITLE_COLOR,
+        size = js_number(TITLE_POINTS * HUNDREDTHS),
+        color = FONT_COLOR,
         fonts = TITLE_FONTS,
         text = Markup::Drawing.text_element(&xml::xml_escape(text)),
     )

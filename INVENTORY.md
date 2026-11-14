@@ -103,8 +103,14 @@ name through with the content it had: `xlsx_edit` — the workbook edit, all fou
 carried out end to end. `mod.rs` holds the `Editor`, `package.rs` the archive, `xml.rs` the string
 surgery, `opc.rs` the packaging conventions every family's edit shares, `image.rs` the picture a
 placement embeds, `text.rs` the paragraph machinery the Word and presentation edits share, `xlsx/`
-the workbook port, `docx/` the Word port and `pptx/` the presentation port (its slide text, and the
-slide, picture and table it writes).
+the workbook port, `docx/` the Word port and `pptx/` the presentation port (its slide text, the
+slide, picture and table it writes, and — under `pptx/create/` — the deck a created presentation is
+built from: the content walk, the pinned writer library's own serialiser transliterated, the package
+around it, and the post-pass that declares titles and corrects the application properties). A
+created deck's invariant parts are not hand-written: they are captured from the reference's own
+output into `assets/pptx-create/`, mirroring the archive's paths, and written exactly as captured.
+`parity/src/bin/capture-pptx-parts.rs` regenerates them and `parity/tests/pptx_create_parts.rs`
+proves the shipped copies are the reference's bytes.
 
 For a PDF, `src/writing/pdf/` is the object model the page actions build on (`lopdf`, which the
 crate's lockfile already resolved through `pdf-extract`): a page is deep-copied between documents
@@ -123,18 +129,20 @@ are carried out end to end — `pdf_merge` and `pdf_split` build a fresh documen
 else the file holds, `pdf_text`, `pdf_image` and `pdf_form_fill` draw text, a placed picture or a
 filled form into the pages they name, with one embedded general-text font subset to the glyphs the
 call draws, and `create` makes a new PDF from one ordered content list — one page per picture when
-the list is pictures alone, a text column otherwise. `create` answers the vocabulary's
-`reason_not_carried_out` for its Word, workbook and presentation families, and `fill_template` for
-the workbook family, until their ports land; the Word and presentation fills are carried out. The
-engine states which (operation, family) pairs it carries out as data, and the dispatch reads that
-statement and nothing else.
+the list is pictures alone, a text column otherwise — or a PowerPoint deck from the same kind of
+list, laid out down a slide's flow and written through the pinned presentation library's own
+serialiser. `create` answers the vocabulary's `reason_not_carried_out` for its Word and workbook
+families, and `fill_template` for the workbook family, until their ports land; the Word and
+presentation fills are carried out. The engine states which (operation, family) pairs it carries out
+as data, and the dispatch reads that statement and nothing else.
 
 Every sentence the engine prints — an edit's refusals, notes and losses, a template fill's own
 refusals and the sentences of the library it ports, the request surface's own shape refusals, a PDF
 action's refusals and its notes, a page-render refusal and the panic fallback — is a vocabulary mark
-(`edit_*`, `fill_*`, `surface_*`, `write_*`, `pdf_page_*`, `pdf_text_*`, `pdf_image_*`, `pdf_form_*`,
-`note_*`, `render_*`, `engine_failed`), not a sentence in code, and `src/test_support/coverage.rs`
-records every writing mark as witnessed by a corpus case or as unreached with its reason.
+(`edit_*`, `fill_*`, `create_*`, `surface_*`, `write_*`, `pdf_page_*`, `pdf_text_*`, `pdf_image_*`,
+`pdf_form_*`, `note_*`, `render_*`, `engine_failed`), not a sentence in code, and
+`src/test_support/coverage.rs` records every writing mark as witnessed by a corpus case or as
+unreached with its reason.
 
 The document builders live in the crate's `test_support`, the one home shared by the crate's tests
 and the harness. `tests/standalone.rs` builds and tests the crate in a temporary copy with no
@@ -146,6 +154,14 @@ enforces each bound, and the restatement scan's reviewed lists and blind spots.
 face; the harness copies its sources rather than linking them, so nothing in this workspace can
 rewrite the product's. The four kit sources are unchanged, so the committed bundle's provenance
 hash still holds.
+
+The crate's own asset directory holds two things: the face, and `pptx-create/` — the parts a created
+deck does not vary in, captured from the reference's own output and written exactly as captured
+(their line endings differ part by part, so the root `.gitattributes` pins them with a rule scoped
+to that directory alone rather than a blanket setting, which would rewrite the committed bundle and
+break the provenance hash). `pptxgenjs-LICENSE.txt` sits beside them: the parts are the output of
+`pptxgenjs` 4.0.1, which ships under the MIT licence, and they are captured output rather than
+hand-written source.
 
 ## Two traps when moving this code
 
