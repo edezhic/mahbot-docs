@@ -146,10 +146,10 @@ document is the pinned writer library's serialiser transliterated — its body w
 table of contents field — and the page numbers its contents entries and its page-count token show are
 the library's own layout pass, ported module for module under `docx/layout/`: the measurer over the
 width tables shipped as data, the line breaker, the paginator, and the passes that settle the numbers.
-`create` carries out all four families, and `fill_template` the Word and presentation fills; only the
-workbook family of `fill_template` still answers the vocabulary's `reason_not_carried_out`. The
-engine states which (operation, family) pairs it carries out as data, and the dispatch reads that
-statement and nothing else.
+`create` carries out all four families, and `fill_template` all three of its OOXML families — a
+Word or presentation sample through the template library, a workbook through the kit's own
+cell-wise filler. The engine states which (operation, family) pairs it carries out as data, and the
+dispatch reads that statement and nothing else.
 
 Every sentence the engine prints — an edit's refusals, notes and losses, a template fill's own
 refusals and the sentences of the library it ports, the request surface's own shape refusals, a PDF

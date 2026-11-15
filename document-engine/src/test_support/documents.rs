@@ -742,6 +742,99 @@ pub const FILL_SLIDE_ONLY_PPTX: Document = Document {
     build: build::pptx_fill_slide_only,
 };
 
+/// A workbook whose strings live in the shared table, and whose cells hold every shape a workbook
+/// fill tells apart.
+pub const FILL_STRINGS_XLSX: Document = Document {
+    name: "fill-strings.xlsx",
+    build: build::xlsx_fill_strings,
+};
+
+/// A workbook whose one worksheet part is not named `sheet<digits>.xml`.
+pub const FILL_ODD_SHEETS_XLSX: Document = Document {
+    name: "fill-odd.xlsx",
+    build: build::xlsx_fill_odd_sheets,
+};
+
+/// A two-sheet workbook whose archive holds the second sheet first.
+pub const FILL_ORDER_XLSX: Document = Document {
+    name: "fill-order.xlsx",
+    build: build::xlsx_fill_order,
+};
+
+/// A workbook whose archive holds two records for one worksheet part.
+pub const FILL_DUPLICATE_XLSX: Document = Document {
+    name: "fill-duplicate.xlsx",
+    build: build::xlsx_fill_duplicate,
+};
+
+/// A workbook with no `[Content_Types].xml` part.
+pub const FILL_NO_CONTENT_TYPES_XLSX: Document = Document {
+    name: "fill-no-content-types.xlsx",
+    build: build::xlsx_fill_no_content_types,
+};
+
+/// A workbook whose two cells name the indexes of an array or string value map.
+pub const FILL_NUMBERED_XLSX: Document = Document {
+    name: "fill-numbered.xlsx",
+    build: build::xlsx_fill_numbered,
+};
+
+/// A workbook whose second row states a row number no `u32` holds, followed by a row that states
+/// none.
+pub const FILL_TOP_ROW_XLSX: Document = Document {
+    name: "fill-top-row.xlsx",
+    build: build::xlsx_fill_top_row,
+};
+
+/// A workbook whose one cell is a whole-cell placeholder for a number.
+pub const FILL_NUMBER_XLSX: Document = Document {
+    name: "fill-number.xlsx",
+    build: build::xlsx_fill_number,
+};
+
+/// A macro-enabled workbook, named as a macro-enabled workbook.
+pub const FILL_MACRO_XLSX: Document = Document {
+    name: "fill-macro.xlsm",
+    build: build::xlsx_fill_macro,
+};
+
+/// The macro-enabled workbook under an ordinary `.xlsx` name: the content types are the package's,
+/// the name is the caller's, and the fill reads neither as the family.
+pub const FILL_MACRO_PLAIN_XLSX: Document = Document {
+    name: "fill-macro-plain.xlsx",
+    build: build::xlsx_fill_macro,
+};
+
+/// A workbook carrying a signature part beside its placeholder.
+pub const FILL_SIGNED_XLSX: Document = Document {
+    name: "fill-signed.xlsx",
+    build: build::xlsx_fill_signed,
+};
+
+/// A workbook whose main part is declared as a template's type under a workbook's name.
+pub const FILL_TEMPLATE_TYPE_XLSX: Document = Document {
+    name: "fill-template.xlsx",
+    build: build::xlsx_fill_template_type,
+};
+
+/// A real Word package under a `.xlsx` name.
+pub const FILL_WORD_AS_XLSX: Document = Document {
+    name: "fill-word.xlsx",
+    build: build::docx_template,
+};
+
+/// A file named as a workbook whose bytes are not a ZIP.
+pub const FILL_UNREADABLE_XLSX: Document = Document {
+    name: "fill-unreadable.xlsx",
+    build: build::docx_fill_unreadable,
+};
+
+/// A workbook holding no placeholder at all.
+pub const FILL_ZERO_XLSX: Document = Document {
+    name: "fill-zero.xlsx",
+    build: build::xlsx_basic,
+};
+
 /// The PDF: two A4 pages, each drawing its own line.
 pub const BASIC_PDF: Document = Document {
     name: "basic.pdf",
@@ -1628,6 +1721,21 @@ pub fn writer_documents() -> Vec<Document> {
         FILL_NOTES_PPTX,
         FILL_MACRO_PPTM,
         FILL_SLIDE_ONLY_PPTX,
+        FILL_STRINGS_XLSX,
+        FILL_ODD_SHEETS_XLSX,
+        FILL_ORDER_XLSX,
+        FILL_DUPLICATE_XLSX,
+        FILL_NO_CONTENT_TYPES_XLSX,
+        FILL_NUMBERED_XLSX,
+        FILL_TOP_ROW_XLSX,
+        FILL_NUMBER_XLSX,
+        FILL_MACRO_XLSX,
+        FILL_MACRO_PLAIN_XLSX,
+        FILL_SIGNED_XLSX,
+        FILL_TEMPLATE_TYPE_XLSX,
+        FILL_WORD_AS_XLSX,
+        FILL_UNREADABLE_XLSX,
+        FILL_ZERO_XLSX,
         PICTURE_OVERSIZE,
     ]
 }

@@ -1,6 +1,6 @@
 {
   "note": "Recorded from the reference engine by `cargo run --bin record-baseline`. The harness never rewrites this file: recording is a deliberate act.",
-  "recorded_at_unix": 1794719358,
+  "recorded_at_unix": 1794747060,
   "writer": {
     "engine": "reference-writer",
     "build": "8718d0113496f4521535de222eb9b236ad719e14e9fedeb8b30daa07e9e2e86a",
@@ -276289,6 +276289,151 @@
       "status": "refused",
       "class": "usage",
       "reason": "form field \"button\" cannot take a value — it is not a fillable field; this document has: no fillable fields"
+    },
+    "pdf/pdf_form_fill/values@list": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "the value for \"0\" must be text, a number or a boolean, not a structure"
+    },
+    "pdf/pdf_form_fill/values@no_values": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
+    "pdf/pdf_form_fill/values@scalar": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [],
+                "kind": "text",
+                "name": "name",
+                "options": [],
+                "state": null,
+                "value": null
+              },
+              {
+                "appearance": [],
+                "kind": "checkbox",
+                "name": "agree",
+                "options": [],
+                "state": "Off",
+                "value": "Off"
+              },
+              {
+                "appearance": [],
+                "kind": "radio",
+                "name": "choice",
+                "options": [],
+                "state": "Off",
+                "value": "Off"
+              },
+              {
+                "appearance": [
+                  "red"
+                ],
+                "kind": "choice",
+                "name": "colour",
+                "options": [
+                  "red",
+                  "green",
+                  "blue"
+                ],
+                "state": null,
+                "value": "red"
+              }
+            ]
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    700.0,
+                    272.0,
+                    724.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    660.0,
+                    86.0,
+                    674.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    620.0,
+                    86.0,
+                    634.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    600.0,
+                    86.0,
+                    614.0
+                  ],
+                  "subtype": "Widget"
+                },
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    560.0,
+                    220.0,
+                    584.0
+                  ],
+                  "subtype": "Widget"
+                }
+              ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A form with one field of each kind"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/values@string": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "no such form field: 0; this document has: name (text), agree (checkbox), choice (radio; options: one, two), colour (choice; options: red, green, blue)"
     },
     "pdf/pdf_image": {
       "status": "produced",
@@ -730863,6 +731008,3680 @@
                                     "children": [
                                       {
                                         "text": "Minsk"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      }
+                    ],
+                    "name": "sheetData"
+                  }
+                ],
+                "name": "worksheet"
+              }
+            }
+          }
+        }
+      }
+    },
+    "xlsx/fill_template@duplicate_part": {
+      "status": "produced",
+      "placeholders": 1,
+      "outputs": {
+        "filled.xlsx": {
+          "format": "xlsx",
+          "parts": {
+            "[Content_Types].xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/package/2006/content-types"
+                },
+                "children": [
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                      "PartName": "/xl/workbook.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+                      "PartName": "/xl/worksheets/sheet1.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-package.relationships+xml",
+                      "Extension": "rels"
+                    },
+                    "name": "Default"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/xml",
+                      "Extension": "xml"
+                    },
+                    "name": "Default"
+                  }
+                ],
+                "name": "Types"
+              }
+            },
+            "_rels/.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/workbook.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/_rels/workbook.xml.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/worksheets/sheet1.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/workbook.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+                  "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "name": "People",
+                          "r:id": "rel(http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet|xl/worksheets/sheet1.xml)",
+                          "sheetId": "1"
+                        },
+                        "name": "sheet"
+                      }
+                    ],
+                    "name": "sheets"
+                  }
+                ],
+                "name": "workbook"
+              }
+            },
+            "xl/worksheets/sheet1.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "r": "1"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A1",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "attrs": {
+                                      "xml:space": "preserve"
+                                    },
+                                    "children": [
+                                      {
+                                        "text": "A"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      }
+                    ],
+                    "name": "sheetData"
+                  }
+                ],
+                "name": "worksheet"
+              }
+            }
+          }
+        }
+      }
+    },
+    "xlsx/fill_template@fill_strings": {
+      "status": "produced",
+      "missing": [
+        "wholeAbsent",
+        "#sec",
+        "/sec",
+        "absentPartial"
+      ],
+      "placeholders": 16,
+      "outputs": {
+        "filled.xlsx": {
+          "format": "xlsx",
+          "parts": {
+            "[Content_Types].xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/package/2006/content-types"
+                },
+                "children": [
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml",
+                      "PartName": "/xl/sharedStrings.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                      "PartName": "/xl/workbook.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+                      "PartName": "/xl/worksheets/sheet1.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-package.relationships+xml",
+                      "Extension": "rels"
+                    },
+                    "name": "Default"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/xml",
+                      "Extension": "xml"
+                    },
+                    "name": "Default"
+                  }
+                ],
+                "name": "Types"
+              }
+            },
+            "_rels/.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/workbook.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/_rels/workbook.xml.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/sharedStrings.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings"
+                    },
+                    "name": "Relationship"
+                  },
+                  {
+                    "attrs": {
+                      "Target": "xl/worksheets/sheet1.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/sharedStrings.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "count": "99",
+                  "uniqueCount": "99",
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "xml:space": "preserve"
+                        },
+                        "children": [
+                          {
+                            "text": "Whole"
+                          }
+                        ],
+                        "name": "t"
+                      }
+                    ],
+                    "name": "si"
+                  },
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "xml:space": "preserve"
+                        },
+                        "children": [
+                          {
+                            "text": "true"
+                          }
+                        ],
+                        "name": "t"
+                      }
+                    ],
+                    "name": "si"
+                  },
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "xml:space": "preserve"
+                        },
+                        "children": [
+                          {
+                            "text": "42"
+                          }
+                        ],
+                        "name": "t"
+                      }
+                    ],
+                    "name": "si"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "attrs": {
+                              "xml:space": "preserve"
+                            },
+                            "children": [
+                              {
+                                "text": "partial Part"
+                              }
+                            ],
+                            "name": "t"
+                          }
+                        ],
+                        "name": "r"
+                      },
+                      {
+                        "children": [
+                          {
+                            "attrs": {
+                              "xml:space": "preserve"
+                            },
+                            "name": "t"
+                          }
+                        ],
+                        "name": "r"
+                      }
+                    ],
+                    "name": "si"
+                  },
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "xml:space": "preserve"
+                        },
+                        "children": [
+                          {
+                            "text": "Unref"
+                          }
+                        ],
+                        "name": "t"
+                      }
+                    ],
+                    "name": "si"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "text": "plain"
+                          }
+                        ],
+                        "name": "t"
+                      }
+                    ],
+                    "name": "si"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "attrs": {
+                              "xml:space": "preserve"
+                            },
+                            "children": [
+                              {
+                                "text": "missing {absentPartial}"
+                              }
+                            ],
+                            "name": "t"
+                          }
+                        ],
+                        "name": "r"
+                      },
+                      {
+                        "children": [
+                          {
+                            "attrs": {
+                              "xml:space": "preserve"
+                            },
+                            "name": "t"
+                          }
+                        ],
+                        "name": "r"
+                      }
+                    ],
+                    "name": "si"
+                  },
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "xml:space": "preserve"
+                        },
+                        "children": [
+                          {
+                            "text": "{wholeAbsent}"
+                          }
+                        ],
+                        "name": "t"
+                      }
+                    ],
+                    "name": "si"
+                  }
+                ],
+                "name": "sst"
+              }
+            },
+            "xl/workbook.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+                  "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "name": "People",
+                          "r:id": "rel(http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet|xl/worksheets/sheet1.xml)",
+                          "sheetId": "1"
+                        },
+                        "name": "sheet"
+                      }
+                    ],
+                    "name": "sheets"
+                  }
+                ],
+                "name": "workbook"
+              }
+            },
+            "xl/worksheets/sheet1.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "r": "1"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A1",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "attrs": {
+                                      "xml:space": "preserve"
+                                    },
+                                    "children": [
+                                      {
+                                        "text": "Inline"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          },
+                          {
+                            "attrs": {
+                              "r": "B1",
+                              "s": "1",
+                              "t": "s"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "text": "0"
+                                  }
+                                ],
+                                "name": "v"
+                              }
+                            ],
+                            "name": "c"
+                          },
+                          {
+                            "attrs": {
+                              "r": "C1",
+                              "s": "1",
+                              "t": "s"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "text": "1"
+                                  }
+                                ],
+                                "name": "v"
+                              }
+                            ],
+                            "name": "c"
+                          },
+                          {
+                            "attrs": {
+                              "r": "D1",
+                              "s": "1"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "text": "42"
+                                  }
+                                ],
+                                "name": "v"
+                              }
+                            ],
+                            "name": "c"
+                          },
+                          {
+                            "attrs": {
+                              "r": "E1",
+                              "t": "s"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "text": "6"
+                                  }
+                                ],
+                                "name": "v"
+                              }
+                            ],
+                            "name": "c"
+                          },
+                          {
+                            "attrs": {
+                              "r": "F1",
+                              "t": "s"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "text": "7"
+                                  }
+                                ],
+                                "name": "v"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      },
+                      {
+                        "attrs": {
+                          "r": "2"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A2",
+                              "t": "s"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "text": "3"
+                                  }
+                                ],
+                                "name": "v"
+                              }
+                            ],
+                            "name": "c"
+                          },
+                          {
+                            "attrs": {
+                              "r": "B2"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "text": "7"
+                                  }
+                                ],
+                                "name": "v"
+                              }
+                            ],
+                            "name": "c"
+                          },
+                          {
+                            "attrs": {
+                              "r": "C2",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "attrs": {
+                                      "xml:space": "preserve"
+                                    },
+                                    "children": [
+                                      {
+                                        "text": "{Dbl}"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          },
+                          {
+                            "attrs": {
+                              "r": "D2",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "attrs": {
+                                      "xml:space": "preserve"
+                                    },
+                                    "children": [
+                                      {
+                                        "text": "{#sec}x{/sec}"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      },
+                      {
+                        "attrs": {
+                          "r": "3"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A3",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "attrs": {
+                                      "xml:space": "preserve"
+                                    },
+                                    "children": [
+                                      {
+                                        "text": "Addr"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          },
+                          {
+                            "attrs": {
+                              "r": "B3",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "attrs": {
+                                      "xml:space": "preserve"
+                                    },
+                                    "children": [
+                                      {
+                                        "text": "=SUM(A1:A2)"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          },
+                          {
+                            "attrs": {
+                              "r": "C3",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "attrs": {
+                                      "xml:space": "preserve"
+                                    },
+                                    "children": [
+                                      {
+                                        "text": "true"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      },
+                      {
+                        "attrs": {
+                          "r": "4"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A4",
+                              "s": "1",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "attrs": {
+                                      "xml:space": "preserve"
+                                    },
+                                    "children": [
+                                      {
+                                        "text": "V tail"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      }
+                    ],
+                    "name": "sheetData"
+                  }
+                ],
+                "name": "worksheet"
+              }
+            }
+          }
+        }
+      }
+    },
+    "xlsx/fill_template@long_literal": {
+      "status": "produced",
+      "placeholders": 1,
+      "outputs": {
+        "filled.xlsx": {
+          "format": "xlsx",
+          "parts": {
+            "[Content_Types].xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/package/2006/content-types"
+                },
+                "children": [
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                      "PartName": "/xl/workbook.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+                      "PartName": "/xl/worksheets/sheet1.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-package.relationships+xml",
+                      "Extension": "rels"
+                    },
+                    "name": "Default"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/xml",
+                      "Extension": "xml"
+                    },
+                    "name": "Default"
+                  }
+                ],
+                "name": "Types"
+              }
+            },
+            "_rels/.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/workbook.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/_rels/workbook.xml.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/worksheets/sheet1.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/workbook.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+                  "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "name": "People",
+                          "r:id": "rel(http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet|xl/worksheets/sheet1.xml)",
+                          "sheetId": "1"
+                        },
+                        "name": "sheet"
+                      }
+                    ],
+                    "name": "sheets"
+                  }
+                ],
+                "name": "workbook"
+              }
+            },
+            "xl/worksheets/sheet1.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "r": "1"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A1"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "text": "123456789012345670000"
+                                  }
+                                ],
+                                "name": "v"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      }
+                    ],
+                    "name": "sheetData"
+                  }
+                ],
+                "name": "worksheet"
+              }
+            }
+          }
+        }
+      }
+    },
+    "xlsx/fill_template@macro_named": {
+      "status": "produced",
+      "placeholders": 1,
+      "outputs": {
+        "filled.xlsm": {
+          "format": "xlsx",
+          "parts": {
+            "[Content_Types].xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/package/2006/content-types"
+                },
+                "children": [
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.ms-excel.sheet.macroEnabled.main+xml",
+                      "PartName": "/xl/workbook.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.ms-office.vbaProject",
+                      "Extension": "bin"
+                    },
+                    "name": "Default"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+                      "PartName": "/xl/worksheets/sheet1.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-package.digital-signature-xmlsignature+xml",
+                      "PartName": "/_xmlsignatures/sig1.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-package.relationships+xml",
+                      "Extension": "rels"
+                    },
+                    "name": "Default"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/xml",
+                      "Extension": "xml"
+                    },
+                    "name": "Default"
+                  }
+                ],
+                "name": "Types"
+              }
+            },
+            "_rels/.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/workbook.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "_xmlsignatures/sig1.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://www.w3.org/2000/09/xmldsig#"
+                },
+                "children": [
+                  {
+                    "name": "SignedInfo"
+                  }
+                ],
+                "name": "Signature"
+              }
+            },
+            "xl/_rels/workbook.xml.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/worksheets/sheet1.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/vbaProject.bin": {
+              "kind": "binary",
+              "len": 5,
+              "sha256": "ff5d8507b6a72bee2debce2c0054798deaccdc5d8a1b945b6280ce8aa9cba52e"
+            },
+            "xl/workbook.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+                  "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "name": "People",
+                          "r:id": "rel(http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet|xl/worksheets/sheet1.xml)",
+                          "sheetId": "1"
+                        },
+                        "name": "sheet"
+                      }
+                    ],
+                    "name": "sheets"
+                  }
+                ],
+                "name": "workbook"
+              }
+            },
+            "xl/worksheets/sheet1.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "r": "1"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A1",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "attrs": {
+                                      "xml:space": "preserve"
+                                    },
+                                    "children": [
+                                      {
+                                        "text": "A"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      }
+                    ],
+                    "name": "sheetData"
+                  }
+                ],
+                "name": "worksheet"
+              }
+            }
+          }
+        }
+      }
+    },
+    "xlsx/fill_template@macro_plain_name": {
+      "status": "produced",
+      "placeholders": 1,
+      "outputs": {
+        "filled.xlsx": {
+          "format": "xlsx",
+          "parts": {
+            "[Content_Types].xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/package/2006/content-types"
+                },
+                "children": [
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.ms-excel.sheet.macroEnabled.main+xml",
+                      "PartName": "/xl/workbook.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.ms-office.vbaProject",
+                      "Extension": "bin"
+                    },
+                    "name": "Default"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+                      "PartName": "/xl/worksheets/sheet1.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-package.digital-signature-xmlsignature+xml",
+                      "PartName": "/_xmlsignatures/sig1.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-package.relationships+xml",
+                      "Extension": "rels"
+                    },
+                    "name": "Default"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/xml",
+                      "Extension": "xml"
+                    },
+                    "name": "Default"
+                  }
+                ],
+                "name": "Types"
+              }
+            },
+            "_rels/.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/workbook.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "_xmlsignatures/sig1.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://www.w3.org/2000/09/xmldsig#"
+                },
+                "children": [
+                  {
+                    "name": "SignedInfo"
+                  }
+                ],
+                "name": "Signature"
+              }
+            },
+            "xl/_rels/workbook.xml.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/worksheets/sheet1.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/vbaProject.bin": {
+              "kind": "binary",
+              "len": 5,
+              "sha256": "ff5d8507b6a72bee2debce2c0054798deaccdc5d8a1b945b6280ce8aa9cba52e"
+            },
+            "xl/workbook.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+                  "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "name": "People",
+                          "r:id": "rel(http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet|xl/worksheets/sheet1.xml)",
+                          "sheetId": "1"
+                        },
+                        "name": "sheet"
+                      }
+                    ],
+                    "name": "sheets"
+                  }
+                ],
+                "name": "workbook"
+              }
+            },
+            "xl/worksheets/sheet1.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "r": "1"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A1",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "attrs": {
+                                      "xml:space": "preserve"
+                                    },
+                                    "children": [
+                                      {
+                                        "text": "A"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      }
+                    ],
+                    "name": "sheetData"
+                  }
+                ],
+                "name": "worksheet"
+              }
+            }
+          }
+        }
+      }
+    },
+    "xlsx/fill_template@no_content_types": {
+      "status": "produced",
+      "placeholders": 1,
+      "outputs": {
+        "filled.xlsx": {
+          "format": "xlsx",
+          "parts": {
+            "_rels/.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/workbook.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/_rels/workbook.xml.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/worksheets/sheet1.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/workbook.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+                  "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "name": "People",
+                          "r:id": "rel(http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet|xl/worksheets/sheet1.xml)",
+                          "sheetId": "1"
+                        },
+                        "name": "sheet"
+                      }
+                    ],
+                    "name": "sheets"
+                  }
+                ],
+                "name": "workbook"
+              }
+            },
+            "xl/worksheets/sheet1.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "r": "1"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A1",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "attrs": {
+                                      "xml:space": "preserve"
+                                    },
+                                    "children": [
+                                      {
+                                        "text": "A"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      }
+                    ],
+                    "name": "sheetData"
+                  }
+                ],
+                "name": "worksheet"
+              }
+            }
+          }
+        }
+      }
+    },
+    "xlsx/fill_template@no_template": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
+    "xlsx/fill_template@no_values": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
+    "xlsx/fill_template@null_value": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "the value for \"name\" must be text, a number or a boolean, not a structure"
+    },
+    "xlsx/fill_template@null_values": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
+    "xlsx/fill_template@number_template": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
+    "xlsx/fill_template@numbered_array": {
+      "status": "produced",
+      "placeholders": 2,
+      "outputs": {
+        "filled.xlsx": {
+          "format": "xlsx",
+          "parts": {
+            "[Content_Types].xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/package/2006/content-types"
+                },
+                "children": [
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                      "PartName": "/xl/workbook.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+                      "PartName": "/xl/worksheets/sheet1.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-package.relationships+xml",
+                      "Extension": "rels"
+                    },
+                    "name": "Default"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/xml",
+                      "Extension": "xml"
+                    },
+                    "name": "Default"
+                  }
+                ],
+                "name": "Types"
+              }
+            },
+            "_rels/.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/workbook.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/_rels/workbook.xml.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/worksheets/sheet1.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/workbook.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+                  "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "name": "People",
+                          "r:id": "rel(http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet|xl/worksheets/sheet1.xml)",
+                          "sheetId": "1"
+                        },
+                        "name": "sheet"
+                      }
+                    ],
+                    "name": "sheets"
+                  }
+                ],
+                "name": "workbook"
+              }
+            },
+            "xl/worksheets/sheet1.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "r": "1"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A1",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "attrs": {
+                                      "xml:space": "preserve"
+                                    },
+                                    "children": [
+                                      {
+                                        "text": "Ada"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      },
+                      {
+                        "attrs": {
+                          "r": "2"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A2",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "attrs": {
+                                      "xml:space": "preserve"
+                                    },
+                                    "children": [
+                                      {
+                                        "text": "Minsk"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      }
+                    ],
+                    "name": "sheetData"
+                  }
+                ],
+                "name": "worksheet"
+              }
+            }
+          }
+        }
+      }
+    },
+    "xlsx/fill_template@numbered_array_of_structures": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "the value for \"0\" must be text, a number or a boolean, not a structure"
+    },
+    "xlsx/fill_template@numbered_string": {
+      "status": "produced",
+      "placeholders": 2,
+      "outputs": {
+        "filled.xlsx": {
+          "format": "xlsx",
+          "parts": {
+            "[Content_Types].xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/package/2006/content-types"
+                },
+                "children": [
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                      "PartName": "/xl/workbook.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+                      "PartName": "/xl/worksheets/sheet1.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-package.relationships+xml",
+                      "Extension": "rels"
+                    },
+                    "name": "Default"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/xml",
+                      "Extension": "xml"
+                    },
+                    "name": "Default"
+                  }
+                ],
+                "name": "Types"
+              }
+            },
+            "_rels/.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/workbook.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/_rels/workbook.xml.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/worksheets/sheet1.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/workbook.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+                  "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "name": "People",
+                          "r:id": "rel(http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet|xl/worksheets/sheet1.xml)",
+                          "sheetId": "1"
+                        },
+                        "name": "sheet"
+                      }
+                    ],
+                    "name": "sheets"
+                  }
+                ],
+                "name": "workbook"
+              }
+            },
+            "xl/worksheets/sheet1.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "r": "1"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A1",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "attrs": {
+                                      "xml:space": "preserve"
+                                    },
+                                    "children": [
+                                      {
+                                        "text": "A"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      },
+                      {
+                        "attrs": {
+                          "r": "2"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A2",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "attrs": {
+                                      "xml:space": "preserve"
+                                    },
+                                    "children": [
+                                      {
+                                        "text": "B"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      }
+                    ],
+                    "name": "sheetData"
+                  }
+                ],
+                "name": "worksheet"
+              }
+            }
+          }
+        }
+      }
+    },
+    "xlsx/fill_template@odd_sheets": {
+      "status": "produced",
+      "placeholders": 0,
+      "outputs": {
+        "filled.xlsx": {
+          "format": "xlsx",
+          "parts": {
+            "[Content_Types].xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/package/2006/content-types"
+                },
+                "children": [
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                      "PartName": "/xl/workbook.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+                      "PartName": "/xl/worksheets/data.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-package.relationships+xml",
+                      "Extension": "rels"
+                    },
+                    "name": "Default"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/xml",
+                      "Extension": "xml"
+                    },
+                    "name": "Default"
+                  }
+                ],
+                "name": "Types"
+              }
+            },
+            "_rels/.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/workbook.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/_rels/workbook.xml.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/worksheets/data.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/workbook.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+                  "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "name": "People",
+                          "r:id": "rel(http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet|xl/worksheets/data.xml)",
+                          "sheetId": "1"
+                        },
+                        "name": "sheet"
+                      }
+                    ],
+                    "name": "sheets"
+                  }
+                ],
+                "name": "workbook"
+              }
+            },
+            "xl/worksheets/data.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "r": "1"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A1",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "children": [
+                                      {
+                                        "text": "{a}"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      }
+                    ],
+                    "name": "sheetData"
+                  }
+                ],
+                "name": "worksheet"
+              }
+            }
+          }
+        }
+      }
+    },
+    "xlsx/fill_template@order": {
+      "status": "produced",
+      "missing": [
+        "b",
+        "a"
+      ],
+      "placeholders": 2,
+      "outputs": {
+        "filled.xlsx": {
+          "format": "xlsx",
+          "parts": {
+            "[Content_Types].xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/package/2006/content-types"
+                },
+                "children": [
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                      "PartName": "/xl/workbook.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+                      "PartName": "/xl/worksheets/sheet1.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+                      "PartName": "/xl/worksheets/sheet2.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-package.relationships+xml",
+                      "Extension": "rels"
+                    },
+                    "name": "Default"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/xml",
+                      "Extension": "xml"
+                    },
+                    "name": "Default"
+                  }
+                ],
+                "name": "Types"
+              }
+            },
+            "_rels/.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/workbook.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/_rels/workbook.xml.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/worksheets/sheet1.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+                    },
+                    "name": "Relationship"
+                  },
+                  {
+                    "attrs": {
+                      "Target": "xl/worksheets/sheet2.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/workbook.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+                  "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "name": "First",
+                          "r:id": "rel(http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet|xl/worksheets/sheet1.xml)",
+                          "sheetId": "1"
+                        },
+                        "name": "sheet"
+                      },
+                      {
+                        "attrs": {
+                          "name": "Second",
+                          "r:id": "rel(http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet|xl/worksheets/sheet2.xml)",
+                          "sheetId": "2"
+                        },
+                        "name": "sheet"
+                      }
+                    ],
+                    "name": "sheets"
+                  }
+                ],
+                "name": "workbook"
+              }
+            },
+            "xl/worksheets/sheet1.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "r": "1"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A1",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "children": [
+                                      {
+                                        "text": "{a}"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      }
+                    ],
+                    "name": "sheetData"
+                  }
+                ],
+                "name": "worksheet"
+              }
+            },
+            "xl/worksheets/sheet2.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "r": "1"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A1",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "children": [
+                                      {
+                                        "text": "{b}"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      }
+                    ],
+                    "name": "sheetData"
+                  }
+                ],
+                "name": "worksheet"
+              }
+            }
+          }
+        }
+      }
+    },
+    "xlsx/fill_template@other_family": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "the sample is really a .docx package, not the .xlsx one its name says — hint: rename it to match its content"
+    },
+    "xlsx/fill_template@scalar_values": {
+      "status": "produced",
+      "missing": [
+        "n"
+      ],
+      "placeholders": 1,
+      "outputs": {
+        "filled.xlsx": {
+          "format": "xlsx",
+          "parts": {
+            "[Content_Types].xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/package/2006/content-types"
+                },
+                "children": [
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                      "PartName": "/xl/workbook.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+                      "PartName": "/xl/worksheets/sheet1.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-package.relationships+xml",
+                      "Extension": "rels"
+                    },
+                    "name": "Default"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/xml",
+                      "Extension": "xml"
+                    },
+                    "name": "Default"
+                  }
+                ],
+                "name": "Types"
+              }
+            },
+            "_rels/.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/workbook.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/_rels/workbook.xml.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/worksheets/sheet1.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/workbook.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+                  "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "name": "People",
+                          "r:id": "rel(http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet|xl/worksheets/sheet1.xml)",
+                          "sheetId": "1"
+                        },
+                        "name": "sheet"
+                      }
+                    ],
+                    "name": "sheets"
+                  }
+                ],
+                "name": "workbook"
+              }
+            },
+            "xl/worksheets/sheet1.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "r": "1"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A1",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "children": [
+                                      {
+                                        "text": "{n}"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      }
+                    ],
+                    "name": "sheetData"
+                  }
+                ],
+                "name": "worksheet"
+              }
+            }
+          }
+        }
+      }
+    },
+    "xlsx/fill_template@signed": {
+      "status": "produced",
+      "placeholders": 1,
+      "outputs": {
+        "filled.xlsx": {
+          "format": "xlsx",
+          "parts": {
+            "[Content_Types].xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/package/2006/content-types"
+                },
+                "children": [
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                      "PartName": "/xl/workbook.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+                      "PartName": "/xl/worksheets/sheet1.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-package.digital-signature-xmlsignature+xml",
+                      "PartName": "/_xmlsignatures/sig1.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-package.relationships+xml",
+                      "Extension": "rels"
+                    },
+                    "name": "Default"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/xml",
+                      "Extension": "xml"
+                    },
+                    "name": "Default"
+                  }
+                ],
+                "name": "Types"
+              }
+            },
+            "_rels/.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/workbook.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "_xmlsignatures/sig1.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://www.w3.org/2000/09/xmldsig#"
+                },
+                "children": [
+                  {
+                    "name": "SignedInfo"
+                  }
+                ],
+                "name": "Signature"
+              }
+            },
+            "xl/_rels/workbook.xml.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/worksheets/sheet1.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/workbook.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+                  "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "name": "People",
+                          "r:id": "rel(http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet|xl/worksheets/sheet1.xml)",
+                          "sheetId": "1"
+                        },
+                        "name": "sheet"
+                      }
+                    ],
+                    "name": "sheets"
+                  }
+                ],
+                "name": "workbook"
+              }
+            },
+            "xl/worksheets/sheet1.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "r": "1"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A1",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "attrs": {
+                                      "xml:space": "preserve"
+                                    },
+                                    "children": [
+                                      {
+                                        "text": "A"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      }
+                    ],
+                    "name": "sheetData"
+                  }
+                ],
+                "name": "worksheet"
+              }
+            }
+          }
+        }
+      }
+    },
+    "xlsx/fill_template@template_type": {
+      "status": "produced",
+      "placeholders": 1,
+      "outputs": {
+        "filled.xlsx": {
+          "format": "xlsx",
+          "parts": {
+            "[Content_Types].xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/package/2006/content-types"
+                },
+                "children": [
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml",
+                      "PartName": "/xl/workbook.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+                      "PartName": "/xl/worksheets/sheet1.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-package.relationships+xml",
+                      "Extension": "rels"
+                    },
+                    "name": "Default"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/xml",
+                      "Extension": "xml"
+                    },
+                    "name": "Default"
+                  }
+                ],
+                "name": "Types"
+              }
+            },
+            "_rels/.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/workbook.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/_rels/workbook.xml.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/worksheets/sheet1.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/workbook.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+                  "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "name": "People",
+                          "r:id": "rel(http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet|xl/worksheets/sheet1.xml)",
+                          "sheetId": "1"
+                        },
+                        "name": "sheet"
+                      }
+                    ],
+                    "name": "sheets"
+                  }
+                ],
+                "name": "workbook"
+              }
+            },
+            "xl/worksheets/sheet1.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "r": "1"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A1",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "attrs": {
+                                      "xml:space": "preserve"
+                                    },
+                                    "children": [
+                                      {
+                                        "text": "A"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      }
+                    ],
+                    "name": "sheetData"
+                  }
+                ],
+                "name": "worksheet"
+              }
+            }
+          }
+        }
+      }
+    },
+    "xlsx/fill_template@top_row": {
+      "status": "produced",
+      "placeholders": 1,
+      "outputs": {
+        "filled.xlsx": {
+          "format": "xlsx",
+          "parts": {
+            "[Content_Types].xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/package/2006/content-types"
+                },
+                "children": [
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                      "PartName": "/xl/workbook.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+                      "PartName": "/xl/worksheets/sheet1.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-package.relationships+xml",
+                      "Extension": "rels"
+                    },
+                    "name": "Default"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/xml",
+                      "Extension": "xml"
+                    },
+                    "name": "Default"
+                  }
+                ],
+                "name": "Types"
+              }
+            },
+            "_rels/.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/workbook.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/_rels/workbook.xml.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/worksheets/sheet1.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/workbook.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+                  "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "name": "People",
+                          "r:id": "rel(http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet|xl/worksheets/sheet1.xml)",
+                          "sheetId": "1"
+                        },
+                        "name": "sheet"
+                      }
+                    ],
+                    "name": "sheets"
+                  }
+                ],
+                "name": "workbook"
+              }
+            },
+            "xl/worksheets/sheet1.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "r": "1"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A1",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "attrs": {
+                                      "xml:space": "preserve"
+                                    },
+                                    "children": [
+                                      {
+                                        "text": "A"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      },
+                      {
+                        "attrs": {
+                          "r": "18446744073709551615"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A2",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "children": [
+                                      {
+                                        "text": "wide"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      },
+                      {
+                        "children": [
+                          {
+                            "attrs": {
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "children": [
+                                      {
+                                        "text": "fallback"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      },
+                      {
+                        "attrs": {
+                          "r": "4294967295"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A4",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "children": [
+                                      {
+                                        "text": "top"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      },
+                      {
+                        "children": [
+                          {
+                            "attrs": {
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "children": [
+                                      {
+                                        "text": "saturated"
+                                      }
+                                    ],
+                                    "name": "t"
+                                  }
+                                ],
+                                "name": "is"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      }
+                    ],
+                    "name": "sheetData"
+                  }
+                ],
+                "name": "worksheet"
+              }
+            }
+          }
+        }
+      }
+    },
+    "xlsx/fill_template@unreadable": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "fill-unreadable.xlsx is not a readable .xlsx package: {{variable}}"
+    },
+    "xlsx/fill_template@zero": {
+      "status": "produced",
+      "placeholders": 0,
+      "outputs": {
+        "filled.xlsx": {
+          "format": "xlsx",
+          "parts": {
+            "[Content_Types].xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/package/2006/content-types"
+                },
+                "children": [
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml",
+                      "PartName": "/xl/sharedStrings.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                      "PartName": "/xl/workbook.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml",
+                      "PartName": "/xl/styles.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+                      "PartName": "/xl/worksheets/sheet1.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+                      "PartName": "/xl/worksheets/sheet2.xml"
+                    },
+                    "name": "Override"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/vnd.openxmlformats-package.relationships+xml",
+                      "Extension": "rels"
+                    },
+                    "name": "Default"
+                  },
+                  {
+                    "attrs": {
+                      "ContentType": "application/xml",
+                      "Extension": "xml"
+                    },
+                    "name": "Default"
+                  }
+                ],
+                "name": "Types"
+              }
+            },
+            "_rels/.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/workbook.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/_rels/workbook.xml.rels": {
+              "kind": "xml",
+              "tree": {
+                "children": [
+                  {
+                    "attrs": {
+                      "Target": "xl/sharedStrings.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings"
+                    },
+                    "name": "Relationship"
+                  },
+                  {
+                    "attrs": {
+                      "Target": "xl/styles.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"
+                    },
+                    "name": "Relationship"
+                  },
+                  {
+                    "attrs": {
+                      "Target": "xl/worksheets/sheet1.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+                    },
+                    "name": "Relationship"
+                  },
+                  {
+                    "attrs": {
+                      "Target": "xl/worksheets/sheet2.xml",
+                      "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+                    },
+                    "name": "Relationship"
+                  }
+                ],
+                "name": "Relationships"
+              }
+            },
+            "xl/sharedStrings.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "count": "5",
+                  "uniqueCount": "5",
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "text": "Name"
+                          }
+                        ],
+                        "name": "t"
+                      }
+                    ],
+                    "name": "si"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "text": "Value"
+                          }
+                        ],
+                        "name": "t"
+                      }
+                    ],
+                    "name": "si"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "text": "Alpha"
+                          }
+                        ],
+                        "name": "t"
+                      }
+                    ],
+                    "name": "si"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "text": "Beta"
+                          }
+                        ],
+                        "name": "t"
+                      }
+                    ],
+                    "name": "si"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "text": "Merged"
+                          }
+                        ],
+                        "name": "t"
+                      }
+                    ],
+                    "name": "si"
+                  }
+                ],
+                "name": "sst"
+              }
+            },
+            "xl/styles.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "attrs": {
+                      "count": "2"
+                    },
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "attrs": {
+                              "val": "11"
+                            },
+                            "name": "sz"
+                          },
+                          {
+                            "attrs": {
+                              "val": "Calibri"
+                            },
+                            "name": "name"
+                          }
+                        ],
+                        "name": "font"
+                      },
+                      {
+                        "children": [
+                          {
+                            "name": "b"
+                          },
+                          {
+                            "attrs": {
+                              "val": "11"
+                            },
+                            "name": "sz"
+                          },
+                          {
+                            "attrs": {
+                              "val": "Calibri"
+                            },
+                            "name": "name"
+                          }
+                        ],
+                        "name": "font"
+                      }
+                    ],
+                    "name": "fonts"
+                  },
+                  {
+                    "attrs": {
+                      "count": "3"
+                    },
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "attrs": {
+                              "patternType": "none"
+                            },
+                            "name": "patternFill"
+                          }
+                        ],
+                        "name": "fill"
+                      },
+                      {
+                        "children": [
+                          {
+                            "attrs": {
+                              "patternType": "gray125"
+                            },
+                            "name": "patternFill"
+                          }
+                        ],
+                        "name": "fill"
+                      },
+                      {
+                        "children": [
+                          {
+                            "attrs": {
+                              "patternType": "solid"
+                            },
+                            "children": [
+                              {
+                                "attrs": {
+                                  "rgb": "FFFFFF00"
+                                },
+                                "name": "fgColor"
+                              },
+                              {
+                                "attrs": {
+                                  "indexed": "64"
+                                },
+                                "name": "bgColor"
+                              }
+                            ],
+                            "name": "patternFill"
+                          }
+                        ],
+                        "name": "fill"
+                      }
+                    ],
+                    "name": "fills"
+                  },
+                  {
+                    "attrs": {
+                      "count": "1"
+                    },
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "name": "left"
+                          },
+                          {
+                            "name": "right"
+                          },
+                          {
+                            "name": "top"
+                          },
+                          {
+                            "name": "bottom"
+                          },
+                          {
+                            "name": "diagonal"
+                          }
+                        ],
+                        "name": "border"
+                      }
+                    ],
+                    "name": "borders"
+                  },
+                  {
+                    "attrs": {
+                      "count": "1"
+                    },
+                    "children": [
+                      {
+                        "attrs": {
+                          "borderId": "0",
+                          "fillId": "0",
+                          "fontId": "0",
+                          "numFmtId": "0"
+                        },
+                        "name": "xf"
+                      }
+                    ],
+                    "name": "cellStyleXfs"
+                  },
+                  {
+                    "attrs": {
+                      "count": "2"
+                    },
+                    "children": [
+                      {
+                        "attrs": {
+                          "borderId": "0",
+                          "fillId": "0",
+                          "fontId": "0",
+                          "numFmtId": "0",
+                          "xfId": "0"
+                        },
+                        "name": "xf"
+                      },
+                      {
+                        "attrs": {
+                          "applyFill": "1",
+                          "applyFont": "1",
+                          "borderId": "0",
+                          "fillId": "2",
+                          "fontId": "1",
+                          "numFmtId": "0",
+                          "xfId": "0"
+                        },
+                        "name": "xf"
+                      }
+                    ],
+                    "name": "cellXfs"
+                  },
+                  {
+                    "attrs": {
+                      "count": "1"
+                    },
+                    "children": [
+                      {
+                        "attrs": {
+                          "builtinId": "0",
+                          "name": "Normal",
+                          "xfId": "0"
+                        },
+                        "name": "cellStyle"
+                      }
+                    ],
+                    "name": "cellStyles"
+                  }
+                ],
+                "name": "styleSheet"
+              }
+            },
+            "xl/workbook.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+                  "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "name": "First",
+                          "r:id": "rel(http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet|xl/worksheets/sheet1.xml)",
+                          "sheetId": "1"
+                        },
+                        "name": "sheet"
+                      },
+                      {
+                        "attrs": {
+                          "name": "Second",
+                          "r:id": "rel(http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet|xl/worksheets/sheet2.xml)",
+                          "sheetId": "2"
+                        },
+                        "name": "sheet"
+                      }
+                    ],
+                    "name": "sheets"
+                  }
+                ],
+                "name": "workbook"
+              }
+            },
+            "xl/worksheets/sheet1.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "r": "1"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A1",
+                              "s": "1",
+                              "t": "s"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "text": "0"
+                                  }
+                                ],
+                                "name": "v"
+                              }
+                            ],
+                            "name": "c"
+                          },
+                          {
+                            "attrs": {
+                              "r": "B1",
+                              "s": "1",
+                              "t": "s"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "text": "1"
+                                  }
+                                ],
+                                "name": "v"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      },
+                      {
+                        "attrs": {
+                          "r": "2"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A2",
+                              "t": "s"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "text": "2"
+                                  }
+                                ],
+                                "name": "v"
+                              }
+                            ],
+                            "name": "c"
+                          },
+                          {
+                            "attrs": {
+                              "r": "B2"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "text": "1"
+                                  }
+                                ],
+                                "name": "v"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      },
+                      {
+                        "attrs": {
+                          "r": "3"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A3",
+                              "t": "s"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "text": "3"
+                                  }
+                                ],
+                                "name": "v"
+                              }
+                            ],
+                            "name": "c"
+                          },
+                          {
+                            "attrs": {
+                              "r": "B3"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "text": "2"
+                                  }
+                                ],
+                                "name": "v"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      },
+                      {
+                        "attrs": {
+                          "r": "5"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A5",
+                              "t": "s"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "text": "4"
+                                  }
+                                ],
+                                "name": "v"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      },
+                      {
+                        "attrs": {
+                          "r": "6"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A6"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "text": "3"
+                                  }
+                                ],
+                                "name": "v"
+                              }
+                            ],
+                            "name": "c"
+                          },
+                          {
+                            "attrs": {
+                              "r": "B6"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "text": "SUM(B2:B3)"
+                                  }
+                                ],
+                                "name": "f"
+                              },
+                              {
+                                "children": [
+                                  {
+                                    "text": "3"
+                                  }
+                                ],
+                                "name": "v"
+                              }
+                            ],
+                            "name": "c"
+                          }
+                        ],
+                        "name": "row"
+                      }
+                    ],
+                    "name": "sheetData"
+                  },
+                  {
+                    "attrs": {
+                      "count": "1"
+                    },
+                    "children": [
+                      {
+                        "attrs": {
+                          "ref": "A5:B5"
+                        },
+                        "name": "mergeCell"
+                      }
+                    ],
+                    "name": "mergeCells"
+                  }
+                ],
+                "name": "worksheet"
+              }
+            },
+            "xl/worksheets/sheet2.xml": {
+              "kind": "xml",
+              "tree": {
+                "attrs": {
+                  "xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                },
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "attrs": {
+                          "r": "1"
+                        },
+                        "children": [
+                          {
+                            "attrs": {
+                              "r": "A1",
+                              "t": "inlineStr"
+                            },
+                            "children": [
+                              {
+                                "children": [
+                                  {
+                                    "children": [
+                                      {
+                                        "text": "Other"
                                       }
                                     ],
                                     "name": "t"

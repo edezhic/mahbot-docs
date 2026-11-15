@@ -1,16 +1,25 @@
-//! Filling a Word or presentation sample from a value map.
+//! Filling a Word, presentation or workbook sample from a value map.
 //!
-//! The reference runs the sample through a third-party template library (`docxtemplater`, pinned
-//! exactly in the producing kit's `package.json`); this module is a port of the part of it the kit
-//! uses, narrowed to the two families the kit sends through it. The library is not a dependency
-//! here, so its behaviour is reproduced part by part: the sample's XML is lexed into markup, text
-//! and template tags; sections are paired and expanded to the element they wrap; the result is
-//! rendered and joined back with the library's own repair of an empty table, row or cell. The
-//! wording of a refusal is the library's too, because the gate compares a case's reason verbatim.
+//! The reference runs the Word and presentation families through a third-party template library
+//! (`docxtemplater`, pinned exactly in the producing kit's `package.json`); this module is a port
+//! of the part of it the kit uses. The library is not a dependency here, so its behaviour is
+//! reproduced part by part: the sample's XML is lexed into markup, text and template tags; sections
+//! are paired and expanded to the element they wrap; the result is rendered and joined back with
+//! the library's own repair of an empty table, row or cell. The wording of a refusal is the
+//! library's too, because the gate compares a case's reason verbatim.
 //!
-//! What the port deliberately does not carry is the library's own module surface, its asynchronous
-//! scope resolution, and its spreadsheet module: no value this operation accepts is a list, so a
-//! section renders once or not at all, and the workbook family has its own filler.
+//! The workbook family does not go through the library: [`workbook`] is the kit's own `fillXlsx`,
+//! which walks a worksheet's cells and then its shared-string table. The two paths share the value
+//! check, the package open and — in [`render`] — the plainer `{name}` pass.
+//!
+//! What the port deliberately does not carry is the library's own module surface and its
+//! asynchronous scope resolution: no value this operation accepts is a list, so a section renders
+//! once or not at all.
+//!
+//! The copy is written from the parts the sample holds: a folder entry is not a part, so the
+//! sample's folder entries are not carried over, exactly as on the edit path. Nothing judges them —
+//! the canonical model treats a folder entry as invisible — but the copy differs there from the
+//! reference's.
 
 mod content;
 mod errors;
@@ -19,13 +28,14 @@ mod parser;
 mod parts;
 mod postparse;
 mod render;
+mod workbook;
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use serde_json::Value;
 
-use super::{opc, package, write_new};
+use super::{checked_values, opc, package, write_new};
 use crate::operation::{Failure, Outcome, Request};
 use crate::vocabulary::{Family, vocabulary};
 use parts::Part;
@@ -59,31 +69,18 @@ fn run(request: &Request, family: Family, output: &Path) -> Result<(Vec<String>,
     // destination first (the operation surface does), so a request wrong in both ways answers the
     // destination here; the difference is invisible through the harness, which hands every case a
     // real directory.
-    let Some(values) = request.values.get("values") else {
-        // `Object.entries(undefined)` faults in the reference, so the class is the engine's own.
-        return Err(Failure::engine());
-    };
-    if values.is_null() {
-        // `Object.entries(null)` faults too. Any other shape is a scope the reference reads: an
-        // array or a string by index and length, a number or a boolean by nothing.
-        return Err(Failure::engine());
-    }
+    let values = checked_values(request)?;
     let scope = render::Scope::new(values);
-    if let Some(name) = scope.non_scalar() {
-        return Err(Failure::usage(
-            marks.format("surface_value_structure", &[("name", &name)]),
-        ));
-    }
     let Some(template) = request.values.get("template").and_then(Value::as_str) else {
-        // The reference reads the template path before it checks it, so a request with none fails
-        // with the runtime's own error; the surface refuses it above the engine.
+        // The reference hands the sample path straight to its file reader, which faults on an
+        // absent or non-string one; nothing above checks it, so the class is the engine's own.
         return Err(Failure::engine());
     };
     let path = Path::new(template);
-    // The read and the package are shared with `Editor::open`; a package holding no family part is
-    // not refused here, because the reference's library identifies a package by its content types
-    // and answers its own `filetype_not_identified` sentence instead, so the check belongs to
-    // `content::select` rather than to this open.
+    // The read and the package are shared with `Editor::open`. A package holding no family part is
+    // not refused here, before the family is known: the Word path refuses it inside the template
+    // library, which answers its own `filetype_not_identified` sentence from `content::select`,
+    // while the workbook path produces the package as it stands.
     // The package's own bytes are the edit path's source, not the fill's: they are released here.
     let package::Opened {
         parts,
@@ -107,19 +104,23 @@ fn run(request: &Request, family: Family, output: &Path) -> Result<(Vec<String>,
         )));
     }
     let mut filled = parts;
-    let selection = content::select(&filled).map_err(|reason| fill_failure(&[reason]))?;
     let mut answer = Answer::default();
-    let (lexed, sects) = lex_parts(&filled, &selection)?;
-    let compiled = compile_parts(lexed, &selection, &sects, &mut answer)?;
-    render_parts(
-        compiled,
-        &mut filled,
-        &selection,
-        &sects,
-        &scope,
-        &mut answer,
-    )?;
-    fill_presenter_notes(&mut filled, selection.config.family, &scope, &mut answer);
+    if family == Family::Xlsx {
+        workbook::fill(&mut filled, &scope, &mut answer);
+    } else {
+        let selection = content::select(&filled).map_err(|reason| fill_failure(&[reason]))?;
+        let (lexed, sects) = lex_parts(&filled, &selection)?;
+        let compiled = compile_parts(lexed, &selection, &sects, &mut answer)?;
+        render_parts(
+            compiled,
+            &mut filled,
+            &selection,
+            &sects,
+            &scope,
+            &mut answer,
+        )?;
+        fill_presenter_notes(&mut filled, selection.config.family, &scope, &mut answer);
+    }
     let written = package::write_package(&filled).map_err(|failure| {
         Failure::internal(marks.format(FILL_WRITE_FAILED, &[("message", &failure.to_string())]))
     })?;
@@ -278,14 +279,20 @@ fn fill_presenter_notes(
         return;
     }
     for (part_name, bytes) in filled {
-        if !is_notes_slide(part_name) {
-            continue;
+        if is_notes_slide(part_name) {
+            rewrite_part(bytes, |text| {
+                render::fill_text_containers(text, "a:p", render::Run::Drawing, scope, answer)
+            });
         }
-        let text = String::from_utf8_lossy(bytes).into_owned();
-        let content = render::fill_notes(&text, scope, answer);
-        if content != text {
-            *bytes = content.into_bytes();
-        }
+    }
+}
+
+/// `bytes` rewritten by `fill` when the fill changed its text, the kit's own `rewrite` helper.
+fn rewrite_part(bytes: &mut Vec<u8>, mut fill: impl FnMut(&str) -> String) {
+    let text = String::from_utf8_lossy(bytes).into_owned();
+    let filled = fill(&text);
+    if filled != text {
+        *bytes = filled.into_bytes();
     }
 }
 
@@ -367,12 +374,12 @@ mod tests {
         clippy::needless_pass_by_value,
         reason = "a test reads better with a literal value than with a borrow of one"
     )]
-    fn fill(directory: &Path, template: &Path, values: Value) -> Outcome {
+    fn fill(directory: &Path, template: &Path, format: &str, values: Value) -> Outcome {
         execute(&Request {
             operation: "fill_template".to_string(),
             values: json!({
                 "template": template.to_string_lossy(),
-                "format": "docx",
+                "format": format,
                 "values": values,
             })
             .as_object()
@@ -396,6 +403,7 @@ mod tests {
         let outcome = fill(
             directory.path(),
             &template,
+            "docx",
             json!({
                 "main": "Body value", "hdr": "Header value", "ftr": "Footer value",
                 "ftn": "Footnote value", "cmt": "Comment value", "e": "Endnote value",
@@ -426,7 +434,7 @@ mod tests {
         let template = directory.path().join("both.docx");
         let body = "<w:p><w:r><w:t>{{#a}x{/b}</w:t></w:r></w:p>";
         std::fs::write(&template, build::docx_fill_body(body)).expect("the sample is written");
-        let failure = fill(directory.path(), &template, json!({}))
+        let failure = fill(directory.path(), &template, "docx", json!({}))
             .failure
             .expect("the sample is refused");
         assert_eq!(
@@ -448,7 +456,7 @@ mod tests {
         let template = directory.path().join("pairs.docx");
         let body = "<w:p><w:r><w:t>{#a}x{/b} {#c}y{/d}</w:t></w:r></w:p>";
         std::fs::write(&template, build::docx_fill_body(body)).expect("the sample is written");
-        let failure = fill(directory.path(), &template, json!({}))
+        let failure = fill(directory.path(), &template, "docx", json!({}))
             .failure
             .expect("the sample is refused");
         assert_eq!(
@@ -472,7 +480,7 @@ mod tests {
             build::docx_fill_body("<w:p><w:r><w:t>{={ }=</w:t></w:r></w:p>"),
         )
         .expect("the sample is written");
-        let failure = fill(directory.path(), &template, json!({}))
+        let failure = fill(directory.path(), &template, "docx", json!({}))
             .failure
             .expect("the sample is refused");
         assert!(!failure.is_usage(), "{failure:?}");
@@ -498,7 +506,7 @@ mod tests {
         }
         body.push_str("</w:t></w:r></w:p>");
         std::fs::write(&template, build::docx_fill_body(&body)).expect("the sample is written");
-        let outcome = fill(directory.path(), &template, json!({}));
+        let outcome = fill(directory.path(), &template, "docx", json!({}));
         let failure = outcome.failure.expect("the sample is refused");
         assert!(!failure.is_usage(), "{failure:?}");
         assert_eq!(
@@ -507,6 +515,29 @@ mod tests {
                 "the sample nests sections {} deep, and the engine reads at most {bound}",
                 bound + 1
             )
+        );
+    }
+
+    #[test]
+    fn a_workbook_package_with_no_family_part_is_produced_rather_than_refused() {
+        // The reference's workbook filler identifies a package by its part names and returns
+        // silently when it finds none, so a plain package is copied through. The canonical model
+        // refuses to model such a package, so no corpus case can judge this; the crate's own test
+        // pins it.
+        let directory = scratch();
+        let template = directory.path().join("no-family.xlsx");
+        std::fs::write(&template, build::xlsx_no_family()).expect("the sample is written");
+        let outcome = fill(directory.path(), &template, "xlsx", json!({ "a": "b" }));
+        assert!(outcome.failure.is_none(), "{:?}", outcome.failure);
+        assert_eq!(outcome.placeholders, Some(0));
+        assert!(outcome.missing.is_empty());
+        let produced = &outcome.outputs[0];
+        assert_eq!(
+            crate::writing::read_package(
+                &std::fs::read(produced).expect("the produced package is readable")
+            )
+            .expect("the produced package is a ZIP"),
+            crate::writing::read_package(&build::xlsx_no_family()).expect("the sample is a ZIP"),
         );
     }
 }

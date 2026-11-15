@@ -440,6 +440,13 @@ const FORMAT_NAMES: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "src/writing/fill/workbook.rs",
+        &[(
+            "row",
+            "a spreadsheet `<row>` element the workbook fill walks",
+        )],
+    ),
+    (
         "src/reading/ooxml.rs",
         &[
             ("title", "a presentation title element the reader matches"),

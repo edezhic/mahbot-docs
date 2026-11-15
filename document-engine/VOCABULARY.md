@@ -22,29 +22,20 @@ copy carries its licence beside it (`NotoSans-LICENSE.txt`).
 The four families are not in the file: `Family::ALL` is their one home, and every operation and
 result names them through `Family::as_str`.
 
-One mark is interim: `reason_not_carried_out` is the engine's answer for a recognised
-(operation, family) pair it does not carry out. It is stated here rather than in code, and the pair's
-own reason replaces it once the dispatch carries the pair out. The writing half carries the three
-edits, the five PDF page actions, the three PDF drawing actions, all four families of `create` and the
-Word and presentation template fills out today, so that mark is the answer for the one pair
-`fill_template` still accepts without a handler: the workbook family. The sentence names the
-operation and not the family because the engine is not wired into a product build while any family of
-an operation is unimplemented, so no user meets it for a sibling of a landed family; if that ever
-stops being true, it must name the family too.
-
 The writing half's marks have their own namespaces: a refusal or a value an edit names is an
 `edit_*` mark (a presentation edit's are `edit_pptx_*`; a sentence it shares with the Word edit
-keeps that family's key), a note or a loss it raises is a `note_*` mark, every sentence the request
-surface prints before an operation runs is a `surface_*` mark, a PDF page action's refusals and its
-one note are `pdf_page_*` marks, the three drawing actions' own refusals are `pdf_text_*`,
-`pdf_image_*` and `pdf_form_*` marks (the image-size sentences are shared with the OOXML arms and
-live under `edit_*`), a created document's own sentences are `create_*` marks —
-`create_word_only`, `create_heading_level`, `create_row_length`, `create_unknown_size`,
-`create_sheet_object`, `create_merges_list`, `create_sheet_name_unique`,
-`create_merge_overlap`, `create_unknown_type`, `create_one_contents`, `create_link_absolute`,
-`create_link_scheme` and `create_write_failed` — the prefix is `create_`, and the key is the
-namespace, an underscore and the behaviour the sentence states in lower-case words, so
-`create_link_scheme` is the refusal of a scheme — and the notes a created Word document's answer
+keeps that family's key), a note or a loss it raises is a `note_*` mark, and a refusal of a
+request's shape is a `surface_*` mark. Those marks name a request's shape. A check may run before
+the operation or once it is under way: a fill and the PDF form fill check a value's shape the second
+way. A PDF page action's refusals and its one note are `pdf_page_*` marks, the
+three drawing actions' own refusals are `pdf_text_*`, `pdf_image_*` and `pdf_form_*` marks (the
+image-size sentences are shared with the OOXML arms and live under `edit_*`), and a created
+document's own sentences are `create_*` marks — `create_word_only`, `create_heading_level`,
+`create_row_length`, `create_unknown_size`, `create_sheet_object`, `create_merges_list`,
+`create_sheet_name_unique`, `create_merge_overlap`, `create_unknown_type`, `create_one_contents`,
+`create_link_absolute`, `create_link_scheme` and `create_write_failed` — the prefix is `create_`, and
+the key is the namespace, an underscore and the behaviour the sentence states in lower-case words,
+so `create_link_scheme` is the refusal of a scheme — and the notes a created Word document's answer
 carries are `note_*` marks
 — `note_page_break_before`, `note_page_break_after`, `note_contents_empty`, `note_contents_gap_one`,
 `note_contents_gaps` and `note_page_count_gap`; a `note_*` mark is a note in the answer's note list
@@ -67,10 +58,11 @@ operation because the fill and the PDF form fill both refuse it), while the word
 for a value that is not one is `surface_object_value` (an edit's value rendering, a fill's `.`
 scope and a create refusal's quoted block all print it). A write
 that fails after it created files and cannot remove one of them is `write_leftover`, whichever half
-was writing, and a package that states one part twice is `write_part_duplicate`, for every operation
-that writes one. The page actions' namespace is separate from the reading's `pdf_*` marks because
-the reading already owns that prefix for what it prints about a PDF; the drawing actions' marks are
-named for their operation so the two halves stay readable.
+was writing, and a part name the writer is handed twice is `write_part_duplicate`, a guard no
+request can reach (`package.rs` states why). The page
+actions' namespace is separate from the reading's `pdf_*` marks because the reading already owns
+that prefix for what it prints about a PDF; the drawing actions' marks are named for their
+operation so the two halves stay readable.
 A sentence that is operation-agnostic is shared rather than copied: `edit_input_missing` names the
 operation and is the one sentence an operation with a single input refuses with, whichever half
 carries it out, and the crate's own caps on a merge extend the `surface_*` namespace that already

@@ -28,30 +28,33 @@ use super::documents::{
     DOCX_COLUMNS, DOCX_EDIT, DOCX_MACRO, DOCX_REVISIONS, DOCX_STRICT, EMPTY_CHOICE_FORM_PDF,
     ENCRYPTED_PDF, FILL_ARCHIVE_DOCX, FILL_BAD_DELIMITERS_DOCX, FILL_COMPILE_BEFORE_RENDER_DOCX,
     FILL_CORRUPT_DOCX, FILL_DELIMITER_DOCX, FILL_DUPLICATE_CLOSE_DOCX, FILL_DUPLICATE_OPEN_DOCX,
-    FILL_EMPTY_ZIP, FILL_HEADER_ONLY_DOCX, FILL_INVALID_XML_DOCX, FILL_LOOP_POSITION_DOCX,
-    FILL_MACRO_DOCM, FILL_MACRO_PPTM, FILL_MALFORMED_XML_DOCX, FILL_MISMATCH_CLOSE_DOCX,
-    FILL_MISSING_DOCX, FILL_MULTI_ERROR_DOCX, FILL_NEXT_PAGE_DOCX, FILL_NO_MAIN_DOCX,
-    FILL_NOTES_PPTX, FILL_PARTS_DOCX, FILL_PLAIN_DOCX, FILL_PREFIX_DELIMITERS_DOCX,
-    FILL_RAW_AND_SECTION_DOCX, FILL_RAW_NOT_IN_PARAGRAPH_DOCX, FILL_RAW_TEXT_DOCX,
-    FILL_RAW_TWO_IN_PARAGRAPH_DOCX, FILL_RAW_TWO_OUTSIDE_DOCX, FILL_RAW_VALUE_DOCX,
-    FILL_SCOPE_DOCX, FILL_SECTIONS_DOCX, FILL_SIGNED_DOCX, FILL_SLIDE_ONLY_PPTX, FILL_TABLES_DOCX,
+    FILL_DUPLICATE_XLSX, FILL_EMPTY_ZIP, FILL_HEADER_ONLY_DOCX, FILL_INVALID_XML_DOCX,
+    FILL_LOOP_POSITION_DOCX, FILL_MACRO_DOCM, FILL_MACRO_PLAIN_XLSX, FILL_MACRO_PPTM,
+    FILL_MACRO_XLSX, FILL_MALFORMED_XML_DOCX, FILL_MISMATCH_CLOSE_DOCX, FILL_MISSING_DOCX,
+    FILL_MULTI_ERROR_DOCX, FILL_NEXT_PAGE_DOCX, FILL_NO_CONTENT_TYPES_XLSX, FILL_NO_MAIN_DOCX,
+    FILL_NOTES_PPTX, FILL_NUMBER_XLSX, FILL_NUMBERED_XLSX, FILL_ODD_SHEETS_XLSX, FILL_ORDER_XLSX,
+    FILL_PARTS_DOCX, FILL_PLAIN_DOCX, FILL_PREFIX_DELIMITERS_DOCX, FILL_RAW_AND_SECTION_DOCX,
+    FILL_RAW_NOT_IN_PARAGRAPH_DOCX, FILL_RAW_TEXT_DOCX, FILL_RAW_TWO_IN_PARAGRAPH_DOCX,
+    FILL_RAW_TWO_OUTSIDE_DOCX, FILL_RAW_VALUE_DOCX, FILL_SCOPE_DOCX, FILL_SECTIONS_DOCX,
+    FILL_SIGNED_DOCX, FILL_SIGNED_XLSX, FILL_SLIDE_ONLY_PPTX, FILL_STRINGS_XLSX, FILL_TABLES_DOCX,
     FILL_TAG_NOT_FOUND_DOCX, FILL_TAGS_DOCX, FILL_TAGS_PPTX, FILL_TEMPLATE_DOCX,
-    FILL_THROWN_BEFORE_POSTPARSE_DOCX, FILL_TWO_MAIN_PARTS_DOCX, FILL_TWO_MAIN_SECTIONS_DOCX,
-    FILL_UNBALANCED_LOOPS_DOCX, FILL_UNCLOSED_DOCX, FILL_UNCLOSED_LOOP_DOCX, FILL_UNOPENED_DOCX,
-    FILL_UNOPENED_LOOP_DOCX, FILL_UNREADABLE_DOCX, FILL_UNTERMINATED_AFTER_TAG_DOCX,
+    FILL_TEMPLATE_TYPE_XLSX, FILL_THROWN_BEFORE_POSTPARSE_DOCX, FILL_TOP_ROW_XLSX,
+    FILL_TWO_MAIN_PARTS_DOCX, FILL_TWO_MAIN_SECTIONS_DOCX, FILL_UNBALANCED_LOOPS_DOCX,
+    FILL_UNCLOSED_DOCX, FILL_UNCLOSED_LOOP_DOCX, FILL_UNOPENED_DOCX, FILL_UNOPENED_LOOP_DOCX,
+    FILL_UNREADABLE_DOCX, FILL_UNREADABLE_XLSX, FILL_UNTERMINATED_AFTER_TAG_DOCX,
     FILL_UNTERMINATED_DELIMITER_DOCX, FILL_UNTERMINATED_DELIMITER_THEN_TAG_DOCX,
-    FILL_UNTERMINATED_UNCLOSED_DOCX, FILL_UNTERMINATED_UNOPENED_DOCX, FORM_PDF,
-    LISTED_FIELD_FORM_PDF, MAX_LENGTH_FORM_PDF, MERGE_A_PDF, MERGE_B_PDF, MERGE_C_PDF,
-    MISPLACED_FORM_PDF, MULTILINE_FORM_PDF, NO_GEOMETRY_PDF, OBJECT_STREAM_ASCII_HEX_PDF,
-    OBJECT_STREAM_INFLATED_PDF, OBJECT_STREAM_PDF, OPTION_FORM_PDF, PAIRED_OPTIONS_FORM_PDF,
-    PAIRED_RADIO_FORM_PDF, PICTURE_BMP, PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_LARGE,
-    PICTURE_OVERSIZE, PICTURE_PDF, PICTURE_PIXEL, PICTURE_PNG, PICTURE_STALE_CRC_PNG, PICTURE_TALL,
-    PICTURE_WEBP, PPTX_ASSETS, PPTX_BOXES, PPTX_BROKEN_SLOT, PPTX_LIST_DISAGREES,
-    PPTX_LIST_REORDERED, PPTX_MACRO, PPTX_MISSING_NOTES, PPTX_NO_CONTENT_TYPES, PPTX_NO_LAYOUT,
-    PPTX_NO_NOTES_MASTER, PPTX_NO_SHAPE_TREE, PPTX_NO_SIZE, PPTX_NO_SLIDE_LIST, PPTX_NOTES_NO_BODY,
-    PPTX_NOTES_TWO, PPTX_RUNS, PPTX_SECTIONS, PPTX_SIGNED, PPTX_SLIDE_OUTSIDE, PPTX_TABLE,
-    PPTX_TWO_NOTES_MASTERS, PUSHBUTTON_CAPTION_FORM_PDF, PUSHBUTTON_FORM_PDF,
-    RADIO_OPTIONS_FORM_PDF, RADIO_OUTRUN_FORM_PDF, RECTLESS_BUTTON_FORM_PDF,
+    FILL_UNTERMINATED_UNCLOSED_DOCX, FILL_UNTERMINATED_UNOPENED_DOCX, FILL_WORD_AS_XLSX,
+    FILL_ZERO_XLSX, FORM_PDF, LISTED_FIELD_FORM_PDF, MAX_LENGTH_FORM_PDF, MERGE_A_PDF, MERGE_B_PDF,
+    MERGE_C_PDF, MISPLACED_FORM_PDF, MULTILINE_FORM_PDF, NO_GEOMETRY_PDF,
+    OBJECT_STREAM_ASCII_HEX_PDF, OBJECT_STREAM_INFLATED_PDF, OBJECT_STREAM_PDF, OPTION_FORM_PDF,
+    PAIRED_OPTIONS_FORM_PDF, PAIRED_RADIO_FORM_PDF, PICTURE_BMP, PICTURE_BROKEN_PNG, PICTURE_JPEG,
+    PICTURE_LARGE, PICTURE_OVERSIZE, PICTURE_PDF, PICTURE_PIXEL, PICTURE_PNG,
+    PICTURE_STALE_CRC_PNG, PICTURE_TALL, PICTURE_WEBP, PPTX_ASSETS, PPTX_BOXES, PPTX_BROKEN_SLOT,
+    PPTX_LIST_DISAGREES, PPTX_LIST_REORDERED, PPTX_MACRO, PPTX_MISSING_NOTES,
+    PPTX_NO_CONTENT_TYPES, PPTX_NO_LAYOUT, PPTX_NO_NOTES_MASTER, PPTX_NO_SHAPE_TREE, PPTX_NO_SIZE,
+    PPTX_NO_SLIDE_LIST, PPTX_NOTES_NO_BODY, PPTX_NOTES_TWO, PPTX_RUNS, PPTX_SECTIONS, PPTX_SIGNED,
+    PPTX_SLIDE_OUTSIDE, PPTX_TABLE, PPTX_TWO_NOTES_MASTERS, PUSHBUTTON_CAPTION_FORM_PDF,
+    PUSHBUTTON_FORM_PDF, RADIO_OPTIONS_FORM_PDF, RADIO_OUTRUN_FORM_PDF, RECTLESS_BUTTON_FORM_PDF,
     RECTLESS_FLAT_FORM_PDF, RECTLESS_FORM_PDF, REPEATED_PAGE_ANNOTATED_PDF, REPEATED_PAGE_PDF,
     RICH_PDF, RICH_PPTX, ROTATED_PDF, SIGNATURE_FORM_PDF, STATE_APPEARANCE_FORM_PDF,
     STATED_SIZE_FORM_PDF, TEMPLATE_DOCX, TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF,
@@ -7346,6 +7349,685 @@ fn fill_template_cases() -> Vec<Case> {
                 },
             ],
         ),
+        // The workbook family's own surface. A whole-cell shared string keeps its index and changes
+        // only its entry; a partial one is substituted in the table's own pass, and so is an entry
+        // nothing references; a cell whose writer left its `r` out is addressed by its position; a
+        // whole-cell number becomes a real number cell; every other value — a boolean, a
+        // formula-looking string — is written as an inline string, never as a `<v>` or an `<f>`.
+        // `{{dbl}}` is a placeholder written with doubled braces, so its substitute keeps one brace
+        // on each side, and a section tag is a name no value answers for.
+        produced(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_STRINGS_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-strings.xlsx",
+                "format": "xlsx",
+                "values": {
+                    "inline": "Inline",
+                    "wholeText": "Whole",
+                    "wholeBool": true,
+                    "wholeNum": 42,
+                    "partialName": "Part",
+                    "unreferenced": "Unref",
+                    "numInline": 7,
+                    "dbl": "Dbl",
+                    "noAddr": "Addr",
+                    "formula": "=SUM(A1:A2)",
+                    "boolInline": true,
+                    "runs": "V",
+                },
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            vec![
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "A1",
+                    value: Scalar::Text("Inline"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "B1",
+                    value: Scalar::Text("Whole"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "C1",
+                    value: Scalar::Text("true"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "D1",
+                    value: Scalar::Number(42.0),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "E1",
+                    value: Scalar::Text("missing {absentPartial}"),
+                },
+                // A whole-cell shared string no value answers is reported at the cell's position,
+                // before the table pass's own names.
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "F1",
+                    value: Scalar::Text("{wholeAbsent}"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "A2",
+                    value: Scalar::Text("partial Part"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "B2",
+                    value: Scalar::Number(7.0),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "C2",
+                    value: Scalar::Text("{Dbl}"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "D2",
+                    value: Scalar::Text("{#sec}x{/sec}"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "A3",
+                    value: Scalar::Text("Addr"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "B3",
+                    value: Scalar::Text("=SUM(A1:A2)"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "C3",
+                    value: Scalar::Text("true"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "A4",
+                    value: Scalar::Text("V tail"),
+                },
+                // The table's pass reaches an entry no cell references.
+                Effect::Text {
+                    output: None,
+                    part: Some("xl/sharedStrings.xml"),
+                    text: "Unref",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("xl/sharedStrings.xml"),
+                    text: "{unreferenced}",
+                    present: false,
+                },
+            ],
+        )
+        .named("fill_strings"),
+        // The fill finds its worksheets by part name, not through the workbook's own sheet list: a
+        // part named `data.xml` is not one it walks, so its placeholder stays and nothing is counted.
+        produced(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_ODD_SHEETS_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-odd.xlsx",
+                "format": "xlsx",
+                "values": { "a": "A" },
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            vec![Effect::Cell {
+                output: None,
+                sheet: "People",
+                cell: "A1",
+                value: Scalar::Text("{a}"),
+            }],
+        )
+        .named("odd_sheets"),
+        // The names the sample declares are reported in the order its parts sit in the archive, not
+        // the order the workbook lists its sheets: the second sheet's part is stored first.
+        produced(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_ORDER_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-order.xlsx",
+                "format": "xlsx",
+                "values": {},
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            vec![
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "A1",
+                    value: Scalar::Text("{a}"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "Second",
+                    cell: "A1",
+                    value: Scalar::Text("{b}"),
+                },
+            ],
+        )
+        .named("order"),
+        // Two archive records for one worksheet part: the archive library keeps one entry per name,
+        // the last content at the first position, so the fill reads the second record's bytes.
+        produced(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_DUPLICATE_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-duplicate.xlsx",
+                "format": "xlsx",
+                "values": { "a": "A" },
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            vec![Effect::Cell {
+                output: None,
+                sheet: "People",
+                cell: "A1",
+                value: Scalar::Text("A"),
+            }],
+        )
+        .named("duplicate_part"),
+        // A package with no `[Content_Types].xml`: the fill finds a workbook's parts by name, so it
+        // is filled like any other.
+        produced(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_NO_CONTENT_TYPES_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-no-content-types.xlsx",
+                "format": "xlsx",
+                "values": { "a": "A" },
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            vec![Effect::Cell {
+                output: None,
+                sheet: "People",
+                cell: "A1",
+                value: Scalar::Text("A"),
+            }],
+        )
+        .named("no_content_types"),
+        // An array value map: `{0}` and `{1}` are its elements.
+        produced(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_NUMBERED_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-numbered.xlsx",
+                "format": "xlsx",
+                "values": ["Ada", "Minsk"],
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            vec![
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "A1",
+                    value: Scalar::Text("Ada"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "A2",
+                    value: Scalar::Text("Minsk"),
+                },
+            ],
+        )
+        .named("numbered_array"),
+        // A string value map: `{0}` and `{1}` are its code units.
+        produced(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_NUMBERED_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-numbered.xlsx",
+                "format": "xlsx",
+                "values": "AB",
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            vec![
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "A1",
+                    value: Scalar::Text("A"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "A2",
+                    value: Scalar::Text("B"),
+                },
+            ],
+        )
+        .named("numbered_string"),
+        // A value that is a structure has no place in a document: an array's element is refused once,
+        // by the index that names it.
+        declined(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_NUMBERED_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-numbered.xlsx",
+                "format": "xlsx",
+                "values": [["x"]],
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            Expect::Refused(Reason::contains(
+                r#"the value for "0" must be text, a number or a boolean, not a structure"#,
+            )),
+        )
+        .named("numbered_array_of_structures"),
+        // The same refusal for an object's member, where `null` is the structure.
+        declined(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_NUMBERED_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-numbered.xlsx",
+                "format": "xlsx",
+                "values": { "name": null },
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            Expect::Refused(Reason::contains(
+                r#"the value for "name" must be text, a number or a boolean, not a structure"#,
+            )),
+        )
+        .named("null_value"),
+        // The value map is read before the sample is opened, and an absent or null one is not a map
+        // the reference can walk: the failure is the runtime's own, so the case states the class.
+        declined(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_NUMBERED_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-numbered.xlsx",
+                "format": "xlsx",
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("no_values"),
+        declined(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_NUMBERED_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-numbered.xlsx",
+                "format": "xlsx",
+                "values": null,
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("null_values"),
+        // A value map with no entries — a number or a boolean — fills nothing: every placeholder is
+        // missing and the sample is produced as it stands.
+        produced(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_NUMBER_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-number.xlsx",
+                "format": "xlsx",
+                "values": 5,
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            vec![Effect::Cell {
+                output: None,
+                sheet: "People",
+                cell: "A1",
+                value: Scalar::Text("{n}"),
+            }],
+        )
+        .named("scalar_values"),
+        // A request naming no sample, and one naming a number for it: neither is a path the
+        // reference can read, so both fail as the runtime's own.
+        declined(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_NUMBERED_XLSX],
+            json!({
+                "op": "fill_template",
+                "format": "xlsx",
+                "values": { "0": "Ada" },
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("no_template"),
+        declined(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_NUMBERED_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": 3,
+                "format": "xlsx",
+                "values": { "0": "Ada" },
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("number_template"),
+        // A macro-enabled workbook, named as one: its worksheet is filled and the macro project and
+        // the signature are carried through untouched.
+        produced(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_MACRO_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-macro.xlsm",
+                "format": "xlsx",
+                "values": { "a": "A" },
+                "output": "$out/filled.xlsm",
+            }),
+            vec!["filled.xlsm"],
+            vec![
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "A1",
+                    value: Scalar::Text("A"),
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "xl/vbaProject.bin",
+                    present: true,
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "_xmlsignatures/sig1.xml",
+                    present: true,
+                },
+            ],
+        )
+        .named("macro_named"),
+        // The same macro-enabled bytes under an ordinary `.xlsx` name: the family is the parts', and
+        // the output keeps the name's extension.
+        produced(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_MACRO_PLAIN_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-macro-plain.xlsx",
+                "format": "xlsx",
+                "values": { "a": "A" },
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            vec![
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "A1",
+                    value: Scalar::Text("A"),
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "xl/vbaProject.bin",
+                    present: true,
+                },
+            ],
+        )
+        .named("macro_plain_name"),
+        // A sample carrying a signature part: the fill renders the sheet and says nothing about the
+        // signature — the note an edit prints is the edit's own, and the transcript's notes are
+        // compared by the baseline.
+        produced(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_SIGNED_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-signed.xlsx",
+                "format": "xlsx",
+                "values": { "a": "A" },
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            vec![
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "A1",
+                    value: Scalar::Text("A"),
+                },
+                Effect::PartPresent {
+                    output: None,
+                    part: "_xmlsignatures/sig1.xml",
+                    present: true,
+                },
+            ],
+        )
+        .named("signed"),
+        // A template's main type under a workbook's name: the fill reads the parts by name, not the
+        // type the package declares.
+        produced(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_TEMPLATE_TYPE_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-template.xlsx",
+                "format": "xlsx",
+                "values": { "a": "A" },
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            vec![Effect::Cell {
+                output: None,
+                sheet: "People",
+                cell: "A1",
+                value: Scalar::Text("A"),
+            }],
+        )
+        .named("template_type"),
+        // A Word package asked for as a workbook: refused by the family its parts declare, naming
+        // both extensions.
+        declined(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_WORD_AS_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-word.xlsx",
+                "format": "xlsx",
+                "values": { "name": "Ada" },
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            Expect::Refused(Reason::contains(
+                "the sample is really a .docx package, not the .xlsx one its name says — hint: \
+                 rename it to match its content",
+            )),
+        )
+        .named("other_family"),
+        // Bytes that are not a ZIP at all: the package is refused by the name it was given.
+        declined(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_UNREADABLE_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-unreadable.xlsx",
+                "format": "xlsx",
+                "values": { "a": "b" },
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            Expect::Refused(Reason::template(
+                "fill-unreadable.xlsx is not a readable .xlsx package: {}",
+            )),
+        )
+        .named("unreadable"),
+        // A workbook holding no placeholder at all: the sample is produced as it stands, with nothing
+        // declared and nothing missing. The effects pin the workbook the output still is.
+        produced(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_ZERO_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-zero.xlsx",
+                "format": "xlsx",
+                "values": { "a": "b" },
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            vec![
+                Effect::SheetNames {
+                    output: None,
+                    names: &["First", "Second"],
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "First",
+                    cell: "A1",
+                    value: Scalar::Text("Name"),
+                },
+            ],
+        )
+        .named("zero"),
+        // A worksheet whose crafted row numbers are the two a `u32` row state cannot advance past:
+        // one stating a number no `u32` holds and one stating exactly `u32::MAX`, each followed by a
+        // row that states none. The fallback and the saturating add both produce the sample rather
+        // than taking the process down. Neither crafted row holds a placeholder, so no address is
+        // written; the divergence that leaves is stated in the module docs.
+        produced(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_TOP_ROW_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-top-row.xlsx",
+                "format": "xlsx",
+                "values": { "a": "A" },
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            vec![
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "A1",
+                    value: Scalar::Text("A"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "A2",
+                    value: Scalar::Text("wide"),
+                },
+                Effect::Cell {
+                    output: None,
+                    sheet: "People",
+                    cell: "A4",
+                    value: Scalar::Text("top"),
+                },
+            ],
+        )
+        .named("top_row"),
+        // A literal past `u64` in a whole-cell placeholder: the request's own parser rounds it into
+        // a double before either engine sees it, and both print the same spelling, which the cell
+        // takes as a number.
+        produced(
+            Family::Xlsx,
+            "fill_template",
+            None,
+            vec![FILL_NUMBER_XLSX],
+            json!({
+                "op": "fill_template",
+                "template": "$in/fill-number.xlsx",
+                "format": "xlsx",
+                "values": {
+                    "n": serde_json::from_str::<Value>("123456789012345678901")
+                        .expect("a JSON number"),
+                },
+                "output": "$out/filled.xlsx",
+            }),
+            vec!["filled.xlsx"],
+            vec![Effect::Cell {
+                output: None,
+                sheet: "People",
+                cell: "A1",
+                value: Scalar::Number(1.234_567_890_123_456_7e20),
+            }],
+        )
+        .named("long_literal"),
         produced(
             Family::Pptx,
             "fill_template",
@@ -14986,6 +15668,81 @@ fn pdf_cases() -> Vec<Case> {
             )),
         )
         .named("refused_structure"),
+        // The value map is absent: `Object.entries(undefined)` faults in the reference, so the class
+        // is the engine's own and nothing is written.
+        declined(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("values"),
+            vec![FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/form.pdf",
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("no_values"),
+        // A value map with no entries — a number or a boolean — produces the form unchanged: the
+        // reference's own `Object.entries` visits nothing, so nothing is checked or filled.
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("values"),
+            vec![FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/form.pdf",
+                "values": 5,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![Effect::PageCount {
+                output: None,
+                count: 1,
+            }],
+        )
+        .named("scalar"),
+        // A string is indexed like a map: its entries are its code units, so the first name is "0",
+        // which no form holds. The refusal is the field lookup's own.
+        declined(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("values"),
+            vec![FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/form.pdf",
+                "values": "Ada",
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            Expect::Refused(Reason::contains(
+                "no such form field: 0; this document has: name (text), agree (checkbox), \
+                 choice (radio; options: one, two), colour (choice; options: red, green, blue)",
+            )),
+        )
+        .named("string"),
+        // A list is indexed the same way, and a structure among its entries is refused by that
+        // index before any field is looked up.
+        declined(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("values"),
+            vec![FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/form.pdf",
+                "values": [{ "first": "Ada" }],
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            Expect::Refused(Reason::contains(
+                r#"the value for "0" must be text, a number or a boolean, not a structure"#,
+            )),
+        )
+        .named("list"),
         // ── the shapes a fill's appearance lays out ──────────────────────────────────────────────
         // A multi-line field wraps its value at the size the reference's fitter chooses: the
         // appearance is an array of runs, so the split itself is part of the record.

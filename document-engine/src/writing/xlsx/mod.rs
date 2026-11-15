@@ -475,7 +475,7 @@ fn col_entries(sheet: &str) -> Vec<ColEntry> {
 }
 
 /// A `<c>`'s own `s=` index, or `None` when it states none.
-fn style_of(cell: &str) -> Option<String> {
+pub(super) fn style_of(cell: &str) -> Option<String> {
     static STYLE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r#"\bs="(\d+)""#).expect("a cell's style attribute must be a pattern")
     });

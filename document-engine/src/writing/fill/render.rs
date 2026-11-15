@@ -12,7 +12,7 @@ use super::content::{self, Config};
 use super::errors::{self, TemplateError};
 use super::parts::{self, Kind, Part, Placeholder, Position};
 use crate::vocabulary::Family;
-use crate::writing::{interpolated, scalar_value, xml};
+use crate::writing::{code_unit, interpolated, xml};
 
 /// The state one part's render carries: the run whose properties a line break repeats, the section
 /// properties a next-page section needs, and the failures the render collected.
@@ -57,24 +57,9 @@ impl<'a> Scope<'a> {
         Self(value)
     }
 
-    /// The first name `Object.entries` would visit whose value is not a scalar, if any.
-    pub fn non_scalar(&self) -> Option<String> {
-        match self.0 {
-            Value::Object(map) => map
-                .iter()
-                .find(|(_, value)| !scalar_value(value))
-                .map(|(name, _)| name.clone()),
-            Value::Array(items) => items
-                .iter()
-                .position(|value| !scalar_value(value))
-                .map(|index| index.to_string()),
-            _ => None,
-        }
-    }
-
     /// The value `name` names, as the reference's own-property read finds it: an object's member is
     /// borrowed, while a string's code unit and a length are computed here.
-    fn get(&self, name: &str) -> Option<Cow<'a, Value>> {
+    pub(super) fn get(&self, name: &str) -> Option<Cow<'a, Value>> {
         match self.0 {
             Value::Object(map) => map.get(name).map(Cow::Borrowed),
             Value::String(text) => string_member(text, name).map(Cow::Owned),
@@ -105,7 +90,7 @@ fn string_member(text: &str, name: &str) -> Option<Value> {
         return Some(Value::from(text.encode_utf16().count()));
     }
     let unit = text.encode_utf16().nth(index_of(name)?)?;
-    Some(Value::String(String::from_utf16_lossy(&[unit])))
+    Some(code_unit(unit))
 }
 
 /// An array's own members: its elements by index and its `length`.
@@ -277,10 +262,35 @@ fn is_falsy(value: &Value) -> bool {
     }
 }
 
-fn record_missing(answer: &mut Answer, name: &str) {
+pub(super) fn record_missing(answer: &mut Answer, name: &str) {
     if answer.seen_missing.insert(name.to_string()) {
         answer.missing.push(name.to_string());
     }
+}
+
+/// `text` with every plain `{name}` substituted, recording every name the sample declared and every
+/// one no value answered. A name is looked up own-property, as the reference does, so a placeholder
+/// named after an object-prototype member is one the caller gave no value for.
+pub(super) fn substitute_placeholders(
+    text: &str,
+    scope: &Scope<'_>,
+    answer: &mut Answer,
+) -> String {
+    PLACEHOLDER_PATTERN
+        .replace_all(text, |capture: &regex::Captures<'_>| {
+            let name = capture.get(1).map_or("", |found| found.as_str());
+            answer.tags.insert(name.to_string());
+            if let Some(value) = scope.get(name) {
+                interpolated(Some(value.as_ref()))
+            } else {
+                record_missing(answer, name);
+                capture
+                    .get(0)
+                    .map_or("", |found| found.as_str())
+                    .to_string()
+            }
+        })
+        .into_owned()
 }
 
 /// Whether the first part of a section's body that is not text is something other than a run's
@@ -496,64 +506,112 @@ fn empty_text_elements(mut parts: Vec<String>) -> Vec<String> {
     parts
 }
 
-// ── the kit's own presenter-notes pass ─────────────────────────────────────────────────────────
+// ── the kit's plainer container pass: presenter notes and shared strings ────────────────────────
 
-/// The kit's plainer fill of a presenter-notes page: only `{name}` is understood, so a section tag
-/// is a literal name.
-pub(super) fn fill_notes(text: &str, scope: &Scope<'_>, answer: &mut Answer) -> String {
-    let element = xml::element_pattern("a:p");
-    let runs = &RUN_PATTERN;
-    let placeholder = &PLACEHOLDER_PATTERN;
-    element
+/// The run element of a part: its namespace, and whether its text element declares `xml:space` so a
+/// significant space survives. A further format is a variant rather than a prefix, so the pattern
+/// and the element cannot name different namespaces.
+#[derive(Clone, Copy)]
+pub(super) enum Run {
+    /// DrawingML's `a:t`, which declares no attributes at all: the attribute is not part of that
+    /// format, and a presentation holding one offers to repair the file.
+    Drawing,
+    /// SpreadsheetML's `<t>`, the shape a workbook part writes.
+    Workbook,
+}
+
+impl Run {
+    /// The element's qualified name.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Drawing => "a:t",
+            Self::Workbook => "t",
+        }
+    }
+
+    /// The run element as a pattern, capturing its text.
+    fn pattern(self) -> &'static Regex {
+        match self {
+            Self::Drawing => &DRAWING_RUN,
+            Self::Workbook => &WORKBOOK_RUN,
+        }
+    }
+
+    /// The element holding one run's text, written as markup rather than as a pattern.
+    fn element(self, content: &str) -> String {
+        let name = self.name();
+        match self {
+            Self::Drawing => format!("<{name}>{content}</{name}>"),
+            Self::Workbook => format!("<{name} xml:space=\"preserve\">{content}</{name}>"),
+        }
+    }
+}
+
+/// The kit's `fillTextContainers`: every `element` of `text` whose runs hold a plain `{name}` tag
+/// has its runs joined, substituted once and written back into its first run.
+pub(super) fn fill_text_containers(
+    text: &str,
+    element: &str,
+    run: Run,
+    scope: &Scope<'_>,
+    answer: &mut Answer,
+) -> String {
+    xml::element_pattern(element)
         .replace_all(text, |captures: &regex::Captures<'_>| {
-            let whole = captures.get(0).map_or("", |found| found.as_str());
-            let mut joined = String::new();
-            for run in runs.captures_iter(whole) {
-                joined.push_str(run.get(1).map_or("", |found| found.as_str()));
-            }
-            let joined = xml::xml_unescape(&joined);
-            if !placeholder.is_match(&joined) {
-                return whole.to_string();
-            }
-            let substituted = placeholder
-                .replace_all(&joined, |capture: &regex::Captures<'_>| {
-                    let name = capture.get(1).map_or("", |found| found.as_str());
-                    answer.tags.insert(name.to_string());
-                    if let Some(value) = scope.get(name) {
-                        interpolated(Some(value.as_ref()))
-                    } else {
-                        record_missing(answer, name);
-                        capture
-                            .get(0)
-                            .map_or("", |found| found.as_str())
-                            .to_string()
-                    }
-                })
-                .into_owned();
-            let mut first = true;
-            runs.replace_all(whole, |_: &regex::Captures<'_>| {
-                if first {
-                    first = false;
-                    format!("<a:t>{}</a:t>", xml::xml_escape(&substituted))
-                } else {
-                    "<a:t></a:t>".to_string()
-                }
-            })
-            .into_owned()
+            let found = captures.get(0).map_or("", |found| found.as_str());
+            let Some(text) = placeholder_text(found, run) else {
+                return found.to_string();
+            };
+            rewrite_runs(found, run, &substitute_placeholders(&text, scope, answer))
         })
         .into_owned()
 }
 
+/// `element` with its first run holding `text` and every further run emptied, the run wrappers
+/// kept.
+fn rewrite_runs(element: &str, run: Run, text: &str) -> String {
+    let mut first = true;
+    run.pattern()
+        .replace_all(element, |_: &regex::Captures<'_>| {
+            let content = if first { text } else { "" };
+            first = false;
+            run.element(&xml::xml_escape(content))
+        })
+        .into_owned()
+}
+
+/// The joined, unescaped text of every run of `element`, or `None` when it holds no placeholder.
+pub(super) fn placeholder_text(element: &str, run: Run) -> Option<String> {
+    let text = run_text(element, run);
+    PLACEHOLDER_PATTERN.is_match(&text).then_some(text)
+}
+
+/// The joined, unescaped text of every run of `element`.
+pub(super) fn run_text(element: &str, run: Run) -> String {
+    let mut joined = String::new();
+    for found in run.pattern().captures_iter(element) {
+        joined.push_str(found.get(1).map_or("", |found| found.as_str()));
+    }
+    xml::xml_unescape(&joined)
+}
+
 /// The run element of a presenter-notes page, capturing its text.
-static RUN_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+static DRAWING_RUN: LazyLock<Regex> = LazyLock::new(|| run_pattern(Run::Drawing));
+
+/// The run element of a workbook part, capturing its text.
+static WORKBOOK_RUN: LazyLock<Regex> = LazyLock::new(|| run_pattern(Run::Workbook));
+
+/// `run`'s element as a pattern, capturing its text.
+fn run_pattern(run: Run) -> Regex {
+    let name = run.name();
     Regex::new(&format!(
         "{}([\\s\\S]*?){}",
-        xml::open_tag_with("a:t", xml::TAG_MIDDLE),
-        xml::close_tag("a:t"),
+        xml::open_tag(name),
+        xml::close_tag(name),
     ))
     .expect("the run pattern is built from fixed words")
-});
+}
 
-/// A plain `{name}` tag, the only kind the presenter-notes pass understands.
+/// A plain `{name}` tag, the only kind the plainer passes understand.
 static PLACEHOLDER_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\{([^{}]+)\}").expect("the tag pattern is a fixed pattern"));

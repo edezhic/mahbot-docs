@@ -4300,7 +4300,7 @@ mod tests {
     }
 
     #[test]
-    fn pdf_form_fill_requires_its_values() {
+    fn pdf_form_fill_faults_without_its_values() {
         let directory = scratch();
         let outcome = run(
             directory.path(),
@@ -4308,7 +4308,9 @@ mod tests {
             json!({ "input": "form.pdf" }),
             "out",
         );
-        assert_usage_refusal(&outcome, "surface_values_missing", &[]);
+        // `Object.entries(undefined)` faults in the reference, so the class is the engine's own,
+        // exactly as it is for a template fill with no value map.
+        assert_internal_refusal(&outcome, "engine_failed", &[]);
     }
 
     #[test]

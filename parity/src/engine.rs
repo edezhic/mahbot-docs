@@ -126,7 +126,9 @@ pub fn request_outputs(request: &serde_json::Value) -> Vec<PathBuf> {
 }
 
 /// What a writer says about one (operation, family) pair before the harness runs its cases: the
-/// engine's three-way answer, in the harness's own vocabulary.
+/// engine's own answer, in the harness's own vocabulary. `NotCarriedOut` is a writer's own claim
+/// rather than one the crate's engine can make today; the harness keeps it so a partial engine,
+/// and the tests that substitute one, still report an unjudged case rather than a pass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Coverage {
     /// The operation accepts the pair and the engine carries it out: its cases are judged.
@@ -144,7 +146,6 @@ impl From<Answer> for Coverage {
     fn from(answer: Answer) -> Self {
         match answer {
             Answer::CarriedOut => Self::Delivered,
-            Answer::NotCarriedOut => Self::NotCarriedOut,
             Answer::UnknownOperation | Answer::UnacceptedFamily => Self::Unaccepted,
         }
     }

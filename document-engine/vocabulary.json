@@ -1539,12 +1539,6 @@
         "reading"
       ]
     },
-    "reason_not_carried_out": {
-      "text": "the {operation} operation is not carried out",
-      "printed_by": [
-        "writing"
-      ]
-    },
     "reason_old_office_version": {
       "text": "an old Office version this tool cannot read",
       "printed_by": [
@@ -2969,12 +2963,6 @@
     },
     "surface_inputs_missing": {
       "text": "the pdf_merge operation needs \"inputs\" to be a list of file paths",
-      "printed_by": [
-        "writing"
-      ]
-    },
-    "surface_values_missing": {
-      "text": "the pdf_form_fill operation needs a \"values\" object",
       "printed_by": [
         "writing"
       ]

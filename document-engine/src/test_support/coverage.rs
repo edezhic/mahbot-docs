@@ -2624,7 +2624,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         marks: &["edit_work_over_budget", "edit_write_failed"],
     },
     Unreached {
-        reason: "a package stating a part twice, which no generated sample does: the shared package writer refuses it rather than dropping a part, for every operation that writes one",
+        reason: "the writer's duplicate-part guard, which `writing/package.rs` documents as unreachable: a fill's archive is collapsed by the reader first — the `duplicate_part` case records that collapse — and no other writer is handed one name twice. It states a crate defect rather than a refusal a caller can reach",
         marks: &["write_part_duplicate"],
     },
     Unreached {
@@ -2660,11 +2660,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
     },
     Unreached {
         reason: "the reference's own kit faults before it reads a value when a required entry is absent, so a corpus case would record a runtime error rather than a product refusal; the crate's surface refuses the missing entry before opening the file, and the product's tool layer refuses it above both",
-        marks: &[
-            "surface_image_missing",
-            "surface_text_missing",
-            "surface_values_missing",
-        ],
+        marks: &["surface_image_missing", "surface_text_missing"],
     },
     Unreached {
         reason: "the operation surface refuses a split's shape before any operation runs; the corpus's split cases name a non-empty groups array under the cap",
@@ -2734,10 +2730,6 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         marks: &["surface_merge_bytes_too_many"],
     },
     Unreached {
-        reason: "printed only for an accepted (operation, family) pair the writing half does not carry out — today only fill_template's workbook family, since all four families of create are carried out; the recorded reference carries every one of them out, so no recorded answer prints it",
-        marks: &["reason_not_carried_out"],
-    },
-    Unreached {
         reason: "the crate's own nesting bound: the reference has none, so it recurses where the crate refuses, and a corpus sample deep enough to reach the bound would compare the reference's stack with the crate's sentence; the port's own test builds one",
         marks: &["fill_nested"],
     },
@@ -2750,7 +2742,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         marks: &["fill_delimiters_repeat"],
     },
     Unreached {
-        reason: "a package that declares a workbook content type but holds no workbook part; `fill_template`'s workbook family has not landed and no generated sample declares one",
+        reason: "a package sent down the Word or presentation path whose workbook part is left to the workbook filler — in practice one that declares a workbook content type but holds no workbook part, and a hybrid package holding both a Word and a workbook part, since the scan keeps every family and the last match wins: the library reads the content types and answers its own module sentence, while the workbook path finds its parts by name and produces the package. No generated sample has either shape, so no case reaches it",
         marks: &["fill_xlsx_needs_module"],
     },
 ];

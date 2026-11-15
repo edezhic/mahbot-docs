@@ -8779,6 +8779,343 @@ pub fn pptx_fill_slide_only() -> Vec<u8> {
     pptx_package_of(Some(&types), parts)
 }
 
+// ── xlsx: the fill_template samples ─────────────────────────────────────────────────────────
+// A workbook fill is its own path: the cell pass over every `xl/worksheets/sheet<digits>.xml`
+// part and then the shared-string table's own pass. The samples below state one thing each: what
+// a cell's text may be held in, which parts the pass reaches, the order it reports names in, and
+// the package shapes it fills or refuses.
+
+/// The content type of a macro-enabled workbook's main part.
+const XLSX_MACRO_MAIN_TYPE: &str = "application/vnd.ms-excel.sheet.macroEnabled.main+xml";
+/// The content type of a workbook template's main part.
+const XLSX_TEMPLATE_MAIN_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml";
+/// The declaration of a workbook's macro project part.
+const XLSX_VBA_DEFAULT: &str =
+    r#"<Default Extension="bin" ContentType="application/vnd.ms-office.vbaProject"/>"#;
+/// The declaration of a package's own signature part.
+const XLSX_SIGNATURE_OVERRIDE: &str = concat!(
+    r#"<Override PartName="/_xmlsignatures/sig1.xml" "#,
+    r#"ContentType="application/vnd.openxmlformats-package.digital-signature-xmlsignature+xml"/>"#,
+);
+
+/// A package's signature part: a fill copies it through untouched.
+const XLSX_SIGNATURE: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+    r#"<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo/></Signature>"#,
+);
+
+/// `content_types` with `declarations` inserted before its closing tag.
+fn xlsx_declaring(content_types: &str, declarations: &str) -> String {
+    content_types.replace("</Types>", &format!("{declarations}</Types>"))
+}
+
+/// One worksheet part whose `A1` holds `text` as an inline string: the cell shape a fill case's
+/// placeholder is written in, so the difference a case shows is the value's, never the markup's.
+fn xlsx_fill_a1(text: &str) -> String {
+    format!(
+        concat!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+            r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#,
+            r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>{}</t></is></c></row></sheetData>"#,
+            r#"</worksheet>"#,
+        ),
+        text,
+    )
+}
+
+/// A one-sheet workbook named `People`: the worksheet part `part` holds `sheet` and is reached
+/// through the relationship target `part` without its `xl/` prefix, the package declares
+/// `content_types`, and `extra` parts sit beside them.
+fn xlsx_fill_package(
+    part: &str,
+    sheet: &str,
+    content_types: &str,
+    extra: &[(&str, &[u8])],
+) -> Vec<u8> {
+    let target = part
+        .strip_prefix("xl/")
+        .expect("a worksheet part sits under xl/");
+    let workbook = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" "#,
+        r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+        r#"<sheets><sheet name="People" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+    );
+    let workbook_rels = xlsx_rels(&[("rId1", "worksheet", target)]);
+    let mut parts: Vec<(&str, &[u8])> = vec![(part, sheet.as_bytes())];
+    parts.extend_from_slice(extra);
+    xlsx_package_around(workbook, &workbook_rels, content_types, &parts)
+}
+
+/// A workbook whose strings live in the shared table: a whole-cell shared string, a partial one,
+/// an entry nothing references, a cell with no `r`, an inline number and boolean, a placeholder
+/// written with doubled braces, a section tag and a formula-looking value — every shape
+/// `fillXlsx` tells apart, in one sheet.
+#[must_use]
+pub fn xlsx_fill_strings() -> Vec<u8> {
+    let sheet = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#,
+        r#"<sheetData>"#,
+        r#"<row r="1">"#,
+        r#"<c r="A1" t="inlineStr"><is><t>{inline}</t></is></c>"#,
+        r#"<c r="B1" s="1" t="s"><v>0</v></c>"#,
+        r#"<c r="C1" s="1" t="s"><v>1</v></c>"#,
+        r#"<c r="D1" s="1" t="s"><v>2</v></c>"#,
+        r#"<c r="E1" t="s"><v>6</v></c>"#,
+        r#"<c r="F1" t="s"><v>7</v></c>"#,
+        r#"</row>"#,
+        r#"<row r="2">"#,
+        r#"<c r="A2" t="s"><v>3</v></c>"#,
+        r#"<c r="B2" t="inlineStr"><is><t>{numInline}</t></is></c>"#,
+        r#"<c r="C2" t="inlineStr"><is><t>{{dbl}}</t></is></c>"#,
+        r#"<c r="D2" t="inlineStr"><is><t>{#sec}x{/sec}</t></is></c>"#,
+        r#"</row>"#,
+        r#"<row r="3">"#,
+        r#"<c t="inlineStr"><is><t>{noAddr}</t></is></c>"#,
+        r#"<c r="B3" t="inlineStr"><is><t>{formula}</t></is></c>"#,
+        r#"<c r="C3" t="inlineStr"><is><t>{boolInline}</t></is></c>"#,
+        r#"</row>"#,
+        r#"<row r="4">"#,
+        r#"<c r="A4" s="1" cm="1" t="inlineStr"><is><r><rPr><b/></rPr><t>{runs}</t></r><r><t> tail</t></r></is></c>"#,
+        r#"</row>"#,
+        r#"</sheetData></worksheet>"#,
+    );
+    // `count` and `uniqueCount` are deliberately 99: a fill that recomputed them would diverge.
+    let shared = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="99" uniqueCount="99">"#,
+        r#"<si><t>{wholeText}</t></si>"#,
+        r#"<si><t>{wholeBool}</t></si>"#,
+        r#"<si><t>{wholeNum}</t></si>"#,
+        r#"<si><r><t>partial </t></r><r><t>{partialName}</t></r></si>"#,
+        r#"<si><t>{unreferenced}</t></si>"#,
+        r#"<si><t>plain</t></si>"#,
+        r#"<si><r><t>missing </t></r><r><t>{absentPartial}</t></r></si>"#,
+        r#"<si><t>{wholeAbsent}</t></si>"#,
+        r#"</sst>"#,
+    );
+    let workbook = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" "#,
+        r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+        r#"<sheets><sheet name="People" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+    );
+    let workbook_rels = xlsx_rels(&[
+        ("rId1", "worksheet", "worksheets/sheet1.xml"),
+        ("rId2", "sharedStrings", "sharedStrings.xml"),
+    ]);
+    let content_types = xlsx_content_types(&[
+        ("/xl/sharedStrings.xml", XLSX_SHARED_TYPE),
+        ("/xl/worksheets/sheet1.xml", XLSX_WORKSHEET_TYPE),
+    ]);
+    xlsx_package_around(
+        workbook,
+        &workbook_rels,
+        &content_types,
+        &[
+            ("xl/sharedStrings.xml", shared.as_bytes()),
+            ("xl/worksheets/sheet1.xml", sheet.as_bytes()),
+        ],
+    )
+}
+
+/// A workbook whose one worksheet part is named `data.xml`: a fill finds its parts by the
+/// `sheet<digits>` name the reference states, so this part is left alone and uncounted.
+#[must_use]
+pub fn xlsx_fill_odd_sheets() -> Vec<u8> {
+    let content_types = xlsx_content_types(&[("/xl/worksheets/data.xml", XLSX_WORKSHEET_TYPE)]);
+    xlsx_fill_package(
+        "xl/worksheets/data.xml",
+        &xlsx_fill_a1("{a}"),
+        &content_types,
+        &[],
+    )
+}
+
+/// A two-sheet workbook whose archive holds the second sheet first: the fill walks the parts in
+/// archive order, so the names it reports missing are the archive's, not the workbook's.
+#[must_use]
+pub fn xlsx_fill_order() -> Vec<u8> {
+    let workbook = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" "#,
+        r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+        r#"<sheets>"#,
+        r#"<sheet name="First" sheetId="1" r:id="rId1"/>"#,
+        r#"<sheet name="Second" sheetId="2" r:id="rId2"/>"#,
+        r#"</sheets></workbook>"#,
+    );
+    let workbook_rels = xlsx_rels(&[
+        ("rId1", "worksheet", "worksheets/sheet1.xml"),
+        ("rId2", "worksheet", "worksheets/sheet2.xml"),
+    ]);
+    let content_types = xlsx_content_types(&[
+        ("/xl/worksheets/sheet1.xml", XLSX_WORKSHEET_TYPE),
+        ("/xl/worksheets/sheet2.xml", XLSX_WORKSHEET_TYPE),
+    ]);
+    let first = xlsx_fill_a1("{a}");
+    let second = xlsx_fill_a1("{b}");
+    xlsx_package_around(
+        workbook,
+        &workbook_rels,
+        &content_types,
+        &[
+            ("xl/worksheets/sheet2.xml", second.as_bytes()),
+            ("xl/worksheets/sheet1.xml", first.as_bytes()),
+        ],
+    )
+}
+
+/// A workbook whose archive holds two records for one worksheet part: `sheet9.xml` is renamed in
+/// the raw bytes to `sheet1.xml`, the name the workbook's relationship already uses. Both names
+/// are ten bytes, so the archive's offsets stay valid, and an archive library keeps one entry per
+/// name — the last content at the first position, which is the one a fill reads.
+#[must_use]
+pub fn xlsx_fill_duplicate() -> Vec<u8> {
+    let content_types = xlsx_content_types(&[("/xl/worksheets/sheet1.xml", XLSX_WORKSHEET_TYPE)]);
+    let first = xlsx_fill_a1("first");
+    let second = xlsx_fill_a1("{a}");
+    let mut bytes = xlsx_fill_package(
+        "xl/worksheets/sheet1.xml",
+        &first,
+        &content_types,
+        &[("xl/worksheets/sheet9.xml", second.as_bytes())],
+    );
+    // The name is stated twice — in the local header and in the central directory — and both
+    // spellings are ten bytes, so replacing it keeps the archive's recorded offsets valid.
+    let mut at = 0;
+    while let Some(found) = bytes[at..]
+        .windows(10)
+        .position(|window| window == b"sheet9.xml")
+    {
+        bytes[at + found..at + found + 10].copy_from_slice(b"sheet1.xml");
+        at += found + 10;
+    }
+    bytes
+}
+
+/// A workbook with no `[Content_Types].xml` at all: the fill finds its parts by name, so the
+/// package is filled like any other.
+#[must_use]
+pub fn xlsx_fill_no_content_types() -> Vec<u8> {
+    let workbook = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" "#,
+        r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+        r#"<sheets><sheet name="People" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+    );
+    let workbook_rels = xlsx_rels(&[("rId1", "worksheet", "worksheets/sheet1.xml")]);
+    let root_rels = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#,
+        r#"<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>"#,
+        r#"</Relationships>"#,
+    );
+    let sheet = xlsx_fill_a1("{a}");
+    package(&[
+        ("_rels/.rels", root_rels.as_bytes()),
+        ("xl/workbook.xml", workbook.as_bytes()),
+        ("xl/_rels/workbook.xml.rels", workbook_rels.as_bytes()),
+        ("xl/worksheets/sheet1.xml", sheet.as_bytes()),
+    ])
+}
+
+/// A workbook whose two cells name the indexes of an array or string value map: `{0}` and `{1}`.
+#[must_use]
+pub fn xlsx_fill_numbered() -> Vec<u8> {
+    let sheet = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#,
+        r#"<sheetData>"#,
+        r#"<row r="1"><c r="A1" t="inlineStr"><is><t>{0}</t></is></c></row>"#,
+        r#"<row r="2"><c r="A2" t="inlineStr"><is><t>{1}</t></is></c></row>"#,
+        r#"</sheetData></worksheet>"#,
+    );
+    let content_types = xlsx_content_types(&[("/xl/worksheets/sheet1.xml", XLSX_WORKSHEET_TYPE)]);
+    xlsx_fill_package("xl/worksheets/sheet1.xml", sheet, &content_types, &[])
+}
+
+/// A workbook whose crafted row numbers are the two a `u32` row state cannot advance past: a row
+/// stating a number no `u32` holds and one stating exactly `u32::MAX`, each followed by a row that
+/// states none. The fallback and the saturating add both keep the sample produced rather than taking
+/// the process down; neither crafted row holds a placeholder, so no address is written.
+#[must_use]
+pub fn xlsx_fill_top_row() -> Vec<u8> {
+    let sheet = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#,
+        r#"<sheetData>"#,
+        r#"<row r="1"><c r="A1" t="inlineStr"><is><t>{a}</t></is></c></row>"#,
+        r#"<row r="18446744073709551615"><c r="A2" t="inlineStr"><is><t>wide</t></is></c></row>"#,
+        r#"<row><c t="inlineStr"><is><t>fallback</t></is></c></row>"#,
+        r#"<row r="4294967295"><c r="A4" t="inlineStr"><is><t>top</t></is></c></row>"#,
+        r#"<row><c t="inlineStr"><is><t>saturated</t></is></c></row>"#,
+        r#"</sheetData></worksheet>"#,
+    );
+    let content_types = xlsx_content_types(&[("/xl/worksheets/sheet1.xml", XLSX_WORKSHEET_TYPE)]);
+    xlsx_fill_package("xl/worksheets/sheet1.xml", sheet, &content_types, &[])
+}
+
+/// A workbook whose one cell is a whole-cell placeholder, for the number a request's own parser
+/// rounds into a double.
+#[must_use]
+pub fn xlsx_fill_number() -> Vec<u8> {
+    let content_types = xlsx_content_types(&[("/xl/worksheets/sheet1.xml", XLSX_WORKSHEET_TYPE)]);
+    xlsx_fill_package(
+        "xl/worksheets/sheet1.xml",
+        &xlsx_fill_a1("{n}"),
+        &content_types,
+        &[],
+    )
+}
+
+/// A macro-enabled workbook: its main part is declared as the macro-enabled type and it carries a
+/// macro project beside a package signature.
+#[must_use]
+pub fn xlsx_fill_macro() -> Vec<u8> {
+    let content_types = xlsx_content_types(&[("/xl/worksheets/sheet1.xml", XLSX_WORKSHEET_TYPE)])
+        .replace(XLSX_MAIN_TYPE, XLSX_MACRO_MAIN_TYPE);
+    let declarations = [XLSX_VBA_DEFAULT, XLSX_SIGNATURE_OVERRIDE].concat();
+    let content_types = xlsx_declaring(&content_types, &declarations);
+    xlsx_fill_package(
+        "xl/worksheets/sheet1.xml",
+        &xlsx_fill_a1("{a}"),
+        &content_types,
+        &[
+            ("xl/vbaProject.bin", &[0x00, 0x01, 0x02, 0x03, 0xff]),
+            ("_xmlsignatures/sig1.xml", XLSX_SIGNATURE.as_bytes()),
+        ],
+    )
+}
+
+/// A workbook carrying a package signature part beside its placeholder.
+#[must_use]
+pub fn xlsx_fill_signed() -> Vec<u8> {
+    let content_types = xlsx_content_types(&[("/xl/worksheets/sheet1.xml", XLSX_WORKSHEET_TYPE)]);
+    let content_types = xlsx_declaring(&content_types, XLSX_SIGNATURE_OVERRIDE);
+    xlsx_fill_package(
+        "xl/worksheets/sheet1.xml",
+        &xlsx_fill_a1("{a}"),
+        &content_types,
+        &[("_xmlsignatures/sig1.xml", XLSX_SIGNATURE.as_bytes())],
+    )
+}
+
+/// A workbook whose main part is declared as a template's type under a workbook's name.
+#[must_use]
+pub fn xlsx_fill_template_type() -> Vec<u8> {
+    let content_types = xlsx_content_types(&[("/xl/worksheets/sheet1.xml", XLSX_WORKSHEET_TYPE)])
+        .replace(XLSX_MAIN_TYPE, XLSX_TEMPLATE_MAIN_TYPE);
+    xlsx_fill_package(
+        "xl/worksheets/sheet1.xml",
+        &xlsx_fill_a1("{a}"),
+        &content_types,
+        &[],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::deflate_fixed;

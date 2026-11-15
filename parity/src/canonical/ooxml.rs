@@ -148,6 +148,11 @@
 //! the format it claims. An engine that emits a zip bomb or an unbounded tree must fail the gate
 //! with a message, not exhaust the harness; the harness bounds its own read of a produced file for
 //! the same reason.
+//!
+//! A filled workbook whose package holds no `xl/workbook.xml` is deliberately outside the model:
+//! the reference produces such a package rather than refusing it, but canonicalisation refuses it
+//! as a workbook with no family part, so no corpus case can record or judge it. The crate's own
+//! test pins that the fill produces it; the model does not compare it.
 
 use crate::engine::Family;
 use anyhow::{Context as _, Result, bail};

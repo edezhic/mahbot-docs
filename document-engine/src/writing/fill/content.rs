@@ -451,7 +451,11 @@ pub(super) fn select(parts: &[(String, Vec<u8>)]) -> Result<Selection, TemplateE
                 continue;
             }
             found = Some(*family);
-            // A workbook's parts are not this filler's: the workbook family has its own.
+            // A workbook's parts are not this filler's: the workbook family has its own. In
+            // practice this arm is reached by a package that declares a workbook content type but
+            // holds no workbook part; a hybrid package holding both parts reaches it too, because
+            // the scan keeps every family and the last match wins. The workbook path itself finds
+            // its parts by name and never reads content types.
             if *family != Family::Xlsx {
                 targets.extend(rendered.into_iter().cloned());
             }

@@ -23,6 +23,7 @@
 //! from a note's wording — which is why the PDF page actions' answers are notes-only, as the
 //! reference's are.
 
+use std::borrow::Cow;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -102,7 +103,7 @@ pub(super) fn js_truthy(value: &Value) -> bool {
 
 /// Whether a value is one of the shared rules' scalar kinds: text, a number or a boolean. A
 /// structure (and JSON's null, which the rules do not list) is not one.
-pub(super) fn scalar_value(value: &Value) -> bool {
+fn scalar_value(value: &Value) -> bool {
     let kind = match value {
         Value::String(_) => "string",
         Value::Number(_) => "number",
@@ -114,6 +115,82 @@ pub(super) fn scalar_value(value: &Value) -> bool {
     crate::vocabulary::scalar_kinds()
         .iter()
         .any(|allowed| allowed == kind)
+}
+
+/// The pairs JavaScript's `Object.entries` visits on a request's value map: a map's members in the
+/// request's own order, a string's UTF-16 code units by index, an array's elements by index, and
+/// nothing at all for a number or a boolean. A null has none either, and [`checked_values`] refuses
+/// one before a caller gets here.
+pub(super) fn entries(value: &Value) -> Vec<(String, Cow<'_, Value>)> {
+    match value {
+        Value::Object(map) => map
+            .iter()
+            .map(|(name, value)| (name.clone(), Cow::Borrowed(value)))
+            .collect(),
+        Value::Array(items) => items
+            .iter()
+            .enumerate()
+            .map(|(index, value)| (index.to_string(), Cow::Borrowed(value)))
+            .collect(),
+        Value::String(text) => text
+            .encode_utf16()
+            .enumerate()
+            .map(|(index, unit)| (index.to_string(), Cow::Owned(code_unit(unit))))
+            .collect(),
+        Value::Number(_) | Value::Bool(_) | Value::Null => Vec::new(),
+    }
+}
+
+/// One UTF-16 code unit as the string JavaScript reads it as: an index that lands on half a
+/// surrogate pair yields the lone code unit, which a Rust string cannot hold, so it becomes U+FFFD.
+pub(super) fn code_unit(unit: u16) -> Value {
+    Value::String(String::from_utf16_lossy(&[unit]))
+}
+
+/// The first name `Object.entries` visits whose value is not a scalar, if any: the name a value
+/// check refuses. It walks the value rather than materialising the entry list [`entries`] builds,
+/// because a string value map would allocate a value per code unit for an answer that is always
+/// "none".
+fn non_scalar(value: &Value) -> Option<String> {
+    match value {
+        Value::Object(map) => map
+            .iter()
+            .find(|(_, value)| !scalar_value(value))
+            .map(|(name, _)| name.clone()),
+        Value::Array(items) => items
+            .iter()
+            .position(|value| !scalar_value(value))
+            .map(|index| index.to_string()),
+        // A string's entries are its code units, every one of them a string; the other kinds have
+        // no entries at all.
+        Value::String(_) | Value::Number(_) | Value::Bool(_) | Value::Null => None,
+    }
+}
+
+/// The request's value map, checked against the shared rule both a fill and the PDF form fill
+/// apply: `Object.entries(values)` visited in order, the first entry that is not text, a number or
+/// a boolean refused by name.
+///
+/// # Errors
+///
+/// The map is absent or null — the reference reads `Object.entries(undefined)` and
+/// `Object.entries(null)`, both of which fault — or it holds a structure.
+pub(super) fn checked_values(request: &Request) -> Result<&Value, Failure> {
+    let Some(values) = request
+        .values
+        .get("values")
+        .filter(|value| !value.is_null())
+    else {
+        return Err(Failure::engine());
+    };
+    if let Some(name) = non_scalar(values) {
+        return Err(Failure::usage(
+            vocabulary()
+                .marks
+                .format("surface_value_structure", &[("name", &name)]),
+        ));
+    }
+    Ok(values)
 }
 
 /// A value as the kit's `JSON.stringify` renders it, with an absent value as the kit's own
@@ -172,9 +249,11 @@ fn write_json(value: &Value, out: &mut String) {
     }
 }
 
-/// A number as JavaScript prints it. A request is JSON, so the reference's runtime parses every
-/// number into a double before the writer sees it: an integer beyond the range a double holds
-/// exactly is rounded on the way in, which is why the exact 64-bit accessors are not used here.
+/// A number as JavaScript prints it. A request is JSON, so every number is a double before the
+/// writer sees it: an integer beyond the range a double holds exactly is rounded on the way in,
+/// which is why the exact 64-bit accessors are not used here. The rounding is the request parser's,
+/// and `serde_json` and the reference's runtime can round one literal past `u64` a unit in the last
+/// place apart, so a product request carrying such a literal can print two ways.
 pub(super) fn number_text(value: &serde_json::Number) -> String {
     js_number(value.as_f64().unwrap_or_default())
 }

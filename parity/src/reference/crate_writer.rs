@@ -6,8 +6,8 @@
 //! substituted `$in`/`$out`, so the first output path names the directory and the base name the
 //! engine derives every produced name from.
 //!
-//! The writing half is still being ported: the engine's own statement says which (operation,
-//! family) pairs it carries out, and the harness judges only those.
+//! The engine's own statement says which (operation, family) pairs it carries out, and the harness
+//! judges only those.
 
 use crate::engine::{Coverage, EngineIdentity, Key, Writer, WriterOutcome};
 use document_engine::operation::{Destination, Request, answer, execute};

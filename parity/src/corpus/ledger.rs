@@ -2,19 +2,18 @@
 //! carried out is not judged: the verdict names the pair instead of failing a comparison the engine
 //! never entered.
 //!
-//! The ledger restates the engine's own statement, and is checked against it in both directions: a
-//! pair recorded delivered while the engine answers the interim sentence fails, and so does a pair
-//! recorded not carried out while the engine carries it out. The ledger is also total over every
-//! pair the engine accepts — an accepted pair with no record, or a pair recorded delivered with no
-//! case to judge, fails rather than passing in silence.
+//! The ledger restates the engine's own statement, and is checked against it: a pair recorded not
+//! carried out while the engine carries it out fails. The ledger is also total over every pair the
+//! engine accepts — an accepted pair with no record, or a pair recorded delivered with no case to
+//! judge, fails rather than passing in silence.
 //!
 //! It is compiled for the harness's tests only: the gate reads the engine's statement, so the
 //! ledger has no runtime consumer. This list is what a person reviews.
 
 use crate::corpus::Case;
 use crate::engine::{Coverage, Family, pair_name};
-use document_engine::operation::{Answer, accepted_pairs, answer};
-use std::collections::BTreeMap;
+use document_engine::operation::accepted_pairs;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// One accepted pair and the coverage the crate's writer claims for it. The claim is the same
 /// three-way answer the writer gives; `Unaccepted` is not a valid claim for an accepted pair, and
@@ -36,14 +35,14 @@ const fn entry(operation: &'static str, family: Family, coverage: Coverage) -> R
 
 /// Every pair the crate's writer answers for today.
 const CRATE_WRITER: &[Record] = &[
-    // Every family of `create` is carried out. Of `fill_template`, the Word and presentation
-    // families are carried out and the workbook's is still being ported.
+    // Every family of `create` and `fill_template` is carried out, as is every edit and every PDF
+    // action.
     entry("create", Family::Docx, Coverage::Delivered),
     entry("create", Family::Xlsx, Coverage::Delivered),
     entry("create", Family::Pptx, Coverage::Delivered),
     entry("create", Family::Pdf, Coverage::Delivered),
     entry("fill_template", Family::Docx, Coverage::Delivered),
-    entry("fill_template", Family::Xlsx, Coverage::NotCarriedOut),
+    entry("fill_template", Family::Xlsx, Coverage::Delivered),
     entry("fill_template", Family::Pptx, Coverage::Delivered),
     entry("docx_edit", Family::Docx, Coverage::Delivered),
     entry("xlsx_edit", Family::Xlsx, Coverage::Delivered),
@@ -74,17 +73,10 @@ fn problems(records: &[Record], cases: &[Case]) -> Vec<String> {
         }
     }
     // What the engine actually carries out, which is what a record is checked against.
-    let actual: BTreeMap<(&str, Family), bool> = accepted_pairs()
-        .map(|(operation, family)| {
-            (
-                (operation, family),
-                answer(operation, family) == Answer::CarriedOut,
-            )
-        })
-        .collect();
+    let actual: BTreeSet<(&str, Family)> = accepted_pairs().collect();
     // Every accepted pair must be recorded: a pair left out would be neither judged nor stated as
     // not carried out.
-    for &(operation, family) in actual.keys() {
+    for &(operation, family) in &actual {
         if !recorded.contains_key(&(operation, family)) {
             problems.push(format!(
                 "{} is accepted but has no recorded state",
@@ -92,35 +84,32 @@ fn problems(records: &[Record], cases: &[Case]) -> Vec<String> {
             ));
         }
     }
-    // Both directions of the record against the engine's answer, and the case that would judge it.
+    // A record against the engine's own answer, and the case that would judge it.
     for (&(operation, family), &claimed) in &recorded {
         let pair = pair_name(family, operation);
-        let Some(&carried_out) = actual.get(&(operation, family)) else {
+        if !actual.contains(&(operation, family)) {
             problems.push(format!(
                 "{pair} is recorded but is not a pair any operation accepts"
             ));
             continue;
-        };
-        match (carried_out, claimed) {
-            (true, Coverage::NotCarriedOut) => problems.push(format!(
+        }
+        match claimed {
+            Coverage::Delivered => {
+                if !cases
+                    .iter()
+                    .any(|case| case.operation == operation && case.family == family)
+                {
+                    problems.push(format!(
+                        "{pair} is recorded delivered, but no corpus case would judge it"
+                    ));
+                }
+            }
+            Coverage::NotCarriedOut => problems.push(format!(
                 "{pair} is recorded not carried out, but the engine carries it out"
             )),
-            (false, Coverage::Delivered) => problems.push(format!(
-                "{pair} is recorded delivered, but the engine answers the interim sentence"
-            )),
-            (_, Coverage::Unaccepted) => problems.push(format!(
+            Coverage::Unaccepted => problems.push(format!(
                 "{pair} is recorded unaccepted, but the operation accepts it"
             )),
-            (true, Coverage::Delivered) | (false, Coverage::NotCarriedOut) => {}
-        }
-        if claimed == Coverage::Delivered
-            && !cases
-                .iter()
-                .any(|case| case.operation == operation && case.family == family)
-        {
-            problems.push(format!(
-                "{pair} is recorded delivered, but no corpus case would judge it"
-            ));
         }
     }
     problems
@@ -166,19 +155,6 @@ mod tests {
         assert!(
             found.iter().any(|problem| problem.contains("pdf/pdf_merge")
                 && problem.contains("the engine carries it out")),
-            "{found:?}"
-        );
-    }
-
-    #[test]
-    fn a_pair_recorded_delivered_while_the_engine_answers_the_interim_sentence_fails() {
-        let ledger = with_coverage("fill_template", Family::Xlsx, Coverage::Delivered);
-        let found = problems(&ledger, &writer_cases());
-        assert!(
-            found
-                .iter()
-                .any(|problem| problem.contains("xlsx/fill_template")
-                    && problem.contains("answers the interim sentence")),
             "{found:?}"
         );
     }

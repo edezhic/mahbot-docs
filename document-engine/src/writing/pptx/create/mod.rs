@@ -42,9 +42,10 @@
 //! type prints `undefined`, a null one `null`, and an object `[object Object]`. The two create marks
 //! it borrows from the PDF arm are `create_word_only` and `create_heading_level`;
 //! `create_unknown_size` is this family's own. A failed write adds no new key either: a part named
-//! twice answers the crate's own `write_part_duplicate`, which every writing operation shares, and
-//! the archive library's own failure answers the engine's internal sentence, because the reference
-//! prints no product sentence for one and the edit path's wording names an edited package.
+//! twice answers the crate's own `write_part_duplicate`, the guard `package::write_package`
+//! documents as unreachable, and the archive library's own failure answers the engine's internal
+//! sentence, because the reference prints no product sentence for one and the edit path's wording
+//! names an edited package.
 //!
 //! # What is deliberately not shared with the edit path
 //!

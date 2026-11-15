@@ -35,7 +35,7 @@ pub(crate) use docx::{DOCX_BODY_PART, convert_docx};
 /// Excel's number formats, shared by the sheet and chart readers.
 mod numfmt;
 mod xlsx;
-pub(crate) use xlsx::{WORKBOOK_PART, convert_xlsx};
+pub(crate) use xlsx::{SHARED_STRINGS_PART, WORKBOOK_PART, convert_xlsx};
 
 /// Maximum bytes decompressed from a single ZIP entry, so a lying size header cannot
 /// inflate the temp dir. Deliberately not an aggregate bound: the entry count is open.

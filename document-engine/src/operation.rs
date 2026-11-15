@@ -39,11 +39,10 @@
 //!
 //! Which (operation, family) pairs are carried out is the writing half's progress, and the engine
 //! states it as data in this module: every operation names the families it accepts and the handler
-//! that answers each accepted pair, and the dispatch reads that statement and nothing else. A pair
-//! whose port has not landed holds no handler and answers the vocabulary's `reason_not_carried_out`;
-//! the surface's own checks run first either way, so a request refused here is refused before any
-//! file is opened. The statement is also where the `format` value and the output extension learn
-//! what an operation accepts, so the answer and the statement cannot disagree.
+//! that answers each accepted pair, and the dispatch reads that statement and nothing else. The
+//! surface's own checks run first, so a request refused here is refused before any file is opened.
+//! The statement is also where the `format` value and the output extension learn what an operation
+//! accepts, so the answer and the statement cannot disagree.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -184,8 +183,7 @@ pub fn execute(request: &Request) -> Outcome {
 
 /// [`execute`] with the statement the dispatch reads injected. The dispatch has no other source for
 /// what it carries out, so substituting one pair's handler is what proves that one family of an
-/// operation is answered while its sibling is refused — and, until a port lands, that the answer
-/// follows the statement rather than a branch beside it.
+/// operation is answered while its sibling is refused.
 fn execute_with(request: &Request, statement: Statement) -> Outcome {
     crate::contained::contain_panics(|| dispatch(request, statement))
         .unwrap_or_else(|_| Outcome::failed(INTERNAL, crate::contained::engine_failed()))
@@ -227,22 +225,8 @@ fn dispatch(request: &Request, statement: Statement) -> Outcome {
             ),
         );
     }
-    // The statement is the one answer for the pair: a family it does not hold was refused above,
-    // and a pair without a handler is one whose port has not landed.
-    match pair.handler {
-        Some(handler) => handler.answer(request, &outputs, pair.family),
-        None => Outcome::failed(INTERNAL, not_carried_out(operation.name())),
-    }
-}
-
-/// The interim answer for an accepted pair whose port has not landed: the one sentence that says
-/// so. It names the operation and not the family; `VOCABULARY.md` records why that is safe while a
-/// port is missing.
-fn not_carried_out(operation: &str) -> String {
-    crate::vocabulary::vocabulary().marks.format(
-        crate::vocabulary::REASON_NOT_CARRIED_OUT,
-        &[("operation", operation)],
-    )
+    // The statement is the one answer for the pair: a family it does not hold was refused above.
+    pair.handler.answer(request, &outputs, pair.family)
 }
 
 /// The destination must exist, be a directory and not be a symlink. That is all this can answer
@@ -388,59 +372,47 @@ impl Handler {
     }
 }
 
-/// One accepted (operation, family) pair. `handler` is the code that answers it, or `None` while
-/// the pair's port has not landed — in which case the dispatch answers the interim sentence. There
-/// is no other place that answer is decided.
+/// One accepted (operation, family) pair and the handler that answers it. There is no other place
+/// the dispatch learns what it carries out.
 struct Pair {
     family: Family,
-    handler: Option<Handler>,
+    handler: Handler,
 }
 
 /// The statement the dispatch reads, injected so a test can substitute one.
 type Statement = fn(Operation) -> &'static [Pair];
 
 /// One pair, for the statement's rows below.
-const fn pair(family: Family, handler: Option<Handler>) -> Pair {
+const fn pair(family: Family, handler: Handler) -> Pair {
     Pair { family, handler }
 }
 
-/// `create` accepts every family: a document can be made of any of the four, and all four are
-/// carried out.
+/// `create` accepts every family: a document can be made of any of the four.
 const CREATE: &[Pair] = &[
-    pair(Family::Docx, Some(Handler::Action(docx_create))),
-    pair(Family::Xlsx, Some(Handler::Action(xlsx_create))),
-    pair(Family::Pptx, Some(Handler::Action(pptx_create))),
-    pair(Family::Pdf, Some(Handler::Action(pdf_create))),
+    pair(Family::Docx, Handler::Action(docx_create)),
+    pair(Family::Xlsx, Handler::Action(xlsx_create)),
+    pair(Family::Pptx, Handler::Action(pptx_create)),
+    pair(Family::Pdf, Handler::Action(pdf_create)),
 ];
 
 /// `fill_template` accepts the three OOXML families: a PDF has no placeholder template of its own.
-/// The Word and presentation families are carried out; the workbook's own filler is a later port.
 const FILL_TEMPLATE: &[Pair] = &[
-    pair(Family::Docx, Some(Handler::Fill)),
-    pair(Family::Xlsx, None),
-    pair(Family::Pptx, Some(Handler::Fill)),
+    pair(Family::Docx, Handler::Fill),
+    pair(Family::Xlsx, Handler::Fill),
+    pair(Family::Pptx, Handler::Fill),
 ];
 
-const DOCX_EDIT: &[Pair] = &[pair(
-    Family::Docx,
-    Some(Handler::Edit(crate::writing::DOCX_PORT)),
-)];
-const XLSX_EDIT: &[Pair] = &[pair(
-    Family::Xlsx,
-    Some(Handler::Edit(crate::writing::XLSX_PORT)),
-)];
-const PPTX_EDIT: &[Pair] = &[pair(
-    Family::Pptx,
-    Some(Handler::Edit(crate::writing::PPTX_PORT)),
-)];
-const PDF_MERGE: &[Pair] = &[pair(Family::Pdf, Some(Handler::Action(pdf_merge)))];
-const PDF_SPLIT: &[Pair] = &[pair(Family::Pdf, Some(Handler::Action(pdf_split)))];
-const PDF_ROTATE: &[Pair] = &[pair(Family::Pdf, Some(Handler::Action(pdf_rotate)))];
-const PDF_CROP: &[Pair] = &[pair(Family::Pdf, Some(Handler::Action(pdf_crop)))];
-const PDF_RESIZE: &[Pair] = &[pair(Family::Pdf, Some(Handler::Action(pdf_resize)))];
-const PDF_TEXT: &[Pair] = &[pair(Family::Pdf, Some(Handler::Action(pdf_text)))];
-const PDF_IMAGE: &[Pair] = &[pair(Family::Pdf, Some(Handler::Action(pdf_image)))];
-const PDF_FORM_FILL: &[Pair] = &[pair(Family::Pdf, Some(Handler::Action(pdf_form_fill)))];
+const DOCX_EDIT: &[Pair] = &[pair(Family::Docx, Handler::Edit(crate::writing::DOCX_PORT))];
+const XLSX_EDIT: &[Pair] = &[pair(Family::Xlsx, Handler::Edit(crate::writing::XLSX_PORT))];
+const PPTX_EDIT: &[Pair] = &[pair(Family::Pptx, Handler::Edit(crate::writing::PPTX_PORT))];
+const PDF_MERGE: &[Pair] = &[pair(Family::Pdf, Handler::Action(pdf_merge))];
+const PDF_SPLIT: &[Pair] = &[pair(Family::Pdf, Handler::Action(pdf_split))];
+const PDF_ROTATE: &[Pair] = &[pair(Family::Pdf, Handler::Action(pdf_rotate))];
+const PDF_CROP: &[Pair] = &[pair(Family::Pdf, Handler::Action(pdf_crop))];
+const PDF_RESIZE: &[Pair] = &[pair(Family::Pdf, Handler::Action(pdf_resize))];
+const PDF_TEXT: &[Pair] = &[pair(Family::Pdf, Handler::Action(pdf_text))];
+const PDF_IMAGE: &[Pair] = &[pair(Family::Pdf, Handler::Action(pdf_image))];
+const PDF_FORM_FILL: &[Pair] = &[pair(Family::Pdf, Handler::Action(pdf_form_fill))];
 
 /// The PDF actions' handlers. Each answers with the output paths the surface derived for it; a
 /// split is the one action that writes several.
@@ -483,10 +455,9 @@ fn xlsx_create(request: &Request, outputs: &[PathBuf]) -> Outcome {
 
 /// What the engine's statement says about one (operation, family) pair.
 ///
-/// The three negative answers are distinct on purpose: an operation the engine does not know, a
-/// family the operation does not accept, and an accepted pair whose port has not landed. A caller
-/// that records what the engine carries out can therefore state a pair it accepts and refuse to
-/// state one it does not.
+/// The two negative answers are distinct on purpose: an operation the engine does not know and a
+/// family the operation does not accept. A caller that records what the engine carries out can
+/// therefore state a pair it accepts and refuse to state one it does not.
 #[cfg(any(test, feature = "test-support"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Answer {
@@ -494,9 +465,6 @@ pub enum Answer {
     UnknownOperation,
     /// The operation is one of them and does not accept this family.
     UnacceptedFamily,
-    /// The operation accepts the family, and the pair's port has not landed: a request naming it
-    /// answers the interim sentence.
-    NotCarriedOut,
     /// The operation accepts the family and carries it out.
     CarriedOut,
 }
@@ -512,10 +480,10 @@ pub fn answer(operation: &str, family: Family) -> Answer {
     let Some(operation) = Operation::parse(operation) else {
         return Answer::UnknownOperation;
     };
-    match operation.pairs().iter().find(|pair| pair.family == family) {
-        None => Answer::UnacceptedFamily,
-        Some(pair) if pair.handler.is_some() => Answer::CarriedOut,
-        Some(_) => Answer::NotCarriedOut,
+    if operation.pairs().iter().any(|pair| pair.family == family) {
+        Answer::CarriedOut
+    } else {
+        Answer::UnacceptedFamily
     }
 }
 
@@ -621,7 +589,7 @@ fn validate(
     };
     // A pair answered by an edit port takes an `edits` value, and every edit names a sub-operation
     // its family has.
-    if matches!(pair.handler, Some(Handler::Edit(_))) {
+    if matches!(pair.handler, Handler::Edit(_)) {
         validate_edits(request, pair.family)?;
     }
     match operation {
@@ -646,9 +614,6 @@ fn validate(
                     &[("max", &max.to_string())],
                 ));
             }
-        }
-        Operation::PdfFormFill if !request.values.get("values").is_some_and(Value::is_object) => {
-            return Err(marks.get("surface_values_missing").to_string());
         }
         Operation::PdfText if !request.values.get("text").is_some_and(Value::is_string) => {
             return Err(marks.get("surface_text_missing").to_string());
@@ -840,14 +805,6 @@ mod tests {
         "pdf_image",
         "pdf_form_fill",
     ];
-
-    /// Every accepted pair whose port has not landed, read from the statement itself so a pair that
-    /// joins it without a handler is covered here rather than in a hand-kept list.
-    fn pairs_without_a_port() -> Vec<(&'static str, Family)> {
-        accepted_pairs()
-            .filter(|&(operation, family)| answer(operation, family) == Answer::NotCarriedOut)
-            .collect()
-    }
 
     /// A request for `operation` with `values`, writing into `directory`.
     #[expect(
@@ -1069,71 +1026,51 @@ mod tests {
         assert_eq!(answer("pdf_merge", Family::Pdf), Answer::CarriedOut);
     }
 
-    #[test]
-    fn every_pair_without_a_port_answers_the_interim_sentence() {
-        let dir = scratch();
-        let pairs = pairs_without_a_port();
-        assert!(!pairs.is_empty(), "the writing half is still landing ports");
-        for (operation, family) in pairs {
-            let request = request(dir.path(), operation, json!({ "format": family.as_str() }));
-            let failure = execute(&request).failure.expect("a failure");
-            assert!(!failure.is_usage(), "{operation}/{}", family.as_str());
-            assert_eq!(
-                failure.reason,
-                crate::vocabulary::vocabulary().marks.format(
-                    crate::vocabulary::REASON_NOT_CARRIED_OUT,
-                    &[("operation", operation)],
-                ),
-                "{operation}/{}",
-                family.as_str()
-            );
-        }
-    }
-
-    /// A statement that carries `create` out for Word only: the seam a port lands through.
-    static WORD_ONLY: &[Pair] = &[
-        pair(Family::Docx, Some(Handler::Action(answer_with_docx))),
-        pair(Family::Xlsx, None),
-        pair(Family::Pptx, None),
-        pair(Family::Pdf, None),
+    /// A statement that carries `create` out for two families: two pairs, so the surface's format
+    /// check runs against the substituted statement rather than the real one.
+    static TWO_FAMILIES: &[Pair] = &[
+        pair(Family::Docx, Handler::Action(answer_with_its_output)),
+        pair(Family::Pdf, Handler::Action(answer_with_its_output)),
     ];
 
-    fn word_only(operation: Operation) -> &'static [Pair] {
+    fn two_families(operation: Operation) -> &'static [Pair] {
         match operation {
-            Operation::Create => WORD_ONLY,
+            Operation::Create => TWO_FAMILIES,
             other => other.pairs(),
         }
     }
 
     /// The substituted handler writes the file the surface named, so the test can see that it
-    /// answered rather than the interim sentence.
-    fn answer_with_docx(_request: &Request, outputs: &[PathBuf]) -> Outcome {
-        std::fs::write(&outputs[0], b"docx").expect("the substituted handler writes its output");
+    /// answered rather than a refusal.
+    fn answer_with_its_output(_request: &Request, outputs: &[PathBuf]) -> Outcome {
+        std::fs::write(&outputs[0], b"answered")
+            .expect("the substituted handler writes its output");
         Outcome::produced(outputs.to_vec())
     }
 
     #[test]
-    fn one_family_is_answered_while_its_sibling_is_refused() {
+    fn a_stated_family_is_answered_while_an_unstated_one_is_refused() {
         let dir = scratch();
         let answered = execute_with(
             &request(dir.path(), "create", json!({ "format": "docx" })),
-            word_only,
+            two_families,
         );
         assert!(answered.failure.is_none(), "{:?}", answered.failure);
         assert_eq!(
             std::fs::read(dir.path().join("out.docx")).expect("read the answered pair's file"),
-            b"docx"
+            b"answered"
         );
         let refused = execute_with(
             &request(dir.path(), "create", json!({ "format": "xlsx" })),
-            word_only,
+            two_families,
         );
+        let failure = refused.failure.expect("a failure");
+        assert!(failure.is_usage(), "{failure:?}");
         assert_eq!(
-            refused.failure.expect("a failure").reason,
-            crate::vocabulary::vocabulary().marks.format(
-                crate::vocabulary::REASON_NOT_CARRIED_OUT,
-                &[("operation", "create")],
-            )
+            failure.reason,
+            crate::vocabulary::vocabulary()
+                .marks
+                .format("surface_unknown_format", &[("format", "xlsx")])
         );
     }
 

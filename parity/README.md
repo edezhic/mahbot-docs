@@ -36,7 +36,7 @@ crate the harness depends on. `cargo test -p document-engine` runs the crate's o
 its vocabulary restatement scan) without the harness.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 775 cases and 91 readings — takes a minute or two; the whole
+managed runtime. A full pass — 802 cases and 91 readings — takes a minute or two; the whole
 test suite, which runs the corpus twice for its determinism check, takes a couple of minutes.
 
 `parity --engine noop` runs the same corpus against the do-nothing engine. That engine exists only
@@ -131,9 +131,9 @@ out none of the pairs the corpus exercises`.
 
 Coverage is recorded per (operation, family) pair: the crate's ledger (`src/corpus/ledger.rs`) states
 for every pair the engine accepts whether it is delivered or not carried out, and a test checks that
-record against the engine's own statement in both directions — a pair recorded delivered while the
-engine answers the interim sentence fails, and so does a pair recorded not carried out while the
-engine carries it out. The engine states the pairs it carries out as data
+record against the engine's own statement — every accepted pair must be recorded, a pair recorded
+not carried out while the engine accepts it fails, and a pair recorded delivered must have a corpus
+case that would judge it. The engine states the pairs it carries out as data
 (`document_engine::operation::answer` for one pair, `accepted_pairs` for every pair, both compiled
 only for a test or a `test-support` consumer), and the dispatch reads that statement rather than a
 branch beside it, so the record cannot drift from the answer.
@@ -271,6 +271,17 @@ builders have one home in `document_engine::test_support`, which the crate's own
   one, a row or a `headers` value that is not an array, a block that is not an object, and a table
   whose rows mix an array with a number;
 - `fill_template` for all three template families;
+- the workbook fill in depth, since it is one of the families of `fill_template` the crate's writer
+  carries out: a shared-string table's whole-cell, partial and unreferenced entries, a whole-cell
+  number beside a boolean and a formula-looking substitute written as text, an address-less cell
+  and a run set collapsed to one, a row number no `u32` holds and one at `u32::MAX`, each followed
+  by a row without one, a literal past `u64` in a number cell, a worksheet part the name pattern does
+  not reach, an
+  archive ordered differently from the sheets, a duplicate part name, a package with no
+  `[Content_Types].xml`, an array, a string and a scalar value map beside the structures and nulls
+  it refuses, a macro-enabled sample named as one and under an ordinary name, a signed sample, a
+  template's main type under a workbook's name, another family's package, and a file that is not a
+  ZIP;
 - every `docx_edit` sub-operation (9), every `xlsx_edit` sub-operation (14) and every `pptx_edit`
   sub-operation (14), each with the precondition it needs — a second sheet to move, a merged range
   to unmerge, a picture to place, a paragraph to remove that is not the last one;
@@ -379,14 +390,16 @@ builders have one home in `document_engine::test_support`, which the crate's own
   and another wrapped at the size it states, with a value past the field's own `/MaxLen`, with a
   combed field drawn one character per cell, with an option list drawing every option it offers,
   with one whose `/Opt` entries are value-and-display pairs (the appearance lists the display
-  name), with a push button whose caption is drawn into its appearance, and described; and the
+  name), with a push button whose caption is drawn into its appearance, with a value map that has
+  no entries (a number, which leaves every field as it was), and described; and the
   form refusals — a missing field with its catalogue, a pushbutton, an option outside the list, an
-  option list with no choice, a checkbox given a state name, a structured value, a combed value
-  wider than its cells (the reference's own layout failure), a pair whose display entry is not
-  text, a text widget that states no rectangle, a button that states none and is regenerated, and
-  a button that states none while flattening, a signature field whose appearance is never
-  regenerated (the library's own failures), and a radio group whose `/Opt` entries are pairs, which
-  names no export value and so offers no choice;
+  option list with no choice, a checkbox given a state name, a structured value, a value map that is
+  a string or a list (indexed by the name its entry states, so the field it names is the index), a
+  combed value wider than its cells (the reference's own layout failure), a pair whose display
+  entry is not text, a text widget that states no rectangle, a button that states none and is
+  regenerated, and a button that states none while flattening, a signature field whose appearance
+  is never regenerated (the library's own failures), and a radio group whose `/Opt` entries are
+  pairs, which names no export value and so offers no choice;
 - the failure side: requests the engine refuses as the caller's to fix, and one it accepts and
   fails to carry out (a PDF whose `/AcroForm` is not a dictionary).
 

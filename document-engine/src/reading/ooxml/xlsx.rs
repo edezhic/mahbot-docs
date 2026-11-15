@@ -47,7 +47,7 @@ pub(crate) const WORKBOOK_PART: &str = "xl/workbook.xml";
 /// Relationships of the workbook part: sheet relationship id -> sheet part.
 const WORKBOOK_RELS_PART: &str = "xl/_rels/workbook.xml.rels";
 /// Part holding the strings the `t="s"` cells index into.
-const SHARED_STRINGS_PART: &str = "xl/sharedStrings.xml";
+pub(crate) const SHARED_STRINGS_PART: &str = "xl/sharedStrings.xml";
 /// Part holding the workbook's cell formats.
 const STYLES_PART: &str = "xl/styles.xml";
 /// Base a worksheet's relationships resolve against: a comment target is relative to it.

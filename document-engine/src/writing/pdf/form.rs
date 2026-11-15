@@ -25,7 +25,7 @@ use super::page;
 use super::{Produced, editable};
 use crate::operation::{Failure, Request};
 use crate::vocabulary::{self, vocabulary};
-use crate::writing::{js_truthy, scalar_value};
+use crate::writing::{checked_values, entries, js_truthy};
 
 /// One terminal field: its object, the name it is addressed by, its kind and the widgets it draws.
 struct Field {
@@ -88,24 +88,11 @@ impl Kind {
 
 /// Fill the request's form.
 pub(super) fn run(request: &Request, produced: &mut Produced) -> Result<(), Failure> {
-    // The operation surface refuses a request whose `values` is not an object before dispatch, so
-    // this is the engine's own defect rather than a caller's condition.
-    let Some(values) = request
-        .values
-        .get("values")
-        .and_then(serde_json::Value::as_object)
-    else {
-        return Err(Failure::engine());
-    };
-    for (name, value) in values {
-        if !scalar_value(value) {
-            return Err(Failure::usage(
-                vocabulary()
-                    .marks
-                    .format("surface_value_structure", &[("name", name)]),
-            ));
-        }
-    }
+    // The reference reads `Object.entries(req.values)` twice — once to check each value's kind and
+    // once to apply it, the second walk below. A shape with no entries (a number, a boolean)
+    // produces the form unchanged, and a string or a list is indexed by the name its entry states.
+    let values = checked_values(request)?;
+    let values = entries(values);
 
     let page::Opened {
         mut document,
@@ -123,7 +110,7 @@ pub(super) fn run(request: &Request, produced: &mut Produced) -> Result<(), Fail
     let face = Face::bundled();
     let mut dirty = HashSet::new();
     let mut unsupported = draw::Unsupported::default();
-    for (name, value) in values {
+    for (name, value) in &values {
         let Some(field) = fields.iter().find(|field| &field.name == name) else {
             let shown = if name.is_empty() {
                 "\"\"".to_string()

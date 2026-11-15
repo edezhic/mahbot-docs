@@ -19,12 +19,11 @@
 //!   whose table-of-contents entries and page-count token show the numbers of the pinned library's
 //!   layout pass, ported under `writing/docx/layout`; a deck at one of the sizes the presentation
 //!   family offers; or a workbook from one list of sheets, each with its name, rows and merge
-//!   ranges. A template fill renders a Word or presentation sample part by part from a value map.
+//!   ranges. A template fill renders a Word, presentation or workbook sample from a value map.
 //!   What the writing half carries out is a statement of (operation, family) pairs — the Word,
 //!   workbook and presentation edits, the five PDF page actions, the three PDF drawing actions, all
-//!   four families of `create`, and the Word and presentation fills — and the dispatch reads that
-//!   statement and nothing else. Only `fill_template`'s workbook family still answers the
-//!   vocabulary's `reason_not_carried_out`.
+//!   four families of `create`, and all three OOXML families of `fill_template` — and the dispatch
+//!   reads that statement and nothing else.
 //! - [`vocabulary`]: every reading bound the engine enforces, every mark it prints, who enforces
 //!   and who prints each one, the enumerations it shares between reading and producing, and the
 //!   embedded font the producing half draws with — one file, embedded at build time, read from

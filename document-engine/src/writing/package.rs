@@ -68,9 +68,11 @@ impl std::fmt::Display for WriteFailure {
 ///
 /// # Errors
 ///
-/// A part name is stated twice, or the archive cannot be written. A sample whose archive states one
-/// name twice is refused rather than collapsed the way the reference's own ZIP writer collapses it:
-/// the crate does not silently drop a part it was handed, and no generated sample states one twice.
+/// A part name is stated twice, or the archive cannot be written. The duplicate check is the
+/// writer's own guard against silently dropping a part it was handed: no request reaches it — a
+/// fill's archive is collapsed by [`read_package`] first, an edit's added part replaces one of the
+/// same name, and a created document's part names are constructed — so it states a crate defect
+/// rather than a refusal.
 pub(super) fn write_package(parts: &[(String, Vec<u8>)]) -> Result<Vec<u8>, WriteFailure> {
     let mut seen = HashSet::with_capacity(parts.len());
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
