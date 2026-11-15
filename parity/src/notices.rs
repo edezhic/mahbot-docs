@@ -6,3 +6,7 @@
 /// so it is skipped wherever the directory is compared with an archive and left out of the
 /// identity.
 pub const NOTICES: &[&str] = &["pptxgenjs-LICENSE.txt"];
+
+/// The notices and documentation that sit beside the layout's derived data, which are not data the
+/// crate's layout reads and so are not bytes the comparison's identity covers.
+pub const LAYOUT_NOTICES: &[&str] = &["LICENSE", "README.md"];

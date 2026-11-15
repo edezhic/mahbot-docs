@@ -1,0 +1,209 @@
+{
+  "faces": [
+    {
+      "name": "MS Mincho",
+      "aliases": [
+        "ＭＳ 明朝",
+        "MS 明朝"
+      ],
+      "lineHeight": 1297,
+      "descent": 289,
+      "monospaced": true,
+      "latin": "Times New Roman"
+    },
+    {
+      "name": "MS Gothic",
+      "aliases": [
+        "ＭＳ ゴシック",
+        "MS ゴシック"
+      ],
+      "lineHeight": 1297,
+      "descent": 289,
+      "monospaced": true,
+      "latin": "Arial"
+    },
+    {
+      "name": "MS PMincho",
+      "aliases": [
+        "ＭＳ Ｐ明朝",
+        "MS P明朝"
+      ],
+      "lineHeight": 1297,
+      "descent": 289,
+      "latin": "Times New Roman"
+    },
+    {
+      "name": "MS PGothic",
+      "aliases": [
+        "ＭＳ Ｐゴシック",
+        "MS Pゴシック"
+      ],
+      "lineHeight": 1297,
+      "descent": 289,
+      "latin": "Arial"
+    },
+    {
+      "name": "Yu Mincho",
+      "aliases": [
+        "游明朝"
+      ],
+      "lineHeight": 1433,
+      "descent": 387,
+      "latin": "Times New Roman"
+    },
+    {
+      "name": "Yu Gothic",
+      "aliases": [
+        "游ゴシック",
+        "游ゴシック Light",
+        "Yu Gothic Light"
+      ],
+      "lineHeight": 1434,
+      "descent": 388,
+      "latin": "Arial"
+    },
+    {
+      "name": "Meiryo",
+      "aliases": [
+        "メイリオ"
+      ],
+      "lineHeight": 1950,
+      "descent": 665,
+      "latin": "Arial"
+    },
+    {
+      "name": "SimSun",
+      "aliases": [
+        "宋体"
+      ],
+      "lineHeight": 1297,
+      "descent": 289,
+      "monospaced": true,
+      "latin": "Times New Roman"
+    },
+    {
+      "name": "NSimSun",
+      "aliases": [
+        "新宋体"
+      ],
+      "lineHeight": 1296,
+      "descent": 290,
+      "monospaced": true,
+      "latin": "Times New Roman"
+    },
+    {
+      "name": "SimHei",
+      "aliases": [
+        "黑体"
+      ],
+      "lineHeight": 1297,
+      "descent": 290,
+      "monospaced": true,
+      "latin": "Arial"
+    },
+    {
+      "name": "KaiTi",
+      "aliases": [
+        "楷体"
+      ],
+      "lineHeight": 1297,
+      "descent": 289,
+      "monospaced": true,
+      "latin": "Times New Roman"
+    },
+    {
+      "name": "FangSong",
+      "aliases": [
+        "仿宋"
+      ],
+      "lineHeight": 1297,
+      "descent": 290,
+      "monospaced": true,
+      "latin": "Times New Roman"
+    },
+    {
+      "name": "Microsoft YaHei",
+      "aliases": [
+        "微软雅黑"
+      ],
+      "lineHeight": 1714.3,
+      "descent": 460,
+      "latin": "Arial"
+    },
+    {
+      "name": "DengXian",
+      "aliases": [
+        "等线",
+        "等线 Light",
+        "DengXian Light"
+      ],
+      "lineHeight": 1354,
+      "descent": 388,
+      "latin": "Arial"
+    },
+    {
+      "name": "PMingLiU",
+      "aliases": [
+        "新細明體"
+      ],
+      "lineHeight": 1300,
+      "descent": 350,
+      "latin": "Times New Roman"
+    },
+    {
+      "name": "MingLiU",
+      "aliases": [
+        "細明體"
+      ],
+      "lineHeight": 1301,
+      "descent": 350,
+      "monospaced": true,
+      "latin": "Times New Roman"
+    },
+    {
+      "name": "Microsoft JhengHei",
+      "aliases": [
+        "微軟正黑體"
+      ],
+      "lineHeight": 1730,
+      "descent": 454,
+      "latin": "Arial"
+    },
+    {
+      "name": "Malgun Gothic",
+      "aliases": [
+        "맑은 고딕"
+      ],
+      "lineHeight": 1730,
+      "descent": 440,
+      "latin": "Arial"
+    },
+    {
+      "name": "Batang",
+      "aliases": [
+        "바탕"
+      ],
+      "lineHeight": 1300,
+      "descent": 292,
+      "latin": "Times New Roman"
+    },
+    {
+      "name": "Gulim",
+      "aliases": [
+        "굴림"
+      ],
+      "lineHeight": 1301,
+      "descent": 292,
+      "latin": "Arial"
+    },
+    {
+      "name": "Dotum",
+      "aliases": [
+        "돋움"
+      ],
+      "lineHeight": 1301,
+      "descent": 292,
+      "latin": "Arial"
+    }
+  ]
+}

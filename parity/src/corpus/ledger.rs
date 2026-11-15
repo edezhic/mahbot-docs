@@ -36,10 +36,9 @@ const fn entry(operation: &'static str, family: Family, coverage: Coverage) -> R
 
 /// Every pair the crate's writer answers for today.
 const CRATE_WRITER: &[Record] = &[
-    // `create`'s PDF, presentation and workbook families are carried out; its Word family is still
-    // being ported, and so is `fill_template`'s workbook family. The Word and presentation fills
-    // are carried out.
-    entry("create", Family::Docx, Coverage::NotCarriedOut),
+    // Every family of `create` is carried out. Of `fill_template`, the Word and presentation
+    // families are carried out and the workbook's is still being ported.
+    entry("create", Family::Docx, Coverage::Delivered),
     entry("create", Family::Xlsx, Coverage::Delivered),
     entry("create", Family::Pptx, Coverage::Delivered),
     entry("create", Family::Pdf, Coverage::Delivered),
@@ -173,11 +172,13 @@ mod tests {
 
     #[test]
     fn a_pair_recorded_delivered_while_the_engine_answers_the_interim_sentence_fails() {
-        let ledger = with_coverage("create", Family::Docx, Coverage::Delivered);
+        let ledger = with_coverage("fill_template", Family::Xlsx, Coverage::Delivered);
         let found = problems(&ledger, &writer_cases());
         assert!(
-            found.iter().any(|problem| problem.contains("docx/create")
-                && problem.contains("answers the interim sentence")),
+            found
+                .iter()
+                .any(|problem| problem.contains("xlsx/fill_template")
+                    && problem.contains("answers the interim sentence")),
             "{found:?}"
         );
     }

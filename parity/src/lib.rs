@@ -40,6 +40,7 @@ pub mod canonical;
 pub mod codecs;
 pub mod contract;
 pub mod corpus;
+pub mod docx_capture;
 pub mod engine;
 pub mod harness;
 pub mod notices;

@@ -9,6 +9,7 @@ use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
 
+use super::super::js_trim;
 use super::super::quoted;
 use super::super::xml;
 use super::text;
@@ -16,7 +17,9 @@ use crate::operation::Failure;
 use crate::vocabulary::heading_levels;
 use crate::vocabulary::vocabulary;
 
-/// A field's own instruction as its elements spell it, or `""` for a field stating none.
+/// A field's own instruction as its elements spell it, or `""` for a field stating none. The
+/// instruction is trimmed the way the reference trims it — JavaScript's own whitespace set — which
+/// differs from Rust's at U+0085 and U+FEFF.
 fn field_instruction(field: &str) -> String {
     static INSTR_TEXT: LazyLock<Arc<Regex>> =
         LazyLock::new(|| xml::pattern(r"<w:instrText[^>]*>([\s\S]*?)</w:instrText>".to_string()));
@@ -25,7 +28,7 @@ fn field_instruction(field: &str) -> String {
         .filter_map(|captures| captures.get(1))
         .map(|found| found.as_str())
         .collect();
-    let spelled = spelled.trim();
+    let spelled = js_trim(&spelled);
     if !spelled.is_empty() {
         return spelled.to_string();
     }
@@ -34,7 +37,7 @@ fn field_instruction(field: &str) -> String {
         .captures(field)
         .and_then(|captures| captures.get(1))
         .map_or_else(String::new, |found| {
-            xml::xml_unescape(found.as_str()).trim().to_string()
+            js_trim(&xml::xml_unescape(found.as_str())).to_string()
         })
 }
 
@@ -126,5 +129,21 @@ mod tests {
         ));
         assert!(heading_style_id("Heading2"));
         assert!(!heading_style_id("CustomBody"));
+    }
+
+    /// The create path's contents generator and this reader know a contents entry's target by one
+    /// convention, and this holds the two to it: the name the writer places is the name this reader
+    /// looks for, at every counter value the writer can reach.
+    #[test]
+    fn the_bookmark_the_writer_places_is_the_one_this_reader_finds() {
+        for id in [1_u64, 2, 9, 10, 123, u64::from(u32::MAX)] {
+            let name = crate::writing::docx::create::fields::bookmark_name(id);
+            assert!(
+                toc_listed(&format!(
+                    r#"<w:p><w:bookmarkStart w:id="{id}" w:name="{name}"/></w:p>"#
+                )),
+                "{name} is not a name this reader lists"
+            );
+        }
     }
 }

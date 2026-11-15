@@ -156,6 +156,38 @@ fn main() {
         crate_combined.update(&bytes);
         crate_components.push_str(&format!("pptx-create:{name}={:x};", Sha256::digest(&bytes)));
     }
+    // A created Word document's captured parts, and the width data its layout reads: the same rule
+    // as a created deck's, with a component of its own so the two sets stay readable in the record.
+    for (directory, prefix) in [
+        ("assets/docx-create", "docx-create"),
+        ("assets/docx-layout", "docx-layout"),
+    ] {
+        let root = crate_root.join(directory);
+        println!("cargo:rerun-if-changed={}", root.display());
+        let mut files = Vec::new();
+        collect(&root, None, &mut files);
+        files.sort();
+        for path in &files {
+            let name = path
+                .strip_prefix(&root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if NOTICES.contains(&name.as_str()) || LAYOUT_NOTICES.contains(&name.as_str()) {
+                continue;
+            }
+            // The probes are documentation: they report what a created document reaches, but the
+            // layout reads none of them, so they are not bytes the writer produces.
+            if name.starts_with("probes/") {
+                continue;
+            }
+            println!("cargo:rerun-if-changed={}", path.display());
+            let bytes = std::fs::read(path)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+            crate_combined.update(&bytes);
+            crate_components.push_str(&format!("{prefix}:{name}={:x};", Sha256::digest(&bytes)));
+        }
+    }
     crate_components.push_str(&format!("codecs={:x};", Sha256::digest(codecs.as_bytes())));
     crate_combined.update(codecs.as_bytes());
     println!(

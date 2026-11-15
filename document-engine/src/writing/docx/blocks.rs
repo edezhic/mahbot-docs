@@ -30,12 +30,12 @@ use crate::vocabulary::table_columns_max;
 use crate::vocabulary::vocabulary;
 
 /// The page a document stating none of its own is read at, in twips: the one `create` lays down.
-const CREATED_WIDTH: f64 = 11_906.0;
-const CREATED_HEIGHT: f64 = 16_838.0;
+pub(super) const CREATED_WIDTH: f64 = 11_906.0;
+pub(super) const CREATED_HEIGHT: f64 = 16_838.0;
 /// One inch in twips, the margin a created page states on every side.
-const TWIPS_PER_INCH: f64 = 1440.0;
+pub(super) const TWIPS_PER_INCH: f64 = 1440.0;
 /// The twips one 96-dpi pixel is: 96 px = 1 in.
-const TWIPS_PER_PIXEL: f64 = TWIPS_PER_INCH / 96.0;
+pub(super) const TWIPS_PER_PIXEL: f64 = TWIPS_PER_INCH / 96.0;
 
 /// The body's own content: where it ends, and the span of its own section properties.
 struct BodyLayout {
@@ -273,14 +273,33 @@ fn element_body<'a>(element: &'a str, name: &str) -> Option<&'a str> {
 
 /// A page's own size and margins, in twips.
 #[derive(Clone, Copy, Debug)]
-struct Page {
-    width: f64,
-    height: f64,
-    left: f64,
-    right: f64,
-    top: f64,
-    bottom: f64,
+pub(super) struct Page {
+    pub(super) width: f64,
+    pub(super) height: f64,
+    pub(super) left: f64,
+    pub(super) right: f64,
+    pub(super) top: f64,
+    pub(super) bottom: f64,
 }
+
+/// The page `create` writes a document on, in twips: the kit's own `CREATED_PAGE`, which is the
+/// library's A4 with the one-inch margin it states on every side. A created picture is fitted into
+/// the column these margins leave, and the answer says when one reaches past the page.
+pub(super) const CREATED_PAGE: Page = Page {
+    width: CREATED_WIDTH,
+    height: CREATED_HEIGHT,
+    left: TWIPS_PER_INCH,
+    right: TWIPS_PER_INCH,
+    top: TWIPS_PER_INCH,
+    bottom: TWIPS_PER_INCH,
+};
+
+/// The distance a created page states from its top and bottom edges to its header and footer, in
+/// twips: the library's own `w:header`/`w:footer`.
+pub(super) const CREATED_HEADER_TWIPS: f64 = 708.0;
+
+/// The line pitch a created page's document grid states, in twips: the library's own `w:linePitch`.
+pub(super) const CREATED_LINE_PITCH_TWIPS: f64 = 360.0;
 
 /// The page a docx block lands on, in twips: the size and the margins the body's own section states.
 fn docx_page(xml_text: &str) -> Page {
@@ -303,17 +322,17 @@ fn docx_page(xml_text: &str) -> Page {
         }
     };
     Page {
-        width: measure("w:pgSz", "w:w", CREATED_WIDTH),
-        height: measure("w:pgSz", "w:h", CREATED_HEIGHT),
-        left: measure("w:pgMar", "w:left", TWIPS_PER_INCH),
-        right: measure("w:pgMar", "w:right", TWIPS_PER_INCH),
-        top: measure("w:pgMar", "w:top", TWIPS_PER_INCH),
-        bottom: measure("w:pgMar", "w:bottom", TWIPS_PER_INCH),
+        width: measure("w:pgSz", "w:w", CREATED_PAGE.width),
+        height: measure("w:pgSz", "w:h", CREATED_PAGE.height),
+        left: measure("w:pgMar", "w:left", CREATED_PAGE.left),
+        right: measure("w:pgMar", "w:right", CREATED_PAGE.right),
+        top: measure("w:pgMar", "w:top", CREATED_PAGE.top),
+        bottom: measure("w:pgMar", "w:bottom", CREATED_PAGE.bottom),
     }
 }
 
 /// The body's own text column, in twips.
-fn docx_text_column(xml_text: &str) -> image::Pixels {
+pub(super) fn docx_text_column(xml_text: &str) -> image::Pixels {
     let page = docx_page(xml_text);
     image::Pixels {
         width: (page.width - page.left - page.right).max(1.0),
@@ -322,7 +341,7 @@ fn docx_text_column(xml_text: &str) -> image::Pixels {
 }
 
 /// Whether a picture's box reaches past the page it is placed on.
-fn reaches_past_page(size: image::Pixels, page: Page) -> bool {
+pub(super) fn reaches_past_page(size: image::Pixels, page: Page) -> bool {
     size.width * TWIPS_PER_PIXEL > page.width - page.left
         || size.height * TWIPS_PER_PIXEL > page.height - page.top
 }

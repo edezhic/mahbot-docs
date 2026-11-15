@@ -22,7 +22,7 @@ use crate::shutdown::panic_message;
 use crate::transcript::{self, CaseTranscript, ReadingTranscript, Status};
 use anyhow::{Context as _, Result, bail};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -344,6 +344,17 @@ impl Harness {
         {
             problems.push(format!("a refused call left {name} behind"));
         }
+        // A created Word package carries two property parts the canonical model cannot miss: it
+        // reads both as empty property elements, and a package that dropped one would compare equal
+        // to one that holds it. They are checked on the archive's own entry list instead, and a
+        // package without them fails the case.
+        if transcript.status == Status::Produced
+            && family == Family::Docx
+            && case.operation == "create"
+            && let Err(problem) = property_parts(&output_dir, &transcript)
+        {
+            problems.push(problem);
+        }
         // The variable a reason template marks is replaced before the baseline comparison, so the
         // recorder and the gate normalise a third-party message identically.
         if let Some(reason) = &mut transcript.reason {
@@ -651,6 +662,34 @@ fn left_behind(directory: &Path) -> Option<String> {
         .flatten()
         .next()
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
+}
+
+/// The two property parts a created Word package states, read from the produced archive's own entry
+/// list.
+///
+/// The canonical model reads `docProps/app.xml` and `docProps/custom.xml` as property elements with
+/// no children, and a package that dropped one would still canonicalise to a value with no entry
+/// for it — the model compares the parts a package holds, so an absent part is invisible to it. The
+/// archive's entry list is what says whether the part was written, and a created package states
+/// both.
+fn property_parts(output_dir: &Path, transcript: &CaseTranscript) -> Result<(), String> {
+    for name in transcript.outputs.keys() {
+        let path = output_dir.join(name);
+        let bytes = std::fs::read(&path)
+            .map_err(|e| format!("cannot read the produced {name} for its property parts: {e}"))?;
+        let archive = zip::ZipArchive::new(std::io::Cursor::new(&bytes))
+            .context("the document is not a readable ZIP archive")
+            .map_err(|e| format!("cannot read the produced {name}'s entries: {e:#}"))?;
+        let entries: BTreeSet<String> = archive.file_names().map(str::to_string).collect();
+        for part in ["docProps/app.xml", "docProps/custom.xml"] {
+            if !entries.contains(part) {
+                return Err(format!(
+                    "the produced {name} carries no {part}, which a created Word package states"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Normalise the engine's own prose, and only its prose: the reason it gave and the notes, losses,

@@ -26,6 +26,13 @@ hayro = "=0.7.1"
 # The PDF writing half compresses the streams it adds: the subset font program, an image's samples
 # and the content that draws them. The product's own kit compresses the same streams.
 flate2 = "=1.1.10"
+# The width tables write `=` for the width of a character's NFD base, and the reference reads it
+# through `String.prototype.normalize("NFD")`; this crate's measurer does the same decomposition
+# with ICU's normaliser. ICU is the same algorithm under the same data, and it is already resolved
+# in the lockfile through the link parser's `idna` tree; the obvious alternative,
+# `unicode-normalization`, is only a transitive dependency of `pdf-extract` and `lopdf`, so naming
+# it would add a second decomposition implementation beside the one the tree already carries.
+icu_normalizer = "=2.2.0"
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
 # The PDF page actions' object model: parsing, page-tree walking, deep-copying a page's objects
 # between documents and writing the result back. Already resolved by `pdf-extract`; named here
@@ -42,6 +49,11 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 sha2 = "0.10"
 strum = { version = "0.27", features = ["derive"] }
+# A link's address is written as the host's own URL parser spells it — scheme and host lower-cased,
+# a default port dropped, the empty path's `/` appended, and the host punycoded — because a
+# hand-written subset diverges silently on shapes no case records. Pinned exactly: it decides a
+# compared byte, and its version joins the comparison's recorded identity.
+url = "=2.5.8"
 tracing = "0.1"
 zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
 

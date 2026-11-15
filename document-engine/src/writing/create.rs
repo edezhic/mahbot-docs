@@ -16,6 +16,11 @@ use crate::vocabulary::{self, Family, vocabulary};
 /// is a fault of the reference's own), then a header, then a footer, then the first offending
 /// block.
 ///
+/// The Word arm does not call this: it is the family these features belong to, and its own walk is
+/// what reads `content`. So an absent or null list is no list at all here — the reference's
+/// `req.content ?? []` — while the Word arm's walk faults on one, as the reference's own
+/// `.entries()` does.
+///
 /// # Errors
 ///
 /// A shape only a Word document holds is refused as the caller's own; a content value the
@@ -147,8 +152,11 @@ pub(crate) fn rows_of(value: Option<&Value>) -> Result<&[Value], Failure> {
     }
 }
 
-/// Write `parts` as the package at `output`, which must not already exist. Both OOXML `create` arms
-/// end here, so the answer to a failed write is stated once.
+/// Write `parts` as the package at `output`, which must not already exist.
+///
+/// The two OOXML `create` arms that share the archive writer end here. The Word arm writes its own
+/// package, because a created package carries folder entries the shared writer drops, so it answers a
+/// failed write with the same mark itself.
 ///
 /// # Errors
 ///
@@ -160,11 +168,13 @@ pub(crate) fn write_parts(output: &Path, parts: &[(String, Vec<u8>)]) -> Result<
         package::WriteFailure::Duplicate(reason) => Failure::internal(reason),
         package::WriteFailure::Archive(_) => Failure::engine(),
     })?;
-    write_new(output, &bytes, "engine_failed")
+    write_new(output, &bytes, "create_write_failed")
 }
 
 /// The answer a `create` arm that writes one package gives: the file `run` wrote, or the failure it
-/// met. A created file's answer carries no notes and no losses.
+/// met. A created file's answer carries no notes and no losses — except the Word arm's, which is the
+/// one `create` family whose notes are its own: a picture the caller sized past the page, a page
+/// break left out at either edge, and the three a table of contents or a page-count token raises.
 pub(crate) fn single_output(output: &Path, result: Result<(), Failure>) -> Outcome {
     match result {
         Ok(()) => Outcome::produced(vec![output.to_path_buf()]),

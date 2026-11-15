@@ -1,0 +1,37 @@
+{
+  "EIGHTHS_PER_POINT": {
+    "value": 8,
+    "quantity": "eighths of a point a border width is stated in",
+    "unit": "eighths of a point"
+  },
+  "FIFTIETHS_OF_A_PERCENT": {
+    "value": 5000,
+    "quantity": "fiftieths of a percent a table's width is stated in",
+    "unit": "fiftieths of a percent"
+  },
+  "PASSES": {
+    "value": 3,
+    "quantity": "layout passes made while page numbers change how lines wrap",
+    "unit": "passes"
+  },
+  "TAB_STOP": {
+    "value": 36,
+    "quantity": "distance between automatic tab stops",
+    "unit": "points"
+  },
+  "TOLERANCE": {
+    "value": 0.01,
+    "quantity": "difference between two lengths below which they count as equal",
+    "unit": "points"
+  },
+  "WORD_2007_MODE": {
+    "value": 12,
+    "quantity": "the compatibility mode a document that states none is laid out in",
+    "unit": "Word compatibility mode"
+  },
+  "WORD_2010_MODE": {
+    "value": 14,
+    "quantity": "the compatibility mode at which Word breaks lines between Chinese and Japanese characters",
+    "unit": "Word compatibility mode"
+  }
+}

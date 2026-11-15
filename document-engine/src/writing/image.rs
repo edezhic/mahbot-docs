@@ -22,6 +22,10 @@ pub(super) const PX_TO_EMU: f64 = 914_400.0 / 96.0;
 /// The points one pixel is: 96 px = 72 pt.
 pub(super) const PX_TO_POINTS: f64 = 72.0 / 96.0;
 
+/// The width a picture the block names no side for is fitted to, in pixels: the kit's own
+/// `DEFAULT_IMAGE_WIDTH`, stated once for every arm that fits a picture into a container of its own.
+pub(super) const DEFAULT_IMAGE_WIDTH: f64 = 400.0;
+
 /// A picture the request embeds: its bytes, the kind its name claims, and the pixel size the frame
 /// header states.
 pub(super) struct Picture {

@@ -20,12 +20,36 @@ pub(super) fn now_w3cdtf() -> String {
     format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
 
+/// The current time as the W3CDTF a Word document's core properties state, to the millisecond: the
+/// reference writes the moment it made the document with `Date.prototype.toISOString`, whose
+/// resolution is finer than a second. Measured rather than assumed: two documents made within one
+/// second still differ in these three digits.
+pub(super) fn now_w3cdtf_millis() -> String {
+    w3cdtf_millis(std::time::SystemTime::now())
+}
+
+/// The W3CDTF spelling of one clock reading, to the millisecond. The civil date and the fraction
+/// come from the same `SystemTime`, so the three digits can never belong to a different second.
+fn w3cdtf_millis(time: std::time::SystemTime) -> String {
+    let elapsed = time
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let (year, month, day, hour, minute, second) = civil_parts(elapsed.as_secs());
+    let millis = elapsed.subsec_millis();
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
+}
+
 /// The current UTC time as its parts: the civil date and the time of day.
 fn now() -> (i64, u32, u32, u64, u64, u64) {
     let seconds = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
         .unwrap_or_default();
+    civil_parts(seconds)
+}
+
+/// The UTC civil date and time of day `seconds` after 1970-01-01.
+fn civil_parts(seconds: u64) -> (i64, u32, u32, u64, u64, u64) {
     let of_day = seconds % 86_400;
     let (year, month, day) = civil(seconds);
     (
@@ -61,4 +85,23 @@ fn civil(seconds: u64) -> (i64, u32, u32) {
         month_of_year - 9
     } as u32;
     (if month <= 2 { year + 1 } else { year }, month, day)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, UNIX_EPOCH};
+
+    use super::w3cdtf_millis;
+
+    #[test]
+    fn the_date_and_the_millis_come_from_one_clock_reading() {
+        // One reading, one spelling: the second and the fraction are the same moment, even when the
+        // fraction is at the second's edge.
+        let at = UNIX_EPOCH + Duration::from_millis(1_700_000_000_999);
+        assert_eq!(w3cdtf_millis(at), "2023-11-14T22:13:20.999Z");
+        // A millisecond later moves the fraction into the next second, and the date follows it.
+        let later = at + Duration::from_millis(1);
+        assert_eq!(w3cdtf_millis(later), "2023-11-14T22:13:21.000Z");
+        assert_ne!(w3cdtf_millis(at), w3cdtf_millis(later));
+    }
 }

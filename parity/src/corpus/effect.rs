@@ -8,6 +8,7 @@
 //! Every effect reads the canonical value, never bytes, so an effect is as spelling-independent as
 //! the model it reads.
 
+use crate::canonical::ooxml::RELATIONSHIP_ATTRIBUTES;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -62,6 +63,26 @@ pub enum Effect {
         output: Option<&'static str>,
         part: &'static str,
         element: &'static str,
+        count: usize,
+    },
+    /// A field's cached result: the number the field's own result run shows is `value`, or no number
+    /// at all when `value` is `None`. The one effect that reads a field rather than the text around
+    /// it, so a number is never proved by a fragment that is a prefix of a longer one, nor by the text
+    /// that follows a field showing nothing.
+    FieldValue {
+        output: Option<&'static str>,
+        part: &'static str,
+        /// The field's instruction as its `w:instrText` states it, e.g. `PAGEREF _Toc1 \h` or `NUMPAGES`.
+        instruction: &'static str,
+        value: Option<&'static str>,
+    },
+    /// Every reference a part makes to a relationship resolves to one the part's own relationships file
+    /// declares: the part makes `count` of them, and none is left as written. The model rewrites a
+    /// resolved reference to the relationship's own key, so a reference the package does not declare is
+    /// the only value that is not rewritten — which is exactly what this reads.
+    ReferencesResolve {
+        output: Option<&'static str>,
+        part: &'static str,
         count: usize,
     },
     /// A table cell's text, at zero-based `row`/`column`.
@@ -343,6 +364,43 @@ impl Effect {
                 expect(found == count, || {
                     format!("{part} holds {found} {element}, expected {count}")
                 })
+            }
+            Self::FieldValue {
+                part,
+                instruction,
+                value: expected,
+                ..
+            } => {
+                let tree = part_tree(value, part)?;
+                let found = Fields::of(tree).result(instruction)?;
+                match expected {
+                    Some(expected) => expect(found == expected, || {
+                        format!("the field {instruction:?} shows {found:?}, expected {expected:?}")
+                    }),
+                    None => expect(found.is_empty(), || {
+                        format!(
+                            "the field {instruction:?} shows the number {found:?}, expected none"
+                        )
+                    }),
+                }
+            }
+            Self::ReferencesResolve { part, count, .. } => {
+                let tree = part_tree(value, part)?;
+                let references = relationship_references(tree);
+                expect(references.len() == count, || {
+                    format!(
+                        "{part} makes {} relationship reference(s), expected {count}",
+                        references.len()
+                    )
+                })?;
+                for reference in references {
+                    expect(reference.starts_with("rel("), || {
+                        format!(
+                            "{part} references {reference:?}, which the package does not declare"
+                        )
+                    })?;
+                }
+                Ok(())
             }
             Self::TableCell {
                 part,
@@ -783,6 +841,8 @@ impl Effect {
         match *self {
             Self::Text { output, .. }
             | Self::ElementCount { output, .. }
+            | Self::FieldValue { output, .. }
+            | Self::ReferencesResolve { output, .. }
             | Self::TableCell { output, .. }
             | Self::FormatOn { output, .. }
             | Self::SheetNames { output, .. }
@@ -831,6 +891,15 @@ impl Effect {
                 count,
                 ..
             } => format!("{part} holds {count} {element}"),
+            Self::FieldValue {
+                instruction, value, ..
+            } => match value {
+                Some(value) => format!("the field {instruction:?} shows {value:?}"),
+                None => format!("the field {instruction:?} shows no number"),
+            },
+            Self::ReferencesResolve { part, count, .. } => {
+                format!("{part} makes {count} relationship reference(s), all resolved")
+            }
             Self::TableCell {
                 row, column, text, ..
             } => format!("table cell [{row}][{column}] is {text:?}"),
@@ -1028,6 +1097,29 @@ fn elements<'a>(tree: &'a Value, name: &str) -> Vec<&'a Value> {
     elements_where(tree, |candidate| candidate == name)
 }
 
+/// Every relationship reference a part makes: the value of each attribute the model rewrites.
+fn relationship_references(node: &Value) -> Vec<&str> {
+    fn walk<'a>(node: &'a Value, references: &mut Vec<&'a str>) {
+        if let Some(attrs) = node.get("attrs").and_then(Value::as_object) {
+            for (name, value) in attrs {
+                if RELATIONSHIP_ATTRIBUTES.contains(&name.as_str())
+                    && let Some(value) = value.as_str()
+                {
+                    references.push(value);
+                }
+            }
+        }
+        if let Some(children) = node.get("children").and_then(Value::as_array) {
+            for child in children {
+                walk(child, references);
+            }
+        }
+    }
+    let mut references = Vec::new();
+    walk(node, &mut references);
+    references
+}
+
 /// An element or attribute name without its namespace prefix.
 fn local(name: &str) -> &str {
     name.rsplit_once(':').map_or(name, |(_, local)| local)
@@ -1061,6 +1153,116 @@ fn collect_text(node: &Value, text: &mut String) {
         for child in children {
             collect_text(child, text);
         }
+    }
+}
+
+/// A field mark, at the offset in its part's text where it stands.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FieldMark {
+    /// `w:fldChar w:fldCharType="separate"`: the field's instruction ends here, its result begins.
+    Separate,
+    /// `w:fldChar w:fldCharType="end"`: the field's result ends here.
+    End,
+}
+
+/// A part's text, with the field structure it holds: where each instruction's own text stands, and
+/// where each field mark stands, as offsets into that text.
+struct Fields {
+    text: String,
+    /// One `(from, to)` per `w:instrText`/`w:instr` element: the range of its own text.
+    instructions: Vec<(usize, usize)>,
+    /// One `(offset, mark)` per `w:fldChar` mark, in document order.
+    marks: Vec<(usize, FieldMark)>,
+}
+
+impl Fields {
+    fn of(tree: &Value) -> Self {
+        fn walk(node: &Value, fields: &mut Fields) {
+            let from = fields.text.len();
+            if let Some(value) = node.get("text").and_then(Value::as_str) {
+                fields.text.push_str(value);
+            }
+            if let Some(mark) = field_mark(node) {
+                fields.marks.push((from, mark));
+            }
+            if let Some(children) = node.get("children").and_then(Value::as_array) {
+                for child in children {
+                    walk(child, fields);
+                }
+            }
+            // An instruction element holds only its own text, so the range it spans is its text.
+            if node
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|name| matches!(local(name), "instrText" | "instr"))
+            {
+                fields.instructions.push((from, fields.text.len()));
+            }
+        }
+        let mut fields = Self {
+            text: String::new(),
+            instructions: Vec::new(),
+            marks: Vec::new(),
+        };
+        walk(tree, &mut fields);
+        fields
+    }
+
+    /// The number the field whose instruction is `instruction` shows, read from its own result run:
+    /// the text between the `separate` that follows the instruction and the `end` that follows that.
+    ///
+    /// A field is a sequence of runs — `begin`, the instruction, `separate`, the result, `end` — so
+    /// the result is what the field itself shows. Reading the part's text from the instruction onward
+    /// instead would read whatever stands after a field that shows nothing: a heading starting with a
+    /// digit would pass as the field's number, and a fragment of a neighbouring token proves nothing.
+    fn result(&self, instruction: &str) -> Result<String, String> {
+        let start = self
+            .instructions
+            .iter()
+            .find_map(|&(from, to)| {
+                self.text[from..to]
+                    .find(instruction)
+                    .map(|at| from + at + instruction.len())
+            })
+            .ok_or_else(|| format!("the part carries no field {instruction:?}"))?;
+        // A field with no `separate` after its instruction shows nothing at all, and so does one with
+        // no `end` after that `separate`.
+        let mark = |from: usize, wanted: FieldMark| {
+            self.marks
+                .iter()
+                .find(|&&(offset, mark)| offset >= from && mark == wanted)
+                .map(|&(offset, _)| offset)
+        };
+        let Some(separate) = mark(start, FieldMark::Separate) else {
+            return Ok(String::new());
+        };
+        let Some(end) = mark(separate, FieldMark::End) else {
+            return Ok(String::new());
+        };
+        Ok(self.text[separate..end]
+            .chars()
+            .skip_while(|character| !character.is_ascii_digit())
+            .take_while(char::is_ascii_digit)
+            .collect())
+    }
+}
+
+/// The mark a `w:fldChar` element states, when it states one of the two this model reads.
+fn field_mark(node: &Value) -> Option<FieldMark> {
+    let name = node.get("name").and_then(Value::as_str)?;
+    if local(name) != "fldChar" {
+        return None;
+    }
+    let kind = node
+        .get("attrs")
+        .and_then(Value::as_object)?
+        .iter()
+        .find(|(name, _)| local(name) == "fldCharType")
+        .and_then(|(_, value)| value.as_str())?;
+    match kind {
+        "separate" => Some(FieldMark::Separate),
+        "end" => Some(FieldMark::End),
+        _ => None,
     }
 }
 
@@ -1769,5 +1971,195 @@ mod tests {
             names: &["Rate", "Local", "ThirdName"],
         };
         assert!(!check(&wrong, &value).passed);
+    }
+
+    /// One part's canonical value, built by hand: a tree under `parts/<part>/tree`.
+    fn part_value(part: &str, tree: Value) -> Value {
+        let mut parts = serde_json::Map::new();
+        parts.insert(part.to_string(), json!({ "tree": tree }));
+        json!({ "parts": parts })
+    }
+
+    #[test]
+    fn a_field_value_reads_the_whole_digit_run_of_the_field_s_own_result() {
+        // A field as the reference writes one: `begin`, the instruction, `separate`, the result the
+        // layout worked out, `end`.
+        let value = part_value(
+            "word/footer1.xml",
+            json!({
+                "name": "w:p",
+                "children": [{
+                    "name": "w:r",
+                    "children": [
+                        { "name": "w:fldChar", "attrs": { "w:fldCharType": "begin" } },
+                        { "name": "w:instrText", "children": [{ "text": "NUMPAGES" }] },
+                        { "name": "w:fldChar", "attrs": { "w:fldCharType": "separate" } },
+                        { "name": "w:t", "children": [{ "text": "10" }] },
+                        { "name": "w:fldChar", "attrs": { "w:fldCharType": "end" } },
+                    ],
+                }],
+            }),
+        );
+        let one = Effect::FieldValue {
+            output: None,
+            part: "word/footer1.xml",
+            instruction: "NUMPAGES",
+            value: Some("1"),
+        };
+        // `10` is not the number `1`: a prefix fragment would pass, a digit run does not.
+        assert!(!check(&one, &value).passed);
+        let ten = Effect::FieldValue {
+            output: None,
+            part: "word/footer1.xml",
+            instruction: "NUMPAGES",
+            value: Some("10"),
+        };
+        assert!(check(&ten, &value).passed, "{:?}", check(&ten, &value));
+        let none = Effect::FieldValue {
+            output: None,
+            part: "word/footer1.xml",
+            instruction: "NUMPAGES",
+            value: None,
+        };
+        assert!(!check(&none, &value).passed, "the field shows a number");
+
+        // A field the layout worked no number out for: `separate` is followed by `end` and nothing
+        // between them.
+        let blank = part_value(
+            "word/document.xml",
+            json!({
+                "name": "w:p",
+                "children": [{
+                    "name": "w:r",
+                    "children": [
+                        { "name": "w:fldChar", "attrs": { "w:fldCharType": "begin" } },
+                        { "name": "w:instrText", "children": [{ "text": " PAGEREF _Toc2 \\h " }] },
+                        { "name": "w:fldChar", "attrs": { "w:fldCharType": "separate" } },
+                        { "name": "w:fldChar", "attrs": { "w:fldCharType": "end" } },
+                    ],
+                }],
+            }),
+        );
+        let absent = Effect::FieldValue {
+            output: None,
+            part: "word/document.xml",
+            instruction: "PAGEREF _Toc2 \\h",
+            value: None,
+        };
+        assert!(
+            check(&absent, &blank).passed,
+            "{:?}",
+            check(&absent, &blank)
+        );
+        let missing = Effect::FieldValue {
+            output: None,
+            part: "word/document.xml",
+            instruction: "PAGEREF _Toc1 \\h",
+            value: None,
+        };
+        let failed = check(&missing, &blank);
+        assert!(!failed.passed);
+        assert!(
+            failed.detail.contains("carries no field"),
+            "{}",
+            failed.detail
+        );
+    }
+
+    #[test]
+    fn a_blank_field_shows_nothing_though_a_heading_after_it_starts_with_a_digit() {
+        // The false pass the walk that read the text after the instruction allowed: the blank entry
+        // of a contents block, followed by a heading whose own text starts with a number.
+        let value = part_value(
+            "word/document.xml",
+            json!({
+                "name": "w:body",
+                "children": [
+                    {
+                        "name": "w:p",
+                        "children": [{
+                            "name": "w:r",
+                            "children": [
+                                { "name": "w:fldChar", "attrs": { "w:fldCharType": "begin" } },
+                                { "name": "w:instrText", "children": [{ "text": "PAGEREF _Toc2 \\h" }] },
+                                { "name": "w:fldChar", "attrs": { "w:fldCharType": "separate" } },
+                                { "name": "w:fldChar", "attrs": { "w:fldCharType": "end" } },
+                            ],
+                        }],
+                    },
+                    {
+                        "name": "w:p",
+                        "children": [{ "name": "w:r", "children": [
+                            { "name": "w:t", "children": [{ "text": "2 Chapter" }] },
+                        ]}],
+                    },
+                ],
+            }),
+        );
+        let blank = Effect::FieldValue {
+            output: None,
+            part: "word/document.xml",
+            instruction: "PAGEREF _Toc2 \\h",
+            value: None,
+        };
+        assert!(check(&blank, &value).passed, "{:?}", check(&blank, &value));
+        let two = Effect::FieldValue {
+            output: None,
+            part: "word/document.xml",
+            instruction: "PAGEREF _Toc2 \\h",
+            value: Some("2"),
+        };
+        let failed = check(&two, &value);
+        assert!(!failed.passed, "the field shows nothing");
+        assert!(failed.detail.contains("shows"), "{}", failed.detail);
+    }
+
+    #[test]
+    fn references_resolve_counts_each_reference_and_rejects_one_left_as_written() {
+        let value = part_value(
+            "word/document.xml",
+            json!({
+                "name": "w:document",
+                "children": [
+                    { "name": "w:drawing", "attrs": { "r:embed": "rel(image|media/image1.png)" } },
+                    {
+                        "name": "w:hyperlink",
+                        "attrs": { "r:id": "rel(hyperlink|https://example.com)" },
+                    },
+                ],
+            }),
+        );
+        let resolved = Effect::ReferencesResolve {
+            output: None,
+            part: "word/document.xml",
+            count: 2,
+        };
+        assert!(
+            check(&resolved, &value).passed,
+            "{:?}",
+            check(&resolved, &value)
+        );
+        let wrong = Effect::ReferencesResolve {
+            output: None,
+            part: "word/document.xml",
+            count: 1,
+        };
+        assert!(!check(&wrong, &value).passed);
+        let dangling = part_value(
+            "word/document.xml",
+            json!({ "name": "w:drawing", "attrs": { "r:embed": "rIdMedia1" } }),
+        );
+        let one = Effect::ReferencesResolve {
+            output: None,
+            part: "word/document.xml",
+            count: 1,
+        };
+        let failed = check(&one, &dangling);
+        assert!(!failed.passed);
+        assert!(
+            failed.detail.contains("does not declare"),
+            "{}",
+            failed.detail
+        );
     }
 }

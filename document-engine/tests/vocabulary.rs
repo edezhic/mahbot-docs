@@ -9,10 +9,13 @@
 //! A word or a number that the reader needs as *format knowledge* — a PDF field kind, an Info
 //! dictionary key, a Word part name, a BIFF format code, Excel's last column — is not a
 //! restatement of a mark or a bound. Those are named one by one in [`FORMAT_NAMES`] and
-//! [`SPEC_CONSTANTS`], each tied to the file it applies to with its reason and, for a number, how
-//! many occurrences of it the file states; a test proves every entry still collides with a
-//! vocabulary value and covers exactly what its file states, so the list cannot rot into silence and
-//! cannot mask a bound restated beside it.
+//! [`EXEMPTIONS`], each tied to the file it applies to with its reason and, for a number, how many
+//! occurrences of it the file states; a test proves every entry still collides with a vocabulary
+//! value and covers exactly what its file states, so the list cannot rot into silence and cannot mask
+//! a bound restated beside it. A number under `src/writing/docx/` states in the same entry what it
+//! counts, and the restatement rule reads that field rather than the exemption's prose: a number
+//! whose quantity is the bound's is the bound restated. That rule matches words rather than
+//! meanings, so it has a blind spot of its own, stated beside [`names_the_same_quantity`].
 
 mod common;
 
@@ -184,6 +187,51 @@ fn all_marks() -> Vec<String> {
 /// `docx_peripheral_parts`); the literal in the source is the reader matching the format, not a
 /// second copy of the printed word.
 const FORMAT_NAMES: &[(&str, &[(&str, &str)])] = &[
+    (
+        "src/writing/docx/create/parts.rs",
+        &[(
+            "default",
+            "the `w:type` a section's header and footer reference states",
+        )],
+    ),
+    (
+        "src/writing/docx/layout/read.rs",
+        &[
+            ("page", "the `w:type` a `w:br` states for a page break"),
+            (
+                "none",
+                "the `w:val` a table border states for no border, format knowledge rather than a printed word",
+            ),
+        ],
+    ),
+    (
+        "src/writing/docx/create/serialise.rs",
+        &[
+            (
+                "title",
+                "the empty `title` attribute a created drawing's `wp:docPr` states",
+            ),
+            (
+                "none",
+                "the `cstate` attribute a created picture's `a:blip` states",
+            ),
+            ("page", "the `w:type` a `w:br` states for a page break"),
+        ],
+    ),
+    (
+        "src/writing/docx/create/body.rs",
+        &[
+            ("text", "the `text` field a content block states"),
+            ("footnote", "the `footnote` field a paragraph block states"),
+        ],
+    ),
+    (
+        "src/writing/docx/create/fields.rs",
+        &[
+            ("page", "the `{page}` token a header or a footer states"),
+            ("pages", "the `{pages}` token a header or a footer states"),
+        ],
+    ),
     (
         "src/writing/pptx/mod.rs",
         &[
@@ -484,9 +532,27 @@ fn marks_for(path: &Path) -> Vec<String> {
         .collect()
 }
 
+/// A number a source states that the restatement scan accepts: the one file that states it, the
+/// value, how many occurrences of it the file states, what the number counts, and why it is not a
+/// vocabulary bound restated.
+struct Exemption {
+    file: &'static str,
+    value: f64,
+    /// How many occurrences of `value` the file states.
+    count: usize,
+    /// What the number counts, where it coincides with a vocabulary bound: the restatement rule
+    /// compares it with the bound's own key. The layout's numbers state one, because the data they
+    /// are read from states a quantity for each; an exemption whose reason already tells it from the
+    /// bound it coincides with states none.
+    quantity: &'static str,
+    /// Why the exemption is legitimate: format knowledge or a loop bound the vocabulary does not
+    /// state.
+    reason: &'static str,
+}
+
 /// Specification constants and implementation loop bounds the reader needs, each tied to the one
-/// file that states it, the value, how many occurrences of it the file states, and the reason it is
-/// not a restatement of a reading or `limits` bound.
+/// file that states it, the value, how many occurrences of it the file states, what the number
+/// counts and the reason it is not a restatement of a reading or `limits` bound.
 ///
 /// The file, the value and the count are the scope: a further occurrence of the same number in the
 /// same file is a finding until it is reviewed into the entry, and the same number in another file is
@@ -496,672 +562,855 @@ fn marks_for(path: &Path) -> Vec<String> {
 /// against the same exemption. The number scan is a cheap heuristic; the guarantee that a bound the
 /// crate's own halves enforce is read from the vocabulary is
 /// [`every_bound_the_crate_enforces_is_read_from_the_vocabulary`].
-const SPEC_CONSTANTS: &[(&str, f64, usize, &str)] = &[
+const EXEMPTIONS: &[Exemption] = &[
+    // ── the created Word document's own numbers ──────────────────────────────────────────────────
+    Exemption {
+        file: "src/writing/docx/create/link.rs",
+        value: 255.0,
+        count: 1,
+        quantity: "a hyperlink fragment's length in bytes",
+        reason: "the longest fragment the reference writes as a hyperlink's own anchor: Word's own limit, \
+         not a bound this engine enforces",
+    },
+    Exemption {
+        file: "src/writing/docx/layout/read.rs",
+        value: 100.0,
+        count: 1,
+        quantity: "a character scale in percent",
+        reason: "a character scale of a hundred percent, the unit a run's `w:w` states",
+    },
+    Exemption {
+        file: "src/writing/docx/layout/read.rs",
+        value: 16.0,
+        count: 1,
+        quantity: "the links of a style chain a lookup follows",
+        reason: "the most style links a chain is followed through, an implementation's own loop bound",
+    },
+    Exemption {
+        file: "src/writing/docx/layout/text.rs",
+        value: 10.0,
+        count: 3,
+        quantity: "the points a run that states no size is measured at",
+        reason: "the size in points the reference measures a run that states none at, and the tenth of a \
+         thousandth the supplementary tables count a width in",
+    },
+    Exemption {
+        file: "src/writing/docx/layout/text.rs",
+        value: 3.0,
+        count: 5,
+        quantity: "the digits a width token is written in",
+        reason: "the three base-64 digits a supplementary or Arabic width token is written in, and the \
+         three bytes `*` and its two digits take",
+    },
+    Exemption {
+        file: "src/writing/docx/layout/text.rs",
+        value: 4.0,
+        count: 3,
+        quantity: "the forms an Arabic letter is joined in",
+        reason: "the four forms an Arabic letter is joined in, and the four lam-alef ligature slots",
+    },
+    Exemption {
+        file: "src/writing/docx/layout/text.rs",
+        value: 1000.0,
+        count: 1,
+        quantity: "the thousandths of an em a width is stated in",
+        reason: "the thousandths of an em a width is stated in",
+    },
+    Exemption {
+        file: "src/writing/docx/layout/text.rs",
+        value: 64.0,
+        count: 1,
+        quantity: "the base of the width tables' digit encoding",
+        reason: "the base of the width tables' own base-64 digit encoding, not a bound",
+    },
+    Exemption {
+        file: "src/writing/docx/layout/text.rs",
+        value: 100.0,
+        count: 2,
+        quantity: "a character scale in percent",
+        reason: "a character scale of a hundred percent, the unit `w:w` states a scale in",
+    },
     // ── the presentation edit's geometry ────────────────────────────────────────────────────────
-    (
-        "src/writing/pptx/mod.rs",
-        100.0,
-        1,
-        "DrawingML states a text size in hundredths of a point, not a bound the vocabulary names: \
+    Exemption {
+        file: "src/writing/pptx/mod.rs",
+        value: 100.0,
+        count: 1,
+        quantity: "",
+        reason: "DrawingML states a text size in hundredths of a point, not a bound the vocabulary names: \
          the edit path's title and table and the created deck's runs each convert with it",
-    ),
-    (
-        "src/writing/pptx/mod.rs",
-        256.0,
-        1,
-        "the lowest `<p:sldId>` id a real deck uses, which a created deck's first slide takes and \
+    },
+    Exemption {
+        file: "src/writing/pptx/mod.rs",
+        value: 256.0,
+        count: 1,
+        quantity: "",
+        reason: "the lowest `<p:sldId>` id a real deck uses, which a created deck's first slide takes and \
          an entry the edit path adds steps past; not a bound",
-    ),
-    (
-        "src/writing/pptx/draw.rs",
-        3.0,
-        1,
-        "the shape id the body placeholder of a generated slide takes, after the group's own id 1",
-    ),
-    (
-        "src/writing/pptx/text.rs",
-        100.0,
-        1,
-        "DrawingML states a text size in hundredths of a point, not a bound the vocabulary names",
-    ),
-    (
-        "src/writing/pptx/text.rs",
-        6.0,
-        1,
-        "the six members of DrawingML's `EG_FillProperties` choice group",
-    ),
+    },
+    Exemption {
+        file: "src/writing/pptx/draw.rs",
+        value: 3.0,
+        count: 1,
+        quantity: "",
+        reason: "the shape id the body placeholder of a generated slide takes, after the group's own id 1",
+    },
+    Exemption {
+        file: "src/writing/pptx/text.rs",
+        value: 100.0,
+        count: 1,
+        quantity: "",
+        reason: "DrawingML states a text size in hundredths of a point, not a bound the vocabulary names",
+    },
+    Exemption {
+        file: "src/writing/pptx/text.rs",
+        value: 6.0,
+        count: 1,
+        quantity: "",
+        reason: "the six members of DrawingML's `EG_FillProperties` choice group",
+    },
     // ── the embedded PDF font ────────────────────────────────────────────────────────────────────
     // An sfnt's own record sizes and field offsets: none is a bound the vocabulary states.
-    (
-        "src/writing/pdf/font.rs",
-        4.0,
-        2,
-        "the four bytes of a 32-bit word, the unit `ALIGN` and `WORD` name",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        4.0,
-        2,
-        "the four fields of a font bounding box, read from `head` and answered",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        4.0,
-        4,
-        "the four bytes a table record's 32-bit fields span and the four-byte step between them",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        4.0,
-        4,
-        "`loca`'s four bytes per glyph offset and the four-byte step through a glyph's records",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        4.0,
-        2,
-        "format 4's four-field header",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        4.0,
-        2,
-        "the four bytes of a format-12 group's first field",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        4.0,
-        3,
-        "the four fields of a format-12 group",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        4.0,
-        1,
-        "the four bytes of a `maxp` table's version",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        8.0,
-        2,
-        "`head`'s checksum adjustment at byte 8 and a table record's offset at byte 8",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        8.0,
-        1,
-        "a format-12 group's third field at byte 8",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        8.0,
-        4,
-        "the four F2Dot14 scales a composite glyph may state",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        6.0,
-        1,
-        "`hhea`'s descent at byte 6",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        6.0,
-        1,
-        "`maxp`'s glyph count at byte 6",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        6.0,
-        1,
-        "cmap format 4's `segCountX2` at byte 6",
-    ),
-    ("src/writing/pdf/font.rs", 16.0, 1, "one sfnt table record"),
-    ("src/writing/pdf/font.rs", 16.0, 1, "the format-12 header"),
-    (
-        "src/writing/pdf/font.rs",
-        16.0,
-        1,
-        "a format-12 group's first group offset",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        10.0,
-        1,
-        "a composite glyph's header length",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        10.0,
-        1,
-        "cmap platform 3's UCS-4 encoding id",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        50.0,
-        2,
-        "`head`'s `indexToLocFormat` at byte 50, read and written",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        3.0,
-        1,
-        "cmap platform 3, the Microsoft platform the bundled font's map is read from",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        32.0,
-        1,
-        "the `maxp` table's 32 bytes",
-    ),
-    (
-        "src/writing/pdf/font.rs",
-        1000.0,
-        1,
-        "PDF glyph space: a width is stated in thousandths of an em",
-    ),
-    (
-        "src/writing/pdf/draw.rs",
-        4.0,
-        2,
-        "the two halves of a quarter inset",
-    ),
-    (
-        "src/writing/pdf/draw.rs",
-        4.0,
-        1,
-        "a font descriptor's symbolic flag",
-    ),
-    (
-        "src/writing/pdf/draw.rs",
-        4.0,
-        1,
-        "the four corners of a rectangle the page states",
-    ),
-    (
-        "src/writing/pdf/draw.rs",
-        4.0,
-        1,
-        "the four hex digits one glyph code is written as",
-    ),
-    (
-        "src/writing/pdf/draw.rs",
-        3.0,
-        1,
-        "the three colour channels a hex colour is split into",
-    ),
-    (
-        "src/writing/pdf/draw.rs",
-        16.0,
-        1,
-        "the base a hex colour's digits are read in",
-    ),
-    (
-        "src/writing/pdf/draw.rs",
-        255.0,
-        1,
-        "the top of one colour channel, which a hex byte is divided by",
-    ),
-    (
-        "src/writing/pdf/text.rs",
-        8.0,
-        4,
-        "the stamp box's inset on each side, in its mark and in the drawn path",
-    ),
-    (
-        "src/writing/pdf/text.rs",
-        16.0,
-        4,
-        "the stamp box's padding on each side, in its mark and in the drawn path",
-    ),
-    (
-        "src/writing/pdf/picture.rs",
-        3.0,
-        6,
-        "the third quarter turn, the three RGB channels, the alpha channel's index and the JPEG \
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 4.0,
+        count: 2,
+        quantity: "",
+        reason: "the four bytes of a 32-bit word, the unit `ALIGN` and `WORD` name",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 4.0,
+        count: 2,
+        quantity: "",
+        reason: "the four fields of a font bounding box, read from `head` and answered",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 4.0,
+        count: 4,
+        quantity: "",
+        reason: "the four bytes a table record's 32-bit fields span and the four-byte step between them",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 4.0,
+        count: 4,
+        quantity: "",
+        reason: "`loca`'s four bytes per glyph offset and the four-byte step through a glyph's records",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 4.0,
+        count: 2,
+        quantity: "",
+        reason: "format 4's four-field header",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 4.0,
+        count: 2,
+        quantity: "",
+        reason: "the four bytes of a format-12 group's first field",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 4.0,
+        count: 3,
+        quantity: "",
+        reason: "the four fields of a format-12 group",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 4.0,
+        count: 1,
+        quantity: "",
+        reason: "the four bytes of a `maxp` table's version",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 8.0,
+        count: 2,
+        quantity: "",
+        reason: "`head`'s checksum adjustment at byte 8 and a table record's offset at byte 8",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 8.0,
+        count: 1,
+        quantity: "",
+        reason: "a format-12 group's third field at byte 8",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 8.0,
+        count: 4,
+        quantity: "",
+        reason: "the four F2Dot14 scales a composite glyph may state",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 6.0,
+        count: 1,
+        quantity: "",
+        reason: "`hhea`'s descent at byte 6",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 6.0,
+        count: 1,
+        quantity: "",
+        reason: "`maxp`'s glyph count at byte 6",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 6.0,
+        count: 1,
+        quantity: "",
+        reason: "cmap format 4's `segCountX2` at byte 6",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 16.0,
+        count: 1,
+        quantity: "",
+        reason: "one sfnt table record",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 16.0,
+        count: 1,
+        quantity: "",
+        reason: "the format-12 header",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 16.0,
+        count: 1,
+        quantity: "",
+        reason: "a format-12 group's first group offset",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 10.0,
+        count: 1,
+        quantity: "",
+        reason: "a composite glyph's header length",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 10.0,
+        count: 1,
+        quantity: "",
+        reason: "cmap platform 3's UCS-4 encoding id",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 50.0,
+        count: 2,
+        quantity: "",
+        reason: "`head`'s `indexToLocFormat` at byte 50, read and written",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 3.0,
+        count: 1,
+        quantity: "",
+        reason: "cmap platform 3, the Microsoft platform the bundled font's map is read from",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 32.0,
+        count: 1,
+        quantity: "",
+        reason: "the `maxp` table's 32 bytes",
+    },
+    Exemption {
+        file: "src/writing/pdf/font.rs",
+        value: 1000.0,
+        count: 1,
+        quantity: "",
+        reason: "PDF glyph space: a width is stated in thousandths of an em",
+    },
+    Exemption {
+        file: "src/writing/pdf/draw.rs",
+        value: 4.0,
+        count: 2,
+        quantity: "",
+        reason: "the two halves of a quarter inset",
+    },
+    Exemption {
+        file: "src/writing/pdf/draw.rs",
+        value: 4.0,
+        count: 1,
+        quantity: "",
+        reason: "a font descriptor's symbolic flag",
+    },
+    Exemption {
+        file: "src/writing/pdf/draw.rs",
+        value: 4.0,
+        count: 1,
+        quantity: "",
+        reason: "the four corners of a rectangle the page states",
+    },
+    Exemption {
+        file: "src/writing/pdf/draw.rs",
+        value: 4.0,
+        count: 1,
+        quantity: "",
+        reason: "the four hex digits one glyph code is written as",
+    },
+    Exemption {
+        file: "src/writing/pdf/draw.rs",
+        value: 3.0,
+        count: 1,
+        quantity: "",
+        reason: "the three colour channels a hex colour is split into",
+    },
+    Exemption {
+        file: "src/writing/pdf/draw.rs",
+        value: 16.0,
+        count: 1,
+        quantity: "",
+        reason: "the base a hex colour's digits are read in",
+    },
+    Exemption {
+        file: "src/writing/pdf/draw.rs",
+        value: 255.0,
+        count: 1,
+        quantity: "",
+        reason: "the top of one colour channel, which a hex byte is divided by",
+    },
+    Exemption {
+        file: "src/writing/pdf/text.rs",
+        value: 8.0,
+        count: 4,
+        quantity: "",
+        reason: "the stamp box's inset on each side, in its mark and in the drawn path",
+    },
+    Exemption {
+        file: "src/writing/pdf/text.rs",
+        value: 16.0,
+        count: 4,
+        quantity: "",
+        reason: "the stamp box's padding on each side, in its mark and in the drawn path",
+    },
+    Exemption {
+        file: "src/writing/pdf/picture.rs",
+        value: 3.0,
+        count: 6,
+        quantity: "",
+        reason: "the third quarter turn, the three RGB channels, the alpha channel's index and the JPEG \
          component defaults and offsets",
-    ),
-    (
-        "src/writing/pdf/picture.rs",
-        8.0,
-        2,
-        "the bits per component a written image sample states",
-    ),
-    (
-        "src/writing/pdf/picture.rs",
-        4.0,
-        2,
-        "the four CMYK components and the four bytes of a JPEG marker's length field",
-    ),
-    (
-        "src/writing/pdf/picture.rs",
-        8.0,
-        1,
-        "the offset of a JPEG frame header's component count, past the length, precision, height \
+    },
+    Exemption {
+        file: "src/writing/pdf/picture.rs",
+        value: 8.0,
+        count: 2,
+        quantity: "",
+        reason: "the bits per component a written image sample states",
+    },
+    Exemption {
+        file: "src/writing/pdf/picture.rs",
+        value: 4.0,
+        count: 2,
+        quantity: "",
+        reason: "the four CMYK components and the four bytes of a JPEG marker's length field",
+    },
+    Exemption {
+        file: "src/writing/pdf/picture.rs",
+        value: 8.0,
+        count: 1,
+        quantity: "",
+        reason: "the offset of a JPEG frame header's component count, past the length, precision, height \
          and width fields",
-    ),
-    (
-        "src/writing/pdf/form.rs",
-        16.0,
-        1,
-        "the button-flag bit that marks a push button",
-    ),
-    (
-        "src/writing/pdf/form.rs",
-        4.0,
-        2,
-        "the quarter of a button's box the on-state's mark is inset by",
-    ),
-    (
-        "src/writing/pdf/form.rs",
-        4.0,
-        1,
-        "the smallest font size the reference's own fitter tries",
-    ),
-    (
-        "src/writing/pdf/create.rs",
-        10.0,
-        1,
-        "a table cell's point size, not a bound the vocabulary names",
-    ),
-    (
-        "src/writing/pdf/create.rs",
-        8.0,
-        1,
-        "the gap under a table row, in points",
-    ),
-    (
-        "src/writing/pdf/create.rs",
-        3.0,
-        1,
-        "a table cell's text indent, in points",
-    ),
-    (
-        "src/writing/pdf/create.rs",
-        0.5,
-        1,
-        "a table rule's thickness, in points",
-    ),
+    },
+    Exemption {
+        file: "src/writing/pdf/form.rs",
+        value: 16.0,
+        count: 1,
+        quantity: "",
+        reason: "the button-flag bit that marks a push button",
+    },
+    Exemption {
+        file: "src/writing/pdf/form.rs",
+        value: 4.0,
+        count: 2,
+        quantity: "",
+        reason: "the quarter of a button's box the on-state's mark is inset by",
+    },
+    Exemption {
+        file: "src/writing/pdf/form.rs",
+        value: 4.0,
+        count: 1,
+        quantity: "",
+        reason: "the smallest font size the reference's own fitter tries",
+    },
+    Exemption {
+        file: "src/writing/pdf/create.rs",
+        value: 10.0,
+        count: 1,
+        quantity: "",
+        reason: "a table cell's point size, not a bound the vocabulary names",
+    },
+    Exemption {
+        file: "src/writing/pdf/create.rs",
+        value: 8.0,
+        count: 1,
+        quantity: "",
+        reason: "the gap under a table row, in points",
+    },
+    Exemption {
+        file: "src/writing/pdf/create.rs",
+        value: 3.0,
+        count: 1,
+        quantity: "",
+        reason: "a table cell's text indent, in points",
+    },
+    Exemption {
+        file: "src/writing/pdf/create.rs",
+        value: 0.5,
+        count: 1,
+        quantity: "",
+        reason: "a table rule's thickness, in points",
+    },
     // ── the created deck's own geometry ─────────────────────────────────────────────────────────
-    (
-        "src/writing/pptx/create/mod.rs",
-        0.5,
-        4,
-        "the half-inch a list item and a mid-deck heading each take of the flow, in inches on the \
+    Exemption {
+        file: "src/writing/pptx/create/mod.rs",
+        value: 0.5,
+        count: 4,
+        quantity: "",
+        reason: "the half-inch a list item and a mid-deck heading each take of the flow, in inches on the \
          reference deck: the reference's own layout, not a bound the vocabulary states",
-    ),
-    (
-        "src/writing/pptx/create/mod.rs",
-        16.0,
-        2,
-        "a paragraph's and a list's point size, which the reference states; not the reading's \
+    },
+    Exemption {
+        file: "src/writing/pptx/create/mod.rs",
+        value: 16.0,
+        count: 2,
+        quantity: "",
+        reason: "a paragraph's and a list's point size, which the reference states; not the reading's \
          shortest page text",
-    ),
-    (
-        "src/writing/pptx/create/mod.rs",
-        100.0,
-        1,
-        "the length at which the pinned library takes a measurement to be EMU already, in inches: \
+    },
+    Exemption {
+        file: "src/writing/pptx/create/mod.rs",
+        value: 100.0,
+        count: 1,
+        quantity: "",
+        reason: "the length at which the pinned library takes a measurement to be EMU already, in inches: \
          the library's own threshold, not a bound the vocabulary states",
-    ),
-    (
-        "src/writing/pptx/create/complete.rs",
-        3.0,
-        1,
-        "the third capture of the heading-variant pattern, which is the close tag's kind",
-    ),
-    (
-        "src/writing/pptx/create/parts.rs",
-        10.0,
-        1,
-        "the nine levels of a presentation's default text style, counted one past the last",
-    ),
-    (
-        "src/writing/pptx/create/parts.rs",
-        3.0,
-        2,
-        "the presentation relationships' first free id after the master and the slides, and the \
+    },
+    Exemption {
+        file: "src/writing/pptx/create/complete.rs",
+        value: 3.0,
+        count: 1,
+        quantity: "",
+        reason: "the third capture of the heading-variant pattern, which is the close tag's kind",
+    },
+    Exemption {
+        file: "src/writing/pptx/create/parts.rs",
+        value: 10.0,
+        count: 1,
+        quantity: "",
+        reason: "the nine levels of a presentation's default text style, counted one past the last",
+    },
+    Exemption {
+        file: "src/writing/pptx/create/parts.rs",
+        value: 3.0,
+        count: 2,
+        quantity: "",
+        reason: "the presentation relationships' first free id after the master and the slides, and the \
          three fixed parts its vector's size counts above the titles",
-    ),
-    (
-        "src/writing/pptx/create/parts.rs",
-        4.0,
-        1,
-        "the presentation relationships' first free id after the master, the slides and the notes \
+    },
+    Exemption {
+        file: "src/writing/pptx/create/parts.rs",
+        value: 4.0,
+        count: 1,
+        quantity: "",
+        reason: "the presentation relationships' first free id after the master, the slides and the notes \
          master",
-    ),
-    (
-        "src/writing/pdf/mod.rs",
-        4.0,
-        2,
-        "a crop area's four sides — x, y, width and height",
-    ),
-    (
-        "src/writing/pdf/page.rs",
-        3.0,
-        3,
-        "the quarter turns a page's turn is counted in — one, two or three — and the fourth index \
+    },
+    Exemption {
+        file: "src/writing/pdf/mod.rs",
+        value: 4.0,
+        count: 2,
+        quantity: "",
+        reason: "a crop area's four sides — x, y, width and height",
+    },
+    Exemption {
+        file: "src/writing/pdf/page.rs",
+        value: 3.0,
+        count: 3,
+        quantity: "",
+        reason: "the quarter turns a page's turn is counted in — one, two or three — and the fourth index \
          of a page box's four corners; not a scale",
-    ),
-    (
-        "src/writing/date.rs",
-        3.0,
-        1,
-        "the three months the algorithm adds to a March-based month to reach the civil month from \
+    },
+    Exemption {
+        file: "src/writing/date.rs",
+        value: 3.0,
+        count: 1,
+        quantity: "",
+        reason: "the three months the algorithm adds to a March-based month to reach the civil month from \
          March on",
-    ),
-    (
-        "src/writing/date.rs",
-        4.0,
-        1,
-        "the leap year every fourth year in the algorithm's day-of-year correction",
-    ),
-    (
-        "src/writing/date.rs",
-        9.0,
-        1,
-        "the nine months the algorithm subtracts for January and February, which belong to the year \
+    },
+    Exemption {
+        file: "src/writing/date.rs",
+        value: 4.0,
+        count: 1,
+        quantity: "",
+        reason: "the leap year every fourth year in the algorithm's day-of-year correction",
+    },
+    Exemption {
+        file: "src/writing/date.rs",
+        value: 9.0,
+        count: 1,
+        quantity: "",
+        reason: "the nine months the algorithm subtracts for January and February, which belong to the year \
          before its March-based one",
-    ),
-    (
-        "src/writing/date.rs",
-        10.0,
-        1,
-        "the ten March-based months from March to December, after which the month is January or \
+    },
+    Exemption {
+        file: "src/writing/date.rs",
+        value: 10.0,
+        count: 1,
+        quantity: "",
+        reason: "the ten March-based months from March to December, after which the month is January or \
          February",
-    ),
-    (
-        "src/writing/date.rs",
-        100.0,
-        1,
-        "the century correction in the algorithm's day-of-year count, a century not being a leap year",
-    ),
-    (
-        "src/writing/pdf/page.rs",
-        4.0,
-        2,
-        "a page box's four numbers and the four entries a page inherits",
-    ),
-    (
-        "src/writing/pdf/scan.rs",
-        3.0,
-        4,
-        "the most octal digits an escape sequence in a literal string states, the bits each one \
+    },
+    Exemption {
+        file: "src/writing/date.rs",
+        value: 100.0,
+        count: 1,
+        quantity: "",
+        reason: "the century correction in the algorithm's day-of-year count, a century not being a leap year",
+    },
+    Exemption {
+        file: "src/writing/pdf/page.rs",
+        value: 4.0,
+        count: 2,
+        quantity: "",
+        reason: "a page box's four numbers and the four entries a page inherits",
+    },
+    Exemption {
+        file: "src/writing/pdf/scan.rs",
+        value: 3.0,
+        count: 4,
+        quantity: "",
+        reason: "the most octal digits an escape sequence in a literal string states, the bits each one \
          shifts into the byte, the three characters a `#xx` escape in a name states, and the step \
          over them",
-    ),
-    (
-        "src/writing/pdf/scan.rs",
-        4.0,
-        5,
-        "the four bits one hexadecimal digit stands for, and the shift that places a nibble: once in \
+    },
+    Exemption {
+        file: "src/writing/pdf/scan.rs",
+        value: 4.0,
+        count: 5,
+        quantity: "",
+        reason: "the four bits one hexadecimal digit stands for, and the shift that places a nibble: once in \
          a hex string, once in a name's `#xx` escape, and twice in ASCIIHexDecode, whose odd final \
          digit is padded with a zero; and the bytes a decoded object stream needs to hold one entry \
          of two numbers",
-    ),
-    (
-        "src/writing/pdf/scan.rs",
-        10.0,
-        3,
-        "the value the hexadecimal digits `a` to `f` stand for, ten through fifteen, and the radix \
+    },
+    Exemption {
+        file: "src/writing/pdf/scan.rs",
+        value: 10.0,
+        count: 3,
+        quantity: "",
+        reason: "the value the hexadecimal digits `a` to `f` stand for, ten through fifteen, and the radix \
          the walk accumulates a number in",
-    ),
-    (
-        "src/writing/mod.rs",
-        0.5,
-        1,
-        "the half JavaScript's `Math.round` adds before flooring, the rounding a negative half-tie \
+    },
+    Exemption {
+        file: "src/writing/mod.rs",
+        value: 0.5,
+        count: 1,
+        quantity: "",
+        reason: "the half JavaScript's `Math.round` adds before flooring, the rounding a negative half-tie \
          needs",
-    ),
-    (
-        "src/writing/xml.rs",
-        16.0,
-        1,
-        "the radix of a hexadecimal character reference in XML text",
-    ),
-    (
-        "src/reading/marks.rs",
-        8.0,
-        1,
-        "the eight accents PDFDocEncoding places at `0x18..=0x1F`",
-    ),
-    (
-        "src/reading/marks.rs",
-        16.0,
-        1,
-        "the `/Ff` bit 16 pushbutton flag (`1 << 16`)",
-    ),
-    (
-        "src/reading/marks.rs",
-        32.0,
-        1,
-        "the `/F` bit 5 value 32, the annotation's not-shown flag",
-    ),
-    (
-        "src/reading/mod.rs",
-        0.5,
-        1,
-        "the half-unit added before truncating a normalised PDF channel to a byte",
-    ),
-    (
-        "src/reading/mod.rs",
-        3.0,
-        12,
-        "RGB's three samples per pixel, the PDF colour-space number 3 and its palette entries",
-    ),
-    (
-        "src/reading/mod.rs",
-        4.0,
-        7,
-        "CMYK's four samples per pixel, the PDF colour-space number 4 and a 4-bit sample width",
-    ),
-    (
-        "src/reading/mod.rs",
-        8.0,
-        12,
-        "a byte's bits, the default and declared 8-bit sample width and the byte stride of a row",
-    ),
-    (
-        "src/reading/mod.rs",
-        16.0,
-        3,
-        "a PDF image's 16-bit sample width",
-    ),
-    (
-        "src/reading/mod.rs",
-        1000.0,
-        1,
-        "the most suffixes the input-avoiding name tries, a loop bound rather than a reading limit",
-    ),
-    (
-        "src/reading/mod.rs",
-        255.0,
-        6,
-        "a byte's maximum, the range a channel is clamped to and the alpha blend's divisor",
-    ),
-    (
-        "src/reading/ooxml/docx.rs",
-        9.0,
-        3,
-        "Word's nine outline and heading levels",
-    ),
-    (
-        "src/reading/ooxml/numfmt.rs",
-        3.0,
-        9,
-        "BIFF built-in format code 3, the third section of a three-part format and the civil-date month shift",
-    ),
-    (
-        "src/reading/ooxml/numfmt.rs",
-        4.0,
-        4,
-        "BIFF built-in format code 4, the condition arm it shares with code 3 and the leap-year divisor",
-    ),
-    (
-        "src/reading/ooxml/numfmt.rs",
-        6.0,
-        2,
-        "BIFF built-in format code 6 and the six comparison operators (`CONDITIONS`)",
-    ),
-    (
-        "src/reading/ooxml/numfmt.rs",
-        8.0,
-        1,
-        "BIFF built-in format code 8",
-    ),
-    (
-        "src/reading/ooxml/numfmt.rs",
-        9.0,
-        3,
-        "BIFF built-in format code 9 and the civil-date month shift",
-    ),
-    (
-        "src/reading/ooxml/numfmt.rs",
-        10.0,
-        4,
-        "BIFF built-in format code 10, the decimal base in `checked_mul(10)` and the month phase",
-    ),
-    (
-        "src/reading/ooxml/numfmt.rs",
-        16.0,
-        1,
-        "BIFF built-in format code 16 (`d-mmm`)",
-    ),
-    (
-        "src/reading/ooxml/numfmt.rs",
-        30.0,
-        1,
-        "the decimal digits before a display is declined (`MAX_SCALED`)",
-    ),
-    (
-        "src/reading/ooxml/numfmt.rs",
-        100.0,
-        4,
-        "a percentage's scale factor and the civil-date century divisor",
-    ),
-    (
-        "src/reading/ooxml/numfmt.rs",
-        1000.0,
-        2,
-        "a number format's thousands scaling",
-    ),
-    (
-        "src/reading/ooxml/xlsx.rs",
-        16_384.0,
-        1,
-        "Excel's last column (XFD), the grid limit a `<col>` range is clamped to",
-    ),
-    (
-        "src/support.rs",
-        4.0,
-        2,
-        "the four spare bytes `one_line` reserves and the buffer `decode_html_entities` encodes a character into",
-    ),
-    (
-        "src/vocabulary.rs",
-        3.0,
-        1,
-        "the three producers in `Producer::ALL`",
-    ),
-    (
-        "src/vocabulary.rs",
-        4.0,
-        1,
-        "the four families in `Family::ALL`",
-    ),
-    (
-        "src/writing/xlsx/mod.rs",
-        3.0,
-        3,
-        "a regular-expression capture-group index (the third group), not a bound",
-    ),
-    (
-        "src/writing/xlsx/shift.rs",
-        3.0,
-        7,
-        "a regular-expression capture-group index (the third group), not a bound",
-    ),
-    (
-        "src/writing/xlsx/shift.rs",
-        4.0,
-        2,
-        "a regular-expression capture-group index (the fourth group), not a bound",
-    ),
-    (
-        "src/writing/xlsx/shift.rs",
-        6.0,
-        1,
-        "a regular-expression capture-group index (the sixth group), not a bound",
-    ),
-    (
-        "src/writing/image.rs",
-        4.0,
-        1,
-        "a big-endian word's four bytes, the unit an image format's offsets are counted in",
-    ),
-    (
-        "src/writing/image.rs",
-        8.0,
-        2,
-        "the eight bytes of two big-endian words, the unit an image format's offsets are counted in",
-    ),
-    (
-        "src/writing/image.rs",
-        256.0,
-        2,
-        "the CRC-32 lookup table's one entry per byte value",
-    ),
-    (
-        "src/writing/image.rs",
-        3.0,
-        3,
-        "an image format's own arithmetic: a VP8 key frame's three-byte frame tag and the three \
+    },
+    Exemption {
+        file: "src/writing/xml.rs",
+        value: 16.0,
+        count: 1,
+        quantity: "",
+        reason: "the radix of a hexadecimal character reference in XML text",
+    },
+    Exemption {
+        file: "src/reading/marks.rs",
+        value: 8.0,
+        count: 1,
+        quantity: "",
+        reason: "the eight accents PDFDocEncoding places at `0x18..=0x1F`",
+    },
+    Exemption {
+        file: "src/reading/marks.rs",
+        value: 16.0,
+        count: 1,
+        quantity: "",
+        reason: "the `/Ff` bit 16 pushbutton flag (`1 << 16`)",
+    },
+    Exemption {
+        file: "src/reading/marks.rs",
+        value: 32.0,
+        count: 1,
+        quantity: "",
+        reason: "the `/F` bit 5 value 32, the annotation's not-shown flag",
+    },
+    Exemption {
+        file: "src/reading/mod.rs",
+        value: 0.5,
+        count: 1,
+        quantity: "",
+        reason: "the half-unit added before truncating a normalised PDF channel to a byte",
+    },
+    Exemption {
+        file: "src/reading/mod.rs",
+        value: 3.0,
+        count: 12,
+        quantity: "",
+        reason: "RGB's three samples per pixel, the PDF colour-space number 3 and its palette entries",
+    },
+    Exemption {
+        file: "src/reading/mod.rs",
+        value: 4.0,
+        count: 7,
+        quantity: "",
+        reason: "CMYK's four samples per pixel, the PDF colour-space number 4 and a 4-bit sample width",
+    },
+    Exemption {
+        file: "src/reading/mod.rs",
+        value: 8.0,
+        count: 12,
+        quantity: "",
+        reason: "a byte's bits, the default and declared 8-bit sample width and the byte stride of a row",
+    },
+    Exemption {
+        file: "src/reading/mod.rs",
+        value: 16.0,
+        count: 3,
+        quantity: "",
+        reason: "a PDF image's 16-bit sample width",
+    },
+    Exemption {
+        file: "src/reading/mod.rs",
+        value: 1000.0,
+        count: 1,
+        quantity: "",
+        reason: "the most suffixes the input-avoiding name tries, a loop bound rather than a reading limit",
+    },
+    Exemption {
+        file: "src/reading/mod.rs",
+        value: 255.0,
+        count: 6,
+        quantity: "",
+        reason: "a byte's maximum, the range a channel is clamped to and the alpha blend's divisor",
+    },
+    Exemption {
+        file: "src/reading/ooxml/docx.rs",
+        value: 9.0,
+        count: 3,
+        quantity: "",
+        reason: "Word's nine outline and heading levels",
+    },
+    Exemption {
+        file: "src/reading/ooxml/numfmt.rs",
+        value: 3.0,
+        count: 9,
+        quantity: "",
+        reason: "BIFF built-in format code 3, the third section of a three-part format and the civil-date month shift",
+    },
+    Exemption {
+        file: "src/reading/ooxml/numfmt.rs",
+        value: 4.0,
+        count: 4,
+        quantity: "",
+        reason: "BIFF built-in format code 4, the condition arm it shares with code 3 and the leap-year divisor",
+    },
+    Exemption {
+        file: "src/reading/ooxml/numfmt.rs",
+        value: 6.0,
+        count: 2,
+        quantity: "",
+        reason: "BIFF built-in format code 6 and the six comparison operators (`CONDITIONS`)",
+    },
+    Exemption {
+        file: "src/reading/ooxml/numfmt.rs",
+        value: 8.0,
+        count: 1,
+        quantity: "",
+        reason: "BIFF built-in format code 8",
+    },
+    Exemption {
+        file: "src/reading/ooxml/numfmt.rs",
+        value: 9.0,
+        count: 3,
+        quantity: "",
+        reason: "BIFF built-in format code 9 and the civil-date month shift",
+    },
+    Exemption {
+        file: "src/reading/ooxml/numfmt.rs",
+        value: 10.0,
+        count: 4,
+        quantity: "",
+        reason: "BIFF built-in format code 10, the decimal base in `checked_mul(10)` and the month phase",
+    },
+    Exemption {
+        file: "src/reading/ooxml/numfmt.rs",
+        value: 16.0,
+        count: 1,
+        quantity: "",
+        reason: "BIFF built-in format code 16 (`d-mmm`)",
+    },
+    Exemption {
+        file: "src/reading/ooxml/numfmt.rs",
+        value: 30.0,
+        count: 1,
+        quantity: "",
+        reason: "the decimal digits before a display is declined (`MAX_SCALED`)",
+    },
+    Exemption {
+        file: "src/reading/ooxml/numfmt.rs",
+        value: 100.0,
+        count: 4,
+        quantity: "",
+        reason: "a percentage's scale factor and the civil-date century divisor",
+    },
+    Exemption {
+        file: "src/reading/ooxml/numfmt.rs",
+        value: 1000.0,
+        count: 2,
+        quantity: "",
+        reason: "a number format's thousands scaling",
+    },
+    Exemption {
+        file: "src/reading/ooxml/xlsx.rs",
+        value: 16_384.0,
+        count: 1,
+        quantity: "",
+        reason: "Excel's last column (XFD), the grid limit a `<col>` range is clamped to",
+    },
+    Exemption {
+        file: "src/support.rs",
+        value: 4.0,
+        count: 2,
+        quantity: "",
+        reason: "the four spare bytes `one_line` reserves and the buffer `decode_html_entities` encodes a character into",
+    },
+    Exemption {
+        file: "src/vocabulary.rs",
+        value: 3.0,
+        count: 1,
+        quantity: "",
+        reason: "the three producers in `Producer::ALL`",
+    },
+    Exemption {
+        file: "src/vocabulary.rs",
+        value: 4.0,
+        count: 1,
+        quantity: "",
+        reason: "the four families in `Family::ALL`",
+    },
+    Exemption {
+        file: "src/writing/xlsx/mod.rs",
+        value: 3.0,
+        count: 3,
+        quantity: "",
+        reason: "a regular-expression capture-group index (the third group), not a bound",
+    },
+    Exemption {
+        file: "src/writing/xlsx/shift.rs",
+        value: 3.0,
+        count: 7,
+        quantity: "",
+        reason: "a regular-expression capture-group index (the third group), not a bound",
+    },
+    Exemption {
+        file: "src/writing/xlsx/shift.rs",
+        value: 4.0,
+        count: 2,
+        quantity: "",
+        reason: "a regular-expression capture-group index (the fourth group), not a bound",
+    },
+    Exemption {
+        file: "src/writing/xlsx/shift.rs",
+        value: 6.0,
+        count: 1,
+        quantity: "",
+        reason: "a regular-expression capture-group index (the sixth group), not a bound",
+    },
+    Exemption {
+        file: "src/writing/image.rs",
+        value: 4.0,
+        count: 1,
+        quantity: "",
+        reason: "a big-endian word's four bytes, the unit an image format's offsets are counted in",
+    },
+    Exemption {
+        file: "src/writing/image.rs",
+        value: 8.0,
+        count: 2,
+        quantity: "",
+        reason: "the eight bytes of two big-endian words, the unit an image format's offsets are counted in",
+    },
+    Exemption {
+        file: "src/writing/image.rs",
+        value: 256.0,
+        count: 2,
+        quantity: "",
+        reason: "the CRC-32 lookup table's one entry per byte value",
+    },
+    Exemption {
+        file: "src/writing/image.rs",
+        value: 3.0,
+        count: 3,
+        quantity: "",
+        reason: "an image format's own arithmetic: a VP8 key frame's three-byte frame tag and the three \
          bytes of start code the sides follow, and the three four-byte words a RIFF header holds",
-    ),
-    (
-        "src/writing/xlsx/sheets.rs",
-        3.0,
-        1,
-        "a regular-expression capture-group index (the third group) in a merge rewrite",
-    ),
+    },
+    Exemption {
+        file: "src/writing/xlsx/sheets.rs",
+        value: 3.0,
+        count: 1,
+        quantity: "",
+        reason: "a regular-expression capture-group index (the third group) in a merge rewrite",
+    },
     // ── the template fill's port of the reference library ───────────────────────────────────────
-    (
-        "src/writing/fill/errors.rs",
-        30.0,
-        1,
-        "the reference's `substr(0, 30)` quotes the first thirty UTF-16 units of the text around a \
+    Exemption {
+        file: "src/writing/fill/errors.rs",
+        value: 30.0,
+        count: 1,
+        quantity: "",
+        reason: "the reference's `substr(0, 30)` quotes the first thirty UTF-16 units of the text around a \
          malformed tag",
-    ),
-    (
-        "src/writing/fill/errors.rs",
-        10.0,
-        1,
-        "the reference lists an unidentified archive's first ten entries in its message",
-    ),
-    (
-        "src/writing/fill/lexer.rs",
-        4.0,
-        3,
-        "the reference widens the text it quotes around a doubled opening tag by four units, starts \
+    },
+    Exemption {
+        file: "src/writing/fill/errors.rs",
+        value: 10.0,
+        count: 1,
+        quantity: "",
+        reason: "the reference lists an unidentified archive's first ten entries in its message",
+    },
+    Exemption {
+        file: "src/writing/fill/lexer.rs",
+        value: 4.0,
+        count: 3,
+        quantity: "",
+        reason: "the reference widens the text it quotes around a doubled opening tag by four units, starts \
          a doubled closing tag's context four units back, and widens that context by the same four",
-    ),
-    (
-        "src/writing/fill/postparse.rs",
-        50.0,
-        1,
-        "the reference searches at most fifty neighbouring section tags for the one a closing tag \
+    },
+    Exemption {
+        file: "src/writing/fill/postparse.rs",
+        value: 50.0,
+        count: 1,
+        quantity: "",
+        reason: "the reference searches at most fifty neighbouring section tags for the one a closing tag \
          matches",
-    ),
+    },
 ];
 
 /// The exemptions one file gets: each value its reviewed entries cover, with the occurrences of it
 /// they account for.
 fn exemptions_for(path: &Path) -> Vec<(f64, usize)> {
     let text = path.to_string_lossy().replace('\\', "/");
-    SPEC_CONSTANTS
+    EXEMPTIONS
         .iter()
-        .filter(|(file, _, _, _)| text.ends_with(file))
-        .map(|&(_, value, count, _)| (value, count))
+        .filter(|exemption| text.ends_with(exemption.file))
+        .map(|exemption| (exemption.value, exemption.count))
         .collect()
 }
 
@@ -1169,8 +1418,10 @@ fn exemptions_for(path: &Path) -> Vec<(f64, usize)> {
 /// value are summed, as [`scan`] sums them.
 fn reviewed() -> BTreeMap<(&'static str, u64), usize> {
     let mut counts = BTreeMap::new();
-    for &(file, value, count, _) in SPEC_CONSTANTS {
-        *counts.entry((file, value.to_bits())).or_default() += count;
+    for exemption in EXEMPTIONS {
+        *counts
+            .entry((exemption.file, exemption.value.to_bits()))
+            .or_default() += exemption.count;
     }
     counts
 }
@@ -1636,7 +1887,8 @@ fn the_mark_check_leaves_format_knowledge_alone() {
 fn the_number_check_leaves_specification_constants_alone() {
     // The exemption is scoped to the file that states the literal: the same number in a file with
     // no entry is a restatement. A rename or a reformat inside the file changes nothing.
-    for &(file, value, _, _) in SPEC_CONSTANTS {
+    for exemption in EXEMPTIONS {
+        let (file, value) = (exemption.file, exemption.value);
         let source = format!("fn specification() -> f64 {{ {value} }}\n");
         let exempt = scan(
             &source,
@@ -1715,7 +1967,8 @@ fn every_format_name_still_collides_with_a_vocabulary_mark() {
 #[test]
 fn every_specification_constant_still_collides_with_a_vocabulary_bound() {
     let bounds = all_bounds();
-    for &(file, value, _, reason) in SPEC_CONSTANTS {
+    for exemption in EXEMPTIONS {
+        let (file, value, reason) = (exemption.file, exemption.value, exemption.reason);
         assert!(
             !reason.is_empty(),
             "`{file}` `{value}` must state its reason"
@@ -1724,8 +1977,7 @@ fn every_specification_constant_still_collides_with_a_vocabulary_bound() {
             bounds
                 .iter()
                 .any(|bound| bound.to_bits() == value.to_bits()),
-            "`{file}` `{value}` no longer collides with a reading bound; remove it from \
-             SPEC_CONSTANTS"
+            "`{file}` `{value}` no longer collides with a reading bound; remove it from EXEMPTIONS"
         );
         // The file must still state the literal; the exemption is proved in effect by
         // `the_number_check_leaves_specification_constants_alone`.
@@ -1733,7 +1985,7 @@ fn every_specification_constant_still_collides_with_a_vocabulary_bound() {
             .unwrap_or_else(|e| panic!("cannot read `{file}`: {e}"));
         assert!(
             !scan(&text, &[value], &[], &[]).is_empty(),
-            "`{file}` no longer states {value}; remove it from SPEC_CONSTANTS"
+            "`{file}` no longer states {value}; remove it from EXEMPTIONS"
         );
     }
 }
@@ -1954,4 +2206,285 @@ fn the_crate_stands_alone() {
         "the crate must not reference product sources or a runtime:\n{}",
         found.join("\n")
     );
+}
+
+// ── the layout's data and the bounds it must not restate ────────────────────────────────────────
+
+/// The meaningful words of a vocabulary bound's key: its leaf name split at underscores, without the
+/// words every key carries.
+fn key_words(key: &str) -> Vec<String> {
+    let leaf = key.rsplit('.').next().unwrap_or(key);
+    leaf.split('_')
+        .filter(|word| word.len() >= 4)
+        .filter(|word| {
+            !matches!(
+                *word,
+                "max"
+                    | "min"
+                    | "chars"
+                    | "bytes"
+                    | "code"
+                    | "size"
+                    | "stated"
+                    | "number"
+                    | "value"
+                    | "values"
+                    | "limit"
+                    | "count"
+                    | "points"
+            )
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+/// Whether a stated quantity names the same thing a bound's key does: at least one meaningful word
+/// of the key stands in the quantity. A numeral whose quantity shares no word with the bound it
+/// coincides with is another quantity in the same unit, not a restatement of it.
+///
+/// It compares words rather than meanings, and that is its blind spot in both directions: a synonym
+/// passes a restatement the rule means to catch — a quantity that says "extent" where the bound's key
+/// says `length` — and a phrase that happens to share one word with an unrelated bound fails
+/// spuriously. A quantity has to be written in the words the rule reads.
+fn names_the_same_quantity(quantity: &str, key: &str) -> bool {
+    let quantity = quantity.to_lowercase();
+    key_words(key)
+        .iter()
+        .any(|word| quantity.contains(word.as_str()))
+}
+
+/// Every bound with its key, walked section by section.
+fn bounds_with_keys() -> Vec<(String, f64)> {
+    fn walk(prefix: &str, value: &Value, out: &mut Vec<(String, f64)>) {
+        match value {
+            Value::Number(number) => {
+                if let Some(float) = number.as_f64() {
+                    out.push((prefix.to_string(), float));
+                }
+            }
+            Value::Object(map) => {
+                for (key, value) in map {
+                    walk(&format!("{prefix}.{key}"), value, out);
+                }
+            }
+            Value::Array(items) => {
+                for (index, value) in items.iter().enumerate() {
+                    walk(&format!("{prefix}[{index}]"), value, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let json = document_engine::vocabulary::json();
+    let mut out = Vec::new();
+    for section in ["reading", "limits", "engine"] {
+        walk(section, &json[section], &mut out);
+    }
+    out
+}
+
+/// Every number the layout's data files state, with the quantity and unit the file says it counts in.
+fn data_numbers() -> Vec<(f64, String, String)> {
+    fn walk(value: &Value, unit: &str, quantity: &str, out: &mut Vec<(f64, String, String)>) {
+        match value {
+            Value::Object(map) => {
+                if let (Some(Value::Number(number)), Some(quantity), Some(unit)) = (
+                    map.get("value"),
+                    map.get("quantity").and_then(Value::as_str),
+                    map.get("unit").and_then(Value::as_str),
+                ) && let Some(float) = number.as_f64()
+                {
+                    out.push((float, quantity.to_string(), unit.to_string()));
+                    return;
+                }
+                for (key, value) in map {
+                    // A range's endpoints are code points, whatever the file's other numbers are.
+                    if key == "ranges" || key == "more_ranges" {
+                        walk(value, "code points", "a code point of the width table", out);
+                    } else {
+                        walk(value, unit, quantity, out);
+                    }
+                }
+            }
+            Value::Array(items) => {
+                for value in items {
+                    walk(value, unit, quantity, out);
+                }
+            }
+            Value::Number(number) => {
+                if let Some(float) = number.as_f64() {
+                    out.push((float, quantity.to_string(), unit.to_string()));
+                }
+            }
+            _ => {}
+        }
+    }
+    // Each data file states numbers in one unit and of one quantity, except the constants file,
+    // whose entries state their own.
+    let files: &[(&str, &str, &str)] = &[
+        ("constants.json", "", ""),
+        (
+            "unicode.json",
+            "code points",
+            "a code point of a character class",
+        ),
+        (
+            "east_asian.json",
+            "thousandths of an em",
+            "a line metric of an East Asian face",
+        ),
+        (
+            "widths.json",
+            "thousandths of an em",
+            "a width in thousandths of an em",
+        ),
+        (
+            "more_widths.json",
+            "thousandths of an em",
+            "a width in thousandths of an em",
+        ),
+        (
+            "arabic_widths.json",
+            "thousandths of an em",
+            "a width in thousandths of an em",
+        ),
+    ];
+    let directory = root().join("assets").join("docx-layout");
+    let mut out = Vec::new();
+    for (name, unit, quantity) in files {
+        let text = std::fs::read_to_string(directory.join(name))
+            .unwrap_or_else(|e| panic!("cannot read {name}: {e}"));
+        let data: Value = serde_json::from_str(&text).expect("the data is JSON");
+        walk(&data, unit, quantity, &mut out);
+    }
+    out
+}
+
+#[test]
+fn the_layout_data_states_no_bound_of_the_same_quantity() {
+    // The scan reads the data files as well as the sources: a value in them that repeats a
+    // vocabulary bound in the same unit *and* the same quantity is a restatement, and fails here.
+    let bounds = bounds_with_keys();
+    let mut found = Vec::new();
+    for (value, quantity, unit) in data_numbers() {
+        for (key, bound) in &bounds {
+            if *bound != value {
+                continue;
+            }
+            // A data entry whose quantity names the bound's is a restatement; one that names
+            // something else, in whatever unit, is not.
+            if quantity.is_empty() || names_the_same_quantity(&quantity, key) {
+                found.push(format!("{value} is {key} restated ({quantity:?}, {unit})"));
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "the layout data restates a vocabulary bound:\n{}",
+        found.join("\n")
+    );
+}
+
+#[test]
+fn every_layout_constant_is_read_by_the_port() {
+    // The data is what the port reads: a constant nothing reads has no place in it, and a name the
+    // port reads the data does not state is a defect in the derivation.
+    let text = std::fs::read_to_string(root().join("assets/docx-layout/constants.json"))
+        .expect("the constants data");
+    let data: Value = serde_json::from_str(&text).expect("the constants are JSON");
+    let names: Vec<String> = data
+        .as_object()
+        .expect("the constants are an object")
+        .keys()
+        .cloned()
+        .collect();
+    let mut code = String::new();
+    for path in sources() {
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        code.push_str(&text[..test_module_start(&text)]);
+    }
+    // The port reads a constant by name: at the call site, or through one of the helpers that take
+    // the name as an argument. Every spelling is a read of the data.
+    const READERS: &[&str] = &["constants::value(\"", "constant(\"", "mode(\""];
+    for name in &names {
+        assert!(
+            READERS
+                .iter()
+                .any(|reader| code.contains(&format!("{reader}{name}\""))),
+            "the data states {name}, which no source reads"
+        );
+    }
+    for reader in READERS {
+        for (quoted, _) in code.match_indices(reader) {
+            let rest = &code[quoted + reader.len()..];
+            let name = rest.split('"').next().unwrap_or_default();
+            assert!(
+                names.iter().any(|known| known == name),
+                "a source reads {name}, which the data does not state"
+            );
+        }
+    }
+}
+
+#[test]
+fn every_layout_number_is_another_quantity_than_the_bound_it_coincides_with() {
+    // A number the source scan exempts coincides with a vocabulary bound. [`Exemption::quantity`]
+    // states what the number counts, as a structured field rather than as prose, and that quantity
+    // must not name the bound's: if it did, the number would be the same quantity in the same unit,
+    // and would have to be read from the vocabulary instead. An exemption that states no quantity has
+    // nothing to compare, and the test below proves that this is never so under `src/writing/docx/`.
+    let bounds = bounds_with_keys();
+    let mut found = Vec::new();
+    for exemption in EXEMPTIONS {
+        if exemption.quantity.is_empty() {
+            assert!(
+                !exemption.file.starts_with("src/writing/docx/"),
+                "`{}` `{}` is exempted under the layout without a stated quantity",
+                exemption.file,
+                exemption.value
+            );
+            continue;
+        }
+        for (key, bound) in &bounds {
+            if *bound == exemption.value && names_the_same_quantity(exemption.quantity, key) {
+                found.push(format!(
+                    "{} states {}, which coincides with {key} and names the same quantity",
+                    exemption.file, exemption.value
+                ));
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "a layout number is the same quantity as a vocabulary bound:\n{}",
+        found.join("\n")
+    );
+}
+
+#[test]
+fn every_layout_exemption_states_its_quantity_and_every_quantity_coincides_with_a_bound() {
+    // The quantity is what the rule above reads, so the layout's numbers must state one: a number
+    // exempted under `src/writing/docx/` with an empty quantity would escape that rule. In the other
+    // direction, a stated quantity is a claim about a collision — the number is one of a bound's
+    // values and counts something else — so a quantity whose value no bound states any more would be a
+    // claim about a number that has stopped coinciding.
+    let bounds = bounds_with_keys();
+    for exemption in EXEMPTIONS {
+        if exemption.file.starts_with("src/writing/docx/") {
+            assert!(
+                !exemption.quantity.is_empty(),
+                "`{}` `{}` is exempted without a stated quantity",
+                exemption.file,
+                exemption.value
+            );
+        }
+        if !exemption.quantity.is_empty() {
+            assert!(
+                bounds.iter().any(|(_, bound)| *bound == exemption.value),
+                "`{}` `{}` states a quantity but coincides with no vocabulary bound",
+                exemption.file,
+                exemption.value
+            );
+        }
+    }
 }

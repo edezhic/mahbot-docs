@@ -60,7 +60,9 @@ use super::documents::{
     XLSX_ONE_VISIBLE, XLSX_ONLY_SHEET, XLSX_SELF_CLOSING, XLSX_UNCLOSED_MERGE_CELL,
 };
 use super::effect::{BoxKind, Scalar, Scope};
-use super::{Case, Document, Effect, Expect, Reason};
+use super::{
+    Case, Document, Effect, Expect, Reason, arabic_case_heading, arabic_case_text, tall_cell_text,
+};
 use crate::engine::Family;
 use serde_json::{Value, json};
 
@@ -125,6 +127,28 @@ fn inputs(sub_operation: &str, basic: Document) -> Vec<Document> {
 
 // ── create ────────────────────────────────────────────────────────────────────────────────────
 
+/// A content list assembled from its blocks: `first`, then `before`, then `count` one-line
+/// paragraphs, then `after`, then `last`.
+///
+/// A layout case is mostly one-line paragraphs, and stating sixty of them inline would hide the
+/// one block that moves the number.
+fn laid_out(
+    first: Value,
+    before: Vec<Value>,
+    count: usize,
+    after: Vec<Value>,
+    last: Value,
+) -> Vec<Value> {
+    let mut content = vec![first];
+    content.extend(before);
+    content.extend(
+        (0..count).map(|index| json!({ "type": "paragraph", "text": format!("Line {index}") })),
+    );
+    content.extend(after);
+    content.push(last);
+    content
+}
+
 fn create_cases() -> Vec<Case> {
     // A table past the writer's Word-only column bound: 64 columns, one header each.
     let wide_headers: Vec<String> = (0..64).map(|index| format!("h{index}")).collect();
@@ -135,6 +159,10 @@ fn create_cases() -> Vec<Case> {
     // A paragraph past the shared edit-text cap (20,000 characters), with a marker at each end so a
     // truncated one loses its tail.
     let long_paragraph = format!("start {} end", "x".repeat(20_050));
+    // One sentence of ordinary words three times, about nine hundred points of text: three lines in
+    // the column a table fits to its content, and six in the grid's equal half.
+    let sentence = "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore";
+    let long_cell = [sentence; 3].join(" ");
     vec![
         produced(
             Family::Docx,
@@ -185,6 +213,1857 @@ fn create_cases() -> Vec<Case> {
                 },
             ],
         ),
+        // A request with no content value is an internal failure, not a usage refusal: the
+        // reference throws the runtime's own type error, so the case expects a third-party reason
+        // rather than a sentence the crate reproduces.
+        declined(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "output": "$out/refused.docx",
+            }),
+            vec!["refused.docx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("no_content"),
+        // A block kind the writer does not know is refused rather than dropped, naming the kinds it
+        // does take.
+        declined(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "notes", "text": "Speaker notes." }],
+                "output": "$out/refused.docx",
+            }),
+            vec!["refused.docx"],
+            Expect::Refused(Reason::contains(
+                "a content block of unknown type \"notes\" — a document takes a heading, a paragraph, a list, a table, an image, a link, a page break or a table of contents",
+            )),
+        )
+        .named("unknown_type"),
+        // A second table of contents is a second field over the same headings, which no caller could
+        // tell apart.
+        declined(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [
+                    { "type": "contents" },
+                    { "type": "heading", "level": 1, "text": "One" },
+                    { "type": "contents" },
+                ],
+                "output": "$out/refused.docx",
+            }),
+            vec!["refused.docx"],
+            Expect::Refused(Reason::contains("a document holds one table of contents")),
+        )
+        .named("two_contents"),
+        // A link's address is checked where it is written: it must parse as an absolute URL, and its
+        // scheme must be one an application can follow.
+        declined(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "link", "text": "Here", "url": "example.com" }],
+                "output": "$out/refused.docx",
+            }),
+            vec!["refused.docx"],
+            Expect::Refused(Reason::contains(
+                "a link's address must be an absolute URL, e.g. https://example.com, got: \"example.com\"",
+            )),
+        )
+        .named("link_not_absolute"),
+        declined(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "link", "text": "Here", "url": "ftp://example.com/file" }],
+                "output": "$out/refused.docx",
+            }),
+            vec!["refused.docx"],
+            Expect::Refused(Reason::contains(
+                "a link's address must be an http, https, mailto or tel address, got: \"ftp://example.com/file\"",
+            )),
+        )
+        .named("link_scheme"),
+        // A picture the caller sized past the page is placed as named, and the answer says so.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            vec![PICTURE_OVERSIZE],
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{
+                    "type": "image",
+                    "image": "$in/oversize.png",
+                    "width": 700,
+                }],
+                "output": "$out/past-edge.docx",
+            }),
+            vec!["past-edge.docx"],
+            vec![Effect::ElementCount {
+                output: None,
+                part: "word/document.xml",
+                element: "w:drawing",
+                count: 1,
+            }],
+        )
+        .named("picture_past_edge"),
+        // The model rewrites a resolved reference to its target, so it cannot see a drawing pointing
+        // at a relationship the package does not hold: `ReferencesResolve` reads the rewrite and
+        // requires both drawings to reach the one relationship. Two identical pictures reach one
+        // media part and one relationship, and every drawing's reference resolves.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            vec![PICTURE_PNG],
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [
+                    { "type": "image", "image": "$in/picture.png", "width": 40, "height": 40 },
+                    { "type": "image", "image": "$in/picture.png", "width": 40, "height": 40 },
+                ],
+                "output": "$out/repeated-picture.docx",
+            }),
+            vec!["repeated-picture.docx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:drawing",
+                    count: 2,
+                },
+                Effect::ImageParts {
+                    output: None,
+                    count: 1,
+                },
+                Effect::ReferencesResolve {
+                    output: None,
+                    part: "word/document.xml",
+                    count: 2,
+                },
+            ],
+        )
+        .named("repeated_picture"),
+        // The layout stops at a character whose width the measuring face does not state — the nabla
+        // is the symbol that actually stops it — and a stop blanks only what follows it. The heading
+        // before the stop keeps its number; the one after it has none, and the answer says so.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [
+                    { "type": "contents" },
+                    { "type": "heading", "level": 1, "text": "Before" },
+                    { "type": "paragraph", "text": "∇" },
+                    { "type": "heading", "level": 1, "text": "After" },
+                ],
+                "footer": "{pages}",
+                "output": "$out/nabla-one.docx",
+            }),
+            vec!["nabla-one.docx"],
+            vec![
+                // The entry before the stop keeps its number; the one after it is blank.
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc1 \\h",
+                    value: Some("1"),
+                },
+                // The blank entry really is blank: no number follows its page reference, which a
+                // stop would have written as 1 or 2.
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc2 \\h",
+                    value: None,
+                },
+            ],
+        )
+        .named("nabla_stop_one_gap"),
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [
+                    { "type": "contents" },
+                    { "type": "heading", "level": 1, "text": "Before" },
+                    { "type": "paragraph", "text": "∇" },
+                    { "type": "heading", "level": 1, "text": "After one" },
+                    { "type": "heading", "level": 1, "text": "After two" },
+                ],
+                "footer": "{pages}",
+                "output": "$out/nabla-two.docx",
+            }),
+            vec!["nabla-two.docx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:hyperlink",
+                    count: 3,
+                },
+                // The entry before the stop keeps its number; both after it are blank, so neither
+                // page reference carries a number.
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc1 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc2 \\h",
+                    value: None,
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc3 \\h",
+                    value: None,
+                },
+            ],
+        )
+        .named("nabla_stop_two_gaps"),
+        // ── create: the Word family ──────────────────────────────────────────────────────────────
+        //
+        // The Word arm is the one `create` family that runs no Word-only scan — it is the family
+        // those features belong to — so its checks are the content walk, then the header and footer.
+        // Its answer is also the only one that carries notes and losses. The cases below pin the
+        // block kinds, the layout's own numbers, the direct-call shapes a typed port would guess
+        // wrong, and the two caps a created document can actually reach.
+        //
+        // A layout case carries a `{pages}` token or a contents block, because a document without
+        // one never asks for the pass: a case meant to prove a number must ask for it. The effect
+        // that ties a field to its number is `FieldValue`, which reads the field's own result run —
+        // `PAGEREF _Toc1 \h` shows `1` here.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [
+                    { "type": "contents" },
+                    { "type": "heading", "level": 1, "text": "One" },
+                    { "type": "heading", "level": 2, "text": "Two" },
+                    { "type": "paragraph", "text": "Body text here." },
+                ],
+                "output": "$out/contents.docx",
+            }),
+            vec!["contents.docx"],
+            vec![
+                // The entries the field carries, and the page each was worked out to start on.
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc1 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc2 \\h",
+                    value: Some("1"),
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:bookmarkStart",
+                    count: 2,
+                },
+                // A level past the first is indented 220 twips, which the entry's own properties
+                // state.
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: "word/document.xml",
+                    text: "Two",
+                    property: "ind",
+                    child: None,
+                    attribute: "left",
+                    value: "220",
+                },
+            ],
+        )
+        .named("contents_pages"),
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "Chapter" },
+                    { "type": "paragraph", "text": "Text." },
+                ],
+                "header": "Running header",
+                "footer": "Page {page} of {pages}",
+                "output": "$out/counted.docx",
+            }),
+            vec!["counted.docx"],
+            vec![
+                // The page count the layout worked out, tied to its field: one page here.
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: Some("1"),
+                },
+                // A `{page}` token is written as a field and never filled; the `page_token_only`
+                // case proves that, by carrying one and no `{pages}`, and finding no page count.
+                Effect::Text {
+                    output: None,
+                    part: Some("word/header1.xml"),
+                    text: "Running header",
+                    present: true,
+                },
+            ],
+        )
+        .named("counted_pages"),
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "Many" },
+                    { "type": "list", "ordered": true, "items": ["One", "Two", "Three"] },
+                    { "type": "list", "items": ["Bullet"] },
+                    { "type": "paragraph", "text": "A footnote host.", "footnote": "The note." },
+                    { "type": "link", "text": "Example", "url": "https://example.com/a?b=c" },
+                    { "type": "link", "text": "Part", "url": "https://example.com/page#part" },
+                    { "type": "page_break" },
+                    { "type": "paragraph", "text": "After the break." },
+                ],
+                "output": "$out/blocks.docx",
+            }),
+            vec!["blocks.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: "After the break.",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/footnotes.xml"),
+                    text: "The note.",
+                    present: true,
+                },
+                // The link's own text is what the document says; its address is a relationship's
+                // target and its fragment an attribute, which the baseline compares.
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: "Example",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: "Part",
+                    present: true,
+                },
+                // The numbered list and the bullet list take different numbering definitions.
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: "word/document.xml",
+                    text: "One",
+                    property: "numPr",
+                    child: Some("numId"),
+                    attribute: "val",
+                    value: "2",
+                },
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: "word/document.xml",
+                    text: "Bullet",
+                    property: "numPr",
+                    child: Some("numId"),
+                    attribute: "val",
+                    value: "1",
+                },
+            ],
+        )
+        .named("block_kinds"),
+        // An empty table is produced: the reference accepts one, and it is the edit path's add-table
+        // sub-operation that refuses it, not the shared table helper.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "table", "headers": [], "rows": [] }],
+                "output": "$out/empty-table.docx",
+            }),
+            vec!["empty-table.docx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:tbl",
+                    count: 1,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:tr",
+                    count: 0,
+                },
+            ],
+        )
+        .named("empty_table"),
+        // A table past the edit path's column bound is produced: the create path inherits none of the
+        // edit path's caps, and the shared table helper must not be what decides it. The `{pages}`
+        // footer makes the document ask for the layout, which stops at a row wider than the page: the
+        // field is written and left blank, and the answer says the count could not be worked out.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{
+                    "type": "table",
+                    "headers": (0..64).map(|index| format!("h{index}")).collect::<Vec<String>>(),
+                }],
+                "footer": "{pages}",
+                "output": "$out/wide-table.docx",
+            }),
+            vec!["wide-table.docx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:gridCol",
+                    count: 64,
+                },
+                Effect::TableCell {
+                    output: None,
+                    part: "word/document.xml",
+                    row: 0,
+                    column: 63,
+                    text: "h63",
+                },
+                // The count's field is in the footer; the layout stops at the row, which keeps the
+                // numbers it placed before the stop and leaves the page count unknown, so the field
+                // is blank.
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: None,
+                },
+            ],
+        )
+        .named("wide_table"),
+        // A paragraph past the edit path's text cap is produced whole. Its text is ordinary words,
+        // not one unbroken 20,050-character run, because ordinary words are what a paragraph past
+        // the cap looks like. A paragraph cut short loses its tail, so the case asserts both ends:
+        // the opening word is there and the closing one survived.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "paragraph", "text": format!("start {} end", "word ".repeat(4_010)) }],
+                "output": "$out/long-text.docx",
+            }),
+            vec!["long-text.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: "start ",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: " end",
+                    present: true,
+                },
+            ],
+        )
+        .named("paragraph_over_the_text_cap"),
+        // A WebP picture is a real axis: the reference adds the media type to the content types part
+        // after packing, so that part is not static across a WebP request.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            vec![PICTURE_WEBP],
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "image", "image": "$in/picture.webp" }],
+                "output": "$out/webp.docx",
+            }),
+            vec!["webp.docx"],
+            // The media type the reference adds after packing is an attribute of the content types
+            // part, which the baseline compares; the drawing the picture becomes is the effect.
+            vec![Effect::ElementCount {
+                output: None,
+                part: "word/document.xml",
+                element: "w:drawing",
+                count: 1,
+            }],
+        )
+        .named("webp_picture"),
+        // A page break at either edge of the document is left out and said, once per edge.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [
+                    { "type": "page_break" },
+                    { "type": "paragraph", "text": "Only." },
+                    { "type": "page_break" },
+                ],
+                "output": "$out/edges.docx",
+            }),
+            vec!["edges.docx"],
+            vec![
+                // Neither break reaches the document: a body of one paragraph holds no break.
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:br",
+                    count: 0,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: "Only.",
+                    present: true,
+                },
+            ],
+        )
+        .named("edge_breaks"),
+        // A table of contents with no heading is empty, and said.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "contents" }, { "type": "paragraph", "text": "No headings." }],
+                "output": "$out/no-headings.docx",
+            }),
+            vec!["no-headings.docx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:bookmarkStart",
+                    count: 0,
+                },
+                // The instruction's own quotation marks are character references, which the model
+                // drops, so the fragment stops where they stand.
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: "TOC \\h \\o ",
+                    present: true,
+                },
+            ],
+        )
+        .named("empty_contents"),
+        // A heading whose own text is empty is listed nowhere and still counts as a heading the
+        // request named, so the table of contents is not called empty — the note `empty_contents`
+        // records is absent here, and the transcript comparison is what holds that.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [
+                    { "type": "contents" },
+                    { "type": "heading", "level": 1, "text": "" },
+                    { "type": "paragraph", "text": "No listed headings." },
+                ],
+                "footer": "{pages}",
+                "output": "$out/empty-heading.docx",
+            }),
+            vec!["empty-heading.docx"],
+            vec![
+                // The heading is written as its own paragraph and listed by no entry.
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:bookmarkStart",
+                    count: 0,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:pStyle",
+                    count: 1,
+                },
+                // The contents block asks for a pass, which settles on the one page the document is.
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: Some("1"),
+                },
+            ],
+        )
+        .named("empty_text_heading"),
+        // A document that spans pages: a hundred one-line paragraphs are two pages of sixty and
+        // forty, and the page count is the whole document's.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": (0..100)
+                    .map(|index| json!({ "type": "paragraph", "text": format!("Line {index}") }))
+                    .collect::<Vec<serde_json::Value>>(),
+                "footer": "Page {page} of {pages}",
+                "output": "$out/spanning.docx",
+            }),
+            vec!["spanning.docx"],
+            vec![Effect::FieldValue {
+                output: None,
+                part: "word/footer1.xml",
+                instruction: "NUMPAGES",
+                value: Some("2"),
+            }],
+        )
+        .named("spanning_pages"),
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [
+                    { "type": "contents" },
+                    { "type": "heading", "level": 1, "text": "One" },
+                    { "type": "paragraph", "text": "Paragraphs follow." },
+                ],
+                "output": "$out/one-entry.docx",
+            }),
+            vec!["one-entry.docx"],
+            vec![Effect::ElementCount {
+                output: None,
+                part: "word/document.xml",
+                element: "w:hyperlink",
+                count: 1,
+            }],
+        )
+        .named("one_entry"),
+        // ── create: the Word family, the shapes a second pass reaches ───────────────────────────
+        //
+        // The cases above pin the block kinds, the layout's own numbers and the two caps. The cases
+        // below add what the first pass does not: text the layout must break without a space, the
+        // four addresses a link's serialisation can move, the direct-call shapes the tool layer
+        // never builds, and the layout situations that move a number from one page to the next.
+        //
+        // A link's target is a relationship's attribute, and every effect reads a part's text, so a
+        // link case pins the block (one `w:hyperlink` holding the link's text) and states the
+        // address the reference serialises in its comment; the recorded baseline compares the
+        // relationship part, whose `Target` is the serialisation.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": "東アジアの改行" },
+                    // One paragraph, no space anywhere in it: every line break is a break between
+                    // two East Asian characters.
+                    { "type": "paragraph", "text": "日本語の文章には単語の間の空白がありませんから、行は文字の間で折り返さなければなりません。".repeat(160) },
+                ],
+                "footer": "Page {page} of {pages}",
+                "output": "$out/cjk.docx",
+            }),
+            vec!["cjk.docx"],
+            vec![
+                // Four pages of text that holds no space: the layout broke the run, and its count
+                // is the number the field carries.
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: Some("4"),
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: "東アジアの改行",
+                    present: true,
+                },
+            ],
+        )
+        .named("cjk_document"),
+        // An Arabic paragraph and a heading over it: the layout measures right-to-left text the
+        // same way, and the count is the one page the joined letters take. The text is chosen so a
+        // measurement without joining lands on two: the crate-side test
+        // `the_arabic_case_text_takes_another_page_count_when_it_is_not_joined` in
+        // `document-engine/tests/docx_layout.rs` proves the page count through the layout's own
+        // pagination, so this recorded count is not vacuous. Both read the heading and the paragraph
+        // from `test_support`, so the text measured and the text recorded cannot drift apart.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [
+                    { "type": "heading", "level": 1, "text": arabic_case_heading() },
+                    { "type": "paragraph", "text": arabic_case_text() },
+                ],
+                "footer": "Page {page} of {pages}",
+                "output": "$out/arabic.docx",
+            }),
+            vec!["arabic.docx"],
+            vec![
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: Some("1"),
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: "عنوان عربي",
+                    present: true,
+                },
+            ],
+        )
+        .named("arabic_document"),
+        // ── create: the four addresses a link's serialisation moves ──────────────────────────────
+        //
+        // The reference writes the address its own parse produced, not the string it was given.
+        // Each case below is one way the two differ, and its comment states the target the
+        // reference writes.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "link", "text": "Here", "url": "https://bücher.example/path" }],
+                "output": "$out/link.docx",
+            }),
+            vec!["link.docx"],
+            vec![
+                // `https://xn--bcher-kva.example/path` — the host is the name the URL standard's
+                // own IDNA form spells.
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:hyperlink",
+                    count: 1,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: "Here",
+                    present: true,
+                },
+            ],
+        )
+        .named("link_idn_host"),
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "link", "text": "Here", "url": "https://example.com:443/x" }],
+                "output": "$out/link.docx",
+            }),
+            vec!["link.docx"],
+            vec![
+                // `https://example.com/x` — a port the scheme's own default is dropped.
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:hyperlink",
+                    count: 1,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: "Here",
+                    present: true,
+                },
+            ],
+        )
+        .named("link_default_port"),
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "link", "text": "Here", "url": "HTTPS://EXAMPLE.COM/A" }],
+                "output": "$out/link.docx",
+            }),
+            vec!["link.docx"],
+            vec![
+                // `https://example.com/A` — the scheme and the host are lowercased, the path is not.
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:hyperlink",
+                    count: 1,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: "Here",
+                    present: true,
+                },
+            ],
+        )
+        .named("link_upper_case"),
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [
+                    { "type": "link", "text": "Escaped", "url": "https://example.com/a%20b" },
+                    { "type": "link", "text": "Raw", "url": "https://example.com/a b" },
+                ],
+                "output": "$out/link.docx",
+            }),
+            vec!["link.docx"],
+            vec![
+                // Both addresses serialise to `https://example.com/a%20b`: the escaped one keeps its
+                // escape and the raw space becomes one, so the two blocks name one target.
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:hyperlink",
+                    count: 2,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: "EscapedRaw",
+                    present: true,
+                },
+            ],
+        )
+        .named("link_percent_encoded"),
+        // ── create: the direct-call shapes ────────────────────────────────────────────────────────
+        //
+        // A request that reaches the kit without the tool layer's normalisation. The manager's
+        // ruling is what each case expects, and the kit's own source states why: a bullet and a cell
+        // are stringified, a text field is checked, a list iterates its `items` without checking
+        // that one is a list, and a row is written only when it has a length.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "list", "items": [5, true, "x"] }],
+                "output": "$out/bullets.docx",
+            }),
+            vec!["bullets.docx"],
+            vec![
+                // The number and the boolean are written as the bullets they stringify to.
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: "5truex",
+                    present: true,
+                },
+                // And they are bullets: the shared bullet definition, not a plain paragraph.
+                Effect::ParagraphAttribute {
+                    output: None,
+                    part: "word/document.xml",
+                    text: "5",
+                    property: "numPr",
+                    child: Some("numId"),
+                    attribute: "val",
+                    value: "1",
+                },
+            ],
+        )
+        .named("list_scalar_items"),
+        // A level that is text is refused, and the sentence names the value it read.
+        declined(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "heading", "level": "1", "text": "H" }],
+                "output": "$out/refused.docx",
+            }),
+            vec!["refused.docx"],
+            Expect::Refused(Reason::contains(
+                "a heading's level must be 1, 2 or 3, got: 1",
+            )),
+        )
+        .named("heading_level_string"),
+        // A list with no `items` is an internal failure: the reference iterates a value it never
+        // checked, so its reason is the runtime's own message and nothing is written.
+        declined(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "list" }],
+                "output": "$out/refused.docx",
+            }),
+            vec!["refused.docx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("list_without_items"),
+        // An empty `items` is a list that draws nothing: produced, with no paragraph in the body.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "list", "items": [] }],
+                "output": "$out/empty-list.docx",
+            }),
+            vec!["empty-list.docx"],
+            vec![Effect::ElementCount {
+                output: None,
+                part: "word/document.xml",
+                element: "w:p",
+                count: 0,
+            }],
+        )
+        .named("list_empty_items"),
+        // A row that is not an array has no length, so it is dropped and the table keeps its header.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "table", "headers": ["A"], "rows": [5, { "a": 1 }] }],
+                "output": "$out/rows.docx",
+            }),
+            vec!["rows.docx"],
+            vec![
+                // The header is the only row: both wrong-shaped rows were dropped.
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:tr",
+                    count: 1,
+                },
+                Effect::TableCell {
+                    output: None,
+                    part: "word/document.xml",
+                    row: 0,
+                    column: 0,
+                    text: "A",
+                },
+            ],
+        )
+        .named("row_not_array"),
+        // A numeric `headers` has no length either, so the header row is dropped and the rows stand.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "table", "headers": 5, "rows": [["one"]] }],
+                "output": "$out/headers.docx",
+            }),
+            vec!["headers.docx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:tr",
+                    count: 1,
+                },
+                Effect::TableCell {
+                    output: None,
+                    part: "word/document.xml",
+                    row: 0,
+                    column: 0,
+                    text: "one",
+                },
+            ],
+        )
+        .named("headers_number"),
+        // An object `headers` reads the same way.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "table", "headers": { "a": 1 }, "rows": [["one"]] }],
+                "output": "$out/headers.docx",
+            }),
+            vec!["headers.docx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:tr",
+                    count: 1,
+                },
+                Effect::TableCell {
+                    output: None,
+                    part: "word/document.xml",
+                    row: 0,
+                    column: 0,
+                    text: "one",
+                },
+            ],
+        )
+        .named("headers_object"),
+        // A string `headers` is iterable but not mappable, so the reference faults: internal, and
+        // its reason is the runtime's own message.
+        declined(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "table", "headers": "A", "rows": [["one"]] }],
+                "output": "$out/refused.docx",
+            }),
+            vec!["refused.docx"],
+            Expect::Failed(Reason::third_party()),
+        )
+        .named("headers_string"),
+        // A block that is not an object has no type, and the refusal names that absence: `undefined`
+        // is what the reference's own stringification of the missing type produces.
+        declined(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": ["hello"],
+                "output": "$out/refused.docx",
+            }),
+            vec!["refused.docx"],
+            Expect::Refused(Reason::contains(
+                "a content block of unknown type undefined — a document takes a heading, a paragraph, a list, a table, an image, a link, a page break or a table of contents",
+            )),
+        )
+        .named("block_string"),
+        declined(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [5],
+                "output": "$out/refused.docx",
+            }),
+            vec!["refused.docx"],
+            Expect::Refused(Reason::contains(
+                "a content block of unknown type undefined — a document takes a heading, a paragraph, a list, a table, an image, a link, a page break or a table of contents",
+            )),
+        )
+        .named("block_number"),
+        // A table whose rows mix an array with a number keeps the header and both real rows.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{
+                    "type": "table",
+                    "headers": ["H"],
+                    "rows": [["one"], 5, ["two"]],
+                }],
+                "output": "$out/rows.docx",
+            }),
+            vec!["rows.docx"],
+            vec![
+                // The header and the two array rows; the number row was dropped.
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:tr",
+                    count: 3,
+                },
+                Effect::TableCell {
+                    output: None,
+                    part: "word/document.xml",
+                    row: 1,
+                    column: 0,
+                    text: "one",
+                },
+                Effect::TableCell {
+                    output: None,
+                    part: "word/document.xml",
+                    row: 2,
+                    column: 0,
+                    text: "two",
+                },
+            ],
+        )
+        .named("rows_mixed"),
+        // ── create: the requests this family ignores ──────────────────────────────────────────────
+        //
+        // An empty content list is a document with no body paragraph, and the `size` and `metadata`
+        // values another family reads are never looked at here.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [],
+                "output": "$out/empty.docx",
+            }),
+            vec!["empty.docx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:p",
+                    count: 0,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:tbl",
+                    count: 0,
+                },
+            ],
+        )
+        .named("empty_content"),
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "paragraph", "text": "Body." }],
+                "size": { "width": 1024, "height": 768 },
+                "metadata": { "title": "Ignored", "author": "Nobody" },
+                "output": "$out/plain.docx",
+            }),
+            vec!["plain.docx"],
+            vec![
+                // The same effects a plain paragraph carries: one paragraph, holding its text.
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:p",
+                    count: 1,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/document.xml"),
+                    text: "Body.",
+                    present: true,
+                },
+            ],
+        )
+        .named("size_and_metadata_ignored"),
+        // ── create: the page token with no count ──────────────────────────────────────────────────
+        //
+        // `{page}` is a field and never a number, and a footer with no `{pages}` asks the layout for
+        // nothing: the footer states the field and no count beside it.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "paragraph", "text": "Body." }],
+                "footer": "Page {page}",
+                "output": "$out/token.docx",
+            }),
+            vec!["token.docx"],
+            vec![
+                // The whole footer line: the field, and nothing after it.
+                Effect::Text {
+                    output: None,
+                    part: Some("word/footer1.xml"),
+                    text: "Page PAGE",
+                    present: true,
+                },
+                // No count is written where the caller stated none.
+                Effect::Text {
+                    output: None,
+                    part: Some("word/footer1.xml"),
+                    text: "NUMPAGES",
+                    present: false,
+                },
+            ],
+        )
+        .named("page_token_only"),
+        // The same token twice, in two parts: the header's `{page}` and the footer's count.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{ "type": "paragraph", "text": "Body." }],
+                "header": "Page {page}",
+                "footer": "Page {page} of {pages}",
+                "output": "$out/tokens.docx",
+            }),
+            vec!["tokens.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some("word/header1.xml"),
+                    text: "Page PAGE",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/footer1.xml"),
+                    text: "Page PAGE of",
+                    present: true,
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: Some("1"),
+                },
+            ],
+        )
+        .named("repeated_tokens"),
+        // ── create: the layout situations that move a number ───────────────────────────────────────
+        //
+        // Each case states a field together with the number the layout worked out for it:
+        // `FieldValue` reads the whole digit run of the field's own result, so `PAGEREF _Toc2 \h`
+        // showing `2` is the entry whose heading the layout placed on page two, and a `1` that is a
+        // prefix of a longer number does not pass.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": laid_out(
+                    json!({ "type": "contents" }),
+                    vec![
+                        json!({ "type": "heading", "level": 1, "text": "Rows" }),
+                        // Eighty rows: more than one page holds, so the tail heading starts page two.
+                        json!({
+                            "type": "table",
+                            "headers": ["Name", "Value"],
+                            "rows": (0..80)
+                                .map(|index| json!([format!("r{index}"), format!("v{index}")]))
+                                .collect::<Vec<serde_json::Value>>(),
+                        }),
+                    ],
+                    0,
+                    Vec::new(),
+                    json!({ "type": "heading", "level": 1, "text": "Tail" }),
+                ),
+                "footer": "{pages}",
+                "output": "$out/rows.docx",
+            }),
+            vec!["rows.docx"],
+            vec![
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc1 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc2 \\h",
+                    value: Some("2"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: Some("2"),
+                },
+            ],
+        )
+        .named("rows_spanning_pages"),
+        // A table whose one row is taller than a page: the row's lines break across the page they
+        // reach, as the reference lays them out, so the row's remaining lines and the heading after
+        // it land on the second page. A layout that moved the whole row to the next page would leave
+        // the first page holding only what came before the table, and put the heading on a third.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": laid_out(
+                    json!({ "type": "contents" }),
+                    vec![
+                        json!({ "type": "heading", "level": 1, "text": "Tall" }),
+                        json!({ "type": "table", "rows": [[tall_cell_text(), "1"]] }),
+                    ],
+                    20,
+                    Vec::new(),
+                    json!({ "type": "heading", "level": 1, "text": "After" }),
+                ),
+                "footer": "{pages}",
+                "output": "$out/tall-row.docx",
+            }),
+            vec!["tall-row.docx"],
+            vec![
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc1 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc2 \\h",
+                    value: Some("2"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: Some("2"),
+                },
+            ],
+        )
+        .named("row_taller_than_a_page"),
+        // A table longer than a page holds. The reference counts the border above every row it places
+        // and the table's bottom border below a row that breaks, so a row costs its line and a half
+        // point, and the room it must fit in is short by another half: fifty-six rows of one line fit
+        // under a contents block, so the fifty-seventh and the fifty-eighth are on page two, where the
+        // heading after them goes. A port that counted no border would fit all fifty-eight on the
+        // first page, with the heading.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": laid_out(
+                    json!({ "type": "contents" }),
+                    vec![json!({
+                        "type": "table",
+                        "rows": (0..58)
+                            .map(|index| json!([format!("r{index}")]))
+                            .collect::<Vec<serde_json::Value>>(),
+                    })],
+                    0,
+                    Vec::new(),
+                    json!({ "type": "heading", "level": 1, "text": "Tail" }),
+                ),
+                "footer": "{pages}",
+                "output": "$out/boundary.docx",
+            }),
+            vec!["boundary.docx"],
+            vec![
+                // The one heading, after the table, is on the second page.
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc1 \\h",
+                    value: Some("2"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: Some("2"),
+                },
+            ],
+        )
+        .named("table_at_a_page_boundary"),
+        // A table of empty cells. The reference keeps a header row's empty cell and drops only a row
+        // with no cells, so the document carries a table of one column and two rows and lays it out on
+        // one page: the column carries its cells' margins even when they hold nothing, and each row is
+        // as tall as its margins, its borders and one empty line.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": [{
+                    "type": "table",
+                    "headers": [""],
+                    "rows": [[""]],
+                }],
+                "footer": "{pages}",
+                "output": "$out/empty-cells.docx",
+            }),
+            vec!["empty-cells.docx"],
+            vec![
+                // The empty header cell is kept, and the body row with it: two rows of one cell.
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:tr",
+                    count: 2,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:tc",
+                    count: 2,
+                },
+                // The layout runs over the empty table and settles on the one page the document is.
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: Some("1"),
+                },
+            ],
+        )
+        .named("empty_cells"),
+        // The library sizes each table column to the content of its cells and widens the columns to
+        // the text column less half the table's borders, so a table whose cells hold unequal text
+        // does not get the equal widths its grid states. `assets/docx-layout/probes/table.mjs`
+        // records the reference's own answer: a row of unequal cells is one line tall, the same text
+        // beside itself two. The long cell here holds one sentence three times, about nine hundred
+        // points of text: at the fitted widths the table is three lines and the document is one
+        // page; at the grid's equal widths it is six lines and the document is two, because the
+        // fifty one-line paragraphs after it fill the page to within two lines of its end. A layout
+        // that used the grid's widths would move the second heading, and the count with it, onto
+        // page two.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": laid_out(
+                    json!({ "type": "contents" }),
+                    vec![
+                        json!({ "type": "heading", "level": 1, "text": "Table" }),
+                        json!({ "type": "table", "rows": [[long_cell, "1"]] }),
+                    ],
+                    50,
+                    Vec::new(),
+                    json!({ "type": "heading", "level": 1, "text": "After" }),
+                ),
+                "footer": "{pages}",
+                "output": "$out/fitted-table.docx",
+            }),
+            vec!["fitted-table.docx"],
+            vec![
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc1 \\h",
+                    value: Some("1"),
+                },
+                // The heading after the table, and the count with it, are on page one: the columns
+                // were fitted to the cells, not given the grid's equal widths.
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc2 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: Some("1"),
+                },
+            ],
+        )
+        .named("table_columns_fit_their_content"),
+        // A footnote at the bottom of the first page: the same body without the footnote paragraph
+        // is one page, and the paragraph's own reference pushes the next heading over.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": laid_out(
+                    json!({ "type": "contents" }),
+                    Vec::new(),
+                    56,
+                    vec![json!({ "type": "paragraph", "text": "Note host.", "footnote": "The note." })],
+                    json!({ "type": "heading", "level": 1, "text": "After" }),
+                ),
+                "footer": "{pages}",
+                "output": "$out/footnote.docx",
+            }),
+            vec!["footnote.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some("word/footnotes.xml"),
+                    text: "The note.",
+                    present: true,
+                },
+                // The heading after the footnote is on page two.
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc1 \\h",
+                    value: Some("2"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: Some("2"),
+                },
+            ],
+        )
+        .named("footnote_at_page_bottom"),
+        // A picture the bottom of the first page has no room for: placed at a stated size it moves
+        // to page two, and the heading after it with it. Without the picture both headings are on
+        // page one.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            vec![PICTURE_PNG],
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": laid_out(
+                    json!({ "type": "contents" }),
+                    vec![json!({ "type": "heading", "level": 1, "text": "Start" })],
+                    40,
+                    vec![json!({ "type": "image", "image": "$in/picture.png", "width": 200, "height": 300 })],
+                    json!({ "type": "heading", "level": 1, "text": "After" }),
+                ),
+                "footer": "Page {page} of {pages}",
+                "output": "$out/picture.docx",
+            }),
+            vec!["picture.docx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:drawing",
+                    count: 1,
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc1 \\h",
+                    value: Some("1"),
+                },
+                // The picture did not fit, so this heading is on page two.
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc2 \\h",
+                    value: Some("2"),
+                },
+            ],
+        )
+        .named("picture_pushed_to_next_page"),
+        // A ten-line header takes the room the body had: fifty-five one-line paragraphs and the two
+        // headings span two pages where a one-line header leaves them one.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": laid_out(
+                    json!({ "type": "contents" }),
+                    vec![json!({ "type": "heading", "level": 1, "text": "Start" })],
+                    55,
+                    Vec::new(),
+                    json!({ "type": "heading", "level": 1, "text": "End" }),
+                ),
+                "header": (0..10).map(|index| format!("H{index}")).collect::<Vec<String>>().join("\n"),
+                "footer": "Page {page} of {pages}",
+                "output": "$out/header.docx",
+            }),
+            vec!["header.docx"],
+            vec![
+                Effect::Text {
+                    output: None,
+                    part: Some("word/header1.xml"),
+                    text: "H0H1H2H3H4H5H6H7H8H9",
+                    present: true,
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc1 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc2 \\h",
+                    value: Some("2"),
+                },
+            ],
+        )
+        .named("tall_header"),
+        // Every shape a created document carries, in one body: a table, a list, a footnote, a
+        // picture, a running header and a page-count token, with a heading on each page — headings
+        // landing on different pages in a document that also holds all of the above. No other case
+        // holds these shapes together.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            vec![PICTURE_PNG],
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": laid_out(
+                    json!({ "type": "contents" }),
+                    vec![
+                        json!({ "type": "heading", "level": 1, "text": "Start" }),
+                        json!({ "type": "table", "headers": ["A", "B"], "rows": [["1", "2"], ["3", "4"]] }),
+                        json!({ "type": "list", "items": ["One", "Two"] }),
+                        json!({ "type": "paragraph", "text": "Note host.", "footnote": "The note." }),
+                        json!({ "type": "image", "image": "$in/picture.png", "width": 200, "height": 300 }),
+                    ],
+                    40,
+                    Vec::new(),
+                    json!({ "type": "heading", "level": 1, "text": "Tail" }),
+                ),
+                "header": "Running header",
+                "footer": "{pages}",
+                "output": "$out/every-shape.docx",
+            }),
+            vec!["every-shape.docx"],
+            vec![
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:tbl",
+                    count: 1,
+                },
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:drawing",
+                    count: 1,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/header1.xml"),
+                    text: "Running header",
+                    present: true,
+                },
+                Effect::Text {
+                    output: None,
+                    part: Some("word/footnotes.xml"),
+                    text: "The note.",
+                    present: true,
+                },
+                // The first heading is on page one and the last on page two: the body's own shapes
+                // take the room between them.
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc1 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc2 \\h",
+                    value: Some("2"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: Some("2"),
+                },
+            ],
+        )
+        .named("every_shape_on_two_pages"),
+        // A heading wider than the contents column, so its entry wraps: the entry is still one field,
+        // and the number the layout worked out for it is one. The wrapping entry is the *first* one,
+        // which is the entry a reader that skips a field's result drops — and the tail heading stands
+        // far enough down the body that the line the wrapped entry adds is what decides its page:
+        // measured as one empty line instead, `_Toc3` and the page count are one page shorter, which is
+        // what this case would then record.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": laid_out(
+                    json!({ "type": "contents" }),
+                    vec![
+                        json!({ "type": "heading", "level": 1, "text": "A very long heading text that must wrap inside the table of contents entry because it is much wider than the column" }),
+                        json!({ "type": "heading", "level": 1, "text": "Second" }),
+                    ],
+                    50,
+                    Vec::new(),
+                    json!({ "type": "heading", "level": 1, "text": "Tail" }),
+                ),
+                "footer": "{pages}",
+                "output": "$out/wrapped.docx",
+            }),
+            vec!["wrapped.docx"],
+            vec![
+                // The tail heading is on the second page, and it is there only because the first
+                // entry takes two lines: measured as one, the body fits on a single page.
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc3 \\h",
+                    value: Some("2"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: Some("2"),
+                },
+                // Three entries, each a hyperlink anchored at its heading's bookmark: the contents
+                // block is written and the wrapped entry is among them. The numbers above are what
+                // prove the wrapping — an entry's text is its heading's, so no fragment can.
+                Effect::ElementCount {
+                    output: None,
+                    part: "word/document.xml",
+                    element: "w:hyperlink",
+                    count: 3,
+                },
+            ],
+        )
+        .named("wrapped_contents_entry"),
         produced(
             Family::Xlsx,
             "create",

@@ -3332,7 +3332,8 @@ mod tests {
         // A guard for the inherited entries a page reads: every page names a different link of one
         // long `/Parent` chain, so a walk that follows the chain from each page reads it once per
         // page — n²/2 links — and a crafted file stalls a crop or a resize. The deadline is what a
-        // quadratic walk meets.
+        // quadratic walk meets: 800 million link reads take minutes, so a deadline generous enough
+        // to survive the whole suite running at once still separates the two.
         let mut document = page::fresh();
         let mut chain = document.add_object(Dictionary::from_iter([(
             "MediaBox".to_string(),
@@ -3357,7 +3358,7 @@ mod tests {
         }
         let chains = page::Chains::of(&document);
         let ancestry = page::Ancestry::new();
-        let framed = within(5, "the pages' parent walk", move || {
+        let framed = within(20, "the pages' parent walk", move || {
             let mut framed = true;
             for page in pages {
                 framed &= page::frame(&document, &chains, &ancestry, page).is_ok();

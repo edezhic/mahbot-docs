@@ -39,7 +39,9 @@ use super::page;
 use super::{Produced, interpolated, js_round};
 use crate::operation::{Failure, Request};
 use crate::vocabulary::{self, Family, vocabulary};
-use crate::writing::image::{PX_TO_POINTS, Picture, Pixels, image_size, read_create_image};
+use crate::writing::image::{
+    DEFAULT_IMAGE_WIDTH, PX_TO_POINTS, Picture, Pixels, image_size, read_create_image,
+};
 use crate::writing::{create, is_js_whitespace, js_truthy, scalar_text};
 
 /// A body line's size, the leading it is drawn on, and the space a body block leaves under itself.
@@ -63,8 +65,6 @@ const CELL_BASELINE: f64 = 13.0;
 /// A table's rule: half a point thick, in a grey.
 const RULE_THICKNESS: f64 = 0.5;
 const RULE_GREY: f64 = 0.6;
-/// The width a streaming picture is fitted to when the request names no side, in pixels.
-const DEFAULT_IMAGE_WIDTH: f64 = 400.0;
 
 /// One thing a page draws, in the order the content list draws it.
 enum Mark {

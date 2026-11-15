@@ -404,10 +404,10 @@ const fn pair(family: Family, handler: Option<Handler>) -> Pair {
     Pair { family, handler }
 }
 
-/// `create` accepts every family: a document can be made of any of the four. The PDF, presentation
-/// and workbook families are carried out; the Word family is a later port.
+/// `create` accepts every family: a document can be made of any of the four, and all four are
+/// carried out.
 const CREATE: &[Pair] = &[
-    pair(Family::Docx, None),
+    pair(Family::Docx, Some(Handler::Action(docx_create))),
     pair(Family::Xlsx, Some(Handler::Action(xlsx_create))),
     pair(Family::Pptx, Some(Handler::Action(pptx_create))),
     pair(Family::Pdf, Some(Handler::Action(pdf_create))),
@@ -470,6 +470,9 @@ fn pdf_form_fill(request: &Request, outputs: &[PathBuf]) -> Outcome {
 }
 fn pdf_create(request: &Request, outputs: &[PathBuf]) -> Outcome {
     crate::writing::pdf::create(request, &outputs[0])
+}
+fn docx_create(request: &Request, outputs: &[PathBuf]) -> Outcome {
+    crate::writing::docx::create::create(request, &outputs[0])
 }
 fn pptx_create(request: &Request, outputs: &[PathBuf]) -> Outcome {
     crate::writing::pptx::create(request, &outputs[0])
@@ -1061,7 +1064,7 @@ mod tests {
             answer("fill_template", Family::Pdf),
             Answer::UnacceptedFamily
         );
-        assert_eq!(answer("create", Family::Docx), Answer::NotCarriedOut);
+        assert_eq!(answer("create", Family::Docx), Answer::CarriedOut);
         assert_eq!(answer("create", Family::Pdf), Answer::CarriedOut);
         assert_eq!(answer("pdf_merge", Family::Pdf), Answer::CarriedOut);
     }

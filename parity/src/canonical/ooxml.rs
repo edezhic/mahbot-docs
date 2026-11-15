@@ -43,6 +43,15 @@
 //!   differently (`every_relationship_attribute_is_rewritten`). Only the
 //!   attributes the model names are rewritten, and only when the id resolves in the owning part's
 //!   `.rels`: a dangling reference is kept as written, so it stays visible.
+//!
+//! Because a reference is rewritten to the relationship's target, the model cannot see **which**
+//! relationship a drawing names, nor how many relationships a package writes: two packages whose
+//! references resolve to the same targets model alike. A reference the package does not declare is
+//! the one shape kept as written, so it is the only resolution difference the model itself shows. A
+//! case that must pin resolution therefore declares the `ReferencesResolve` effect, and a case that
+//! repeats one picture — two drawings that must reach one media relationship — is the one that needs
+//! it.
+//!
 //! - **A relationship's target mode**: only `External` is recorded, so an entry that states
 //!   `Internal` and one that states no mode are one entry; what the model keeps is whether the
 //!   target leaves the package (`a_relationship_entry_is_its_type_target_and_mode`).

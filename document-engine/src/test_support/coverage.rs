@@ -2004,6 +2004,57 @@ pub const WRITING_WITNESSES: &[WritingWitness] = &[
         case: "pdf/create@word_only_link",
         witness: "a link block is a Word document's own, and pdf holds none",
     },
+    // ── the created Word document's own marks ───────────────────────────────────────────────────
+    WritingWitness {
+        mark: "create_unknown_type",
+        case: "docx/create@unknown_type",
+        witness: "a content block of unknown type \"notes\" — a document takes a heading, a paragraph, a list, a table, an image, a link, a page break or a table of contents",
+    },
+    WritingWitness {
+        mark: "create_one_contents",
+        case: "docx/create@two_contents",
+        witness: "a document holds one table of contents",
+    },
+    WritingWitness {
+        mark: "create_link_absolute",
+        case: "docx/create@link_not_absolute",
+        witness: "a link's address must be an absolute URL, e.g. https://example.com, got: \"example.com\"",
+    },
+    WritingWitness {
+        mark: "create_link_scheme",
+        case: "docx/create@link_scheme",
+        witness: "a link's address must be an http, https, mailto or tel address, got: \"ftp://example.com/file\"",
+    },
+    WritingWitness {
+        mark: "note_page_break_before",
+        case: "docx/create@edge_breaks",
+        witness: "[a page break before the first block was left out — a document does not begin with an empty page]",
+    },
+    WritingWitness {
+        mark: "note_page_break_after",
+        case: "docx/create@edge_breaks",
+        witness: "[a page break after the last block was left out — it would leave the document with an empty last page]",
+    },
+    WritingWitness {
+        mark: "note_contents_empty",
+        case: "docx/create@empty_contents",
+        witness: "[the table of contents is empty — the document has no headings]",
+    },
+    WritingWitness {
+        mark: "note_contents_gap_one",
+        case: "docx/create@nabla_stop_one_gap",
+        witness: "[the table of contents has one entry with no page number — the writer could not work out the page it starts on]",
+    },
+    WritingWitness {
+        mark: "note_contents_gaps",
+        case: "docx/create@nabla_stop_two_gaps",
+        witness: "[the table of contents has 2 entries with no page number — the writer could not work out the pages they start on]",
+    },
+    WritingWitness {
+        mark: "note_page_count_gap",
+        case: "docx/create@nabla_stop_one_gap",
+        witness: "[the page count a header or a footer states could not be worked out — {pages} is left blank rather than filled with a number that may be wrong]",
+    },
     WritingWitness {
         mark: "create_heading_level",
         case: "pdf/create@heading_level_out_of_range",
@@ -2432,7 +2483,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         marks: &["edit_docx_unknown", "edit_pptx_unknown"],
     },
     Unreached {
-        reason: "the reference has no nesting bound and never refuses on this ground: the cap that stops a deeply nested part is the crate's own (`engine.paragraph_nesting_max`), with no counterpart in the reference",
+        reason: "the reference has no nesting bound and never refuses on this ground: the cap that stops a deeply nested part is the crate's own (`engine.paragraph_nesting_max`), with no counterpart in the reference. The create path cannot reach it either: a create request is flat, and the two probes — a table cell holding a block, then a list item holding one — are refused as `a table cell must be text, a number or a boolean` and `a bullet must be text, a number or a boolean`, so a created body's deepest paragraph is one against a cap of a thousand",
         marks: &["edit_docx_nested"],
     },
     Unreached {
@@ -2569,7 +2620,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         ],
     },
     Unreached {
-        reason: "an environmental failure a generated case cannot force: a call over the work budget, or a destination that refuses the write",
+        reason: "an environmental failure a generated case cannot force: a call over the work budget, or a destination that refuses the write. Both belong to the edit seam, which charges the walks that take a part into hand; a create request charges nothing at all, because its parts are built as strings rather than read. The probes — one paragraph of 200,000 characters, then one of 2,000,000 — are produced in a tenth of a second each, so a part of the budget's 4 GiB is 21,474 such paragraphs away; the reference could not build one either, because each of its parts is one string and bun refuses a string of 2 GiB with `Out of memory`, and the harness could neither read past its 64 MiB output bound nor canonicalise one",
         marks: &["edit_work_over_budget", "edit_write_failed"],
     },
     Unreached {
@@ -2640,7 +2691,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
     },
     Unreached {
         reason: "an I/O failure while a produced file is written; the harness hands every case its own writable directory, so no recorded run met one",
-        marks: &["pdf_page_write_failed"],
+        marks: &["create_write_failed", "pdf_page_write_failed"],
     },
     Unreached {
         reason: "a call that failed after it had written some of its files and could not remove one of them; the harness hands every case its own writable directory, so no recorded run met one",
@@ -2683,7 +2734,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         marks: &["surface_merge_bytes_too_many"],
     },
     Unreached {
-        reason: "printed only for an accepted (operation, family) pair the writing half does not carry out — today create's Word family and fill_template's workbook family; the recorded reference carries every one of them out, so no recorded answer prints it",
+        reason: "printed only for an accepted (operation, family) pair the writing half does not carry out — today only fill_template's workbook family, since all four families of create are carried out; the recorded reference carries every one of them out, so no recorded answer prints it",
         marks: &["reason_not_carried_out"],
     },
     Unreached {

@@ -64,7 +64,10 @@ place. Document code inside them:
 
 ## Things that are not here on purpose
 
-- No sample documents or binary fixtures: every test document is synthesized in code.
+- No binary sample documents: every test document is synthesized in code. Captured XML text parts
+  live under `document-engine/assets/docx-create/`, derived JSON data under
+  `document-engine/assets/docx-layout/`, and the embedded font is the existing exception; none of
+  them is a sample document.
 - No settings: the document part has no config key, no migration and no Settings entry.
 - CI does not mention the document kit; the bundle reaches the binary through `include_bytes!`.
 
@@ -103,14 +106,20 @@ name through with the content it had: `xlsx_edit` — the workbook edit, all fou
 carried out end to end. `mod.rs` holds the `Editor`, `package.rs` the archive, `xml.rs` the string
 surgery, `opc.rs` the packaging conventions every family's edit shares, `image.rs` the picture a
 placement embeds, `text.rs` the paragraph machinery the Word and presentation edits share, `xlsx/`
-the workbook port, `docx/` the Word port and `pptx/` the presentation port (its slide text, the
-slide, picture and table it writes, and — under `pptx/create/` — the deck a created presentation is
-built from: the content walk, the pinned writer library's own serialiser transliterated, the package
-around it, and the post-pass that declares titles and corrects the application properties). A
+the workbook port, `docx/` the Word port (under `docx/create/` the document a created Word document
+is built from, and under `docx/layout/` the pinned library's layout pass) and `pptx/` the
+presentation port (its slide text, the slide, picture and table it writes, and — under `pptx/create/`
+— the deck a created presentation is built from: the content walk, the pinned writer library's own
+serialiser transliterated, the package around it, and the post-pass that declares titles and
+corrects the application properties). A
 created deck's invariant parts are not hand-written: they are captured from the reference's own
 output into `assets/pptx-create/`, mirroring the archive's paths, and written exactly as captured.
 `parity/src/bin/capture-pptx-parts.rs` regenerates them and `parity/tests/pptx_create_parts.rs`
-proves the shipped copies are the reference's bytes.
+proves the shipped copies are the reference's bytes. A created Word document is the same shape of
+port, one library deeper: `docx/create/` walks the content list and serialises each block, and
+`docx/layout/` is the pinned library's layout pass — the measurer over the width tables shipped as
+data, the line breaker, the paginator and the passes that settle a table of contents' page numbers
+and a page-count token — so the numbers a created document shows are the reference's own.
 
 For a PDF, `src/writing/pdf/` is the object model the page actions build on (`lopdf`, which the
 crate's lockfile already resolved through `pdf-extract`): a page is deep-copied between documents
@@ -132,17 +141,23 @@ call draws, and `create` makes a new PDF from one ordered content list — one p
 the list is pictures alone, a text column otherwise — or a PowerPoint deck from the same kind of
 list, laid out down a slide's flow and written through the pinned presentation library's own
 serialiser, or a workbook made from one list of sheets, each with its name, rows and merge ranges,
-written part by part and sharing the edit path's styles part and merge reading. `create` answers the
-vocabulary's `reason_not_carried_out` for its Word family, and `fill_template` for the workbook
-family, until their ports land; the Word and presentation fills are carried out. The engine states
-which (operation, family) pairs it carries out as data, and the dispatch reads that statement and
-nothing else.
+written part by part and sharing the edit path's styles part and merge reading. A created Word
+document is the pinned writer library's serialiser transliterated — its body walk, its package, its
+table of contents field — and the page numbers its contents entries and its page-count token show are
+the library's own layout pass, ported module for module under `docx/layout/`: the measurer over the
+width tables shipped as data, the line breaker, the paginator, and the passes that settle the numbers.
+`create` carries out all four families, and `fill_template` the Word and presentation fills; only the
+workbook family of `fill_template` still answers the vocabulary's `reason_not_carried_out`. The
+engine states which (operation, family) pairs it carries out as data, and the dispatch reads that
+statement and nothing else.
 
 Every sentence the engine prints — an edit's refusals, notes and losses, a template fill's own
 refusals and the sentences of the library it ports, the request surface's own shape refusals, a PDF
 action's refusals and its notes, a page-render refusal and the panic fallback — is a vocabulary mark
-(`edit_*`, `fill_*`, `create_*`, `surface_*`, `write_*`, `pdf_page_*`, `pdf_text_*`, `pdf_image_*`,
-`pdf_form_*`, `note_*`, `render_*`, `engine_failed`), not a sentence in code, and
+(writing: `edit_*`, `fill_*`, `create_*`, `surface_*`, `write_*`, `pdf_page_*`, `pdf_text_*`,
+`pdf_image_*`, `pdf_form_*`; reading: `pdf_*`, `block_*`, `chart_*`, `xlsx_*`, `docx_*`, `legacy_*`,
+`unshown_*`, `pptx_*`, `word_*`, `number_*`, `render_*`; shared: `note_*`, `reason_*`,
+`engine_failed`), not a sentence in code, and
 `src/test_support/coverage.rs` records every writing mark as witnessed by a corpus case or as
 unreached with its reason.
 
@@ -157,13 +172,31 @@ face; the harness copies its sources rather than linking them, so nothing in thi
 rewrite the product's. The four kit sources are unchanged, so the committed bundle's provenance
 hash still holds.
 
-The crate's own asset directory holds two things: the face, and `pptx-create/` — the parts a created
-deck does not vary in, captured from the reference's own output and written exactly as captured
-(their line endings differ part by part, so the root `.gitattributes` pins them with a rule scoped
-to that directory alone rather than a blanket setting, which would rewrite the committed bundle and
-break the provenance hash). `pptxgenjs-LICENSE.txt` sits beside them: the parts are the output of
-`pptxgenjs` 4.0.1, which ships under the MIT licence, and they are captured output rather than
-hand-written source.
+The crate's own asset directory holds four things: the face; `pptx-create/` — the parts a created
+deck does not vary in, captured from the reference's own output and written exactly as captured;
+`docx-create/` — the same for a created Word document, plus the fragments its footnotes, numbering and
+content-types parts are built around; and `docx-layout/` — the pinned `docx` library's width,
+supplementary, Arabic and East Asian face tables, its character-class ranges, the layout constants the
+port reads, its module list, the probe scripts its exclusions rest on, and its licence, derived by
+`bun parity/scripts/derive-docx-layout-data.mjs`. Their line endings differ part by part, so the root
+`.gitattributes` pins the two captured-part directories with rules scoped to those directories alone
+rather than a blanket setting, which would rewrite the committed bundle and break the provenance
+hash. Two licences ship beside the data they cover: `pptxgenjs-LICENSE.txt` for the deck's captured
+parts (the output of `pptxgenjs` 4.0.1, which ships under the MIT licence), and
+`docx-layout/LICENSE` for the `docx` 9.12.0 tables — and for the Word parts captured in
+`docx-create/`, which the same library writes. `docx-create/` holds no licence file of its own: it is
+regenerated wholesale by `parity/src/bin/capture-docx-parts.rs`, and `docx-layout/README.md` is where
+the pointer to the licence that covers it lives. The `docx` tables' provenance and unresolved licence
+question are that README's too.
+
+The width data's provenance, exactly as established: the pinned package says its Arabic and
+supplementary width tables were generated from the proprietary application's own PDFs, and that its
+layout is checked against that application's output. It does not say which openly licensed fonts the
+core tables came from, so part of the shipped data is derived from another vendor's application and
+fonts, and the package's licence cannot convey rights its author did not hold. The question is
+unresolved and is the owner's decision; it is not re-litigated here. Regenerating the widths from
+freely licensed fonts was considered and rejected, because it moves every measured width, page
+number and contents entry a created document shows.
 
 ## Two traps when moving this code
 

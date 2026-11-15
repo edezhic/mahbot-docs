@@ -888,6 +888,12 @@
         "writing"
       ]
     },
+    "create_write_failed": {
+      "text": "the created document could not be written: {message}",
+      "printed_by": [
+        "writing"
+      ]
+    },
     "docx_cell_part_of": {
       "text": "(part of R{r}C{c})",
       "printed_by": [
@@ -3858,6 +3864,66 @@
     },
     "edit_pptx_fraction": {
       "text": "{name} must be {bounds}, got: {value}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "create_link_absolute": {
+      "text": "a link's address must be an absolute URL, e.g. https://example.com, got: {url}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "create_link_scheme": {
+      "text": "a link's address must be an http, https, mailto or tel address, got: {url}",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "create_one_contents": {
+      "text": "a document holds one table of contents",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "create_unknown_type": {
+      "text": "a content block of unknown type {type} — a document takes a heading, a paragraph, a list, a table, an image, a link, a page break or a table of contents",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_contents_empty": {
+      "text": "[the table of contents is empty — the document has no headings]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_contents_gap_one": {
+      "text": "[the table of contents has one entry with no page number — the writer could not work out the page it starts on]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_contents_gaps": {
+      "text": "[the table of contents has {count} entries with no page number — the writer could not work out the pages they start on]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_page_break_after": {
+      "text": "[a page break after the last block was left out — it would leave the document with an empty last page]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_page_break_before": {
+      "text": "[a page break before the first block was left out — a document does not begin with an empty page]",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "note_page_count_gap": {
+      "text": "[the page count a header or a footer states could not be worked out — {pages} is left blank rather than filled with a number that may be wrong]",
       "printed_by": [
         "writing"
       ]

@@ -34,7 +34,7 @@ use crate::vocabulary::{Family, Span, vocabulary};
 
 pub(crate) mod create;
 mod date;
-mod docx;
+pub(crate) mod docx;
 mod fill;
 mod image;
 mod opc;
@@ -845,12 +845,24 @@ fn write_new_with(
 /// Create `output`, which must not already exist, answering the open file. The caller owns the file
 /// from here and removes it when the call fails: a call that produces several files removes them
 /// all once, so what stayed behind is named once.
+///
+/// A name taken between the surface's own check and this write is the caller's concurrency, and is
+/// answered as the surface answers it rather than as an engine failure: nothing was overwritten, and
+/// the caller must hear which name is taken.
 pub(super) fn create_new(output: &Path, mark: &str) -> Result<std::fs::File, Failure> {
     std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(output)
-        .map_err(|error| write_failure(mark, &error))
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                return Failure::usage(vocabulary().marks.format(
+                    "surface_output_taken",
+                    &[("path", &output.display().to_string())],
+                ));
+            }
+            write_failure(mark, &error)
+        })
 }
 
 /// Write `bytes` into a file the call created, answering the sentence `mark` names when the write
@@ -874,7 +886,10 @@ pub(super) fn write_bytes(file: &mut std::fs::File, bytes: &[u8]) -> std::io::Re
 /// The refusal a write failure is answered with. The destination was a valid directory when it was
 /// checked, so a permission or a read-only filesystem is a condition the engine met while carrying
 /// the request out rather than a fault in the request; the reference lets the write error propagate
-/// the same way.
+/// the same way. The sentence is the family's own, and it carries the platform's message: an answer
+/// that says only that the engine failed tells the caller nothing they can act on. A name taken
+/// between the surface's check and the write is not one of these: [`create_new`] answers it as the
+/// surface does.
 fn write_failure(mark: &str, error: &std::io::Error) -> Failure {
     Failure::internal(
         vocabulary()
@@ -1204,6 +1219,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_name_taken_between_the_check_and_the_write_is_the_callers_own_refusal() {
+        // The surface refuses a taken name before any work. A name taken after that check is the
+        // caller's own concurrency, and the write answers it as the surface does rather than as an
+        // engine failure: nothing was overwritten, and the caller must hear which name is taken.
+        let directory = scratch();
+        let output = directory.path().join("out.docx");
+        std::fs::write(&output, b"keep").expect("a taken name");
+        let failure = create_new(&output, "create_write_failed").expect_err("a taken name");
+        assert!(failure.is_usage(), "{failure:?}");
+        assert!(failure.reason.contains("already holds"), "{failure:?}");
+        assert_eq!(
+            std::fs::read(&output).expect("the taken file"),
+            b"keep",
+            "the refused write does not touch the file it found"
+        );
+    }
     #[test]
     fn an_xlsm_copy_keeps_its_extension_and_a_bin_copy_gets_xlsx() {
         for (name, expected) in [("sheet.xlsm", "out.xlsm"), ("sheet.bin", "out.xlsx")] {

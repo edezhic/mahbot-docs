@@ -15,7 +15,10 @@ pub mod effect;
 #[cfg(test)]
 mod ledger;
 
-pub use document_engine::test_support::{Document, build, documents, legacy_formats};
+pub use document_engine::test_support::{
+    Document, arabic_case_heading, arabic_case_text, build, documents, legacy_formats,
+    tall_cell_text,
+};
 pub use effect::Effect;
 
 use crate::engine::{Family, Key};

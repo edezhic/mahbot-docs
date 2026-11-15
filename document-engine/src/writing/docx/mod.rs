@@ -1,11 +1,18 @@
-//! The WordprocessingML edit port: `docx_edit`, one sub-operation at a time.
+//! The WordprocessingML family: the `docx_edit` arm, and `create`'s Word writer with the layout pass
+//! that fills its contents numbers.
 //!
-//! This is the kit's `docx_edit` arm, carried across function for function so the two can be read
-//! side by side: [`edit`] is `docxEdit`, [`apply`] is `applyDocxEdit`, and the modules below hold
-//! the paragraphs and text slots an edit addresses ([`text`]), the run and paragraph formatting
-//! ([`mod@format`]), the numbering part a list is written to ([`numbering`]), the blocks an edit adds
-//! ([`blocks`]), the table of contents a heading is protected by ([`contents`]), the markup an edit
-//! reached without naming it ([`marks`]) and the reasons a miss states ([`find`]).
+//! [`edit`] is the kit's `docxEdit` and [`apply`] its `applyDocxEdit`, carried across function for
+//! function so the two can be read side by side: the modules below hold the paragraphs and text slots
+//! an edit addresses ([`text`]), the run and paragraph formatting ([`mod@format`]), the numbering part
+//! a list is written to ([`numbering`]), the blocks an edit adds ([`blocks`]), the table of contents a
+//! heading is protected by ([`contents`]), the markup an edit reached without naming it ([`marks`])
+//! and the reasons a miss states ([`find`]).
+//!
+//! `create` writes a new document from one ordered content list ([`create`]), and [`layout`] reads
+//! the parts that writer produced — not the request's blocks — to work out the page numbers its
+//! contents entries and its page-count token show. The layout's model of a formatted body is its own:
+//! `reading` projects the same XML into text for a caller, and the edit arm rewrites it, so a fix to
+//! one of the three does not reach the others.
 //!
 //! # Invariants
 //!
@@ -31,8 +38,10 @@
 
 mod blocks;
 mod contents;
+pub(crate) mod create;
 mod find;
 mod format;
+pub(crate) mod layout;
 mod marks;
 mod numbering;
 mod text;
@@ -64,6 +73,32 @@ const DOCX_NUMBERING: &str = "word/numbering.xml";
 
 /// The package directory a docx picture lives in.
 const DOCX_MEDIA: &str = "word/media/";
+
+/// The first name of `names` a field's instruction states, with the value it is paired with, and the
+/// rest of the instruction after that name.
+///
+/// The reference reads an instruction with `^\s*(NAME|…)\b(.*)$` under the `i` flag, so a name is
+/// matched whatever its case and answered in upper case — which is why each entry's name is spelled
+/// that way here — and the whitespace before it is ECMAScript's own. A name is anchored with `\b`, so
+/// `PAGES` and `PAGEREFX` name neither `PAGE` nor `PAGEREF`.
+pub(super) fn field_name<'a, T: Copy>(
+    instruction: &'a str,
+    names: &[(&'static str, T)],
+) -> Option<(T, &'a str)> {
+    let instruction = super::js_trim_start(instruction);
+    names.iter().find_map(|(name, value)| {
+        // A name is ASCII, so the same number of bytes compared case-insensitively is the reference's
+        // `i` flag, and a match leaves a character boundary behind it.
+        let head = instruction.as_bytes().get(..name.len())?;
+        if !head.eq_ignore_ascii_case(name.as_bytes()) {
+            return None;
+        }
+        let rest = &instruction[name.len()..];
+        let boundary = !rest
+            .starts_with(|character: char| character.is_ascii_alphanumeric() || character == '_');
+        boundary.then_some((*value, rest))
+    })
+}
 
 /// The `w:val` spellings `ST_OnOff` reads as false: the settings part's tracked-revisions switch, a
 /// styles part's `w:default` and a run property's own toggle all read through it.

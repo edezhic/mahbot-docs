@@ -25,13 +25,12 @@ result names them through `Family::as_str`.
 One mark is interim: `reason_not_carried_out` is the engine's answer for a recognised
 (operation, family) pair it does not carry out. It is stated here rather than in code, and the pair's
 own reason replaces it once the dispatch carries the pair out. The writing half carries the three
-edits, the five PDF page actions, the three PDF drawing actions, `create`'s PDF, presentation and
-workbook families and the Word and presentation template fills out today, so that mark is the answer
-for the two pairs `create` and `fill_template` still accept without a handler: `create`'s Word
-family, and the workbook family of `fill_template`. The sentence names the operation and
-not the family because the engine is not wired into a product build while any family of an
-operation is unimplemented, so no user meets it for a sibling of a landed family; if that ever stops
-being true, it must name the family too.
+edits, the five PDF page actions, the three PDF drawing actions, all four families of `create` and the
+Word and presentation template fills out today, so that mark is the answer for the one pair
+`fill_template` still accepts without a handler: the workbook family. The sentence names the
+operation and not the family because the engine is not wired into a product build while any family of
+an operation is unimplemented, so no user meets it for a sibling of a landed family; if that ever
+stops being true, it must name the family too.
 
 The writing half's marks have their own namespaces: a refusal or a value an edit names is an
 `edit_*` mark (a presentation edit's are `edit_pptx_*`; a sentence it shares with the Word edit
@@ -41,9 +40,17 @@ one note are `pdf_page_*` marks, the three drawing actions' own refusals are `pd
 `pdf_image_*` and `pdf_form_*` marks (the image-size sentences are shared with the OOXML arms and
 live under `edit_*`), a created document's own sentences are `create_*` marks —
 `create_word_only`, `create_heading_level`, `create_row_length`, `create_unknown_size`,
-`create_sheet_object`, `create_merges_list`, `create_sheet_name_unique` and
-`create_merge_overlap` (the rest of what a block or a sheet refuses is the shared `edit_*`
-vocabulary, reused by key rather than copied:
+`create_sheet_object`, `create_merges_list`, `create_sheet_name_unique`,
+`create_merge_overlap`, `create_unknown_type`, `create_one_contents`, `create_link_absolute`,
+`create_link_scheme` and `create_write_failed` — the prefix is `create_`, and the key is the
+namespace, an underscore and the behaviour the sentence states in lower-case words, so
+`create_link_scheme` is the refusal of a scheme — and the notes a created Word document's answer
+carries are `note_*` marks
+— `note_page_break_before`, `note_page_break_after`, `note_contents_empty`, `note_contents_gap_one`,
+`note_contents_gaps` and `note_page_count_gap`; a `note_*` mark is a note in the answer's note list
+rather than a refusal, and a third-party library's own reason is not a mark — the sentence that
+quotes it is, and the library's message is carried as a value (the rest of what a block or a sheet
+refuses is the shared `edit_*` vocabulary, reused by key rather than copied:
 `edit_text_not_text` for a block's text, `edit_value_kind` for a bullet, a table heading or a cell,
 `edit_image_extension`, `edit_image_not_whole` with the label it interpolates
 (`edit_image_label_png`, `edit_image_label_jpeg` or `edit_image_label_webp`) and
@@ -67,9 +74,10 @@ named for their operation so the two halves stay readable.
 A sentence that is operation-agnostic is shared rather than copied: `edit_input_missing` names the
 operation and is the one sentence an operation with a single input refuses with, whichever half
 carries it out, and the crate's own caps on a merge extend the `surface_*` namespace that already
-carries the split's group refusals. The reading's marks keep their own prefixes (`xlsx_*`, `docx_*`,
-`render_*` and others) and share `note_*` and `reason_*`, so a key rather than a prefix keeps the
-two halves' sentences apart. Two edits that refuse a value with the same sentence share one mark
+carries the split's group refusals. The reading's marks keep their own prefixes (`pdf_*`, `block_*`,
+`chart_*`, `xlsx_*`, `docx_*`, `legacy_*`, `unshown_*`, `pptx_*`, `word_*`, `number_*` and
+`render_*`) and share `note_*`, `reason_*` and `engine_failed` with the writing half, so a key
+rather than a prefix keeps the two halves' sentences apart. Two edits that refuse a value with the same sentence share one mark
 (`edit_align_value`, `edit_size_span`), so a wording stated twice is never mistaken for two. Both
 halves also print the panic fallback `engine_failed` and the Word marks `rules` states (a
 tracked-change label, a chart label).
@@ -175,11 +183,21 @@ mark added without a witness is a failing test rather than an invisible gap.
 
 ## The restatement check
 
-`tests/vocabulary.rs` scans the crate's `src/` for a literal that repeats a limit or a mark and
-fails on a match. It reads:
+`tests/vocabulary.rs` scans the crate's `src/` and its layout data for a literal that repeats a
+limit or a mark and fails on a match. It reads:
 
 - every `.rs` file under `src/`, including `src/vocabulary.rs`, except the generated corpus under
   `src/test_support/`, stopping at a `#[cfg(test)]` module;
+- the layout data files under `assets/docx-layout/` — `widths.json`, `more_widths.json`,
+  `arabic_widths.json`, `unicode.json`, `east_asian.json`, `constants.json` and `modules.json` — as
+  data: a value is a finding when it equals a vocabulary bound **in the same unit** *and* the
+  quantity the data states for it names the same thing the bound's key does. A numeral that
+  coincides with a bound of another quantity or another unit is not a restatement (a width in
+  thousandths of an em is not a page count in pages, a pass cap is not a raster scale, and a
+  module's version number is not a bound at all). The source scan keeps its reviewed
+  `EXEMPTIONS` entries, each stating what its number counts as well as why it is exempt, and a test
+  holds each of them to the same rule: a quantity that names the colliding bound's quantity would
+  fail it. The entry is the one home of both the exemption and its quantity;
 - a string literal's value — normal, byte or raw, with escapes decoded where they apply — compared
   exactly with a mark; a one-word mark included;
 - a decimal numeric literal in code whose value is one of the vocabulary's bounds — every entry of
@@ -204,14 +222,17 @@ bound it covers:
   `highlight`, `none`). A name is an exact literal, so the file that matches the format is the scope; each
   still collides with a vocabulary mark, and a test fails when an entry stops colliding, so the list
   cannot rot into silence;
-- `SPEC_CONSTANTS` — a PDF channel rounder, a number format's operator count, a sample width, a
+- `EXEMPTIONS` — a PDF channel rounder, a number format's operator count, a sample width, a
   byte's maximum, a percentage's or a thousand's scale factor, Word's heading levels, a PDF flag
   bit, Excel's last column, a crop area's four sides, a page's quarter turns and a box's fourth
   corner, DrawingML's hundredths of a point and the shape id a generated slide's body placeholder
   takes, the lowest slide id a real deck uses, and the constants of the date conversion a produced
-  file's information dictionary is dated with. Each names the one file and value it covers, how many occurrences of it the file
-  states, and why it is not a restatement; entries for one file and value are summed into one
-  exemption.
+  file's information dictionary is dated with. Each names the one file and value it covers, how many
+  occurrences of it the file states, what the number counts, and why it is not a restatement; entries
+  for one file and value are summed into one exemption. A number the layout port states also carries
+  its quantity, and a number whose quantity names the same thing a bound's key does is that bound
+  restated, so it must be read from the vocabulary instead — the column bound the layout shares with
+  the rules is read that way, not exempted.
 
 Neither silences the check wholesale: a coincidence in a file that does not state the value fails
 until it is added with a reason. Because the scope is the file, the value and the number of
@@ -237,6 +258,11 @@ What it cannot see, and why that is recorded rather than fixed:
 - an escape other than `\n`, `\t`, `\r`, `\0`, `\\`, `\"`, `\'` or `\u{…}`: it is left as written,
   so a mark spelled with `\xNN` is invisible;
 - any other crate, the JavaScript kit and the product's own sources;
+- a synonym in a quantity: an exemption states what its number counts, and the rule that a number
+  coinciding with a bound must count something else decides "the same quantity" by matching words of
+  the bound's key inside that phrase. A phrase that says "extent" where the key says `length` passes
+  a restatement the rule means to catch, and one that happens to share a word with an unrelated
+  bound fails spuriously; the quantity is reviewed prose, so a reviewer is the check;
 - coincidence: a literal that happens to equal a limit fails whether or not it was meant as one,
   which is the intended strictness.
 

@@ -37,6 +37,30 @@ pub const CODECS: &[&str] = &[
     "zip",
     "quick-xml",
     "flate2",
+    // The link parser a created Word document's addresses are written with, and the crates beneath
+    // it that decide a compared target: `idna` applies the URL standard's IDNA mapping,
+    // `idna_adapter` is what applies UTS-46's mapping, `icu_normalizer` and `icu_properties` hold
+    // that mapping and its data, and `zerotrie` holds the trie it reads; `percent-encoding` and
+    // `form_urlencoded` decide the percent-encoding of a target. A bump in any of them is a change
+    // to a compared byte and belongs in the identity. The generic containers those crates are built
+    // on — `smallvec`, `yoke`, `zerovec`, `tinystr` and the rest — carry no mapping or encoding of
+    // their own, so a bump there cannot decide a compared byte and is not recorded.
+    // `cargo tree -p url --offline` resolves the tree from the local cargo cache: url 2.5.8 →
+    // idna 1.1.0 → idna_adapter 1.2.2 → icu_normalizer 2.2.0 / icu_properties 2.2.0, and
+    // icu_provider 2.4.0 → zerotrie 0.2.5.
+    "url",
+    "idna",
+    "idna_adapter",
+    "percent-encoding",
+    "form_urlencoded",
+    "icu_normalizer",
+    "icu_normalizer_data",
+    "icu_properties",
+    "icu_properties_data",
+    "icu_provider",
+    "icu_locale_core",
+    "icu_collections",
+    "zerotrie",
 ];
 
 /// `name=version[,version…];…` for [`CODECS`], read from the workspace lockfile's text. Every

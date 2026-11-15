@@ -92,7 +92,9 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use super::super::image::{Picture as PictureFile, Pixels, image_size, read_create_image};
+use super::super::image::{
+    DEFAULT_IMAGE_WIDTH, Picture as PictureFile, Pixels, image_size, read_create_image,
+};
 use super::super::{create, js_round, js_trim, js_truthy, package, scalar_text};
 use super::draw::{BODY_WIDTH_INCHES, TITLE_INCHES, TITLE_POINTS, TITLE_SHAPE};
 use super::{EMU_PER_INCH, FIRST_SLIDE_ID, PRESENTATION, PRESENTATION_RELS};
@@ -114,10 +116,6 @@ pub(crate) fn captured_parts() -> Vec<&'static str> {
 
 /// Pixels in an inch, the unit a picture's own size is stated in.
 const PIXELS_PER_INCH: f64 = 96.0;
-
-/// The width a picture the block names no side for is fitted to, in pixels, before the slide's own
-/// flow height caps it.
-const DEFAULT_IMAGE_WIDTH: f64 = 400.0;
 
 /// The flow's own start below the title and the floor it may not pass, in inches on the reference
 /// deck.
