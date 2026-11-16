@@ -8,6 +8,11 @@
 //! inside the copy, and asserts both that the build passes and that neither `src/` nor `tests/`
 //! names the product's sources.
 //!
+//! The copy lies outside the tree, so the root's declarations do not reach it: a synthetic
+//! `[workspace.package]` states the tree's declared minimum (which cargo hands this crate as
+//! `CARGO_PKG_RUST_VERSION`), and the nested build runs with the same `cargo` — and so the same
+//! toolchain — as this suite.
+//!
 //! The whole-crate compile makes this test slow; that is the price of an actual isolated build
 //! rather than a scan. On failure the child's stdout and stderr are printed, and the panic says
 //! what to run by hand.
@@ -61,7 +66,12 @@ fn the_crate_builds_and_tests_with_no_product_sources_present() {
     std::fs::create_dir_all(&root).expect("the isolated copy");
 
     let source = common::root();
-    std::fs::copy(source.join("Cargo.toml"), root.join("Cargo.toml")).expect("the manifest");
+    let version = env!("CARGO_PKG_RUST_VERSION");
+    let mut manifest = std::fs::read_to_string(source.join("Cargo.toml")).expect("the manifest");
+    manifest.push_str(&format!(
+        "\n[workspace]\nresolver = \"2\"\n\n[workspace.package]\nrust-version = \"{version}\"\n"
+    ));
+    std::fs::write(root.join("Cargo.toml"), manifest).expect("the copied manifest");
     std::fs::copy(source.join("vocabulary.json"), root.join("vocabulary.json"))
         .expect("the vocabulary");
     copy_tree(&source.join("src"), &root.join("src"), &[]);
@@ -116,8 +126,9 @@ fn the_crate_builds_and_tests_with_no_product_sources_present() {
     assert!(
         output.status.success(),
         "the isolated crate did not build and test cleanly. Run `cargo test --offline` in a copy \
-         of document-engine (Cargo.toml, src/, tests/ without tests/standalone.rs, assets/ and \
-         vocabulary.json) by hand.\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+         of document-engine (Cargo.toml with a `[workspace.package]` stating the declared minimum, \
+         src/, tests/ without tests/standalone.rs, assets/ and vocabulary.json) by hand.\nstatus: \
+         {}\nstdout:\n{}\nstderr:\n{}",
         output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),

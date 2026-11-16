@@ -771,10 +771,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(
-        clippy::float_cmp,
-        reason = "the vocabulary states the sizes exactly, and an inexact one is the defect"
-    )]
     fn a_heading_level_takes_its_size_from_its_own_place_in_the_rules() {
         // The refusal's list is the shared rules' own list of levels, joined the reference's way,
         // and the sizes section has one entry per level: a level without a size is a defect rather

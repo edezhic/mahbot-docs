@@ -2,7 +2,7 @@
 name = "document-engine"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.96"
+rust-version.workspace = true
 publish = false
 description = "The MahBot document engine: read documents, produce and edit them, and the vocabulary both halves share"
 

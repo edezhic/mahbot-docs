@@ -19,7 +19,7 @@
   "reader": {
     "engine": "reference-reader",
     "build": "005bdf1d75de675dfa0376de3ba3dd07129be77741e0db726d1a077f1e06e7d1",
-    "runtime": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+    "runtime": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
     "components": {
       "assets/docgen/NotoSans-Regular.ttf": "b85c38ecea8a7cfb39c24e395a4007474fa5a4fc864f6ee33309eb4948d232d5",
       "assets/docgen/rules.json": "67e77a24afad336e0b5c5c171be81f740fe901646e07d5ecb77b0055ac596840",

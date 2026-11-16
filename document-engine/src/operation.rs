@@ -1148,7 +1148,7 @@ mod tests {
                     .get("surface_inputs_missing"),
                 "{values}"
             );
-            assert!(outcome.outputs.is_empty());
+            assert!(outcome.outputs.is_empty(), "{:?}", outcome.outputs);
         }
     }
 
@@ -1173,7 +1173,7 @@ mod tests {
                 &[("max", &max.to_string())]
             )
         );
-        assert!(outcome.outputs.is_empty());
+        assert!(outcome.outputs.is_empty(), "{:?}", outcome.outputs);
     }
 
     #[test]

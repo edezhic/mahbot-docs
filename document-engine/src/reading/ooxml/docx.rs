@@ -2503,7 +2503,7 @@ mod tests {
         };
         assert_eq!(text, "First paragraph\nSecond paragraph");
         assert_eq!(images, vec![dir.path().join("pic.png")]);
-        assert!(notes.is_empty());
+        assert!(notes.is_empty(), "{notes:?}");
         assert_eq!(
             std::fs::read(&images[0]).expect("read written image"),
             b"\x89PNG\r\n\x1a\nfake image bytes"

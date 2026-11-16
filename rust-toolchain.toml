@@ -1,0 +1,23 @@
+# One compiler for this workspace, and the same one the product's own tree takes. The channel is
+# named exactly: `1.99.1` selects one build, while `1.99` or `1.99.x` would select the newest patch
+# of the series and could drift from the tree the artefacts are compared with.
+#
+# 1.99.1 rather than 1.99.0: 1.99.1 is a point release that fixes three regressions and adds no
+# capabilities. The two are separate toolchains and share no cache, so a tree on 1.99.0 would be no
+# closer to this one than a tree on 1.98.0.
+#
+# 1.100 is deliberately not taken, although it is current stable. The product's database engine does
+# not build under it, and taking a pre-release of that engine was declined. The standard library's
+# Unicode tables also change at 1.100 and not at 1.99, and the writer decides sheet names, style ids
+# and font names through case mapping, so 1.100 would move a behaviour 1.99.1 leaves alone.
+#
+# The components are the ones the checks need: `rustfmt` and `clippy`. The lint bar is
+# `cargo clippy --workspace --all-targets` — the plain invocation compiles no test code. The gate's
+# own invocations are in `parity/README.md`.
+#
+# This governs `cargo` invocations made inside the tree. It is outranked by an explicit override —
+# the `RUSTUP_TOOLCHAIN` environment variable, `rustup override set` for the directory, or a nearer
+# `rust-toolchain.toml` — and it cannot reach an invocation made from outside the tree.
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]

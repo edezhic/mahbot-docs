@@ -2,6 +2,7 @@
 name = "document-parity"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
 publish = false
 
 # The reader half of the reference is the product's own reader sources, copied byte for byte under

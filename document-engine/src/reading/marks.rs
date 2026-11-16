@@ -1116,7 +1116,7 @@ mod tests {
             )
         );
         assert!(marks.fields.is_none());
-        assert!(marks.notes.is_empty());
+        assert!(marks.notes.is_empty(), "{:?}", marks.notes);
     }
 
     #[test]
@@ -1187,7 +1187,7 @@ mod tests {
             marks.annotations.as_deref(),
             Some("Annotations:\nnote on page 1:\n  please verify")
         );
-        assert!(marks.notes.is_empty());
+        assert!(marks.notes.is_empty(), "{:?}", marks.notes);
     }
 
     #[test]
@@ -1257,7 +1257,7 @@ mod tests {
                  Empty (text) on page 1: (no value)"
             )
         );
-        assert!(marks.notes.is_empty());
+        assert!(marks.notes.is_empty(), "{:?}", marks.notes);
     }
 
     /// A checkbox that offers more than one on-state says which one it is in: a

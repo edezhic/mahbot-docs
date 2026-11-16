@@ -530,7 +530,7 @@ mod tests {
         let outcome = fill(directory.path(), &template, "xlsx", json!({ "a": "b" }));
         assert!(outcome.failure.is_none(), "{:?}", outcome.failure);
         assert_eq!(outcome.placeholders, Some(0));
-        assert!(outcome.missing.is_empty());
+        assert!(outcome.missing.is_empty(), "{:?}", outcome.missing);
         let produced = &outcome.outputs[0];
         assert_eq!(
             crate::writing::read_package(

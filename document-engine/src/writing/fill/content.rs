@@ -576,6 +576,6 @@ mod tests {
         let xml = r#"<Types><Default Extension="xml" ContentType="a"/><Override PartName="/b" ContentType="c"/></Types>"#;
         assert_eq!(elements(xml, "Override").len(), 1);
         assert_eq!(elements(xml, "Default").len(), 1);
-        assert!(elements(xml, "Over").is_empty());
+        assert_eq!(elements(xml, "Over").len(), 0);
     }
 }

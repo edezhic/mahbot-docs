@@ -1409,7 +1409,7 @@ mod tests {
             panic!("expected text");
         };
         assert_eq!(text, "Sheet \"Данные\":\n  A1: Привет\n  B2: 3.5");
-        assert!(notes.is_empty());
+        assert!(notes.is_empty(), "{notes:?}");
     }
 
     #[test]
@@ -1422,7 +1422,7 @@ mod tests {
             text,
             "Slide 1:\n  Hello deck\n\nSlide 1 notes:\n  A speaker note"
         );
-        assert!(notes.is_empty());
+        assert!(notes.is_empty(), "{notes:?}");
     }
 
     #[test]
@@ -1451,8 +1451,8 @@ mod tests {
             panic!("expected text");
         };
         assert_eq!(text, "Slide 1:\n  Slide title");
-        assert!(images.is_empty());
-        assert!(notes.is_empty());
+        assert!(images.is_empty(), "{images:?}");
+        assert!(notes.is_empty(), "{notes:?}");
         assert_eq!(unshown.lines(), [UNSHOWN_OBJECT]);
     }
 

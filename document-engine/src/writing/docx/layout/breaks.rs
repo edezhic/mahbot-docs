@@ -154,24 +154,24 @@ mod tests {
         // A created document's compatibility mode is Word 2013's, so ideograph breaking is on.
         assert_eq!(breaks_of("東アジア"), vec![1, 2, 3]);
         // Korean does not break between syllables.
-        assert!(breaks_of("한글구조").is_empty());
+        assert_eq!(breaks_of("한글구조"), Vec::<usize>::new());
     }
 
     #[test]
     fn a_dash_breaks_after_itself_unless_it_is_part_of_a_number() {
         assert_eq!(breaks_of("well-known"), vec![5]);
-        assert!(breaks_of("1-2").is_empty());
+        assert_eq!(breaks_of("1-2"), Vec::<usize>::new());
     }
 
     #[test]
     fn a_zero_width_space_breaks_and_a_glue_does_not() {
         assert_eq!(breaks_of("one\u{200B}two"), vec![4]);
-        assert!(breaks_of("one\u{00A0}two").is_empty());
+        assert_eq!(breaks_of("one\u{00A0}two"), Vec::<usize>::new());
     }
 
     #[test]
     fn a_mark_belongs_to_the_character_before_it() {
         // The mark takes no break opportunity of its own, and neither does the character before it.
-        assert!(breaks_of("a\u{0301}b").is_empty());
+        assert_eq!(breaks_of("a\u{0301}b"), Vec::<usize>::new());
     }
 }

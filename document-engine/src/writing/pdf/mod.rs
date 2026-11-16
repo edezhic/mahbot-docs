@@ -717,10 +717,6 @@ mod tests {
     //! request-shape checks, pinned beside the surface that makes them; a merge's byte total can only
     //! be checked once the inputs are in hand, so it is here.
 
-    // A fixture states exact numbers, so a test compares them exactly; the writer's own arithmetic
-    // is held to a tolerance where it rounds.
-    #![allow(clippy::float_cmp)]
-
     use std::collections::BTreeSet;
     use std::path::{Path, PathBuf};
 
@@ -2674,7 +2670,7 @@ mod tests {
         assert_eq!(outcome.notes, vec![expected]);
         // A page action's answer carries notes and no losses: a loss is what the reference's answer
         // lists in its loss field, and these actions never do.
-        assert!(outcome.losses.is_empty());
+        assert!(outcome.losses.is_empty(), "{:?}", outcome.losses);
     }
 
     // ── the page cap the reference states and the merge byte cap the crate owns ───────────────────
@@ -4380,6 +4376,10 @@ mod tests {
             .expect("a stated size")
     }
 
+    #[expect(
+        clippy::float_cmp,
+        reason = "a fixture states exact numbers, so the test compares them exactly"
+    )]
     #[test]
     fn a_combed_field_centres_each_character_in_its_own_cell() {
         // The model compares the text an appearance draws, not where it draws it, so this is the
