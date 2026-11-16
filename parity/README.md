@@ -36,8 +36,14 @@ crate the harness depends on. `cargo test -p document-engine` runs the crate's o
 its vocabulary restatement scan) without the harness.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 802 cases and 91 readings — takes a minute or two; the whole
-test suite, which runs the corpus twice for its determinism check, takes a couple of minutes.
+managed runtime. A full pass — 802 cases and 91 readings — takes about 55–70 s for the crate engine
+and about 560–600 s for the reference engine, because the gate runs every case in a child process of
+its own. The whole test suite runs the corpus several times (once per determinism check, once for
+the supervised reference test, once per bound test), so it is much slower than a single pass.
+
+The gate exits `0` when the run passes, `1` when a verdict fails, `2` when the invocation or the
+harness is wrong, and `3` when a signal cut the run short. A cut-short run prints no aggregate
+summary: the absence of that line is what makes it visibly cut short.
 
 `parity --engine noop` runs the same corpus against the do-nothing engine. That engine exists only
 to prove the gate rejects it: a case passes only if its transcript matches the baseline **and** its
@@ -46,6 +52,7 @@ recorder's engine — the reference writer and the product's own reader — and 
 also requires the build identity to match the baseline. `parity --engine crate` (the default) pairs
 the engine crate's own writer and reader; an (operation, family) pair the crate's writer has not
 landed yet is shown as `SKIP`, not failed, and a run that judged no case at all is not a pass.
+`--engine helper:<path>` is for the harness's own tests only.
 
 ## What is here
 
@@ -58,14 +65,19 @@ landed yet is shown as `SKIP`, not failed, and a run that judged no case at all 
 | `src/reference/crate_reader.rs` | The engine crate's reader: `document_engine::reading::{detect, read}`, whose shapes are already the harness's. This is the default reader. |
 | `src/reference/crate_writer.rs` | The engine crate's writer: `document_engine::operation::execute`, bridged from the kit's request shape to the crate's `Request`/`Destination`. The crate's writer carries out the (operation, family) pairs the engine's own statement names, and the harness judges only those; the rest are unjudged rather than failed. |
 | `src/reference/noop.rs` | The negative control. |
+| `src/reference/helper.rs` | The parent's stand-in for the helper engine the bound tests point a supervised run at: it answers the identity and the coverage decision, and refuses to run anything itself. |
 | `src/reference_sources/` | Byte-for-byte copies of the product's reader modules, compiled here. `tests/engine_contract.rs` compares them with `../../src/` and fails when they diverge. |
 | `src/host/` | The minimal host the reader sources need: `rules.json` and its typed views, `contain_panics`, and the handful of `util` helpers the readers call. |
 | `src/corpus/` | The writer scenarios (`cases.rs`) and their declared effects (`effect.rs`); `ledger.rs` records, per (operation, family) pair, what the crate's writer delivers — checked against the engine's statement and compiled for the tests only, never read by the gate; the document builders are re-exported from `document_engine::test_support`, their one home. |
 | `src/canonical/` | The canonical model, one module per format; each states what it compares, normalises, does not compare and refuses, and the diff. |
 | `src/pptx_capture.rs`, `src/docx_capture.rs`, `src/notices.rs` | The created deck's and created Word document's invariant parts: the matrices, the two-halves rule and the sets the crate captures, driven by both the capture commands and the parts tests; and the one home of the licence notices' names, which `build.rs` includes so the crate's identity leaves them out. |
-| `src/harness.rs` | Runs a corpus against an engine, compares, and produces verdicts. |
+| `src/harness.rs` | Runs a corpus against an engine, compares, and produces verdicts. `run()` is the in-process path (the recorder and the fake-engine tests); `supervise()` is the gate's, one child per case. |
+| `src/supervisor.rs` | The supervised seam: the child protocol, the per-case bounds and their defaults, the poller, the descendant walk and its teardown, the signal flag, and the leftover-root sweep. `parity/README.md` is the one statement of what is bounded and what is not. |
+| `src/bin/parity.rs` | The gate, and the same binary's hidden `--internal-run` child mode. |
+| `src/bin/parity-helper.rs` | The harness's helper child: the same protocol, with a runaway (writer or reading), a spike that finishes above a lowered ceiling, a hanging case with an own-group descendant, a path-bearing failure, an oversized transcript, two deaths outside any bound, and the three disk-bound shapes, each selected per case from the environment the supervisor hands the child. The bound and interrupt tests in `tests/supervision.rs` and the gate test that judges nothing use it. |
 | `src/baseline.rs` | The recorded reference, with the identity of the engine that produced it. |
 | `src/transcript.rs` | The normalised transcript: no paths, no nonces, no timings. |
+| `tests/supervision.rs` | The bounds and the containment: a runaway writer and a runaway reading are one failed verdict each (macOS, where the footprint bound is enforced), a case that finishes above the ceiling is failed too, each disk bound names itself and only its target, the directory bound outranks the entry bound when both are tripped, a writer and a reading that outlive the supervisor's own budget name the budget and nothing else, the transcript cap and an unparseable transcript name themselves, an in-process and a supervised transcript agree, a leftover root is reclaimed only when its owner is dead and the grace passed, and each of the interrupt, termination and hang-up signals kills the case's tree and exits three. |
 | `tests/engine_contract.rs` | The engine crate's contract, proved from here: its vocabulary is the reference's data, its result shapes carry every recorded field, its closed operation set holds every corpus operation and edit, the reference copies are byte-for-byte the product's, and the host's media tables are the product's own. |
 | `tests/coverage.rs` | The corpus's depth: every reading mark is witnessed by a recorded reading or recorded as unproducible with its reason, every mark only the writing half prints is witnessed by a recorded case's answer or recorded unreached with its reason, neither ledger's "not produced" side names a mark a recorded answer really prints, every per-family failure verdict is witnessed, and every corpus document is in the baseline. |
 | `tests/teeth.rs` | The comparison has teeth: a reading or a produced case altered in a field its sample populates — a picture dropped, a note or a loss reworded, an output renamed, a produced file's content changed, a status flipped — fails it, and so does a detection answer changed for one input. |
@@ -546,14 +558,15 @@ counted as failed rather than judged, and its problem names the pair.
 
 The summary counts cases per (operation, family) pair — judged and unjudged — and lists every pair
 with unjudged cases, in the `family/operation` spelling a verdict key uses and the order the block is
-sorted in. The counts describe the run, so they are honest for any engine: the reference and the
-no-op engine have no unported pair, so all their cases are judged (and the no-op's all fail), while
-the crate's own unported pairs show as unjudged. The counts are printed after the per-verdict lines
-and before the aggregate, and `--quiet` does not suppress them. Refusals are compared by the class
-the engine reports (`usage` for the caller's to fix, `internal` otherwise) and by the reason, with
-volatile parts normalised; the sentence the product prints around it is not the harness's business.
-A reason declared as a template records a third-party library's message as `{{variable}}`, so a
-different message inside the same engine words is the same reason.
+sorted in. The counts describe the run, so they are honest for any engine: a pair the engine does not
+carry out shows as unjudged rather than passing, and a no-op engine's cases are judged and fail.
+Today every pair the crate can accept is carried out, so the crate's run has no unjudged case; the
+counts are printed after the per-verdict lines and before the aggregate, and `--quiet` does not
+suppress them. Refusals are compared by the class the engine reports (`usage` for the caller's to
+fix, `internal` otherwise) and by the reason, with volatile parts normalised; the sentence the
+product prints around it is not the harness's business. A reason declared as a template records a
+third-party library's message as `{{variable}}`, so a different message inside the same engine words
+is the same reason.
 
 `baseline/baseline.json` is recorded from the current engine and kept with its identity: the
 writer's build digest and `bun <version>` (with the bundle, kit, rules, lockfile, font and the
@@ -598,39 +611,208 @@ timestamp of the run. It replaces the harness's own root, the run's own nonce an
 `tests/gate.rs` runs the whole corpus twice and requires the two transcripts to be identical, and
 asserts the serialised text holds no absolute path, the run's own date or its nonce.
 
-The harness writes only inside one temporary directory under the OS temporary area — created by
-`new_with`, or validated when `at` is given one — never the product's storage root: the root must
-be named `document-parity-…` and lie under the OS temporary directory, or the harness refuses it,
-and a root the harness did not create is never removed.
+## Supervision and the bounds
 
-The whole run is bounded by a budget, and each half has its own bound inside it: a writer case and a
-reading each run on a thread of their own, the writer under a 120 s timeout and the reading under
-one too — so an engine that hangs on every case or every document fails in bounded time rather than
-once per call, and entries the budget does not reach fail with a budget problem rather than
-vanishing from the run. A case or reading that does not finish within its bound is that entry's own
-problem — a timeout recorded as its outcome — and the rest of the corpus still runs; the recorder
-refuses to bake such a run into the baseline, because a timeout measures the machine rather than the
-bytes. An in-process writer cannot be interrupted: an abandoned writer thread may keep writing into
-that case's directory after the verdict is decided, which is why the run does not wait and why the
-directory is per case, so no later case reads it. Two limits of that isolation are stated rather
-than hidden: an abandoned reading thread holds one of the product's two document-conversion permits
-until the process ends, so two hung readings make every later reading time out (each still with its
-own verdict), and a thread cannot be killed, so a hung reading's memory is not reclaimed.
+The gate runs one child process per case — the same binary in a hidden `--internal-run` mode — and
+the harness's own per-case body inside it: the inputs are built, the engine runs and the output is
+canonicalised in the child. Only the comparison with the recorded baseline and the printing of the
+verdict are the parent's. A case that writes without limit or hangs costs that case, and so does one
+that exhausts memory on a platform that reports physical footprint: its verdict names the bound, and
+every verdict already decided was written and flushed, so a run killed mid-way leaves everything
+judged up to that point. The child is a fresh program image of the same binary, so its footprint is
+its own and not the parent's. The child writes its raw transcript to a file outside its own root —
+reclamation cannot delete it before the parent reads it, and the directory and entry bounds do not
+count it — and the parent reads it back under a cap.
 
-The writer engine runs with the kit's own directory under that root as its working directory —
+The bounds are configuration with the defaults stated here, because a bound that cannot be set
+small cannot be tested. A test lowers one bound for one named case through `Supervision::override_for`,
+so the rest of the corpus runs under these defaults and only the target can be failed by the lowered
+limit.
+
+| Bound | Default | Enforced by |
+|---|---|---|
+| physical footprint of the case's process tree | 2048 MiB | the parent's poller, by killing the tree — **macOS only**: the metric is that platform's, and elsewhere the gate runs supervised without this bound |
+| one file's apparent size | 256 MiB | `RLIMIT_FSIZE`, soft and hard equal, installed before the child execs |
+| a case's directory, allocated bytes | 1 GiB | the parent's poller, by killing the tree |
+| a case's directory, entries counted recursively | 256 entries | the parent's poller, by killing the tree |
+| the parent's read of one transcript | 4 MiB | a failed verdict naming the cap |
+| the poller's interval | 100 ms | — |
+| the grace before a dead owner's root is reclaimed | 60 s | the sweep |
+| one writer case's supervisor budget | 240 s | the supervisor |
+| one reading's supervisor budget | 330 s | the supervisor |
+
+`RLIMIT_FSIZE` is a property of the child process, not of a file: it bounds **every** file the child
+writes, including the case's own fixture and its transcript. The cap sits above any fixture the
+corpus holds today (the bound tests pick cases whose fixtures are under 256 KiB) and above the
+transcript cap, so it is never what decides a legitimate case; a future case whose fixture exceeded
+it would be killed before the engine ran, and its verdict would name the per-file bound for a file
+the case did not choose to write.
+
+The memory ceiling is derived from legitimate cases. Measured today, the largest is
+`pdf/create@large_picture` under the reference engine at about 787 MiB — the child's exact peak
+plus the runtime's sampled peak, a sum that overstates the simultaneous footprint — while the
+crate's largest is about 495 MiB and the largest reading about 265 MiB. The ceiling is 2048 MiB,
+about 2.6 times the largest: the reference case's peak is a JavaScript heap whose collection timing
+moves it by more than a tight margin would allow, so the headroom is deliberately wider than the
+largest case. The child's own peak is exact: the platform reports a lifetime maximum, read before
+the child is reaped, since the ordinary wait path would leave the verdict resting on the last
+sample. The grandchildren's half is the largest, over the poller's samples, of the sum of the
+descendants' lifetime maxima in that sample; it is a lower bound because a descendant may exit and
+be reaped between samples and the supervisor does not own its exit status to read a lifetime
+maximum, while the sum can overstate the tree's simultaneous footprint because two lifetime maxima
+need not coincide. A legitimate case just under the ceiling can therefore be killed by the sum. The
+ceiling is not a product bound: if that happens, the number is re-derived from the case and raised
+in a deliberate change. A merge at the engine's declared 200 MiB input bound was measured once at
+about 903 MiB of physical footprint — under the 2048 MiB ceiling — with an output of about 200 MiB.
+It cannot be a judged case, because its output exceeds the harness's 64 MiB read bound; the
+measurement records engine reach the ceiling covers but the harness cannot judge.
+
+The disk bounds have no run-level cap, and the reasons differ by kind. A cumulative run measure
+would have to absorb the reference kit's own rewrites — several gigabytes per reference run — so
+any number either sits under legitimate work or is never reached; a cap on live bytes is reachable
+but redundant, because per-case reclamation bounds live bytes to one case. The worst a runaway run
+can write is the corpus's case count times the per-case cap, which is finite because the corpus is
+finite, and each case's directory is reclaimed as that case finishes. A reclamation that fails is
+reported on standard error rather than swallowed, by the per-case reclaim and by the sweep alike; the
+live bytes a failed reclamation leaves behind are the one way this bound stops holding. The directory
+bound has two bases: it is about eight times the largest legitimate case directory measured today,
+and about two and a half times a merge at the declared input bound once its output, the kit's own
+files and the transcript are counted.
+
+The poller's overshoot is a rate assumption, not a bound: every sampled bound is observed one poll
+interval late, so a runaway growing at a gigabyte per second reaches 2048 MiB in about two seconds
+and is killed some hundred mebibytes later, and a faster one overshoots more. The same assumption
+covers the directory-size and entry-count bounds: they are sampled one interval late too, so a case
+that writes faster overshoots further. A symlink inside a case's directory is neither followed nor
+charged, so a link to a tree outside the root cannot trip a bound the case never reached.
+
+Where several bounds could explain a kill, the order is fixed: the file-size bound, then the
+directory-size bound, then the entry-count bound, then the memory bound; the first one found tripped
+is the one the verdict names. A supervisor timeout is reported only when no bound explains the case.
+On the reference path the per-file limit kills the runtime rather than the case child, which then
+completes normally; the supervisor therefore names the file-size bound when the case's directory
+holds a file at the bound, and otherwise reports the engine's own error. A child that dies without a
+transcript — a signal, a non-zero exit — is one failed verdict naming how; a child that exits
+non-zero *and* wrote a parseable transcript is that transcript's verdict, because the child's exit
+code reflects the case's own outcome, not the harness's.
+
+Supervision requires process groups and a descendant walk, which macOS and Linux provide; another
+Unix, and a platform without process groups, makes the gate refuse to run supervised rather than
+claim containment it does not have. The memory metric is physical footprint, which macOS reports;
+on Linux and any other host the gate runs supervised but the footprint bound is not enforced, and
+the table and this section say so rather than implying a universal guarantee. `RLIMIT_FSIZE` exists
+wherever process groups do. The directory, entry and footprint bounds are sampled rather than
+enforced by the kernel, and all three overshoot at a rate. Measuring a case's directory is itself
+bounded: the walk stops at sixteen times the entry bound plus a margin, so a case with more entries
+than that is named by the entry bound and its entry count is stated as a lower bound (`at least N`),
+and the directory-size bound is evaluated over the entries the walk reached.
+
+The supervisor kills the whole process tree, descendants before the child: the reference writer puts
+its runtime in a process group of its own, so a group kill of the case child misses it, and the walk
+must happen while the descendants are still its descendants. A signal handler records an interrupt,
+termination or hang-up and does nothing else; the ordinary path notices the flag within one poll
+interval, walks and kills the descendants, kills the child, removes the temporary root and exits
+with code three, emitting no further verdicts.
+
+`parity/src/bin/parity-helper.rs` is the helper child a supervised run is pointed at through
+`--engine helper:<path>`. It speaks the same child protocol and selects one behaviour per named case
+or reading from the environment the supervisor hands the child (`Supervision::env`), so a partial
+run is produced deterministically and no test touches its own process environment:
+
+| Variable | Behaviour |
+|---|---|
+| `PARITY_HELPER_RUNAWAY` | a writer case allocates without limit |
+| `PARITY_HELPER_READING_RUNAWAY` | a reading allocates without limit |
+| `PARITY_HELPER_READING_HANG` | a reading never returns |
+| `PARITY_HELPER_SPIKE` | a case allocates above a lowered ceiling and finishes |
+| `PARITY_HELPER_HANG` | a case spawns a descendant in its own process group, writes its pid to `PARITY_HELPER_PIDFILE`, then sleeps |
+| `PARITY_HELPER_NOT_CARRIED_OUT` | the helper's reader is the real reference one, for the gate test that judges nothing; the writer is the ordinary helper's, because the parent classifies every writer case as unjudged before a child starts |
+| `PARITY_HELPER_FAILING` | a case fails quoting its scratch path |
+| `PARITY_HELPER_BIG_TRANSCRIPT` | a case fails with a message larger than a lowered transcript cap |
+| `PARITY_HELPER_BAD_TRANSCRIPT` | a case writes a real transcript and then makes it unparseable |
+| `PARITY_HELPER_ABORT` | a case dies by `abort` |
+| `PARITY_HELPER_EXIT` | a case exits seven without a transcript |
+| `PARITY_HELPER_BIG_FILE` | a case writes one file without limit |
+| `PARITY_HELPER_FLOOD_FILES` | a case writes many files without limit |
+| `PARITY_HELPER_FLOOD_ENTRIES` | a case writes many empty files inside a subdirectory |
+
+Every other case does ordinary work. The memory, disk, interrupt and gate tests use it, because a sampled
+bound needs a case that lives long enough for the poller to observe it, which an ordinary case that
+finishes in milliseconds does not.
+
+The holes are stated rather than closed: a run killed outright with an uncatchable signal cannot be
+handled by anything and leaves its child alive; a harness killed outright leaves its temporary root
+and its case roots behind; a double-forked descendant escapes a parent-walk; a case child that dies
+on its own leaves its descendants reparented and unidentifiable, so a root whose owner died while its
+children still live is reclaimed once the grace has passed rather than waiting for them; a write
+through an already-existing memory mapping is not caught by `RLIMIT_FSIZE`, though extending the file
+is; and the recording mode and the parent's own corpus enumeration stay in process, unbounded in
+memory and on disk — the recorder is run deliberately and rarely, and is named here rather than
+implied to be covered.
+
+A leftover root is reclaimed only when it carries the harness's own `.document-parity-root` marker,
+its recorded owner is no longer alive — decided by the recorded process start time as well as the
+identifier, with a permission error on the probe counting as alive — and it is older than the grace.
+The sweep runs once, in the parent, at the start of a run, never in a child. The harness's own root
+and every case's child root carry the owner's start time before the nonce, so the normaliser strips
+the root it is given and the child's and the parent's texts agree; `tests/supervision.rs` compares
+an in-process and a supervised transcript for a path-bearing failure.
+
+The harness writes only inside temporary directories under the OS temporary area — the parent's own
+root, created by `new_with` or validated when `at` is given one, and one child root per case, which
+the parent creates before the child starts and reclaims when the case finishes — never the product's
+storage root: a root must be named `document-parity-…` and lie under the OS temporary directory, or
+the harness refuses it. A root the harness did not create carries no marker, and so the sweep never
+removes it.
+
+The whole run is bounded by a budget, measured under supervision at the timings above (about
+560–600 s for the reference engine, about 55–70 s for the crate engine), so the budget is 1200 s.
+Inside it each case has its own bound: the in-process path runs a writer under a 120 s timeout and a
+reading under one too, and
+the supervised path gives a writer case 240 s (the engine's 120 s, the runtime's 30 s version probe,
+kit materialisation, and fixture construction and canonicalisation) and a reading 330 s (the two
+bounded engine calls and the fixture and canonicalisation). An engine that hangs on every case or
+every document fails in bounded time rather than once per call, and entries the budget does not
+reach fail with a budget problem rather than vanishing from the run. A case or reading that does not
+finish within its bound is that entry's own problem — a timeout recorded as its outcome — and the
+rest of the corpus still runs; the recorder refuses to bake such a run into the baseline, because a
+timeout measures the machine rather than the bytes. The in-process path — the recorder and the
+fake-engine tests — still abandons a timed-out writer thread, which may keep writing into that
+case's directory after the verdict is decided, and still has the product's two conversion permits
+held by an abandoned reading thread, so two hung readings there make every later reading time out
+(each still with its own verdict). The gate's supervised path has neither limit: each case is a
+process, and per-case reclamation bounds what is live. The recording mode is the one unbounded
+phase, in memory and on disk.
+
+The writer engine runs with the kit's own directory under its case root as its working directory —
 never a workspace — with `--no-install` and `--no-env-file`, the same guards the product passes.
-On Unix it leads a process group of its own, so anything it starts is killed with it; the price is
-that an interactive Ctrl-C of the harness does not reach a running kit.
+On Unix it leads a process group of its own, so anything it starts is killed with it; the supervisor
+walks the child's descendants before killing it, so an interactive Ctrl-C now reaches a running kit
+through the ordinary teardown rather than leaving it behind.
 
-A panicking engine — or a panicking corpus builder — is one failed verdict, not a dead run, and
-resource bounds are verdicts too: a produced file over 64 MiB, each pipe's output beyond its last
-64 KiB, a result file over 8 MiB, an OOXML part over 64 MiB, a package of more than 4096 parts or
-256 MiB of parts, an archive whose stated entry count exceeds what it yields, an XML part nesting
+A panicking engine — or a panicking corpus builder — is one failed verdict, not a dead run, and the
+document-shaped bounds are verdicts too: a produced file over 64 MiB, each pipe's output beyond its
+last 64 KiB, a result file over 8 MiB, an OOXML part over 64 MiB, a package of more than 4096 parts
+or 256 MiB of parts, an archive whose stated entry count exceeds what it yields, an XML part nesting
 deeper than 256 elements, a PDF of more than 10,000 pages, a content stream running more than
-100,000 operators or an image claiming more than 64 MiB to decode fails the case with a
-message rather than exhausting the harness, and so does a document whose decoded streams — page
-content, form XObjects, `/ToUnicode` maps, images — pass 256 MiB in total. An image is charged its
-declared area before it is decoded; any other stream is decoded first and then charged, so one
-stream's own expansion is the decoder's, and the bound refuses the document rather than letting a
-document of many of them exhaust the run. The comparison's own recursion is bounded above the
-model's deepest tree, so a document the model can hold is never declared undecidable.
+100,000 operators or an image claiming more than 64 MiB to decode fails the case with a message
+rather than exhausting the harness, and so does a document whose decoded streams — page content,
+form XObjects, `/ToUnicode` maps, images — pass 256 MiB in total. An image is charged its declared
+area before it is decoded; any other stream is decoded first and then charged, so one stream's own
+expansion is the decoder's, and the bound refuses the document rather than letting a document of
+many of them exhaust the run. The comparison's own recursion is bounded above the model's deepest
+tree, so a document the model can hold is never declared undecidable. None of these bounds covers an
+engine that allocates without limit; the supervisor's footprint bound is what does, and an
+in-process memory ceiling cannot produce a per-case verdict on this toolchain: an allocation failure
+aborts the process and cannot be caught, and a global allocator may not unwind. Address-space and
+data-segment limits cannot be set to a useful value here — the process's virtual size at start is
+hundreds of gigabytes of shared cache and reservations — and the resident-set limit is an advisory
+hint, not a boundary.
+
+The harness's own tests hold at most two supervised runs in flight at once **per test binary**: each
+test that spawns the gate takes one of two permits from `tests/common/mod.rs`, so the cap holds under
+any `cargo test` invocation — from `parity/` or from the workspace root — and an operator's
+`RUST_TEST_THREADS` is left alone. `cargo test` runs the test binaries one after another, so a suite
+run holds at most two; two concurrent `cargo test` invocations hold two each. The cap is in the tests
+because supervision multiplies process spawning and several tests spawn the whole gate, while the
+crate's own suite is not throttled.

@@ -81,8 +81,12 @@ effect. The product's reader sources are byte-for-byte copies under `parity/src/
 so nothing in this workspace can rewrite the product's sources and a divergence fails the gate. The
 default engine, `--engine crate`, pairs the crate's own writer and reader; `--engine reference` is
 the recorder — the reference kit's writer and the product's own reader. Detection is recorded and
-compared beside every reading. See `parity/README.md` for the model, the engine boundary, the
-baseline and how to run it. Nothing in the product was changed to build it.
+compared beside every reading. The gate runs every case in a child process of its own
+(`parity/src/supervisor.rs`), so a case that writes without limit or hangs costs that case, and so
+does one that exhausts memory where the platform reports physical footprint;
+`parity/src/bin/parity-helper.rs` is the harness's own helper child, used only by the harness's
+tests. See `parity/README.md` for the model, the engine boundary, the baseline, the bounds and how
+to run it. Nothing in the product was changed to build it.
 
 ## `document-engine/` — the document engine crate (new work, not copied from the product)
 

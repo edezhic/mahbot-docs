@@ -9,30 +9,42 @@
 //! A run that judged nothing is not a pass: the gate exists to judge, and a report with no judged
 //! case says so.
 //!
-//! A writer case runs on a thread of its own under [`WRITE_TIMEOUT`]. An in-process writer cannot
-//! be interrupted: the abandoned thread may keep writing into that case's directory after the
-//! timeout. That is why the verdict is decided at the timeout and the run does not wait — the
-//! directory is per case, and a later case never reads it.
+//! There are two ways to run the corpus. [`Harness::run`] is in process: a writer case runs on a
+//! thread of its own under `WRITE_TIMEOUT`, and a reader under `READ_TIMEOUT`. An in-process
+//! writer cannot be interrupted: the abandoned thread may keep writing into that case's directory
+//! after the timeout. That is why the verdict is decided at the timeout and the run does not wait —
+//! the directory is per case, and a later case never reads it. The recording mode and the tests that
+//! drive fake engines use this path.
+//!
+//! [`Harness::supervise`] is the gate's path: one child process per case, with the harness's own
+//! per-case body inside it. It is the path that bounds memory and disk, on the platforms that can
+//! enforce each bound, and it leaves verdicts behind when the run is killed. See
+//! [`crate::supervisor`] for the child protocol, and `parity/README.md` ("Supervision and the
+//! bounds") for what is bounded, what is not and the holes that are stated rather than closed.
 
 use crate::baseline::Baseline;
 use crate::canonical::{self, Comparison};
 use crate::corpus::{Case, Document, Expect, Reason};
 use crate::engine::{Coverage, EngineIdentity, Family, Key, Kind, Reader, Reading, Writer};
 use crate::shutdown::panic_message;
+use crate::supervisor::{self, ChildTarget, Supervision};
 use crate::transcript::{self, CaseTranscript, ReadingTranscript, Status};
 use anyhow::{Context as _, Result, bail};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 /// The whole run's budget. A kit that hangs on every case must fail the gate in bounded time
 /// rather than once per case, each at its own timeout: once the budget is spent, every entry it
-/// did not reach fails with a budget problem.
-const RUN_BUDGET: Duration = Duration::from_secs(600);
+/// did not reach fails with a budget problem. `parity/README.md` records the supervised timings the
+/// budget is derived from, and why it is 1200 s rather than the slowest of them.
+const RUN_BUDGET: Duration = Duration::from_secs(1200);
 
 /// How long one writer case may take before it is one failed case. An in-process writer cannot be
 /// interrupted, so the thread is abandoned rather than killed; the verdict is already decided.
@@ -51,9 +63,6 @@ pub const NO_CASE_JUDGED: &str =
 /// are small; a bigger file is a case failure with a message, not an exhaustion of the run.
 pub const MAX_OUTPUT_BYTES: u64 = 64 * 1024 * 1024;
 
-/// The prefix every harness root carries: a root is a directory this harness named.
-const ROOT_PREFIX: &str = "document-parity-";
-
 /// A harness owns one temporary root, and nothing outside it is ever written.
 pub struct Harness {
     root: PathBuf,
@@ -69,21 +78,18 @@ pub struct Harness {
 impl Harness {
     /// A fresh root under the OS temporary directory, named the way [`Harness::at`] requires. A
     /// harness creates it and removes it; another caller — the capture command — creates and
-    /// removes it itself.
+    /// removes it itself. The name carries the owning process and its start time, so a root a dead
+    /// run left behind can be told from a live one after the identifier is reused.
     #[must_use]
     pub fn temp_root() -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "{ROOT_PREFIX}{}-{:016x}",
-            std::process::id(),
-            nonce()
-        ))
+        std::env::temp_dir().join(supervisor::root_name(nonce()))
     }
 
     /// A harness rooted at `root`, which must be a directory this harness may own: one named the
     /// way [`Harness::temp_root`] names it, under the OS temporary directory. A root this call
     /// creates is removed by `Drop`; one that already exists is left alone.
     pub fn at(root: PathBuf, writer: Box<dyn Writer>, reader: Box<dyn Reader>) -> Result<Self> {
-        let owned = create_root(&root)?;
+        let owned = create_root(&root, RootState::Adopt)?;
         Ok(Self::new(root, writer, reader, owned))
     }
 
@@ -95,13 +101,13 @@ impl Harness {
         engines: impl FnOnce(&Path) -> Result<(Box<dyn Writer>, Box<dyn Reader>)>,
     ) -> Result<Self> {
         let root = Self::temp_root();
-        let owned = create_root(&root)?;
+        let owned = create_root(&root, RootState::Adopt)?;
         let (writer, reader) = match engines(&root) {
             Ok(engines) => engines,
             Err(e) => {
                 // A root this call created is removed when the engine cannot be built.
                 if owned {
-                    let _ = std::fs::remove_dir_all(&root);
+                    supervisor::discard(&root);
                 }
                 return Err(e);
             }
@@ -121,21 +127,21 @@ impl Harness {
         }
     }
 
-    /// A harness whose whole run is bounded by `budget` rather than [`RUN_BUDGET`].
+    /// A harness whose whole run is bounded by `budget` rather than `RUN_BUDGET`.
     #[must_use]
     pub fn with_budget(mut self, budget: Duration) -> Self {
         self.budget = budget;
         self
     }
 
-    /// A harness whose single writer case is bounded by `timeout` rather than [`WRITE_TIMEOUT`].
+    /// A harness whose single writer case is bounded by `timeout` rather than `WRITE_TIMEOUT`.
     #[must_use]
     pub fn with_write_timeout(mut self, timeout: Duration) -> Self {
         self.write_timeout = timeout;
         self
     }
 
-    /// A harness whose single reading is bounded by `timeout` rather than [`READ_TIMEOUT`].
+    /// A harness whose single reading is bounded by `timeout` rather than `READ_TIMEOUT`.
     #[must_use]
     pub fn with_read_timeout(mut self, timeout: Duration) -> Self {
         self.read_timeout = timeout;
@@ -147,40 +153,23 @@ impl Harness {
     /// Nothing here fails the run: an entry the budget did not reach is that entry's problem, so a
     /// slow engine still produces a verdict for every other case rather than erasing them all.
     pub fn run(&self) -> Run {
+        // The sweep runs once, in the parent, before any case: a child would sweep its siblings.
+        supervisor::sweep(&self.root, &supervisor::Bounds::default());
         let cases = crate::corpus::writer_cases();
         let documents = crate::corpus::reader_documents();
         let started = Instant::now();
         let outcomes = cases
             .iter()
-            .map(|case| {
-                let key = case.key();
-                match self.writer.coverage(&key) {
-                    Coverage::Unaccepted => {
-                        let why = unaccepted_reason(&key);
-                        CaseOutcome::corpus_defect(key, why)
-                    }
-                    // A case the writer does not carry out is not run at all: it is unjudged
-                    // rather than failed, and the budget is not spent on an answer the engine
-                    // cannot give.
-                    Coverage::NotCarriedOut => {
-                        let why = unjudged_reason(&key);
-                        CaseOutcome::unjudged(key, why)
-                    }
-                    Coverage::Delivered if self.spent(started) => {
-                        CaseOutcome::problem(key, self.over_budget())
-                    }
-                    Coverage::Delivered => self.run_case(case),
-                }
+            .map(|case| match self.classify(case, started) {
+                Some(outcome) => outcome,
+                None => self.run_case(case),
             })
             .collect();
         let readings = documents
             .iter()
             .map(|document| {
-                if self.spent(started) {
-                    ReadingOutcome::problem(document.name.to_string(), self.over_budget())
-                } else {
-                    self.read_document(*document)
-                }
+                self.classify_reading(*document, started)
+                    .unwrap_or_else(|| self.read_document(*document))
             })
             .collect();
         Run {
@@ -191,9 +180,235 @@ impl Harness {
         }
     }
 
+    /// A case's outcome when it is decided without running the engine: a corpus defect, a case the
+    /// writer does not carry out, or one the run's budget did not reach; `None` means the case must
+    /// run. The streaming gate and the collected report both use this, so the two cannot classify a
+    /// case differently.
+    fn classify(&self, case: &Case, started: Instant) -> Option<CaseOutcome> {
+        let key = case.key();
+        match self.writer.coverage(&key) {
+            Coverage::Unaccepted => {
+                let why = unaccepted_reason(&key);
+                Some(CaseOutcome::corpus_defect(key, why))
+            }
+            // A case the writer does not carry out is not run at all: it is unjudged rather than
+            // failed, and the budget is not spent on an answer the engine cannot give.
+            Coverage::NotCarriedOut => {
+                let why = unjudged_reason(&key);
+                Some(CaseOutcome::unjudged(key, why))
+            }
+            Coverage::Delivered if self.spent(started) => {
+                Some(CaseOutcome::problem(key, self.over_budget()))
+            }
+            Coverage::Delivered => None,
+        }
+    }
+
+    /// A reading's outcome when the run's budget did not reach it.
+    fn classify_reading(&self, document: Document, started: Instant) -> Option<ReadingOutcome> {
+        self.spent(started)
+            .then(|| ReadingOutcome::problem(document.name.to_string(), self.over_budget()))
+    }
+
     /// Whether the run has spent its whole budget.
     fn spent(&self, started: Instant) -> bool {
         started.elapsed() > self.budget
+    }
+
+    /// The two engines' identities, as the gate prints them before any case runs.
+    #[must_use]
+    pub fn identities(&self) -> (EngineIdentity, EngineIdentity) {
+        (self.writer.identity(), self.reader.identity())
+    }
+
+    /// Run every writer case and every reading with one child process per case, emitting each
+    /// verdict as it is decided. This is the gate's path: a case that exhausts memory, writes
+    /// without limit or hangs costs that case, not the run.
+    ///
+    /// The gate prints the identity lines before calling this; the coverage decision and the
+    /// runtime's presence are the parent's too, before any child starts, so a missing runtime is
+    /// one failure rather than one per case. The comparison and the printing are the parent's; the
+    /// child runs `Harness::run_case` or `Harness::read_document`, the same body the in-process
+    /// path runs.
+    pub fn supervise(
+        &self,
+        baseline: &Baseline,
+        sink: &mut dyn VerdictSink,
+        supervision: &Supervision,
+    ) -> Result<Supervised> {
+        // A runtime check rather than a compile-time one: on a platform without process groups the
+        // gate refuses rather than claiming containment it does not have, and the rest of this
+        // function stays reachable to the compiler.
+        if !cfg!(unix) {
+            bail!(
+                "supervision requires process groups, which this platform lacks: the gate refuses \
+                 to run unsupervised while its documentation claims containment"
+            );
+        }
+        if !cfg!(any(target_os = "macos", target_os = "linux")) {
+            bail!(
+                "supervision requires a descendant walk, which this Unix does not provide: the \
+                 reference writer puts its runtime in a process group of its own, so a group kill \
+                 of the case child would miss it"
+            );
+        }
+        // One harness-level error, not one per case: a child that cannot be started would fail
+        // every verdict with the same words.
+        if !supervision.child.is_file() {
+            bail!(
+                "the case child executable {} is not a file: every case would fail to start",
+                supervision.child.display()
+            );
+        }
+        // The sweep runs once, in the parent, before any child: a child would sweep its siblings.
+        supervisor::sweep(&self.root, &supervision.bounds);
+        let cases = crate::corpus::writer_cases();
+        let documents = crate::corpus::reader_documents();
+        let transcripts = self.root.join("transcripts");
+        std::fs::create_dir_all(&transcripts).with_context(|| {
+            format!(
+                "cannot create the transcript directory {}",
+                transcripts.display()
+            )
+        })?;
+        let started = Instant::now();
+        let mut verdicts = Vec::with_capacity(cases.len());
+        let mut outcomes = Vec::new();
+        let mut readings = Vec::with_capacity(documents.len());
+        let mut reading_outcomes = Vec::new();
+        let mut cut_short = false;
+        for case in &cases {
+            let outcome = match self.step_case(case, started, supervision, &transcripts) {
+                Step::Outcome(outcome) => outcome,
+                Step::CutShort => {
+                    cut_short = true;
+                    break;
+                }
+            };
+            let verdict = judge(&outcome, Some(case), baseline);
+            // Every outcome is collected, whether the case ran or was classified without running:
+            // a collected report recomputes staleness from these, so an unjudged or over-budget
+            // case must be here too, or it would read as a stale baseline entry.
+            if supervision.collect {
+                outcomes.push(outcome);
+            }
+            sink.writer(&verdict);
+            verdicts.push(verdict);
+        }
+        if !cut_short {
+            for document in &documents {
+                let outcome = match self.step_reading(*document, started, supervision, &transcripts)
+                {
+                    Step::Outcome(outcome) => outcome,
+                    Step::CutShort => {
+                        cut_short = true;
+                        break;
+                    }
+                };
+                let verdict = compare_reading(&outcome, baseline);
+                if supervision.collect {
+                    reading_outcomes.push(outcome);
+                }
+                sink.reading(&verdict);
+                readings.push(verdict);
+            }
+        }
+        // Staleness is a fact about the corpus, not about what this engine can judge: every case the
+        // run reached produced a verdict, judged or not. A cut-short run never prints the summary,
+        // so its stale lists are not consulted.
+        let seen: BTreeSet<String> = verdicts.iter().map(|verdict| verdict.key.slug()).collect();
+        let seen_readings: BTreeSet<String> = readings
+            .iter()
+            .map(|verdict| verdict.document.clone())
+            .collect();
+        let report = Report::new(
+            self.writer.identity(),
+            self.reader.identity(),
+            baseline,
+            verdicts,
+            readings,
+            &seen,
+            &seen_readings,
+        );
+        let run = supervision.collect.then(|| Run {
+            writer: report.writer.clone(),
+            reader: report.reader.clone(),
+            outcomes,
+            readings: reading_outcomes,
+        });
+        Ok(Supervised {
+            report,
+            run,
+            cut_short,
+        })
+    }
+
+    /// One writer case's turn: classified without running, run in its own child, or cut short.
+    fn step_case(
+        &self,
+        case: &Case,
+        started: Instant,
+        supervision: &Supervision,
+        transcripts: &Path,
+    ) -> Step<CaseOutcome> {
+        if supervisor::signal_raised().is_some() {
+            return Step::CutShort;
+        }
+        if let Some(outcome) = self.classify(case, started) {
+            return Step::Outcome(outcome);
+        }
+        let key = case.key();
+        let answered = key.clone();
+        step(
+            ChildTarget::Case(key.slug()),
+            format!("w-{}.json", file_name(&key.slug())),
+            supervision,
+            transcripts,
+            move |report| match report {
+                ChildReport::Case(outcome) if outcome.key == answered => Ok(outcome),
+                ChildReport::Case(outcome) => Err(format!(
+                    "the case's child answered for {}, not {answered}",
+                    outcome.key
+                )),
+                ChildReport::Reading(_) => {
+                    Err("the case's child answered with a reading".to_string())
+                }
+            },
+            move |problem| CaseOutcome::problem(key, problem),
+        )
+    }
+
+    /// One reading's turn: classified without running, run in its own child, or cut short.
+    fn step_reading(
+        &self,
+        document: Document,
+        started: Instant,
+        supervision: &Supervision,
+        transcripts: &Path,
+    ) -> Step<ReadingOutcome> {
+        if supervisor::signal_raised().is_some() {
+            return Step::CutShort;
+        }
+        if let Some(outcome) = self.classify_reading(document, started) {
+            return Step::Outcome(outcome);
+        }
+        let name = document.name.to_string();
+        let answered = name.clone();
+        step(
+            ChildTarget::Reading(name.clone()),
+            format!("r-{}.json", file_name(&name)),
+            supervision,
+            transcripts,
+            move |report| match report {
+                ChildReport::Reading(outcome) if outcome.document == answered => Ok(outcome),
+                ChildReport::Reading(outcome) => Err(format!(
+                    "the reading's child answered for {}, not {answered}",
+                    outcome.document
+                )),
+                ChildReport::Case(_) => Err("the reading's child answered with a case".to_string()),
+            },
+            move |problem| ReadingOutcome::problem(name, problem),
+        )
     }
 
     /// What an entry the budget did not reach reports.
@@ -204,7 +419,9 @@ impl Harness {
         )
     }
 
-    fn run_case(&self, case: &Case) -> CaseOutcome {
+    /// The harness's own per-case body, reached by a child. A child looks its case up by name in the
+    /// same corpus enumeration the parent holds.
+    pub(crate) fn run_case(&self, case: &Case) -> CaseOutcome {
         let key = case.key();
         // The corpus builder and the canonicaliser run under this: a slip in either is one case's
         // problem, because one failure must not hide every other verdict. The engine has its own
@@ -227,7 +444,7 @@ impl Harness {
 
     fn run_case_inner(&self, case: &Case) -> CaseOutcome {
         let key = case.key();
-        let directory = self.root.join("cases").join(key.slug().replace('/', "-"));
+        let directory = self.root.join("cases").join(file_name(&key.slug()));
         let input_dir = directory.join("in");
         let output_dir = directory.join("out");
         let scratch = directory.join("engine");
@@ -385,8 +602,8 @@ impl Harness {
 
     /// One reading. A reader that answers with an error, panics or never returns is one failing
     /// reading, not a failed run: against another implementation one failure must not hide every
-    /// other verdict.
-    fn read_document(&self, document: Document) -> ReadingOutcome {
+    /// other verdict. A child reaches this body by name.
+    pub(crate) fn read_document(&self, document: Document) -> ReadingOutcome {
         let name = document.name.to_string();
         let mut outcome = match crate::shutdown::contain_panics(|| self.try_read(document)) {
             Ok(Ok(transcript)) => ReadingOutcome {
@@ -410,10 +627,7 @@ impl Harness {
     }
 
     fn try_read(&self, document: Document) -> Result<ReadingTranscript> {
-        let directory = self
-            .root
-            .join("readings")
-            .join(document.name.replace('/', "-"));
+        let directory = self.root.join("readings").join(file_name(document.name));
         let out_dir = directory.join("out");
         std::fs::create_dir_all(&out_dir)?;
         let path = directory.join(document.name);
@@ -457,8 +671,29 @@ impl Harness {
 impl Drop for Harness {
     fn drop(&mut self) {
         if self.owned {
-            let _ = std::fs::remove_dir_all(&self.root);
+            supervisor::discard(&self.root);
         }
+    }
+}
+
+/// Run one entry in its own child and map the child's answer, or say the run was cut short. The
+/// child's own body already normalised its problem against the root the parent handed it, so this
+/// never normalises a second time.
+fn step<T>(
+    target: ChildTarget,
+    transcript: String,
+    supervision: &Supervision,
+    transcripts: &Path,
+    answered: impl FnOnce(ChildReport) -> Result<T, String>,
+    failed: impl FnOnce(String) -> T,
+) -> Step<T> {
+    match run_child(supervision, &target, transcripts, transcript) {
+        ChildRun::CutShort => Step::CutShort,
+        ChildRun::Failed(problem) => Step::Outcome(failed(problem)),
+        ChildRun::Report(report) => Step::Outcome(match answered(*report) {
+            Ok(outcome) => outcome,
+            Err(problem) => failed(problem),
+        }),
     }
 }
 
@@ -515,11 +750,19 @@ fn bounded<T: Send + 'static>(
     }
 }
 
-/// Validate a root and create it, answering whether this call created it.
-///
-/// A root that already exists is adopted only when it is a real directory: a symlink would make
-/// the harness write outside the root it validated, and a file is not a root at all.
-fn create_root(root: &Path) -> Result<bool> {
+/// Whether a root may already exist.
+#[derive(Clone, Copy, Debug)]
+enum RootState {
+    /// The root must not exist: a case child's root must not be a stale one a collision handed it.
+    Fresh,
+    /// The root is adopted when it exists, and created when it does not.
+    Adopt,
+}
+
+/// Validate a root and create or adopt it, answering whether this call created it. A symlink is
+/// refused: it would make the harness write outside the root it validated. A file is not a root at
+/// all.
+fn create_root(root: &Path, state: RootState) -> Result<bool> {
     validate_root(root)?;
     match std::fs::symlink_metadata(root) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
@@ -529,11 +772,18 @@ fn create_root(root: &Path) -> Result<bool> {
             "the harness root {} exists and is not a directory",
             root.display()
         ),
+        Ok(_) if matches!(state, RootState::Fresh) => {
+            bail!("the harness root {} already exists", root.display())
+        }
         Ok(_) => Ok(false),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            // Create-new, so a nonce collision fails rather than sharing another harness's root.
             std::fs::create_dir(root)
                 .with_context(|| format!("cannot create the harness root {}", root.display()))?;
+            // The marker is what lets a later run reclaim this root if this run dies without
+            // removing it. A root the harness did not create carries no marker and is never swept.
+            // A marker that cannot be written is not the root's: it still works, it just cannot be
+            // reclaimed by the sweep.
+            let _ = supervisor::write_marker(root);
             Ok(true)
         }
         Err(e) => {
@@ -551,12 +801,13 @@ fn validate_root(root: &Path) -> Result<()> {
         .and_then(|parent| std::fs::canonicalize(parent).ok());
     let named = root
         .file_name()
-        .is_some_and(|name| name.to_string_lossy().starts_with(ROOT_PREFIX));
+        .is_some_and(|name| name.to_string_lossy().starts_with(supervisor::ROOT_PREFIX));
     if !named || !parent.is_some_and(|parent| parent.starts_with(&temp)) {
         bail!(
-            "the harness root {} must be a `{ROOT_PREFIX}…` directory under the OS temporary \
+            "the harness root {} must be a `{}…` directory under the OS temporary \
              directory ({})",
             root.display(),
+            supervisor::ROOT_PREFIX,
             temp.display()
         );
     }
@@ -574,6 +825,256 @@ pub(crate) fn nonce() -> u64 {
             .unwrap_or_default(),
     );
     hasher.finish()
+}
+
+/// A case slug or reading name as one file-name component: the separator becomes `-`, so a case's
+/// directory and its transcript are named the same way.
+fn file_name(name: &str) -> String {
+    name.replace('/', "-")
+}
+
+/// What a child returns: one case's outcome or one reading's.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum ChildReport {
+    Case(CaseOutcome),
+    Reading(ReadingOutcome),
+}
+
+/// What one child run produced for the parent.
+enum ChildRun {
+    /// The child wrote a transcript the parent read back.
+    Report(Box<ChildReport>),
+    /// The case is one failed verdict for this reason.
+    Failed(String),
+    /// The harness received a signal; the child tree is dead and the run must stop.
+    CutShort,
+}
+
+/// Run the named case or reading in this process and write its transcript. This is the harness's own
+/// per-case body, not a copy of it: the input-unchanged check, the refused-call-created-nothing
+/// check, the output naming and the canonicalisation all stay in `Harness::run_case` and
+/// `Harness::read_document`. The gate's hidden mode and the helper binary both reach it.
+pub fn run_invocation(
+    invocation: supervisor::ChildInvocation,
+    writer: Box<dyn Writer>,
+    reader: Box<dyn Reader>,
+) -> Result<()> {
+    let harness = Harness::at(invocation.root, writer, reader)?;
+    let report = match &invocation.target {
+        ChildTarget::Case(slug) => {
+            let cases = crate::corpus::writer_cases();
+            let case: &Case = cases
+                .iter()
+                .find(|case| &case.key().slug() == slug)
+                .with_context(|| format!("the corpus holds no writer case {slug:?}"))?;
+            ChildReport::Case(harness.run_case(case))
+        }
+        ChildTarget::Reading(name) => {
+            let documents = crate::corpus::reader_documents();
+            let document = documents
+                .iter()
+                .find(|document| document.name == name)
+                .with_context(|| format!("the corpus holds no reading {name:?}"))?;
+            ChildReport::Reading(harness.read_document(*document))
+        }
+    };
+    let text = transcript::to_json(&report)?;
+    // The transcript lives in the parent's root, which this child cannot normalise away; naming only
+    // its file name keeps a raw temporary path out of the parent's verdict.
+    let name = invocation
+        .transcript
+        .file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+    std::fs::write(&invocation.transcript, text)
+        .with_context(|| format!("cannot write the child transcript {name}"))?;
+    Ok(())
+}
+
+/// Run one named case or reading in a child process under `supervision`'s bounds, and read back what
+/// it produced. The parent creates the child's root, named the way any harness root is named, so the
+/// case lands where it always lands inside it; the child adopts it, and the parent reclaims it. The
+/// transcript lives outside the child's root, so reclamation cannot delete it before the parent reads
+/// it.
+fn run_child(
+    supervision: &Supervision,
+    target: &ChildTarget,
+    transcripts: &Path,
+    transcript: String,
+) -> ChildRun {
+    let root = Harness::temp_root();
+    let transcript = transcripts.join(transcript);
+    if let Err(e) = create_root(&root, RootState::Fresh) {
+        return ChildRun::Failed(transcript::normalise(
+            &format!("cannot create the case's own root: {e:#}"),
+            &root,
+        ));
+    }
+    let bounds = supervision.bounds_for(target);
+    let mut command = Command::new(&supervision.child);
+    command
+        .arg("--internal-run")
+        .arg("--case")
+        .arg(target.argument())
+        .arg("--engine")
+        .arg(supervision.engine.name())
+        .arg("--root")
+        .arg(&root)
+        .arg("--transcript")
+        .arg(&transcript)
+        .envs(
+            supervision
+                .env
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_str())),
+        )
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        // The child leads a process group of its own, so an interrupt of the harness's group does
+        // not reach it and the ordinary path is what tears it down.
+        command.process_group(0);
+        let limit = bounds.file_bytes;
+        // The platform's spawn path carries no attribute for a resource limit, so it is installed
+        // in the forked child before it execs. Soft and hard are equal, so the child cannot raise
+        // it back.
+        // SAFETY: the closure only calls `setrlimit`, which is async-signal-safe.
+        unsafe {
+            command.pre_exec(move || {
+                let limit = libc::rlimit {
+                    rlim_cur: limit,
+                    rlim_max: limit,
+                };
+                if libc::setrlimit(libc::RLIMIT_FSIZE, &limit) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            supervisor::discard(&root);
+            return ChildRun::Failed(transcript::normalise(
+                &format!("cannot start the case's child process: {e}"),
+                &root,
+            ));
+        }
+    };
+    let pid = child.id() as i32;
+    let stdout = child.stdout.take().map(supervisor::tail);
+    let stderr = child.stderr.take().map(supervisor::tail);
+    let budget = supervisor::timeout_for(bounds, target);
+    let mut sampled = supervisor::poll(pid, &root, bounds, budget);
+    // The child's own peak is exact: the platform reports a lifetime maximum, and it is read before
+    // the ordinary wait path reaps the child, which would leave the verdict resting on the last
+    // sample. The grandchildren's half is the largest sum of the poller's samples.
+    sampled.child_peak = supervisor::read_footprint(pid).unwrap_or(sampled.child_peak);
+    let stdout = supervisor::drain(stdout);
+    let stderr = supervisor::drain(stderr);
+    let status = supervisor::wait(&mut child, pid);
+    let outcome = if supervisor::signal_raised().is_some() {
+        ChildRun::CutShort
+    } else if let Some(reason) =
+        supervisor::bounds_tripped(&root, bounds, sampled.child_peak, sampled.descendants_peak)
+    {
+        ChildRun::Failed(reason)
+    } else if sampled.timed_out {
+        ChildRun::Failed(format!(
+            "the case did not finish within the supervisor's {}s budget",
+            budget.as_secs_f64()
+        ))
+    } else {
+        match status {
+            Some(status) => outcome_from(
+                &status,
+                &root,
+                &transcript,
+                &stdout,
+                &stderr,
+                bounds.transcript_bytes,
+            ),
+            None => ChildRun::Failed("cannot reap the case's child process".to_string()),
+        }
+    };
+    supervisor::discard(&root);
+    // A transcript is absent on exactly the paths that killed the case — a bound, the supervisor's
+    // budget, a signal, an abort or a non-zero exit — so only a real removal failure is reported.
+    if let Err(e) = std::fs::remove_file(&transcript)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        eprintln!(
+            "parity: cannot remove the transcript {}: {e}",
+            transcript.display()
+        );
+    }
+    outcome
+}
+
+/// Read the child's transcript, or say why it is not one.
+fn outcome_from(
+    status: &std::process::ExitStatus,
+    root: &Path,
+    transcript: &Path,
+    stdout: &str,
+    stderr: &str,
+    transcript_bytes: usize,
+) -> ChildRun {
+    let tail = || {
+        let mut text = String::new();
+        for (what, stream) in [("stdout", stdout), ("stderr", stderr)] {
+            if !stream.is_empty() {
+                text.push_str(&format!("; {what} ends: {stream}"));
+            }
+        }
+        transcript::normalise(&text, root)
+    };
+    let mut bytes = Vec::new();
+    let read = std::fs::File::open(transcript).and_then(|file| {
+        file.take(transcript_bytes as u64 + 1)
+            .read_to_end(&mut bytes)
+    });
+    match read {
+        Ok(_) if bytes.len() > transcript_bytes => {
+            return ChildRun::Failed(format!(
+                "the case's transcript is over the {transcript_bytes}-byte read limit"
+            ));
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return ChildRun::Failed(exit_reason(status, "without a transcript", &tail()));
+        }
+        Err(e) => {
+            return ChildRun::Failed(format!("cannot read the case's transcript: {e}"));
+        }
+    }
+    match serde_json::from_slice::<ChildReport>(&bytes) {
+        Ok(report) => ChildRun::Report(Box::new(report)),
+        Err(e) => ChildRun::Failed(format!(
+            "the case's transcript does not parse: {e}{}",
+            tail()
+        )),
+    }
+}
+
+/// Why a child that wrote no usable transcript is one failed verdict.
+fn exit_reason(status: &std::process::ExitStatus, what: &str, tail: &str) -> String {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt as _;
+        if let Some(signal) = status.signal() {
+            return format!("the case's child process was killed by signal {signal}{tail}");
+        }
+    }
+    let code = status
+        .code()
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| "an unknown status".to_string());
+    format!("the case's child process exited with status {code} {what}{tail}")
 }
 
 /// Resolve `$in/<name>` and `$out/<name>` in every string of a request.
@@ -726,7 +1227,8 @@ fn normalise_reading(transcript: &mut ReadingTranscript, root: &Path) {
 }
 
 /// Whether a case was judged against the baseline, or why it could not be.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Judgement {
     /// The engine carries the case's (operation, family) pair out, so its transcript is compared.
     Judged,
@@ -739,6 +1241,7 @@ pub enum Judgement {
 }
 
 /// One case's run: its transcript, or why there is none.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CaseOutcome {
     pub key: Key,
     pub transcript: Option<CaseTranscript>,
@@ -810,6 +1313,7 @@ enum WriterAnswer {
 }
 
 /// One reading's run: its transcript, or why there is none.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReadingOutcome {
     pub document: String,
     pub transcript: Option<ReadingTranscript>,
@@ -832,6 +1336,59 @@ pub struct Run {
     pub reader: EngineIdentity,
     pub outcomes: Vec<CaseOutcome>,
     pub readings: Vec<ReadingOutcome>,
+}
+
+/// What one entry's turn in a supervised run produced. A named answer rather than `Option`, whose
+/// `None` would mean "run it" in [`Harness::classify`] and "cut short" here.
+enum Step<T> {
+    /// The entry is decided: classified without running, or answered by its child.
+    Outcome(T),
+    /// A signal cut the run short before this entry was decided.
+    CutShort,
+}
+
+/// What a supervised run emits as each verdict is decided, so a run that dies leaves everything
+/// judged up to that point. The gate prints from here; a test collects from [`Supervised::run`].
+pub trait VerdictSink {
+    fn writer(&mut self, verdict: &Verdict);
+    fn reading(&mut self, verdict: &ReadingVerdict);
+}
+
+/// What one supervised run produced.
+pub struct Supervised {
+    /// The report, including every verdict as it was decided.
+    pub report: Report,
+    /// The transcripts, when the supervision asked to collect them. The gate does not: the parent
+    /// holds no transcript it has already judged.
+    pub run: Option<Run>,
+    /// Whether a signal cut the run short. A cut-short run prints no aggregate summary and exits
+    /// with its own code; it is not a pass, however many verdicts it emitted.
+    pub cut_short: bool,
+}
+
+/// The baseline entries the run did not reach, in sorted order. Staleness is a fact about the
+/// corpus, not about what an engine can judge: a case that produced a verdict, judged or not, keeps
+/// its baseline entry. The streaming gate and the collected report both use this.
+fn stale_entries(
+    baseline: &Baseline,
+    seen: &BTreeSet<String>,
+    seen_readings: &BTreeSet<String>,
+) -> (Vec<String>, Vec<String>) {
+    let mut stale: Vec<String> = baseline
+        .cases
+        .keys()
+        .filter(|slug| !seen.contains(*slug))
+        .cloned()
+        .collect();
+    stale.sort();
+    let mut stale_readings: Vec<String> = baseline
+        .readings
+        .keys()
+        .filter(|name| !seen_readings.contains(*name))
+        .cloned()
+        .collect();
+    stale_readings.sort();
+    (stale, stale_readings)
 }
 
 /// The gate's answer for one case.
@@ -892,6 +1449,31 @@ pub struct Report {
 }
 
 impl Report {
+    /// Assemble a report from the verdicts a run decided and the baseline entries it saw. The
+    /// recorded identities and the stale lists are computed here, so the streaming gate and the
+    /// collected report cannot disagree about either.
+    fn new(
+        writer: EngineIdentity,
+        reader: EngineIdentity,
+        baseline: &Baseline,
+        verdicts: Vec<Verdict>,
+        readings: Vec<ReadingVerdict>,
+        seen: &BTreeSet<String>,
+        seen_readings: &BTreeSet<String>,
+    ) -> Self {
+        let (stale, stale_readings) = stale_entries(baseline, seen, seen_readings);
+        Self {
+            writer,
+            reader,
+            recorded_writer: baseline.writer.clone(),
+            recorded_reader: baseline.reader.clone(),
+            verdicts,
+            readings,
+            stale,
+            stale_readings,
+        }
+    }
+
     /// Whether the engine in hand is the build the baseline was recorded from. Informative: the
     /// harness must be usable against another implementation, so only the reference gate — the
     /// reference engine checked against its own baseline — treats a difference as a failure.
@@ -905,6 +1487,9 @@ impl Report {
     /// judged nothing has not shown anything, however many transcripts it produced. An unjudged
     /// case is neither a pass nor a failure, so it is left out rather than counted either way; a
     /// corpus defect fails the run.
+    ///
+    /// A cut-short run never reaches this: the gate returns the cut-short code first, and such a
+    /// run's stale lists name every entry it did not reach, so it could not read as a pass anyway.
     ///
     /// The engine's identity is deliberately not part of it — being pointed at another
     /// implementation is what the harness is for.
@@ -989,7 +1574,7 @@ impl Run {
         let mut verdicts = Vec::with_capacity(self.outcomes.len());
         for outcome in &self.outcomes {
             let case = cases.iter().find(|case| case.key() == outcome.key);
-            verdicts.push(self.verdict(outcome, case, baseline));
+            verdicts.push(judge(outcome, case, baseline));
         }
         let mut readings = Vec::with_capacity(self.readings.len());
         for reading in &self.readings {
@@ -998,83 +1583,66 @@ impl Run {
         // Staleness is a fact about the corpus, not about what this engine can judge: every case
         // produced an outcome, judged or not, so an entry the corpus still holds is never stale
         // merely because the engine cannot answer it.
-        let mut stale: Vec<String> = baseline
-            .cases
-            .keys()
-            .filter(|slug| {
-                !self
-                    .outcomes
-                    .iter()
-                    .any(|outcome| &outcome.key.slug() == *slug)
-            })
-            .cloned()
-            .collect();
-        stale.sort();
-        let mut stale_readings: Vec<String> = baseline
-            .readings
-            .keys()
-            .filter(|name| {
-                !self
-                    .readings
-                    .iter()
-                    .any(|reading| &reading.document == *name)
-            })
-            .cloned()
-            .collect();
-        stale_readings.sort();
-        Report {
-            writer: self.writer.clone(),
-            reader: self.reader.clone(),
-            recorded_writer: baseline.writer.clone(),
-            recorded_reader: baseline.reader.clone(),
+        let seen: BTreeSet<String> = self.outcomes.iter().map(|o| o.key.slug()).collect();
+        let seen_readings: BTreeSet<String> =
+            self.readings.iter().map(|r| r.document.clone()).collect();
+        Report::new(
+            self.writer.clone(),
+            self.reader.clone(),
+            baseline,
             verdicts,
             readings,
-            stale,
-            stale_readings,
-        }
+            &seen,
+            &seen_readings,
+        )
     }
+}
 
-    fn verdict(&self, outcome: &CaseOutcome, case: Option<&Case>, baseline: &Baseline) -> Verdict {
-        // An unjudged case has no transcript and no baseline to compare: saying so is the whole
-        // verdict, and it must not read as a failure of an engine that never answered.
-        if let Judgement::Unjudged(why) = &outcome.judgement {
-            return Verdict {
-                key: outcome.key.clone(),
-                judgement: Judgement::Unjudged(why.clone()),
-                problems: Vec::new(),
-            };
-        }
-        let mut problems = Vec::new();
-        if let Some(problem) = &outcome.problem {
-            problems.push(problem.clone());
-        }
-        let transcript = outcome.transcript.as_ref();
-        if let (Some(case), Some(transcript)) = (case, transcript) {
-            problems.extend(check_expectation(&case.expect, transcript));
-            if case.expect == Expect::Produced {
-                // Every case names at least one output; `every_output_the_request_names_is_declared`
-                // holds the corpus to it, and a slip is a verdict problem rather than an abort.
-                match case.outputs.first() {
-                    Some(first) => {
-                        for effect in &case.effects {
-                            let check = effect.check(&transcript.outputs, first);
-                            if !check.passed {
-                                problems.push(format!(
-                                    "effect not met: {} — {}",
-                                    check.effect, check.detail
-                                ));
-                            }
+/// The gate's answer for one case: the one comparison implementation both the collected report and
+/// the streaming gate reach.
+fn judge(outcome: &CaseOutcome, case: Option<&Case>, baseline: &Baseline) -> Verdict {
+    // An unjudged case has no transcript and no baseline to compare: saying so is the whole
+    // verdict, and it must not read as a failure of an engine that never answered.
+    if let Judgement::Unjudged(why) = &outcome.judgement {
+        return Verdict {
+            key: outcome.key.clone(),
+            judgement: Judgement::Unjudged(why.clone()),
+            problems: Vec::new(),
+        };
+    }
+    let mut problems = Vec::new();
+    if let Some(problem) = &outcome.problem {
+        problems.push(problem.clone());
+    }
+    let transcript = outcome.transcript.as_ref();
+    if let (Some(case), Some(transcript)) = (case, transcript) {
+        problems.extend(check_expectation(&case.expect, transcript));
+        if case.expect == Expect::Produced {
+            // Every case names at least one output; `every_output_the_request_names_is_declared`
+            // holds the corpus to it, and a slip is a verdict problem rather than an abort.
+            match case.outputs.first() {
+                Some(first) => {
+                    for effect in &case.effects {
+                        let check = effect.check(&transcript.outputs, first);
+                        if !check.passed {
+                            problems.push(format!(
+                                "effect not met: {} — {}",
+                                check.effect, check.detail
+                            ));
                         }
                     }
-                    None => problems.push("the case names no output to check".to_string()),
                 }
+                None => problems.push("the case names no output to check".to_string()),
             }
         }
-        match baseline.cases.get(&outcome.key.slug()) {
-            None => problems.push(
-                "no baseline entry: record the baseline deliberately before gating".to_string(),
-            ),
-            Some(recorded) => {
+    }
+    match baseline.cases.get(&outcome.key.slug()) {
+        None => problems
+            .push("no baseline entry: record the baseline deliberately before gating".to_string()),
+        Some(recorded) => {
+            // A case that produced no transcript has already said why; a comparison could only add
+            // "cannot decide: no transcript" beneath that reason.
+            if outcome.problem.is_none() || outcome.transcript.is_some() {
                 let comparison =
                     compare_transcript(recorded, transcript, "the case produced no transcript");
                 problems.extend(
@@ -1085,11 +1653,11 @@ impl Run {
                 );
             }
         }
-        Verdict {
-            key: outcome.key.clone(),
-            judgement: outcome.judgement.clone(),
-            problems,
-        }
+    }
+    Verdict {
+        key: outcome.key.clone(),
+        judgement: outcome.judgement.clone(),
+        problems,
     }
 }
 
@@ -1196,19 +1764,24 @@ fn compare_reading(outcome: &ReadingOutcome, baseline: &Baseline) -> ReadingVerd
     match baseline.readings.get(&outcome.document) {
         None => problems.push("no baseline reading: record the baseline deliberately".to_string()),
         Some(recorded) => {
-            // The reading body and the detection are compared separately, so a disagreement about
-            // what the document is reads as such rather than as a diff somewhere inside a reading.
-            let comparison = compare_reading_body(
-                recorded,
-                outcome.transcript.as_ref(),
-                "the reading produced no transcript",
-            );
-            problems.extend(
-                comparison
-                    .lines(12)
-                    .into_iter()
-                    .map(|line| format!("baseline {line}")),
-            );
+            // A reading that produced no transcript has already said why; a comparison could only
+            // add "cannot decide: no transcript" beneath that reason.
+            if outcome.problem.is_none() || outcome.transcript.is_some() {
+                // The reading body and the detection are compared separately, so a disagreement
+                // about what the document is reads as such rather than as a diff somewhere inside
+                // a reading.
+                let comparison = compare_reading_body(
+                    recorded,
+                    outcome.transcript.as_ref(),
+                    "the reading produced no transcript",
+                );
+                problems.extend(
+                    comparison
+                        .lines(12)
+                        .into_iter()
+                        .map(|line| format!("baseline {line}")),
+                );
+            }
             if let Some(actual) = outcome.transcript.as_ref() {
                 match (recorded.detection, actual.detection) {
                     (Some(expected), Some(actual)) if expected != actual => problems.push(format!(

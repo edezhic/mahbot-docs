@@ -1,16 +1,18 @@
 //! The two references the harness is judged against: the current writer (the JavaScript kit) and
 //! the current reader (the product's Rust sources, copied under `reference_sources/`), plus the
-//! crate's own writer and reader, the engine under test, and the do-nothing engine the gate is
-//! proved against.
+//! crate's own writer and reader, the engine under test, the do-nothing engine the gate is proved
+//! against, and the parent's stand-in for the helper engine the harness's tests use.
 
 pub mod crate_reader;
 pub mod crate_writer;
+pub mod helper;
 pub mod noop;
 pub mod reader;
 pub mod writer;
 
 pub use crate_reader::CrateReader;
 pub use crate_writer::CrateWriter;
+pub use helper::HelperProbe;
 pub use noop::{NoOpReader, NoOpWriter};
 pub use reader::ReferenceReader;
 pub use writer::ReferenceWriter;

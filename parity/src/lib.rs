@@ -46,4 +46,5 @@ pub mod harness;
 pub mod notices;
 pub mod pptx_capture;
 pub mod reference;
+pub mod supervisor;
 pub mod transcript;

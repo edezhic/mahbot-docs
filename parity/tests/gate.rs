@@ -1,5 +1,10 @@
 //! The gate itself: the reference engine matches the recorded baseline, a do-nothing engine fails
 //! every verdict, and two runs of one engine produce identical transcripts.
+//!
+//! The gate is supervised, and supervision requires process groups and a descendant walk: where
+//! they are unavailable the gate refuses to run, so these tests are gated to the two platforms the
+//! supervisor supports, exactly as `Harness::supervise` is.
+#![cfg(any(target_os = "macos", target_os = "linux"))]
 
 mod common;
 
@@ -244,8 +249,10 @@ impl Reader for HangingReader {
     }
 }
 
-/// Run the reference engine over the whole corpus.
+/// Run the reference engine over the whole corpus, supervised: one child per case, the same entry
+/// point the gate uses.
 fn reference_run() -> Run {
+    let _permit = common::permit();
     let harness = Harness::new_with(|root| {
         Ok((
             Box::new(ReferenceWriter::new(root)?) as Box<dyn Writer>,
@@ -253,7 +260,21 @@ fn reference_run() -> Run {
         ))
     })
     .expect("the harness needs bun on PATH or PARITY_BUN");
-    harness.run()
+    let baseline = Baseline::load(&Baseline::default_path())
+        .expect("the baseline is recorded before the gate is used");
+    let mut supervision = document_parity::supervisor::Supervision::new(
+        document_parity::supervisor::EngineKind::Reference,
+        PathBuf::from(env!("CARGO_BIN_EXE_parity")),
+    );
+    supervision.collect = true;
+    let supervised = harness
+        .supervise(&baseline, &mut common::NullSink, &supervision)
+        .expect("the reference run is supervised");
+    assert!(
+        !supervised.cut_short,
+        "the reference run was cut short by a signal"
+    );
+    supervised.run.expect("the run collected its transcripts")
 }
 
 /// The reference run, made once: the tests that only read a report from it must not each pay for
@@ -376,13 +397,26 @@ fn the_readme_states_the_recorded_corpus_size() {
 
 #[test]
 fn a_no_op_engine_fails_every_verdict() {
+    let _permit = common::permit();
     let baseline = Baseline::load(&Baseline::default_path())
         .expect("the baseline is recorded before the gate is used");
-    let root = Harness::temp_root();
-    let harness =
-        Harness::at(root, Box::new(NoOpWriter), Box::new(NoOpReader)).expect("a harness root");
-    let run = harness.run();
-    let report = run.report(&baseline);
+    let harness = Harness::new_with(|_| {
+        Ok((
+            Box::new(NoOpWriter) as Box<dyn Writer>,
+            Box::new(NoOpReader) as Box<dyn Reader>,
+        ))
+    })
+    .expect("a harness root");
+    // The no-op control is supervised like the other two engines: the gate's containment is what
+    // this test proves, not an in-process path the gate no longer takes.
+    let supervision = document_parity::supervisor::Supervision::new(
+        document_parity::supervisor::EngineKind::Noop,
+        PathBuf::from(env!("CARGO_BIN_EXE_parity")),
+    );
+    let report = harness
+        .supervise(&baseline, &mut common::NullSink, &supervision)
+        .expect("the no-op run is supervised")
+        .report;
     assert_eq!(
         report.verdicts.len(),
         baseline.cases.len(),
@@ -816,6 +850,7 @@ fn a_hung_reading_does_not_take_the_later_ones_with_it() {
 
 #[test]
 fn a_failing_gate_removes_its_temporary_root() {
+    let _permit = common::permit();
     let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_parity"))
         .args(["--engine", "noop", "--quiet"])
         .stdout(std::process::Stdio::null())
@@ -885,6 +920,7 @@ fn another_build_is_shown_but_is_not_a_verdict_failure() {
 
 #[test]
 fn the_gate_shows_a_different_engine_identity() {
+    let _permit = common::permit();
     // The no-op engine's identity differs from the baseline's; its run is cheap, and the point is
     // what the command says, not what it computes. The gate only reads the baseline, so the
     // recorded file is passed as it is.
@@ -1045,17 +1081,26 @@ fn the_baseline_names_the_engine_and_runtime_that_produced_it() {
 
 #[test]
 fn a_writer_that_implements_nothing_judges_nothing() {
-    // The reference reader matches the baseline, so the only reason this run is not a pass is
-    // that the writer judged no case at all.
+    let _permit = common::permit();
+    // The parent's writer carries out no pair, so every case is classified as unjudged before a
+    // child starts; the child is the helper binary, whose reader is the real reference one. The
+    // run is therefore supervised like every other reference run.
     let harness = Harness::at(
         Harness::temp_root(),
         Box::new(CoverageWriter(Coverage::NotCarriedOut)),
         Box::new(ReferenceReader),
     )
     .expect("a harness root");
-    let run = harness.run();
-    let report =
-        run.report(&Baseline::load(&Baseline::default_path()).expect("the baseline is recorded"));
+    let baseline = Baseline::load(&Baseline::default_path()).expect("the baseline is recorded");
+    let mut supervision = document_parity::supervisor::Supervision::new(
+        document_parity::supervisor::EngineKind::Helper,
+        PathBuf::from(env!("CARGO_BIN_EXE_parity-helper")),
+    );
+    supervision.env = vec![("PARITY_HELPER_NOT_CARRIED_OUT".to_string(), "1".to_string())];
+    let report = harness
+        .supervise(&baseline, &mut common::NullSink, &supervision)
+        .expect("the supervised run")
+        .report;
     assert_eq!(report.judged(), 0, "nothing was judged");
     assert_eq!(
         report.unjudged(),
