@@ -1,5 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["document-engine", "parity"]
-# The product-touchpoint copies are reference material, not packages of this workspace.
-exclude = ["product-touchpoints"]
+# The product-touchpoint copies are reference material, not packages of this workspace. The
+# development oracle is a package of its own, with its own resolution: it drives an outside program
+# and nothing here depends on it, so the root build, this lockfile and the parity harness's
+# comparison identity are untouched by it.
+exclude = ["product-touchpoints", "oracle"]

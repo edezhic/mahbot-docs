@@ -1,0 +1,75 @@
+{
+  "id": "docx/picture",
+  "format": "docx",
+  "chain": [
+    {
+      "operation": "create",
+      "values": {
+        "format": "docx",
+        "content": [
+          {
+            "type": "paragraph",
+            "text": "Above the picture."
+          },
+          {
+            "type": "image",
+            "image": "$asset:picture"
+          },
+          {
+            "type": "paragraph",
+            "text": "Below the picture."
+          }
+        ]
+      }
+    }
+  ],
+  "source": {
+    "digest": "sha256-252eb83d0cab9935c4236e12a6306c20a8e56fb1a128ceff21125066f739b79c",
+    "metadata_excluded": [
+      "the two dcterms dates in docProps/core.xml, which the writer stamps with the time it wrote the file"
+    ]
+  },
+  "produced": {
+    "filter": "writer_pdf_Export",
+    "metadata_excluded": [
+      "the document dates and the trailer's identifier, which the reference stamps with the time it ran",
+      "the document checksum the reference writes into the trailer, which covers those stamps",
+      "the whole XMP packet, which carries the reference's own dates and document identifiers and is replaced by a placeholder rather than read",
+      "the six-letter tag the reference puts in front of every font subset's name",
+      "the reference's own encoding of a face — the subset it splits the face into, the program, the widths and the character map of that subset — which the reference chooses differently from one run to the next; what a page drew in is recorded by the face's name and the face file's digest instead"
+    ],
+    "digest": "sha256-569ecdce12c81a2e2a4ffefcbd52db722be7a3359cd79c79dc93e6f0355ff335"
+  },
+  "pages": {
+    "blank": [],
+    "pages": [
+      {
+        "page": 1,
+        "width_pt": 595.304,
+        "height_pt": 841.89,
+        "faces": [
+          "TimesNewRomanPSMT"
+        ],
+        "lines": [
+          "Above the picture.",
+          "",
+          "Below the picture."
+        ]
+      }
+    ]
+  },
+  "faces": {
+    "named": [],
+    "default": "Times New Roman",
+    "used": [
+      "TimesNewRomanPSMT"
+    ],
+    "metric_compatible": [],
+    "not_metric_compatible": [],
+    "without_metric_substitute": []
+  },
+  "engine_computed": [],
+  "not_shown": [
+    "a picture's own resolution: the export re-encodes what it was given, so a page shows the picture as the reference drew it, not as the bytes the writer embedded"
+  ]
+}

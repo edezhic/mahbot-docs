@@ -3,10 +3,25 @@
 This folder holds everything in the MahBot product that deals with documents: the
 JavaScript document kit, the Rust document readers, the Rust↔JavaScript glue, the
 prompts, and reference copies of the shared product files that carry document code. It also
-holds the new `document-engine` crate and the `parity` harness that judges it.
+holds the new `document-engine` crate, the `parity` harness that judges it, and the development
+oracle that records what an outside reference lays out for the documents the engine writes.
 
 Copied from `/Users/egordezic/Desktop/mahbot` on 2026-11-06. The product repository
 was not modified.
+
+## The packages this folder holds
+
+Three, of which two are members of the root workspace:
+
+| Package | What it is | Workspace |
+|---|---|---|
+| `document-engine/` | the crate the product will depend on instead of its own document modules | member |
+| `parity/` | the harness that judges the crate against the product's own behaviour | member |
+| `oracle/` | the development oracle: what an outside reference lays out for the documents the engine writes | a workspace of its own |
+
+The oracle is deliberately outside the root workspace. It drives an outside program, nothing in this
+workspace depends on it, and a resolution of its own leaves the root build, the root lockfile and the
+parity harness's comparison identity untouched by it.
 
 ## Layout
 
@@ -68,6 +83,11 @@ place. Document code inside them:
   live under `document-engine/assets/docx-create/`, derived JSON data under
   `document-engine/assets/docx-layout/`, and the embedded font is the existing exception; none of
   them is a sample document.
+- No sample document is recorded either, but `oracle/record/` does hold binary PDFs. They are a
+  **captured artefact**: a sample document is an input the writer is judged on, and these are an
+  outside producer's output for the writer's own documents, kept so the pages can be rasterised and
+  reviewed later. Reading them needs nothing but the workspace, and nothing in the engine's build or
+  tests reads them.
 - No settings: the document part has no config key, no migration and no Settings entry.
 - CI does not mention the document kit; the bundle reaches the binary through `include_bytes!`.
 
@@ -201,6 +221,51 @@ fonts, and the package's licence cannot convey rights its author did not hold. T
 unresolved and is the owner's decision; it is not re-litigated here. Regenerating the widths from
 freely licensed fonts was considered and rejected, because it moves every measured width, page
 number and contents entry a created document shows.
+
+## `oracle/` — the development oracle (new work, not copied from the product)
+
+The harness above judges **files**. It cannot say what a page of a document this system produces
+looks like, and the engine has no page renderer for Word, PowerPoint or Excel. This package records
+that shape first, from **the outside reference** — LibreOffice, driven headless — and the engine is
+brought into line with it afterwards. Comparing the engine's own pages against it is a separate body
+of work and is not here.
+
+`oracle` keeps its own resolution and its own `Cargo.lock`; the root build, the root lockfile and the
+parity identity are untouched by it, and `document-engine` does not depend on it, not even as a
+development dependency. Its corpus is declared in `src/corpus.rs` and generated in code — six
+documents and seven operations over the three Office families — and its record lives under
+`oracle/record/`: per document, the PDF the reference produced and `document.json`, the canonical
+description of its pages; once for the whole record, `identity.json` (the reference's version and
+build, the invocation, the pinned locale and paper, and the font set with the digest of every face a
+page drew a glyph in) and `fonts.conf`, the font configuration the reference was given.
+
+Four properties are worth stating here because they are what makes the record usable:
+
+- **It is bound to the engine's own output.** `document.json` carries the canonical digest of the
+  document the writer produced, with the dates the writer stamps left out, so a change to our writer
+  makes the entry stale and fails the run — as does an entry whose corpus document disappeared.
+- **The kept document is bound to its entry.** Reading the record digests and re-describes every
+  kept PDF and refuses when its entry is not what the file shows — the same object graph, pages,
+  blank pages and drawn faces — and `fonts.conf` must be the configuration the identity digests and
+  must name the directories the identity states. A replaced artefact, or an entry edited by hand, is
+  refused rather than trusted by a later rasteriser.
+- **It is reproduced, not asserted.** `oracle --record` surveys twice and refuses to write anything
+  unless the second run reproduces the first's pages under the record's canonical equality, then
+  reads the written record back and compares it with what it wrote, failing the run when the record
+  does not describe itself or reads back as something else;
+  `oracle` verifies the committed record against the reference on the machine and refuses when the
+  version, build, locale, paper, tolerance, font set or the tool's own version is not the one
+  recorded. Every conversion's input is digested before and after, so a reference that rewrote the
+  document it was given fails the run rather than being trusted.
+- **The font set is supplied and proved.** A headless build's own fontconfig names no directories, so
+  the run hands the reference an explicit configuration naming the machine's fonts and the
+  reference's own, and a probe document naming one machine face proves the reference could see it; a
+  build that cannot is refused rather than recorded.
+
+`oracle` never runs as part of the root workspace's build or test run: it is invoked explicitly, and
+its own `cargo test` needs no network. Four of its tests touch what the machine has — one asks the
+reference for its version, two read a system face and one the reference's own bundled Carlito — and
+each passes when it is absent. See `oracle/README.md` and `oracle/record/README.md`.
 
 ## Two traps when moving this code
 

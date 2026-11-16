@@ -1,0 +1,80 @@
+{
+  "schema": 4,
+  "recorded_by": "page-oracle 0.1.0",
+  "page_text_extractor": "pdf-extract 0.12.1",
+  "reference": {
+    "program": "LibreOffice",
+    "version": "26.8.2.2",
+    "build": "9dea406ab7695df6325b11b0e19fdca8db4b7276",
+    "installation": "/Applications/LibreOffice.app",
+    "launcher": "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+  },
+  "invocation": {
+    "arguments": [
+      "--headless",
+      "--norestore",
+      "--nolockcheck",
+      "--nodefault",
+      "--nofirststartwizard"
+    ],
+    "filters": {
+      "docx": "writer_pdf_Export",
+      "pptx": "impress_pdf_Export",
+      "xlsx": "calc_pdf_Export"
+    }
+  },
+  "locale": "en-US",
+  "paper": {
+    "width_pt": 612.0,
+    "height_pt": 792.0,
+    "observed_from": "xlsx/workbook"
+  },
+  "page_size_tolerance_pt": 0.5,
+  "fonts": {
+    "config_digest": "sha256-95bc7dee7b90a9d241e2c670aa9e987903ccabe312b19b795a2d4ce9417206f4",
+    "directories": [
+      "/System/Library/Fonts",
+      "/Library/Fonts",
+      "/Users/egordezic/Library/Fonts",
+      "/Applications/LibreOffice.app/Contents/Resources/fonts/truetype"
+    ],
+    "visibility": {
+      "probe_face": "Helvetica",
+      "used_families": [
+        "Helvetica"
+      ]
+    },
+    "faces": [
+      {
+        "face": "Carlito",
+        "family": "Carlito",
+        "file": "/Applications/LibreOffice.app/Contents/Resources/fonts/truetype/Carlito-Regular.ttf",
+        "digest": "sha256-b4ff23ba370cc95a3c349336b73f9c28514a1371210f89832efc85c4b1ea7131"
+      },
+      {
+        "face": "Carlito-Bold",
+        "family": "Carlito",
+        "file": "/Applications/LibreOffice.app/Contents/Resources/fonts/truetype/Carlito-Bold.ttf",
+        "digest": "sha256-0f62ab34ad5d079a0a28fac01bcf7c7a724a4db4d6cb99cab9cabff382fbb80f"
+      },
+      {
+        "face": "OpenSymbol",
+        "family": "OpenSymbol",
+        "file": "/Applications/LibreOffice.app/Contents/Resources/fonts/truetype/opens___.ttf",
+        "digest": "sha256-f543e6e2d7275557a839a164941c0a86e5f2c3f2a0042bfc434c88c6dde9e140"
+      },
+      {
+        "face": "TimesNewRomanPS-BoldMT",
+        "family": "Times New Roman",
+        "file": "/System/Library/Fonts/Supplemental/Times New Roman Bold.ttf",
+        "digest": "sha256-50f5b1f27b7d34621090e437e8b1dd4510a22d2823fc876b3286bed327b64bbb"
+      },
+      {
+        "face": "TimesNewRomanPSMT",
+        "family": "Times New Roman",
+        "file": "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
+        "digest": "sha256-f3b4ffff71c2a0c7227d37497683b2498fb2d0a4e8beae26f022e3ccfcaabfa3"
+      }
+    ]
+  }
+}

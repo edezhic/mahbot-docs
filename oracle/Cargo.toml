@@ -1,0 +1,27 @@
+[package]
+name = "page-oracle"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+publish = false
+description = "The development oracle: records what the outside reference lays out for every Office document the engine writes"
+
+# A workspace of its own, so the root workspace's build, its lockfile and the parity harness's
+# comparison identity are untouched by this package and by anything it resolves.
+[workspace]
+
+[dependencies]
+document-engine = { path = "../document-engine" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+zip = { version = "8", default-features = false, features = ["deflate"] }
+lopdf = "=0.42.0"
+pdf-extract = { version = "=0.12.1", default-features = false }
+regex = "1"
+# The one picture the corpus embeds is generated in code, with the same encoder version the engine
+# resolves, so no hand-written PNG/zlib/CRC encoder is maintained here.
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

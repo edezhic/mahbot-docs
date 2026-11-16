@@ -1,0 +1,194 @@
+{
+  "id": "pptx/deck",
+  "format": "pptx",
+  "chain": [
+    {
+      "operation": "create",
+      "values": {
+        "format": "pptx",
+        "size": "widescreen",
+        "content": [
+          {
+            "type": "heading",
+            "text": "Quarterly review",
+            "level": 1
+          },
+          {
+            "type": "paragraph",
+            "text": "Three workstreams this quarter."
+          },
+          {
+            "type": "list",
+            "items": [
+              "engine",
+              "oracle",
+              "renderer"
+            ]
+          },
+          {
+            "type": "heading",
+            "text": "Revenue by region",
+            "level": 1
+          },
+          {
+            "type": "table",
+            "headers": [
+              "Region",
+              "Revenue"
+            ],
+            "rows": [
+              [
+                "North",
+                "1 200"
+              ],
+              [
+                "South",
+                "980"
+              ]
+            ]
+          },
+          {
+            "type": "image",
+            "image": "$asset:picture",
+            "width": 320,
+            "height": 160
+          },
+          {
+            "type": "notes",
+            "text": "Speaker notes for the second slide: they are not part of the pages this record holds."
+          },
+          {
+            "type": "heading",
+            "text": "What comes next",
+            "level": 1
+          },
+          {
+            "type": "paragraph",
+            "text": "A renderer of our own, judged against this record."
+          }
+        ]
+      }
+    }
+  ],
+  "source": {
+    "digest": "sha256-774be1fc65f569f5c39a76cd49a79bc960bd27b9fdb8b2b1e612805095401f4e",
+    "metadata_excluded": [
+      "the two dcterms dates in docProps/core.xml, which the writer stamps with the time it wrote the file"
+    ]
+  },
+  "produced": {
+    "filter": "impress_pdf_Export",
+    "metadata_excluded": [
+      "the document dates and the trailer's identifier, which the reference stamps with the time it ran",
+      "the document checksum the reference writes into the trailer, which covers those stamps",
+      "the whole XMP packet, which carries the reference's own dates and document identifiers and is replaced by a placeholder rather than read",
+      "the six-letter tag the reference puts in front of every font subset's name",
+      "the reference's own encoding of a face — the subset it splits the face into, the program, the widths and the character map of that subset — which the reference chooses differently from one run to the next; what a page drew in is recorded by the face's name and the face file's digest instead"
+    ],
+    "digest": "sha256-e64e168f93d42cadc102444340a3d97dcce5239ae3ce6c841c99bf9536da4218"
+  },
+  "pages": {
+    "blank": [],
+    "pages": [
+      {
+        "page": 1,
+        "width_pt": 960.009,
+        "height_pt": 540.0,
+        "faces": [
+          "Carlito",
+          "Carlito-Bold",
+          "OpenSymbol"
+        ],
+        "lines": [
+          "Quarterly review",
+          "",
+          "Three workstreams this quarter.",
+          "",
+          "• engine",
+          "• oracle",
+          "• renderer"
+        ]
+      },
+      {
+        "page": 2,
+        "width_pt": 960.009,
+        "height_pt": 540.0,
+        "faces": [
+          "Carlito",
+          "Carlito-Bold"
+        ],
+        "lines": [
+          "Revenue by region",
+          "",
+          "Region Revenue",
+          "",
+          "North 1 200",
+          "",
+          "South 980"
+        ]
+      },
+      {
+        "page": 3,
+        "width_pt": 960.009,
+        "height_pt": 540.0,
+        "faces": [
+          "Carlito",
+          "Carlito-Bold"
+        ],
+        "lines": [
+          "What comes next",
+          "",
+          "A renderer of our own, judged against this record."
+        ]
+      }
+    ]
+  },
+  "faces": {
+    "named": [
+      {
+        "face": "Calibri",
+        "source": "the document's theme minor font",
+        "metric_substitute": "Carlito"
+      },
+      {
+        "face": "Calibri Light",
+        "source": "the document's theme major font",
+        "metric_substitute": null
+      }
+    ],
+    "default": null,
+    "used": [
+      "Carlito",
+      "Carlito-Bold",
+      "OpenSymbol"
+    ],
+    "metric_compatible": [
+      {
+        "face": "Carlito",
+        "substitutes": "Calibri"
+      }
+    ],
+    "not_metric_compatible": [
+      {
+        "face": "OpenSymbol",
+        "reason": "the reference draws its bullet glyphs in it; it substitutes nothing"
+      }
+    ],
+    "without_metric_substitute": [
+      {
+        "face": "Calibri Light",
+        "measured_in": [
+          "Carlito",
+          "Carlito-Bold"
+        ]
+      }
+    ]
+  },
+  "engine_computed": [],
+  "not_shown": [
+    "speaker notes: the export asks for slides, not notes pages, so no notes page is drawn",
+    "hidden slides: the export draws no slide the deck marks hidden, and a created deck marks none",
+    "slide transitions and animations: a PDF shows a slide's final state only",
+    "the notes master and any handout: neither is part of the export"
+  ]
+}

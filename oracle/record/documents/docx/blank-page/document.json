@@ -1,0 +1,98 @@
+{
+  "id": "docx/blank-page",
+  "format": "docx",
+  "chain": [
+    {
+      "operation": "create",
+      "values": {
+        "format": "docx",
+        "content": [
+          {
+            "type": "paragraph",
+            "text": "Before the empty page."
+          },
+          {
+            "type": "page_break"
+          },
+          {
+            "type": "page_break"
+          },
+          {
+            "type": "paragraph",
+            "text": "After the empty page."
+          }
+        ]
+      }
+    }
+  ],
+  "source": {
+    "digest": "sha256-d6b1ab330e131b8c2464b6bb4221db08729aeff3461c9ce9d22290884fc1de2a",
+    "metadata_excluded": [
+      "the two dcterms dates in docProps/core.xml, which the writer stamps with the time it wrote the file"
+    ]
+  },
+  "produced": {
+    "filter": "writer_pdf_Export",
+    "metadata_excluded": [
+      "the document dates and the trailer's identifier, which the reference stamps with the time it ran",
+      "the document checksum the reference writes into the trailer, which covers those stamps",
+      "the whole XMP packet, which carries the reference's own dates and document identifiers and is replaced by a placeholder rather than read",
+      "the six-letter tag the reference puts in front of every font subset's name",
+      "the reference's own encoding of a face — the subset it splits the face into, the program, the widths and the character map of that subset — which the reference chooses differently from one run to the next; what a page drew in is recorded by the face's name and the face file's digest instead"
+    ],
+    "digest": "sha256-cc7a9a334feb615b7346d79ea9d8dd18e25549f992912906fa719c8048edd02d"
+  },
+  "pages": {
+    "blank": [
+      {
+        "page": 2,
+        "reason": "two consecutive page breaks leave an empty paragraph on a page of its own, and nothing is drawn on it"
+      }
+    ],
+    "pages": [
+      {
+        "page": 1,
+        "width_pt": 595.304,
+        "height_pt": 841.89,
+        "faces": [
+          "TimesNewRomanPSMT"
+        ],
+        "lines": [
+          "Before the empty page."
+        ]
+      },
+      {
+        "page": 2,
+        "width_pt": 595.304,
+        "height_pt": 841.89,
+        "faces": [],
+        "lines": []
+      },
+      {
+        "page": 3,
+        "width_pt": 595.304,
+        "height_pt": 841.89,
+        "faces": [
+          "TimesNewRomanPSMT"
+        ],
+        "lines": [
+          "After the empty page."
+        ]
+      }
+    ]
+  },
+  "faces": {
+    "named": [],
+    "default": "Times New Roman",
+    "used": [
+      "TimesNewRomanPSMT"
+    ],
+    "metric_compatible": [],
+    "not_metric_compatible": [],
+    "without_metric_substitute": []
+  },
+  "engine_computed": [],
+  "not_shown": [
+    "an empty page is drawn as an empty page: the export marks it in no way, so a page with no ink and a page that is missing look the same to a reader of the file"
+  ]
+}

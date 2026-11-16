@@ -1,0 +1,212 @@
+{
+  "id": "docx/report",
+  "format": "docx",
+  "chain": [
+    {
+      "operation": "create",
+      "values": {
+        "format": "docx",
+        "content": [
+          {
+            "type": "heading",
+            "text": "Quarterly report",
+            "level": 1
+          },
+          {
+            "type": "paragraph",
+            "text": "Every page in this record is the writer's own output, laid out by the outside reference. This paragraph is long enough that the reference has to break it across several lines, which is what makes a page boundary worth recording at all. The words after it are ordinary prose."
+          },
+          {
+            "type": "heading",
+            "text": "Revenue by region",
+            "level": 2
+          },
+          {
+            "type": "list",
+            "items": [
+              "North",
+              "South",
+              "East",
+              "West"
+            ]
+          },
+          {
+            "type": "paragraph",
+            "text": "The same regions, in the order the report reads them:"
+          },
+          {
+            "type": "list",
+            "items": [
+              "North",
+              "South",
+              "East",
+              "West"
+            ],
+            "ordered": true
+          },
+          {
+            "type": "heading",
+            "text": "Detail",
+            "level": 3
+          },
+          {
+            "type": "table",
+            "headers": [
+              "Region",
+              "Revenue",
+              "Growth"
+            ],
+            "rows": [
+              [
+                "North",
+                "1 200",
+                "4%"
+              ],
+              [
+                "South",
+                "980",
+                "2%"
+              ],
+              [
+                "East",
+                "1 540",
+                "7%"
+              ]
+            ]
+          },
+          {
+            "type": "image",
+            "image": "$asset:picture",
+            "width": 240,
+            "height": 120
+          },
+          {
+            "type": "link",
+            "text": "The full breakdown is published.",
+            "url": "https://example.com/report"
+          },
+          {
+            "type": "page_break"
+          },
+          {
+            "type": "heading",
+            "text": "Appendix",
+            "level": 2
+          },
+          {
+            "type": "contents"
+          },
+          {
+            "type": "paragraph",
+            "text": "A paragraph carrying a footnote.",
+            "footnote": "The footnote's own text, on the page the reference gives it."
+          }
+        ],
+        "header": "Quarterly report",
+        "footer": "Page {page} of {pages}"
+      }
+    }
+  ],
+  "source": {
+    "digest": "sha256-826b89a116c97adb95967e2ba56fecbd449d42e5735d97f04da03a4391f0917d",
+    "metadata_excluded": [
+      "the two dcterms dates in docProps/core.xml, which the writer stamps with the time it wrote the file"
+    ]
+  },
+  "produced": {
+    "filter": "writer_pdf_Export",
+    "metadata_excluded": [
+      "the document dates and the trailer's identifier, which the reference stamps with the time it ran",
+      "the document checksum the reference writes into the trailer, which covers those stamps",
+      "the whole XMP packet, which carries the reference's own dates and document identifiers and is replaced by a placeholder rather than read",
+      "the six-letter tag the reference puts in front of every font subset's name",
+      "the reference's own encoding of a face — the subset it splits the face into, the program, the widths and the character map of that subset — which the reference chooses differently from one run to the next; what a page drew in is recorded by the face's name and the face file's digest instead"
+    ],
+    "digest": "sha256-ac4851d5ea5d4e5c88cfc125317ff3693dc2ca9d029a3cf76f4d630fef707140"
+  },
+  "pages": {
+    "blank": [],
+    "pages": [
+      {
+        "page": 1,
+        "width_pt": 595.304,
+        "height_pt": 841.89,
+        "faces": [
+          "TimesNewRomanPS-BoldMT",
+          "TimesNewRomanPSMT"
+        ],
+        "lines": [
+          "Quarterly report",
+          "",
+          "Page 1 of 2",
+          "",
+          "Quarterly report",
+          "Every page in this record is the writer's own output, laid out by the outside reference. This paragraph is long",
+          "enough that the reference has to break it across several lines, which is what makes a page boundary worth",
+          "recording at all. The words after it are ordinary prose.",
+          "Revenue by region",
+          "● North",
+          "● South",
+          "● East",
+          "● West",
+          "The same regions, in the order the report reads them:",
+          "1. North",
+          "2. South",
+          "3. East",
+          "4. West",
+          "Detail",
+          "Region Revenue Growth",
+          "North 1 200 4%",
+          "South 980 2%",
+          "East 1 540 7%",
+          "",
+          "The full breakdown is published."
+        ]
+      },
+      {
+        "page": 2,
+        "width_pt": 595.304,
+        "height_pt": 841.89,
+        "faces": [
+          "TimesNewRomanPSMT"
+        ],
+        "lines": [
+          "Quarterly report",
+          "",
+          "Page 2 of 2",
+          "",
+          "Appendix",
+          "Quarterly report........................................................................................................................................................ 1",
+          "Revenue by region...............................................................................................................................................1",
+          "Detail...............................................................................................................................................................1",
+          "Appendix.............................................................................................................................................................. 2",
+          "",
+          "A paragraph carrying a footnote.1",
+          "",
+          "1The footnote's own text, on the page the reference gives it."
+        ]
+      }
+    ]
+  },
+  "faces": {
+    "named": [],
+    "default": "Times New Roman",
+    "used": [
+      "TimesNewRomanPS-BoldMT",
+      "TimesNewRomanPSMT"
+    ],
+    "metric_compatible": [],
+    "not_metric_compatible": [],
+    "without_metric_substitute": []
+  },
+  "engine_computed": [
+    "the page numbers a table of contents prints",
+    "the page count a {pages} token shows"
+  ],
+  "not_shown": [
+    "commentary notes in the margin: the export states no comments, and a created document carries none",
+    "hidden text: the export draws only visible text",
+    "a link: it is drawn as its own text, with no target and no live link, so a page shows what the sentence says rather than where it goes",
+    "a table of contents' page numbers: the reference does not update the field, it shows the cached numbers the engine's own layout pass wrote"
+  ]
+}

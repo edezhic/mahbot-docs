@@ -1,0 +1,217 @@
+{
+  "id": "xlsx/workbook",
+  "format": "xlsx",
+  "chain": [
+    {
+      "operation": "create",
+      "values": {
+        "format": "xlsx",
+        "sheets": [
+          {
+            "name": "Summary",
+            "rows": [
+              [
+                "Kind",
+                "Value",
+                "Note"
+              ],
+              [
+                "text",
+                "hello",
+                "an inline string"
+              ],
+              [
+                "number",
+                42,
+                "a whole number"
+              ],
+              [
+                "boolean",
+                true,
+                "a boolean"
+              ],
+              [
+                "amount",
+                1234.5,
+                "the edit step gives it a money format"
+              ],
+              [
+                "share",
+                0.185,
+                "the edit step gives it a percentage format"
+              ],
+              [
+                "date",
+                46024,
+                "the edit step gives it a date format"
+              ]
+            ],
+            "merges": [
+              "A1:C1"
+            ]
+          },
+          {
+            "name": "Detail",
+            "rows": [
+              [
+                "Region",
+                "Revenue"
+              ],
+              [
+                "North",
+                1200
+              ],
+              [
+                "South",
+                980
+              ],
+              [
+                "East",
+                1540
+              ]
+            ]
+          },
+          {
+            "name": "Notes",
+            "rows": [
+              [
+                "A third sheet, so the workbook's pages are decided by more than one sheet's content."
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "xlsx_edit",
+      "values": {
+        "input": "$previous",
+        "edits": [
+          {
+            "op": "set_cell",
+            "sheet": "Summary",
+            "cell": "B5",
+            "value": 1234.5,
+            "number_format": "#,##0.00"
+          },
+          {
+            "op": "set_cell",
+            "sheet": "Summary",
+            "cell": "B6",
+            "value": 0.185,
+            "number_format": "0.0%"
+          },
+          {
+            "op": "set_cell",
+            "sheet": "Summary",
+            "cell": "B7",
+            "value": 46024,
+            "number_format": "dd/mm/yy"
+          },
+          {
+            "op": "set_cell",
+            "sheet": "Detail",
+            "cell": "B5",
+            "value": {
+              "formula": "=SUM(B2:B4)"
+            },
+            "number_format": "#,##0.00"
+          }
+        ]
+      }
+    }
+  ],
+  "source": {
+    "digest": "sha256-8862d63f0946a6617545328b97cb709f0b0ee667a54b7be6d3bbeccb108686fc",
+    "metadata_excluded": [
+      "the two dcterms dates in docProps/core.xml, which the writer stamps with the time it wrote the file"
+    ]
+  },
+  "produced": {
+    "filter": "calc_pdf_Export",
+    "metadata_excluded": [
+      "the document dates and the trailer's identifier, which the reference stamps with the time it ran",
+      "the document checksum the reference writes into the trailer, which covers those stamps",
+      "the whole XMP packet, which carries the reference's own dates and document identifiers and is replaced by a placeholder rather than read",
+      "the six-letter tag the reference puts in front of every font subset's name",
+      "the reference's own encoding of a face — the subset it splits the face into, the program, the widths and the character map of that subset — which the reference chooses differently from one run to the next; what a page drew in is recorded by the face's name and the face file's digest instead"
+    ],
+    "digest": "sha256-a85cdd32c81a354870f6f2b5cb9ec14cd3ddb75972939a5cfa0ddb30a4d32aba"
+  },
+  "pages": {
+    "blank": [],
+    "pages": [
+      {
+        "page": 1,
+        "width_pt": 612.0,
+        "height_pt": 792.0,
+        "faces": [
+          "Carlito"
+        ],
+        "lines": [
+          "Kind",
+          "text hello an inline string",
+          "number 42 a whole number",
+          "boolean TRUE a boolean",
+          "amount 1,234.50 the edit step gives it a money format",
+          "share 18.5% the edit step gives it a percentage format",
+          "date 02/01/26 the edit step gives it a date format"
+        ]
+      },
+      {
+        "page": 2,
+        "width_pt": 612.0,
+        "height_pt": 792.0,
+        "faces": [
+          "Carlito"
+        ],
+        "lines": [
+          "Region Revenue",
+          "North 1200",
+          "South 980",
+          "East 1540",
+          "3,720.00"
+        ]
+      },
+      {
+        "page": 3,
+        "width_pt": 612.0,
+        "height_pt": 792.0,
+        "faces": [
+          "Carlito"
+        ],
+        "lines": [
+          "A third sheet, so the workbook's pages are decided by more than one sheet's content."
+        ]
+      }
+    ]
+  },
+  "faces": {
+    "named": [
+      {
+        "face": "Calibri",
+        "source": "the workbook's font table",
+        "metric_substitute": "Carlito"
+      }
+    ],
+    "default": null,
+    "used": [
+      "Carlito"
+    ],
+    "metric_compatible": [
+      {
+        "face": "Carlito",
+        "substitutes": "Calibri"
+      }
+    ],
+    "not_metric_compatible": [],
+    "without_metric_substitute": []
+  },
+  "engine_computed": [],
+  "not_shown": [
+    "cell comments: the export draws no comment indicator",
+    "row and column headings and gridlines: the export draws the page as printed, without them",
+    "hidden sheets: the export prints the sheets the workbook states as visible, and a created workbook states none",
+    "a formula's own text: the export shows the value the reference computed from it"
+  ]
+}

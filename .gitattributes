@@ -5,3 +5,12 @@
 # `assets/docgen/document-kit.js`, whose digest is part of the reference writer's identity.
 /document-engine/assets/pptx-create/** -text
 /document-engine/assets/docx-create/** -text
+
+# The oracle's kept PDFs are the outside reference's own output, stored and written exactly as it
+# produced them: a line-ending conversion would change the digest that says a second run reproduces
+# the file, and the pages a reviewer reads.
+/oracle/record/documents/**/produced.pdf -text
+
+# The oracle's font configuration is compared byte for byte against the one this machine's font set
+# makes, so a line-ending conversion would break the comparison.
+/oracle/record/fonts.conf -text
