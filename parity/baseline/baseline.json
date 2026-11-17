@@ -1,6 +1,6 @@
 {
   "note": "Recorded from the reference engine by `cargo run --bin record-baseline`. The harness never rewrites this file: recording is a deliberate act.",
-  "recorded_at_unix": 1794747060,
+  "recorded_at_unix": 1794936488,
   "writer": {
     "engine": "reference-writer",
     "build": "8718d0113496f4521535de222eb9b236ad719e14e9fedeb8b30daa07e9e2e86a",
@@ -275253,6 +275253,292 @@
         }
       }
     },
+    "pdf/pdf_form_fill/hybrid@hybrid": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [
+                  "Ada"
+                ],
+                "kind": "text",
+                "name": "name",
+                "options": [],
+                "state": null,
+                "value": "Ada"
+              }
+            ]
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    700.0,
+                    272.0,
+                    724.0
+                  ],
+                  "subtype": "Widget"
+                }
+              ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A hybrid form"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/hybrid_direct_form@hybrid_direct_form": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [
+                  "Ada"
+                ],
+                "kind": "text",
+                "name": "name",
+                "options": [],
+                "state": null,
+                "value": "Ada"
+              }
+            ]
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    700.0,
+                    272.0,
+                    724.0
+                  ],
+                  "subtype": "Widget"
+                }
+              ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A hybrid form"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/hybrid_empty_values@hybrid_empty_values": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [],
+                "kind": "text",
+                "name": "name",
+                "options": [],
+                "state": null,
+                "value": null
+              }
+            ]
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    700.0,
+                    272.0,
+                    724.0
+                  ],
+                  "subtype": "Widget"
+                }
+              ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A hybrid form"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/hybrid_flatten@hybrid_flatten": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [
+                "Ada"
+              ],
+              "crop": null,
+              "forms": 1,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A hybrid form"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_form_fill/hybrid_scalar_values@hybrid_scalar_values": {
+      "status": "produced",
+      "outputs": {
+        "filled.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [],
+                "kind": "text",
+                "name": "name",
+                "options": [],
+                "state": null,
+                "value": null
+              }
+            ]
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    700.0,
+                    272.0,
+                    724.0
+                  ],
+                  "subtype": "Widget"
+                }
+              ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "A hybrid form"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
     "pdf/pdf_form_fill/keep_fields": {
       "status": "produced",
       "outputs": {
@@ -279352,6 +279638,67 @@
       "status": "refused",
       "class": "usage",
       "reason": "damaged-encrypted.pdf is password-protected — the tool cannot open an encrypted PDF"
+    },
+    "pdf/pdf_rotate/hybrid_form@hybrid_form": {
+      "status": "produced",
+      "outputs": {
+        "rotated.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": [
+              {
+                "appearance": [],
+                "kind": "text",
+                "name": "name",
+                "options": [],
+                "state": null,
+                "value": null
+              }
+            ],
+            "xfa": true
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [
+                {
+                  "contents": "",
+                  "rect": [
+                    72.0,
+                    700.0,
+                    272.0,
+                    724.0
+                  ],
+                  "subtype": "Widget"
+                }
+              ],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                "A hybrid form"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
     },
     "pdf/pdf_rotate/index_syntax_broken": {
       "status": "refused",

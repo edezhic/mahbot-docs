@@ -1015,6 +1015,19 @@ pub const FORM_PDF: Document = Document {
     build: build::pdf_form,
 };
 
+/// One A4 page whose AcroForm holds a text field and also names an XFA entry.
+pub const HYBRID_FORM_PDF: Document = Document {
+    name: "hybrid-form.pdf",
+    build: build::pdf_hybrid_form,
+};
+
+/// One A4 page whose AcroForm holds a text field; the form itself is written in the catalog rather
+/// than as an object of its own.
+pub const HYBRID_DIRECT_FORM_PDF: Document = Document {
+    name: "hybrid-direct-form.pdf",
+    build: build::pdf_hybrid_direct_form,
+};
+
 /// One A4 page with an option list and a text field: the option-list refusal's input.
 pub const OPTION_FORM_PDF: Document = Document {
     name: "option-form.pdf",
@@ -1619,6 +1632,8 @@ pub fn writer_documents() -> Vec<Document> {
         XLSX_UNCLOSED_MERGE_CELL,
         OPTION_FORM_PDF,
         EMPTY_CHOICE_FORM_PDF,
+        HYBRID_FORM_PDF,
+        HYBRID_DIRECT_FORM_PDF,
         PAIRED_OPTIONS_FORM_PDF,
         BROKEN_PAIR_OPTIONS_FORM_PDF,
         PAIRED_RADIO_FORM_PDF,

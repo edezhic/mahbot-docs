@@ -40,7 +40,7 @@ compares the engine's own PDF pages against PDFium, reporting the other families
 resolution therefore cannot move a codec version the comparison identity covers.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 802 cases and 91 readings — takes about 55–70 s for the crate engine
+managed runtime. A full pass — 808 cases and 91 readings — takes about 55–70 s for the crate engine
 and about 560–600 s for the reference engine, because the gate runs every case in a child process of
 its own. The whole test suite runs the corpus several times (once per determinism check, once for
 the supervised reference test, once per bound test), so it is much slower than a single pass.
@@ -385,7 +385,8 @@ builders have one home in `document_engine::test_support`, which the crate's own
   without a package: a rotated page (its turn stated on the page tree) rotated, cropped and
   resized; a rich document — a picture, a filled form field, a page-level attachment, an outline,
   page labels, a structure tree, marked content and a description — merged, and rotated, cropped
-  and resized; a page whose annotation has no geometry, so the resize note is reached; a third
+  and resized; a hybrid form rotated, which keeps its XFA entry because only a fill drops it;
+  a page whose annotation has no geometry, so the resize note is reached; a third
   distinct document, so a merge's order is judged; a description passed to each action; a merge of
   no input and of one; a split whose group names one page twice, so the produced part holds two
   page objects; and the refusals the reference itself makes — a quarter turn that is not one, an
@@ -407,15 +408,18 @@ builders have one home in `document_engine::test_support`, which the crate's own
   combed field drawn one character per cell, with an option list drawing every option it offers,
   with one whose `/Opt` entries are value-and-display pairs (the appearance lists the display
   name), with a push button whose caption is drawn into its appearance, with a value map that has
-  no entries (a number, which leaves every field as it was), and described; and the
-  form refusals — a missing field with its catalogue, a pushbutton, an option outside the list, an
-  option list with no choice, a checkbox given a state name, a structured value, a value map that is
-  a string or a list (indexed by the name its entry states, so the field it names is the index), a
-  combed value wider than its cells (the reference's own layout failure), a pair whose display
-  entry is not text, a text widget that states no rectangle, a button that states none and is
-  regenerated, and a button that states none while flattening, a signature field whose appearance
-  is never regenerated (the library's own failures), and a radio group whose `/Opt` entries are
-  pairs, which names no export value and so offers no choice;
+  no entries (a number, which leaves every field as it was), and described; a hybrid form — an
+  ordinary form that also names an XFA entry — filled with a value, with an empty value map, with
+  a scalar value map, and flattened, each of which drops the form's entry so a viewer that prefers
+  the packet shows the fields, once more with the form written in the catalog rather than as an
+  object of its own; and the form refusals — a missing field with its catalogue, a pushbutton, an
+  option outside the list, an option list with no choice, a checkbox given a state name, a
+  structured value, a value map that is a string or a list (indexed by the name its entry states,
+  so the field it names is the index), a combed value wider than its cells (the reference's own
+  layout failure), a pair whose display entry is not text, a text widget that states no rectangle,
+  a button that states none and is regenerated, and a button that states none while flattening, a
+  signature field whose appearance is never regenerated (the library's own failures), and a radio
+  group whose `/Opt` entries are pairs, which names no export value and so offers no choice;
 - the failure side: requests the engine refuses as the caller's to fix, and one it accepts and
   fails to carry out (a PDF whose `/AcroForm` is not a dictionary).
 
@@ -526,15 +530,16 @@ Matching the baseline is not enough: an operation implemented as a no-op could m
 recorded from a no-op. Every produced case declares what it is supposed to change — text present or
 absent, a table cell, a formatting property, a sheet-name list, a merged range, a slide count and
 its titles, a page's rotation or box, a page annotation's subtype and rectangle, a form field's
-value, a flattened form — and the gate checks it against the canonical model. The workbook's effects
-can also assert a cell's formula text, its number format (resolved through the styles part), a
-column's width, a row's height, the presence or absence of a part, and the workbook's defined names
-in order; a formula cell is never mistaken for an empty one, so `CellAbsent` cannot pass over a
-formula a call failed to remove. The Word effects also read a paragraph property's own attribute
-(`<w:ind w:left="400"/>`, `<w:spacing w:line="280"/>`, the `lineRule` beside it) and an attribute of
-its child (`<w:numPr><w:ilvl w:val="1"/>`), so an indent, a spacing and a list level are asserted as
-the value written rather than as a count; the attribute is named by its local name, so a strict
-document's `start` is read as the same effect a transitional `left` is.
+value, whether the form still names an XFA entry, a flattened form — and the gate checks it
+against the canonical model. The workbook's effects can also assert a cell's formula text, its
+number format (resolved through the styles part), a column's width, a row's height, the presence or
+absence of a part, and the workbook's defined names in order; a formula cell is never mistaken for
+an empty one, so `CellAbsent` cannot pass over a formula a call failed to remove. The Word effects
+also read a paragraph property's own attribute (`<w:ind w:left="400"/>`, `<w:spacing w:line="280"/>`,
+the `lineRule` beside it) and an attribute of its child (`<w:numPr><w:ilvl w:val="1"/>`), so an
+indent, a spacing and a list level are asserted as the value written rather than as a count; the
+attribute is named by its local name, so a strict document's `start` is read as the same effect a
+transitional `left` is.
 `tests/gate.rs` proves the rule with the no-op engine.
 
 ## The arm's own two checks

@@ -5495,6 +5495,92 @@ pub fn pdf_form() -> Vec<u8> {
     form_document(false)
 }
 
+/// One A4 page whose AcroForm holds one text field and also names an XFA entry: the hybrid shape,
+/// in which a viewer that prefers the packet draws the packet's own form rather than the field.
+/// The packet is the Acrobat pair — a template and a datasets stream — and the catalog states
+/// `/NeedsRendering`, as a hybrid file does.
+#[must_use]
+pub fn pdf_hybrid_form() -> Vec<u8> {
+    hybrid_form(Hybrid::Indirect)
+}
+
+/// The hybrid shape whose `/AcroForm` is a dictionary written in the catalog rather than an object
+/// of its own, so a fill drops the entry from the dictionary the catalog holds.
+#[must_use]
+pub fn pdf_hybrid_direct_form() -> Vec<u8> {
+    hybrid_form(Hybrid::Direct)
+}
+
+/// The hybrid shape whose `/XFA` entry is `null`: the entry is there but names nothing, and the
+/// reference's library leaves it in place.
+#[must_use]
+pub fn pdf_hybrid_null_form() -> Vec<u8> {
+    hybrid_form(Hybrid::NullEntry)
+}
+
+/// Where a hybrid fixture writes its `/AcroForm`, and what its `/XFA` entry states.
+enum Hybrid {
+    /// An object of the catalog's own, naming the packet.
+    Indirect,
+    /// A dictionary written in the catalog, naming the packet.
+    Direct,
+    /// An object of the catalog's own, stating `null`.
+    NullEntry,
+}
+
+fn hybrid_form(hybrid: Hybrid) -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let helvetica = pdf.push(PDF_FONT);
+    let content = pdf.stream("", b"BT /F1 14 Tf 72 780 Td (A hybrid form) Tj ET");
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let template = pdf.stream(
+        "",
+        b"<?xml version=\"1.0\"?><xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\">\
+          <template><subform name=\"form1\"/></template></xdp:xdp>",
+    );
+    let datasets = pdf.stream(
+        "",
+        b"<?xml version=\"1.0\"?><xfa:datasets \
+          xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\"><xfa:data/></xfa:datasets>",
+    );
+    let name = pdf.push(format!(
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /Rect [72 700 272 724] \
+         /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+    ));
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {helvetica} >> >> /Contents {content} \
+             /Annots [{name}] >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    let xfa = match hybrid {
+        Hybrid::Indirect | Hybrid::Direct => {
+            format!("[(template) {template} (datasets) {datasets}]")
+        }
+        Hybrid::NullEntry => "null".to_string(),
+    };
+    let body = format!(
+        "<< /Fields [{name}] /DA (/Helv 0 Tf 0 g) \
+         /DR << /Font << /Helv {helvetica} >> >> /XFA {xfa} >>"
+    );
+    let acroform = if matches!(hybrid, Hybrid::Direct) {
+        body
+    } else {
+        pdf.push(body)
+    };
+    let catalog = pdf.push(format!(
+        "<< /Type /Catalog /Pages {pages} /AcroForm {acroform} /NeedsRendering true >>"
+    ));
+    pdf.finish(&catalog, "")
+}
+
 /// A form whose text field states a normal appearance that is a state dictionary rather than a
 /// stream: the reference regenerates it when the field is filled, so the value is drawn.
 #[must_use]

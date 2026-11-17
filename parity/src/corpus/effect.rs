@@ -305,6 +305,11 @@ pub enum Effect {
     },
     /// The form was flattened: no fillable field remains.
     FormFlattened { output: Option<&'static str> },
+    /// The form names an XFA entry (`present`) or names none.
+    FormXfa {
+        output: Option<&'static str>,
+        present: bool,
+    },
     /// How many media parts the package embeds.
     ImageParts {
         output: Option<&'static str>,
@@ -828,6 +833,20 @@ impl Effect {
                     format!("the form still has {fields} field(s)")
                 })
             }
+            Self::FormXfa { present, .. } => {
+                let found = value
+                    .get("form")
+                    .and_then(|form| form.get("xfa"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                expect(found == present, || {
+                    if present {
+                        "the form names no XFA entry".to_string()
+                    } else {
+                        "the form still names an XFA entry".to_string()
+                    }
+                })
+            }
             Self::ImageParts { count, .. } => {
                 let found = media_parts(value).len();
                 expect(found == count, || {
@@ -874,6 +893,7 @@ impl Effect {
             | Self::FormState { output, .. }
             | Self::FormAppearance { output, .. }
             | Self::FormFlattened { output }
+            | Self::FormXfa { output, .. }
             | Self::ParagraphAttribute { output, .. }
             | Self::ImageParts { output, .. } => output,
         }
@@ -1039,6 +1059,12 @@ impl Effect {
                 format!("form field {field:?} draws {text:?}")
             }
             Self::FormFlattened { .. } => "form flattened".to_string(),
+            Self::FormXfa { present, .. } => if present {
+                "the form names an XFA entry"
+            } else {
+                "the form names no XFA entry"
+            }
+            .to_string(),
             Self::ImageParts { count, .. } => format!("{count} media part(s)"),
         }
     }
@@ -2161,5 +2187,26 @@ mod tests {
             "{}",
             failed.detail
         );
+    }
+
+    #[test]
+    fn the_form_xfa_effect_reads_the_forms_entry() {
+        let named = json!({ "form": { "fields": [], "xfa": true } });
+        let plain = json!({ "form": { "fields": [] } });
+        let gone = Effect::FormXfa {
+            output: None,
+            present: false,
+        };
+        assert!(
+            !check(&gone, &named).passed,
+            "a form that names an entry is not one that names none"
+        );
+        assert!(check(&gone, &plain).passed);
+        let named_effect = Effect::FormXfa {
+            output: None,
+            present: true,
+        };
+        assert!(check(&named_effect, &named).passed);
+        assert!(!check(&named_effect, &plain).passed);
     }
 }

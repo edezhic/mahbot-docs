@@ -3,6 +3,8 @@
 //! # What is compared
 //!
 //! A document becomes `{ "pages": […], "info": {…}, "form": {"fields": […]}, "attachments": […] }`.
+//! A form that names an XFA entry carries `"xfa": true` beside its `fields`, and one that names
+//! none states no such key.
 //!
 //! A page is:
 //!
@@ -40,8 +42,9 @@
 //!
 //! The document also carries the four content-bearing Info entries (`title`, `author`, `subject`,
 //! `keywords`; `null` when the document states none), every form field's fully-qualified name,
-//! kind, value, options, shown appearance state and drawn appearance text, and the names of its
-//! embedded files, read from the catalog's `/EmbeddedFiles` name tree.
+//! kind, value, options, shown appearance state and drawn appearance text, whether the form names
+//! an XFA entry, and the names of its embedded files, read from the catalog's `/EmbeddedFiles`
+//! name tree.
 //!
 //! # How an appearance is read
 //!
@@ -114,6 +117,9 @@
 //!   a high byte that is not UTF-8 reads as U+FFFD. PDFDocEncoding is not decoded: two different
 //!   legacy spellings can therefore read as the same replacement character and compare equal
 //!   (`a_string_without_a_utf16_marker_is_read_as_utf8`).
+//! - **An `/XFA` entry whose value is `null`** names nothing, so a form stating one is the same form
+//!   as one stating no entry — the reference's own form object reads it the same way
+//!   (`an_xfa_entry_that_is_null_names_none`).
 //!
 //! # What is compared byte for byte
 //!
@@ -170,6 +176,11 @@
 //!   (`an_appearances_glyph_program_is_not_compared`).
 //! - **A field's `/DA`.** It states what a viewer would edit the field with, not what the file
 //!   shows (`a_fields_default_appearance_is_not_read`).
+//! - **What an XFA packet holds, and the objects it names.** A hybrid form is compared by whether
+//!   its `/AcroForm` still names an XFA entry, because that entry decides whether a viewer shows
+//!   the packet's own form rather than the ordinary fields; the packet's streams and their bytes
+//!   are not read, and neither is the unreferenced object a fill may leave behind, so two packets
+//!   whose contents differ are one form (`an_xfa_packets_contents_are_not_compared`).
 //! - **A field's value, kind, state and options, read the way the format's writers read them.** A
 //!   field with no `/FT` and one whose type the model does not name are both `unknown`; a choice
 //!   that selects several options holds them as an array and the model spells them joined with
@@ -188,8 +199,8 @@
 //!   flags and a link's action target are not read, so a difference confined to them compares
 //!   equal (`an_annotation_is_its_subtype_rectangle_and_contents`).
 //! - **The parts of the document the model does not read at all**: outlines, page labels, the
-//!   catalog's language and XMP metadata. A difference confined to them is not seen
-//!   (`outlines_page_labels_language_and_xmp_are_not_read`).
+//!   catalog's language, its `/NeedsRendering` flag and XMP metadata. A difference confined to them
+//!   is not seen (`outlines_page_labels_language_needs_rendering_and_xmp_are_not_read`).
 //! - **The document's structure tree and a page's marked content** are not read either: a document
 //!   that tags its content and one that does not are one document
 //!   (`a_structure_tree_and_marked_content_are_not_read`).
@@ -359,11 +370,11 @@ fn model(bytes: &[u8]) -> Result<Value> {
         .iter()
         .map(|page| page_value(page, &mut budget))
         .collect::<Result<Vec<_>>>()?;
-    let fields = fields_value(&pdf, &mut budget)?;
+    let form = form_value(&pdf, &mut budget)?;
     Ok(json!({
         "pages": pages,
         "info": info_value(pdf.metadata()),
-        "form": { "fields": fields },
+        "form": form,
         "attachments": attachment_names(&pdf),
     }))
 }
@@ -1074,38 +1085,49 @@ fn info_value(metadata: &Metadata) -> Value {
     })
 }
 
-/// Every form field, in field-tree order.
-fn fields_value(pdf: &Pdf, budget: &mut Decoded) -> Result<Vec<Value>> {
+/// The document's form: every field its tree holds, in field-tree order, and whether it names an XFA
+/// entry. The key is stated only where the form names one, so a form naming none leaves the model
+/// unchanged.
+fn form_value(pdf: &Pdf, budget: &mut Decoded) -> Result<Value> {
     let Some(acroform) = catalog(pdf).and_then(|catalog| catalog.get::<Dict<'_>>(b"AcroForm"))
     else {
-        return Ok(Vec::new());
+        return Ok(json!({ "fields": [] }));
     };
-    let Some(fields) = acroform.get::<Array<'_>>(b"Fields") else {
-        return Ok(Vec::new());
-    };
-    let mut walk = FieldWalk {
-        found: Vec::new(),
-        visited: HashSet::new(),
-    };
-    for field in fields.iter::<Object<'_>>() {
-        if let Object::Dict(field) = field {
-            walk.visit(&field, "", 0);
+    let mut out = Vec::new();
+    if let Some(fields) = acroform.get::<Array<'_>>(b"Fields") {
+        let mut walk = FieldWalk {
+            found: Vec::new(),
+            visited: HashSet::new(),
+        };
+        for field in fields.iter::<Object<'_>>() {
+            if let Object::Dict(field) = field {
+                walk.visit(&field, "", 0);
+            }
+        }
+        let mut cache: ToUnicodeCache = HashMap::new();
+        for (field, name) in walk.found {
+            let kind = field_kind(&field);
+            out.push(json!({
+                "name": name,
+                "kind": kind,
+                "value": field_value(&field),
+                "options": field_options(&field, kind),
+                "state": field_state(&field, kind),
+                "appearance": field_appearance(&field, &mut cache, budget)?,
+            }));
         }
     }
-    let mut cache: ToUnicodeCache = HashMap::new();
-    let mut out = Vec::new();
-    for (field, name) in walk.found {
-        let kind = field_kind(&field);
-        out.push(json!({
-            "name": name,
-            "kind": kind,
-            "value": field_value(&field),
-            "options": field_options(&field, kind),
-            "state": field_state(&field, kind),
-            "appearance": field_appearance(&field, &mut cache, budget)?,
-        }));
-    }
-    Ok(out)
+    // An entry whose value is `null` names nothing, which is how the reference's own form object
+    // reads it.
+    let names_entry = matches!(
+        acroform.get::<Object<'_>>(b"XFA"),
+        Some(object) if !matches!(object, Object::Null(_))
+    );
+    Ok(if names_entry {
+        json!({ "fields": out, "xfa": true })
+    } else {
+        json!({ "fields": out })
+    })
 }
 
 /// The document catalog, which holds the form and the name tree.

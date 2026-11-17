@@ -106,6 +106,8 @@ pub(super) fn run(request: &Request, produced: &mut Produced) -> Result<(), Fail
     if broken_acroform(&document, &chains) {
         return Err(Failure::engine());
     }
+    // Before any value is applied, so a request that writes nothing drops the entry too.
+    drop_xfa(&mut document);
     let fields = parse(&mut document, &chains);
     let face = Face::bundled();
     let mut dirty = HashSet::new();
@@ -217,6 +219,22 @@ fn acroform(document: &mut Document) -> Option<ObjectId> {
             Some(id)
         }
         _ => None,
+    }
+}
+
+/// Drop the form's `/XFA` entry, as the reference's library does when it is asked for the form: a
+/// hybrid file's packet would otherwise still name the original form, which a viewer that prefers
+/// the packet shows instead of the fields just filled. The packet's own objects stay in the file,
+/// unreferenced; nothing reads them. An entry whose value is `null` names nothing, and the
+/// reference's own `has` reads it as absent and leaves it in place, so this does too.
+fn drop_xfa(document: &mut Document) {
+    if let Some(acroform) = acroform(document)
+        && let Ok(dictionary) = document
+            .get_object_mut(acroform)
+            .and_then(Object::as_dict_mut)
+        && !matches!(dictionary.get(b"XFA"), Ok(Object::Null))
+    {
+        dictionary.remove(b"XFA");
     }
 }
 

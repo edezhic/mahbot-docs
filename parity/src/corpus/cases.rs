@@ -44,23 +44,24 @@ use super::documents::{
     FILL_UNREADABLE_DOCX, FILL_UNREADABLE_XLSX, FILL_UNTERMINATED_AFTER_TAG_DOCX,
     FILL_UNTERMINATED_DELIMITER_DOCX, FILL_UNTERMINATED_DELIMITER_THEN_TAG_DOCX,
     FILL_UNTERMINATED_UNCLOSED_DOCX, FILL_UNTERMINATED_UNOPENED_DOCX, FILL_WORD_AS_XLSX,
-    FILL_ZERO_XLSX, FORM_PDF, LISTED_FIELD_FORM_PDF, MAX_LENGTH_FORM_PDF, MERGE_A_PDF, MERGE_B_PDF,
-    MERGE_C_PDF, MISPLACED_FORM_PDF, MULTILINE_FORM_PDF, NO_GEOMETRY_PDF,
-    OBJECT_STREAM_ASCII_HEX_PDF, OBJECT_STREAM_INFLATED_PDF, OBJECT_STREAM_PDF, OPTION_FORM_PDF,
-    PAIRED_OPTIONS_FORM_PDF, PAIRED_RADIO_FORM_PDF, PICTURE_BMP, PICTURE_BROKEN_PNG, PICTURE_JPEG,
-    PICTURE_LARGE, PICTURE_OVERSIZE, PICTURE_PDF, PICTURE_PIXEL, PICTURE_PNG,
-    PICTURE_STALE_CRC_PNG, PICTURE_TALL, PICTURE_WEBP, PPTX_ASSETS, PPTX_BOXES, PPTX_BROKEN_SLOT,
-    PPTX_LIST_DISAGREES, PPTX_LIST_REORDERED, PPTX_MACRO, PPTX_MISSING_NOTES,
-    PPTX_NO_CONTENT_TYPES, PPTX_NO_LAYOUT, PPTX_NO_NOTES_MASTER, PPTX_NO_SHAPE_TREE, PPTX_NO_SIZE,
-    PPTX_NO_SLIDE_LIST, PPTX_NOTES_NO_BODY, PPTX_NOTES_TWO, PPTX_RUNS, PPTX_SECTIONS, PPTX_SIGNED,
-    PPTX_SLIDE_OUTSIDE, PPTX_TABLE, PPTX_TWO_NOTES_MASTERS, PUSHBUTTON_CAPTION_FORM_PDF,
-    PUSHBUTTON_FORM_PDF, RADIO_OPTIONS_FORM_PDF, RADIO_OUTRUN_FORM_PDF, RECTLESS_BUTTON_FORM_PDF,
-    RECTLESS_FLAT_FORM_PDF, RECTLESS_FORM_PDF, REPEATED_PAGE_ANNOTATED_PDF, REPEATED_PAGE_PDF,
-    RICH_PDF, RICH_PPTX, ROTATED_PDF, SIGNATURE_FORM_PDF, STATE_APPEARANCE_FORM_PDF,
-    STATED_SIZE_FORM_PDF, TEMPLATE_DOCX, TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF,
-    TRUNCATED_XLSX, TWO_CATALOGS_PDF, WORD_AS_PPTX, XLSX_ALL_HIDDEN, XLSX_BAD_MERGE_REF,
-    XLSX_BROKEN_MERGES, XLSX_EDIT, XLSX_MACRO, XLSX_NO_CONTENT_TYPES, XLSX_NO_FAMILY,
-    XLSX_ONE_VISIBLE, XLSX_ONLY_SHEET, XLSX_SELF_CLOSING, XLSX_UNCLOSED_MERGE_CELL,
+    FILL_ZERO_XLSX, FORM_PDF, HYBRID_DIRECT_FORM_PDF, HYBRID_FORM_PDF, LISTED_FIELD_FORM_PDF,
+    MAX_LENGTH_FORM_PDF, MERGE_A_PDF, MERGE_B_PDF, MERGE_C_PDF, MISPLACED_FORM_PDF,
+    MULTILINE_FORM_PDF, NO_GEOMETRY_PDF, OBJECT_STREAM_ASCII_HEX_PDF, OBJECT_STREAM_INFLATED_PDF,
+    OBJECT_STREAM_PDF, OPTION_FORM_PDF, PAIRED_OPTIONS_FORM_PDF, PAIRED_RADIO_FORM_PDF,
+    PICTURE_BMP, PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_LARGE, PICTURE_OVERSIZE, PICTURE_PDF,
+    PICTURE_PIXEL, PICTURE_PNG, PICTURE_STALE_CRC_PNG, PICTURE_TALL, PICTURE_WEBP, PPTX_ASSETS,
+    PPTX_BOXES, PPTX_BROKEN_SLOT, PPTX_LIST_DISAGREES, PPTX_LIST_REORDERED, PPTX_MACRO,
+    PPTX_MISSING_NOTES, PPTX_NO_CONTENT_TYPES, PPTX_NO_LAYOUT, PPTX_NO_NOTES_MASTER,
+    PPTX_NO_SHAPE_TREE, PPTX_NO_SIZE, PPTX_NO_SLIDE_LIST, PPTX_NOTES_NO_BODY, PPTX_NOTES_TWO,
+    PPTX_RUNS, PPTX_SECTIONS, PPTX_SIGNED, PPTX_SLIDE_OUTSIDE, PPTX_TABLE, PPTX_TWO_NOTES_MASTERS,
+    PUSHBUTTON_CAPTION_FORM_PDF, PUSHBUTTON_FORM_PDF, RADIO_OPTIONS_FORM_PDF,
+    RADIO_OUTRUN_FORM_PDF, RECTLESS_BUTTON_FORM_PDF, RECTLESS_FLAT_FORM_PDF, RECTLESS_FORM_PDF,
+    REPEATED_PAGE_ANNOTATED_PDF, REPEATED_PAGE_PDF, RICH_PDF, RICH_PPTX, ROTATED_PDF,
+    SIGNATURE_FORM_PDF, STATE_APPEARANCE_FORM_PDF, STATED_SIZE_FORM_PDF, TEMPLATE_DOCX,
+    TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF, TRUNCATED_XLSX, TWO_CATALOGS_PDF, WORD_AS_PPTX,
+    XLSX_ALL_HIDDEN, XLSX_BAD_MERGE_REF, XLSX_BROKEN_MERGES, XLSX_EDIT, XLSX_MACRO,
+    XLSX_NO_CONTENT_TYPES, XLSX_NO_FAMILY, XLSX_ONE_VISIBLE, XLSX_ONLY_SHEET, XLSX_SELF_CLOSING,
+    XLSX_UNCLOSED_MERGE_CELL,
 };
 use super::effect::{BoxKind, Scalar, Scope};
 use super::{
@@ -14157,6 +14158,34 @@ fn pdf_cases() -> Vec<Case> {
                 },
             ],
         ),
+        // A hybrid file turned, not filled: the reference's library is never asked for the form, so
+        // the entry stays and the model records it. Only a fill drops it.
+        produced(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("hybrid_form"),
+            vec![HYBRID_FORM_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/hybrid-form.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            vec![
+                Effect::PageRotate {
+                    output: None,
+                    page: 0,
+                    degrees: 90,
+                },
+                Effect::FormXfa {
+                    output: None,
+                    present: true,
+                },
+            ],
+        )
+        .named("hybrid_form"),
         // An in-place action reads and writes one page object once per name, so the second read
         // sees the turn the first write left: both names show two quarter turns.
         produced(
@@ -16207,6 +16236,140 @@ fn pdf_cases() -> Vec<Case> {
             )),
         )
         .named("refused_radio_outrun"),
+        // ── a form that also names an XFA entry ─────────────────────────────────────────────────
+        // A hybrid file carries both ordinary fields and an XFA packet, and a viewer that prefers
+        // the packet shows the packet's own form. The reference's library drops the form's `/XFA`
+        // entry when it is asked for the form — before any value is written — so the produced file
+        // no longer names the entry and the filled fields are what a viewer shows. The entry is
+        // what decides this, not the packet's bytes, which the library leaves in the file.
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("hybrid"),
+            vec![HYBRID_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/hybrid-form.pdf",
+                "values": { "name": "Ada" },
+                "flatten": false,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![
+                Effect::FormValue {
+                    output: None,
+                    field: "name",
+                    value: "Ada",
+                },
+                Effect::FormAppearance {
+                    output: None,
+                    field: "name",
+                    text: "Ada",
+                },
+                Effect::FormXfa {
+                    output: None,
+                    present: false,
+                },
+            ],
+        )
+        .named("hybrid"),
+        // The same hybrid shape with its `/AcroForm` written in the catalog rather than as an object
+        // of its own: the entry goes from the dictionary the catalog holds.
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("hybrid_direct_form"),
+            vec![HYBRID_DIRECT_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/hybrid-direct-form.pdf",
+                "values": { "name": "Ada" },
+                "flatten": false,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![
+                Effect::FormValue {
+                    output: None,
+                    field: "name",
+                    value: "Ada",
+                },
+                Effect::FormAppearance {
+                    output: None,
+                    field: "name",
+                    text: "Ada",
+                },
+                Effect::FormXfa {
+                    output: None,
+                    present: false,
+                },
+            ],
+        )
+        .named("hybrid_direct_form"),
+        // The removal is the library's side effect of asking for the form, not of writing a value:
+        // an empty value map produces the form unchanged, and the entry still goes.
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("hybrid_empty_values"),
+            vec![HYBRID_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/hybrid-form.pdf",
+                "values": {},
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![Effect::FormXfa {
+                output: None,
+                present: false,
+            }],
+        )
+        .named("hybrid_empty_values"),
+        // A scalar `values` is answered by producing the form unchanged, and the entry still goes:
+        // the library drops it before any value is applied.
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("hybrid_scalar_values"),
+            vec![HYBRID_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/hybrid-form.pdf",
+                "values": 5,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![Effect::FormXfa {
+                output: None,
+                present: false,
+            }],
+        )
+        .named("hybrid_scalar_values"),
+        // Flattening the hybrid form also leaves no entry named: the AcroForm stays, without fields
+        // and without the entry.
+        produced(
+            Family::Pdf,
+            "pdf_form_fill",
+            Some("hybrid_flatten"),
+            vec![HYBRID_FORM_PDF],
+            json!({
+                "op": "pdf_form_fill",
+                "input": "$in/hybrid-form.pdf",
+                "values": { "name": "Ada" },
+                "flatten": true,
+                "output": "$out/filled.pdf",
+            }),
+            vec!["filled.pdf"],
+            vec![
+                Effect::FormFlattened { output: None },
+                Effect::FormXfa {
+                    output: None,
+                    present: false,
+                },
+            ],
+        )
+        .named("hybrid_flatten"),
     ];
     // A file whose body is intact and whose index is not: the reference never consults the index, so
     // all five actions answer from the body alone, and the produced file must hold both pages.

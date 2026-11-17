@@ -4092,6 +4092,48 @@ mod tests {
         );
     }
 
+    #[test]
+    fn pdf_form_fill_drops_a_hybrid_forms_packet_entry() {
+        // Every request shape, including the two that write no value.
+        let directory = scratch();
+        for (index, values) in [json!({ "name": "Ada" }), json!({}), json!(5)]
+            .into_iter()
+            .enumerate()
+        {
+            let input = fixture(directory.path(), "hybrid.pdf", build::pdf_hybrid_form());
+            let acroform = filled_form(directory.path(), &input, &values, &format!("out{index}"));
+            assert!(
+                acroform.get(b"XFA").is_err(),
+                "the form still names an entry after a fill with {values}"
+            );
+        }
+        // An entry whose value is `null` names nothing, and the reference leaves it: the fill
+        // keeps it.
+        let input = fixture(
+            directory.path(),
+            "hybrid-null.pdf",
+            build::pdf_hybrid_null_form(),
+        );
+        let acroform = filled_form(directory.path(), &input, &json!({ "name": "Ada" }), "null");
+        assert_eq!(
+            acroform.get(b"XFA").ok(),
+            Some(&Object::Null),
+            "the null entry stays"
+        );
+    }
+
+    /// The `/AcroForm` of the document a fill of `input` with `values` produced, written as `base`.
+    fn filled_form(directory: &Path, input: &Path, values: &Value, base: &str) -> Dictionary {
+        let outcome = run(
+            directory,
+            "pdf_form_fill",
+            json!({ "input": input.to_string_lossy(), "values": values }),
+            base,
+        );
+        let document = parsed(produced(&outcome));
+        nested(&document, &catalog(&document), b"AcroForm").expect("the form is a form")
+    }
+
     /// The dictionary `key` holds in `dictionary`, resolved through any reference.
     fn nested(document: &Document, dictionary: &Dictionary, key: &[u8]) -> Option<Dictionary> {
         let value = dictionary.get(key).ok()?;

@@ -922,6 +922,91 @@ fn an_option_pairs_export_name_is_not_compared() {
     assert_eq!(radio["form"]["fields"][0]["options"], json!([]));
 }
 
+/// A one-page PDF whose `/AcroForm` holds one text field and states `entry`. The packet's streams
+/// are the `template` and `datasets` objects, and an object `entry` does not name is unreferenced.
+fn pdf_naming_xfa(entry: &str, template: &[u8], datasets: &[u8]) -> Vec<u8> {
+    pdf_with_entries(
+        "/AcroForm {acroform}",
+        "",
+        vec![
+            Object::new(
+                "field",
+                "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /Rect [10 10 90 30] \
+                 /P {page} >>",
+            ),
+            Object::new("template", stream(&[], template, false)),
+            Object::new("datasets", stream(&[], datasets, false)),
+            Object::new("acroform", format!("<< /Fields [{{field}}] {entry} >>")),
+        ],
+    )
+}
+
+/// A hybrid form is compared by whether its form names an XFA entry, not by what the packet holds:
+/// two packets whose streams differ are one form, and a form that names none is a difference. The
+/// entry is what a viewer that prefers the packet follows, so it is the entry the model records.
+#[test]
+fn an_xfa_packets_contents_are_not_compared() {
+    let one = canonical(&pdf_naming_xfa(
+        "/XFA [(template) {template} (datasets) {datasets}]",
+        b"<template><subform name=\"one\"/></template>",
+        b"<xfa:data xmlns:xfa=\"xfa\"><name>Ada</name></xfa:data>",
+    ))
+    .expect("a readable PDF");
+    let other = canonical(&pdf_naming_xfa(
+        "/XFA [(template) {template} (datasets) {datasets}]",
+        b"<template><subform name=\"two\"/></template>",
+        b"<xfa:data xmlns:xfa=\"xfa\"><name>Grace</name></xfa:data>",
+    ))
+    .expect("a readable PDF");
+    assert_eq!(one["form"]["xfa"], json!(true));
+    assert!(
+        compare(&one, &other).is_same(),
+        "a packet's contents are not a difference: {:?}",
+        compare(&one, &other).lines(4)
+    );
+    // An entry that names only the template leaves the datasets stream unreferenced, as a fill that
+    // drops the entry leaves both: an object nothing refers to is not part of the model.
+    let unreferenced = canonical(&pdf_naming_xfa(
+        "/XFA [(template) {template}]",
+        b"<template><subform name=\"one\"/></template>",
+        b"<xfa:data xmlns:xfa=\"xfa\"><name>Ada</name></xfa:data>",
+    ))
+    .expect("a readable PDF");
+    assert!(
+        compare(&one, &unreferenced).is_same(),
+        "an unreferenced packet object is not a difference: {:?}",
+        compare(&one, &unreferenced).lines(4)
+    );
+    let without = canonical(&pdf_naming_xfa("", b"", b"")).expect("a readable PDF");
+    assert!(
+        without["form"].get("xfa").is_none(),
+        "a form that names no entry states no key: {}",
+        without["form"]
+    );
+    assert!(
+        !compare(&one, &without).is_same(),
+        "a form that still names an entry is a difference"
+    );
+}
+
+/// An `/XFA` entry whose value is `null` names nothing, so the form states no `xfa` key and is the
+/// same form as one stating no entry — the reference's own form object reads it the same way.
+#[test]
+fn an_xfa_entry_that_is_null_names_none() {
+    let null = canonical(&pdf_naming_xfa("/XFA null", b"", b"")).expect("a readable PDF");
+    let none = canonical(&pdf_naming_xfa("", b"", b"")).expect("a readable PDF");
+    assert!(
+        null["form"].get("xfa").is_none(),
+        "a null entry names nothing: {}",
+        null["form"]
+    );
+    assert!(
+        compare(&null, &none).is_same(),
+        "a null entry is no entry: {:?}",
+        compare(&null, &none).lines(4)
+    );
+}
+
 /// A radio group's state is the first state its widgets show that is not `Off`, so a difference in a
 /// later widget's state is not seen; a group with no widget records `null`, which `Off` is not.
 #[test]
@@ -1828,7 +1913,7 @@ fn an_annotation_without_a_subtype_is_recorded_with_an_empty_one() {
 /// The parts of the document the model does not read at all: a difference confined to them is not
 /// seen.
 #[test]
-fn outlines_page_labels_language_and_xmp_are_not_read() {
+fn outlines_page_labels_language_needs_rendering_and_xmp_are_not_read() {
     let base = canonical(&pdf_with_entries("", "", Vec::new())).expect("a readable PDF");
     assert_eq!(
         base["info"],
@@ -1848,6 +1933,12 @@ fn outlines_page_labels_language_and_xmp_are_not_read() {
             Vec::new(),
         ),
         ("the language", "/Lang (de-DE)", "/Lang (de-DE)", Vec::new()),
+        (
+            "needs-rendering flag",
+            "/NeedsRendering true",
+            "/NeedsRendering",
+            Vec::new(),
+        ),
         (
             "XMP metadata",
             "/Metadata {metadata}",
