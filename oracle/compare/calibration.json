@@ -1,0 +1,85 @@
+{
+  "schema": 1,
+  "pdfium_release": "chromium/8165",
+  "pdfium_sha256": "d421e426bd487de02fa3bd1f2aeaf56947261f790e6116951e26f729ced1b018",
+  "metric": {
+    "long_side_px": 1000,
+    "max_scale": 16.0,
+    "block_px": 8,
+    "block_difference_threshold": 16.0,
+    "ink_luminance": 250.0,
+    "dimension_rounding_px": 2
+  },
+  "classes": {
+    "text": {
+      "max_changed_fraction": 0.0025,
+      "measured": {
+        "page": "pdf/text page 1",
+        "total_blocks": 11125,
+        "real_pair": 1,
+        "noise_amplitude_16": 13,
+        "sub_pixel_shift": 14,
+        "whole_pixel_shift": 221,
+        "element_moved": 1272,
+        "blank": 2817
+      },
+      "secondary": [
+        {
+          "page": "pdf/small page 1",
+          "total_blocks": 15625,
+          "real_pair": 0,
+          "noise_amplitude_16": 0,
+          "sub_pixel_shift": 0,
+          "whole_pixel_shift": 3,
+          "element_moved": 46,
+          "blank": 47
+        }
+      ],
+      "note": "The real pair produced 1 changed block; +-16 antialiasing noise 13 and a 0.5-pixel shift 14, both below the threshold's 28 blocks; a whole-pixel shift 221 and the control's 24-pixel move 1272 are well above it. The class separates the two directions on a dense page. The 300-point page carries less ink: its blank page produces 47 changed blocks (above the class's 39-block allowance on its 15625 blocks), its whole-pixel shift 3 and its 24-pixel move 46, so the class is coarse there and does not claim per-pixel sensitivity."
+    },
+    "picture": {
+      "max_changed_fraction": 0.003,
+      "measured": {
+        "page": "pdf/picture page 1",
+        "total_blocks": 11125,
+        "real_pair": 0,
+        "noise_amplitude_16": 0,
+        "sub_pixel_shift": 19,
+        "whole_pixel_shift": 38,
+        "element_moved": 280,
+        "blank": 649
+      },
+      "secondary": [
+        {
+          "page": "pdf/pages page 2",
+          "total_blocks": 11125,
+          "real_pair": 0,
+          "noise_amplitude_16": 0,
+          "sub_pixel_shift": 0,
+          "whole_pixel_shift": 7,
+          "element_moved": 110,
+          "blank": 106
+        }
+      ],
+      "note": "The real pair produced 0 changed blocks, a 0.5-pixel shift 19 and a whole-pixel shift 38, so the class separates the two directions at 34 blocks on the full-size picture; the control's 24-pixel move produces 280. The second picture page places the picture smaller, so its whole-pixel shift produces only 7 and its 24-pixel move 110; the class is coarse there. The two renderers resample images differently: the signal catches a missing, blank or grossly displaced picture, not a small colour shift."
+    },
+    "annotation": {
+      "max_changed_fraction": 0.006,
+      "measured": {
+        "page": "pdf/annotated page 1",
+        "total_blocks": 11125,
+        "real_pair": 31,
+        "noise_amplitude_16": 39,
+        "sub_pixel_shift": 45,
+        "whole_pixel_shift": 53,
+        "element_moved": 228,
+        "blank": 397
+      },
+      "secondary": [],
+      "note": "The annotation's rectangle is rounded to device pixels differently by the two renderers: the real pair already differs by 31 blocks, and a whole-pixel shift (53) is not separable from a sub-pixel one (45). The class cannot separate the two and says so; its threshold is 67 blocks, which catches a blank page (397) and the control's 24-pixel move (228), not a one-pixel shift."
+    }
+  },
+  "controls": {
+    "element_moved_px": 24
+  }
+}

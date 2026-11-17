@@ -7,6 +7,8 @@ how the record is produced and what the machinery is; this file says how to read
 judged on, and the workspace commits none: every corpus input is synthesised in code. What is here is
 an output an outside producer was judged on, kept so the pages can be rasterised and reviewed later.
 Nothing in the engine's build or tests reads it; the oracle's own tests read it to prove it is whole.
+The comparison does not read this record: it judges the engine's own PDF output against PDFium
+(`../compare/README.md`), and a recorded Office page is not compared there.
 
 Reading an entry needs nothing but this directory: no LibreOffice, no network, no build. Reading it
 also checks it: the kept PDF must be the one its entry describes — the same object graph, and the

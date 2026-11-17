@@ -4,7 +4,7 @@
 //! whatever the working tree holds when it is read.
 
 use sha2::{Digest, Sha256};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 // The codec list has one home, shared with the crate and its contract test. A build script cannot
 // depend on the crate it builds, so it includes the same source file. The captured parts' licence
@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 // script must read the list the harness's comparison skips.
 include!("src/codecs.rs");
 include!("src/notices.rs");
+include!("src/crate_identity.rs");
 
 /// Every source of the reference reader: the product's reader modules copied under
 /// `reference_sources/` and the minimal host beside them.
@@ -50,9 +51,10 @@ const WRITER_RUNNER: &str = "parity/src/reference/writer.rs";
 
 fn main() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    // `include!` does not register its target with cargo, so the codec list and the notices are
-    // watched explicitly: editing either must rerun this script, or the recorded versions and both
-    // build digests go stale while the gate still reports that the identity matches.
+    // `include!` does not register its target with cargo, so the codec list, the notices and the
+    // shared identity rule are watched explicitly: editing any must rerun this script, or the
+    // recorded versions and both build digests go stale while the gate still reports that the
+    // identity matches.
     println!(
         "cargo:rerun-if-changed={}",
         manifest.join("src/codecs.rs").display()
@@ -60,6 +62,10 @@ fn main() {
     println!(
         "cargo:rerun-if-changed={}",
         manifest.join("src/notices.rs").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest.join("src/crate_identity.rs").display()
     );
     let workspace = manifest
         .parent()
@@ -100,101 +106,20 @@ fn main() {
     );
     println!("cargo:rustc-env=PARITY_READER_COMPONENTS={components}");
 
-    // The crate's own reading identity: every Rust source under `document-engine/src`, its
-    // vocabulary and the font it rasterises with, sorted by path so two builds agree. The
-    // directory itself is watched so a source added later reruns this script rather than being
-    // silently omitted from the identity.
-    let crate_root = workspace.join("document-engine");
+    // The crate's own build identity, computed by the one rule the oracle shares. Every byte that
+    // decides what the crate reads or writes is covered, and the oracle's comparison names the same
+    // build with the same digest.
+    let identity = crate_identity(workspace, &codecs, NOTICES, LAYOUT_NOTICES, &mut |path| {
+        println!("cargo:rerun-if-changed={}", path.display())
+    });
     println!(
-        "cargo:rerun-if-changed={}",
-        crate_root.join("src").display()
+        "cargo:rustc-env=PARITY_CRATE_READER_BUILD={}",
+        identity.build
     );
-    let mut crate_sources = Vec::new();
-    collect(&crate_root.join("src"), Some("rs"), &mut crate_sources);
-    crate_sources.push(crate_root.join("vocabulary.json"));
-    crate_sources.push(crate_root.join("assets/NotoSans-Regular.ttf"));
-    crate_sources.sort();
-    let mut crate_combined = Sha256::new();
-    let mut crate_components = String::new();
-    for path in &crate_sources {
-        println!("cargo:rerun-if-changed={}", path.display());
-        let bytes =
-            std::fs::read(path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-        let name = path
-            .strip_prefix(workspace)
-            .unwrap_or(path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        crate_combined.update(&bytes);
-        crate_components.push_str(&format!("{name}={:x};", Sha256::digest(&bytes)));
-    }
-    // The parts a created deck is captured from: a captured byte is a byte the crate's writer
-    // produces, so a change there is a change to what it writes. The crate's reader and writer
-    // share one build digest — one crate, one digest — so this component moves both identities, and
-    // a part re-captured from the reference is never silently read as the same build.
-    //
-    // The directory itself is watched as well as each file: a part added there must rerun this
-    // script rather than be left out of the identity it belongs to.
-    let captured_root = crate_root.join("assets/pptx-create");
-    println!("cargo:rerun-if-changed={}", captured_root.display());
-    let mut captured = Vec::new();
-    collect(&captured_root, None, &mut captured);
-    captured.sort();
-    for path in &captured {
-        let name = path
-            .strip_prefix(&captured_root)
-            .unwrap_or(path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        // A licence notice is not a part a deck holds, so it is not a byte the writer produces.
-        if NOTICES.contains(&name.as_str()) {
-            continue;
-        }
-        println!("cargo:rerun-if-changed={}", path.display());
-        let bytes =
-            std::fs::read(path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-        crate_combined.update(&bytes);
-        crate_components.push_str(&format!("pptx-create:{name}={:x};", Sha256::digest(&bytes)));
-    }
-    // A created Word document's captured parts, and the width data its layout reads: the same rule
-    // as a created deck's, with a component of its own so the two sets stay readable in the record.
-    for (directory, prefix) in [
-        ("assets/docx-create", "docx-create"),
-        ("assets/docx-layout", "docx-layout"),
-    ] {
-        let root = crate_root.join(directory);
-        println!("cargo:rerun-if-changed={}", root.display());
-        let mut files = Vec::new();
-        collect(&root, None, &mut files);
-        files.sort();
-        for path in &files {
-            let name = path
-                .strip_prefix(&root)
-                .unwrap_or(path)
-                .to_string_lossy()
-                .replace('\\', "/");
-            if NOTICES.contains(&name.as_str()) || LAYOUT_NOTICES.contains(&name.as_str()) {
-                continue;
-            }
-            // The probes are documentation: they report what a created document reaches, but the
-            // layout reads none of them, so they are not bytes the writer produces.
-            if name.starts_with("probes/") {
-                continue;
-            }
-            println!("cargo:rerun-if-changed={}", path.display());
-            let bytes = std::fs::read(path)
-                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-            crate_combined.update(&bytes);
-            crate_components.push_str(&format!("{prefix}:{name}={:x};", Sha256::digest(&bytes)));
-        }
-    }
-    crate_components.push_str(&format!("codecs={:x};", Sha256::digest(codecs.as_bytes())));
-    crate_combined.update(codecs.as_bytes());
     println!(
-        "cargo:rustc-env=PARITY_CRATE_READER_BUILD={:x}",
-        crate_combined.finalize()
+        "cargo:rustc-env=PARITY_CRATE_READER_COMPONENTS={}",
+        identity.components
     );
-    println!("cargo:rustc-env=PARITY_CRATE_READER_COMPONENTS={crate_components}");
 
     let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
     let version = std::process::Command::new(rustc)
@@ -205,23 +130,4 @@ fn main() {
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
         .unwrap_or_else(|| "unknown rustc".to_string());
     println!("cargo:rustc-env=PARITY_READER_RUNTIME={version}");
-}
-
-/// Every file under `directory`, recursively, whose extension is `extension` — or every file when
-/// it is `None`.
-fn collect(directory: &Path, extension: Option<&str>, out: &mut Vec<PathBuf>) {
-    let entries = std::fs::read_dir(directory)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", directory.display()));
-    for entry in entries {
-        let path = entry
-            .unwrap_or_else(|e| panic!("cannot read {}: {e}", directory.display()))
-            .path();
-        if path.is_dir() {
-            collect(&path, extension, out);
-        } else if extension
-            .is_none_or(|extension| path.extension().is_some_and(|own| own == extension))
-        {
-            out.push(path);
-        }
-    }
 }

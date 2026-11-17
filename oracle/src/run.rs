@@ -24,8 +24,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::canonical;
+use crate::chain::Assets;
 use crate::corpus::{self, Document};
-use crate::engine::{self, Assets, Built};
+use crate::engine::{self, Built};
 use crate::fonts::{self, FontSet};
 use crate::record::{
     Ambient, BlankPageRecord, DocumentRecord, FontIdentity, Identity, Invocation, Paper, Produced,
@@ -431,7 +432,7 @@ fn survey(
     progress: bool,
 ) -> Result<Survey, String> {
     let deadline = std::time::Instant::now() + SURVEY_TIMEOUT;
-    let assets = Assets::write(&root.join("corpus"))?;
+    let assets = Assets::write(&root.join("corpus/assets"), corpus::ASSETS)?;
     let converter = Converter::new(reference, &root.join("reference"), &set.config)?;
     let visible = visibility(&converter, set, &root.join("probe"))?;
     let mut documents = Vec::with_capacity(corpus::documents().len());

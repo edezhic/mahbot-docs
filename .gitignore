@@ -5,3 +5,7 @@ target/
 .idea/
 .vscode/
 *.log
+
+# The comparison report and its evidence are generated on every run, replaced rather than
+# accumulated, and never committed.
+/oracle/compare/evidence/

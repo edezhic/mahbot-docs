@@ -5,9 +5,10 @@
 // change a compared digest without changing any source this workspace holds; the object model is
 // recorded for the same reason, because a new version of it can write a different file.
 //
-// This file is the list's one home: `build.rs` includes it to emit the versions, and
-// `tests/engine_contract.rs` reads it through the crate. Adding a codec here is therefore covered
-// by the contract test without a second copy to keep in step.
+// This file is the list's one home: `build.rs` includes it to emit the versions, the oracle's build
+// script includes it to name the engine build, and `tests/engine_contract.rs` reads it through the
+// crate. Adding a codec here is therefore covered by the contract test without a second copy to keep
+// in step.
 
 /// The codecs whose resolved versions are part of the comparison identity. A codec named in a
 /// manifest is pinned exactly by the contract test, so a patch bump is a deliberate edit.
@@ -68,29 +69,32 @@ pub const CODECS: &[&str] = &[
 /// to any of them is a change to what may run. A codec missing from the lock is a build-script bug,
 /// not a reason to record an incomplete identity.
 pub fn codec_versions(lock: &str) -> String {
-    let mut versions: std::collections::BTreeMap<&str, Vec<&str>> =
-        std::collections::BTreeMap::new();
-    let mut name: Option<&str> = None;
-    for line in lock.lines().map(str::trim) {
-        if let Some(rest) = line.strip_prefix("name = \"") {
-            name = rest.strip_suffix('"');
-        } else if let Some(rest) = line.strip_prefix("version = \"")
-            && let Some(version) = rest.strip_suffix('"')
-            && let Some(name) = name.take()
-            && CODECS.contains(&name)
-        {
-            versions.entry(name).or_default().push(version);
-        }
-    }
     CODECS
         .iter()
         .map(|name| {
-            let mut resolved = versions
-                .get(name)
-                .unwrap_or_else(|| panic!("Cargo.lock resolves no `{name}`"))
-                .clone();
-            resolved.sort_unstable();
+            let resolved = resolved_versions(lock, name);
+            assert!(!resolved.is_empty(), "Cargo.lock resolves no `{name}`");
             format!("{name}={};", resolved.join(","))
         })
         .collect()
+}
+
+/// The versions the lock resolves for `name`, sorted; empty when it holds no such package.
+pub(crate) fn resolved_versions<'a>(lock: &'a str, name: &str) -> Vec<&'a str> {
+    let mut versions = Vec::new();
+    let mut current: Option<&str> = None;
+    for line in lock.lines().map(str::trim) {
+        if line == "[[package]]" {
+            current = None;
+        } else if let Some(rest) = line.strip_prefix("name = \"") {
+            current = rest.strip_suffix('"');
+        } else if let Some(rest) = line.strip_prefix("version = \"")
+            && let Some(version) = rest.strip_suffix('"')
+            && current == Some(name)
+        {
+            versions.push(version);
+        }
+    }
+    versions.sort_unstable();
+    versions
 }

@@ -1,4 +1,4 @@
-//! The oracle's one entry point.
+//! The record's entry point.
 //!
 //! `oracle` verifies the committed record; `oracle --record` deliberately re-records it. There is no
 //! third mode: a run that cannot see the reference refuses, and a record that does not exist is

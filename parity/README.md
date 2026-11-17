@@ -34,9 +34,10 @@ probes are re-run to show what a created document still reaches.
 The root workspace holds two members: this harness and `../document-engine`, the engine crate the
 harness depends on. `cargo test -p document-engine` runs the crate's own suite (including its
 vocabulary restatement scan) without the harness. The folder holds one more package, `../oracle`, the
-development oracle that records what an outside reference lays out for the documents the engine
-writes; it is a workspace of its own, nothing here depends on it, and its resolution therefore
-cannot move a codec version the comparison identity covers.
+development oracle: it records what LibreOffice lays out for the documents the engine writes, and it
+compares the engine's own PDF pages against PDFium, reporting the other families as not compared
+(`../oracle/compare/README.md`). It is a workspace of its own, nothing here depends on it, and its
+resolution therefore cannot move a codec version the comparison identity covers.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
 managed runtime. A full pass — 802 cases and 91 readings — takes about 55–70 s for the crate engine

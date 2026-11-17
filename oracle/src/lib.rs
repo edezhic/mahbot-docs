@@ -1,14 +1,18 @@
-//! The development oracle: what the outside reference lays out for every Office document the
-//! engine's own writer produces.
+//! The development oracle: what the outside references show for the documents the engine's own
+//! writer produces.
 //!
 //! The parity harness judges files. It cannot say what a page of a document this system produces
-//! looks like, and the engine has no page renderer for Word, PowerPoint or Excel. This package
-//! records that shape first, from **the outside reference** — LibreOffice, driven headless — so the
-//! shape exists before any renderer does.
+//! looks like, and the engine has no page renderer for Word, PowerPoint or Excel. This package has
+//! two parts, both explicit and both development only:
 //!
-//! The reference keeps its existing meaning: the kit. The outside reference is a *second opinion*,
-//! never the truth: it rounds line heights to whole twips, so its page boundaries can differ from
-//! what Word would show. What is recorded is what it shows.
+//! - the **record** ([`record`], [`run`]) captures what LibreOffice lays out for every Office
+//!   document the engine writes, so the shape exists before a renderer does;
+//! - the **comparison** ([`compare`]) judges the one page the engine can draw — a page of a PDF —
+//!   against PDFium, an independent rasteriser, and reports every other family as not compared.
+//!
+//! The reference keeps its existing meaning: the kit. The outside references are a *second opinion*,
+//! never the truth: LibreOffice rounds line heights to whole twips, and PDFium and the engine round a
+//! page's edges differently. What is recorded and what is compared is what they show.
 //!
 //! # What a record is
 //!
@@ -42,23 +46,38 @@
 //! nothing in the engine's build or tests reads them.
 //!
 //! A PDF is what the record holds for a Word, PowerPoint or Excel document, because that is what the
-//! reference produces for those families. A PDF *input* is not recorded: the outside reference for a
-//! PDF is an independent rasteriser, not this one.
+//! reference produces for those families. A PDF *input* is not recorded: it is compared against an
+//! independent rasteriser by [`compare`], which judges the engine's own PDF output and reports the
+//! Office families as not compared, with the reason.
+//!
+//! # What the comparison is
+//!
+//! [`compare`] compares the engine's own PDF pages against PDFium: the page count, the page's pixel
+//! dimensions, and the drawn page, at a fixed long side and with a per-content-class threshold. Text,
+//! faces and the page's size in points are not compared, and the report says why. It is a report,
+//! not a gate: a divergence does not fail it, and only a failed mechanism does. It proves the
+//! drawing of the engine's own output; it proves nothing about the Office families, and it is not a
+//! check on arbitrary user PDFs. `compare/README.md` states the whole contract.
 //!
 //! # Running it
 //!
 //! `cargo run --bin oracle` verifies the committed record against the reference installed on this
-//! machine; `cargo run --bin oracle -- --record` deliberately re-records it. Both are explicit
-//! invocations: the verification is part of the recording, so no build that does not see the
-//! reference can pass for one that did. Nothing here runs as part of the root workspace's build or
-//! test run, and the engine crate never depends on it.
+//! machine; `cargo run --bin oracle -- --record` deliberately re-records it. `cargo run --bin
+//! oracle-compare` compares the fixed PDF set and writes its report and evidence;
+//! `oracle-compare --measure` prints the numbers a deliberate re-calibration is written from. All
+//! are explicit invocations: the verification is part of the recording, so no build that does not
+//! see the reference can pass for one that did. Nothing here runs as part of the root workspace's
+//! build or test run, and the engine crate never depends on it.
 
 pub mod canonical;
+pub mod chain;
+pub mod compare;
 pub mod corpus;
 pub mod engine;
 pub mod fonts;
 pub mod ink;
 pub mod pages;
+pub mod pdfium;
 pub mod record;
 pub mod reference;
 pub mod run;

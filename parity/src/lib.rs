@@ -40,6 +40,10 @@ pub mod canonical;
 pub mod codecs;
 pub mod contract;
 pub mod corpus;
+// The engine-identity rule is shared with the oracle's build script through `include!`. Declaring
+// it as a module too keeps it under `cargo fmt` and clippy; nothing in the library calls it.
+#[allow(dead_code)]
+pub(crate) mod crate_identity;
 pub mod docx_capture;
 pub mod engine;
 pub mod harness;

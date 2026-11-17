@@ -544,7 +544,9 @@ fn the_committed_record_is_bound_to_the_engine_output() {
     let record = Record::load(&page_oracle::run::record_root())
         .expect("the committed record must be readable");
     let area = area("engine");
-    let assets = page_oracle::engine::Assets::write(area.path()).expect("the generated assets");
+    let assets =
+        page_oracle::chain::Assets::write(&area.path().join("assets"), page_oracle::corpus::ASSETS)
+            .expect("the generated assets");
     for document in corpus::documents() {
         let built = page_oracle::engine::build(document, &area.path().join("corpus"), &assets)
             .unwrap_or_else(|error| panic!("{}: {error}", document.id));

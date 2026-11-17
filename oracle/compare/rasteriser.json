@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "program": "PDFium",
+  "release": "chromium/8165",
+  "version": "160.0.8165.0",
+  "platform": "mac-arm64",
+  "library": "libpdfium.dylib",
+  "sha256": "d421e426bd487de02fa3bd1f2aeaf56947261f790e6116951e26f729ced1b018",
+  "archive_sha256": "112e74d717f3e0310273b70f3c8780e8a61ff11b34834124465c8305c841d350",
+  "licence": "pdfium/LICENSE-pdfium.txt"
+}

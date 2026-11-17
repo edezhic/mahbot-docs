@@ -1,18 +1,27 @@
 # The development oracle
 
-What LibreOffice shows for every Office document the engine's writer produces, recorded so the
-shape exists before any page renderer does.
+Two explicit, development-only views of what an outside source shows for the documents the engine's
+writer produces:
+
+- the **record**: what LibreOffice lays out for every Office document the engine writes, so the
+  shape exists before any page renderer does;
+- the **comparison**: the engine's own PDF pages against PDFium, an independent rasteriser, with
+  every other family reported as not compared.
 
 The parity harness judges **files**. It cannot say what a page of a document this system produces
-looks like, and the engine has no page renderer for Word, PowerPoint or Excel. This package records
+looks like, and the engine has no page renderer for Word, PowerPoint or Excel. The record captures
 that shape first, from the **outside reference** — LibreOffice, driven headless — and the engine is
-brought into line with it afterwards. Comparing the engine's own pages against it is not here.
+brought into line with it afterwards. The comparison judges the one page the engine can draw today,
+a page of a PDF; the Office families become comparable when the engine can draw them.
+`compare/README.md` states the comparison's whole contract: what is compared, what is not, the
+rasteriser, the thresholds, the controls, the report and its decisions.
 
-The reference keeps its existing meaning: the JavaScript document kit. The outside reference is a
-**second opinion, not the truth**. It rounds line heights to whole twips, so its page boundaries can
-differ from what Word would show; what is recorded is what it shows, and the record is authoritative
-only for that. It is used for development comparison only and never reaches the product: nothing
-here is a dependency of `document-engine`, and no product file changes.
+The reference keeps its existing meaning: the JavaScript document kit. The outside references are a
+**second opinion, not the truth**. LibreOffice rounds line heights to whole twips, so its page
+boundaries can differ from what Word would show; PDFium and the engine round a page's edges
+differently. What is recorded and what is compared is what they show. Both are used for development
+only and never reach the product: nothing here is a dependency of `document-engine`, and no product
+file changes.
 
 ## Running it
 
@@ -21,9 +30,19 @@ cd oracle
 cargo run --bin oracle                    # verify the committed record against this machine's reference
 cargo run --bin oracle -- --record        # deliberately re-record it (two runs, which must agree)
 cargo run --bin oracle -- --root <dir>    # use <dir> instead of ./record
+cargo build --bin oracle-pdfium           # once: the comparison's contained rasteriser helper
+cargo run --bin oracle-compare            # compare the engine's PDF pages against PDFium
+cargo run --bin oracle-compare -- --measure  # print the numbers a re-calibration is written from
 cargo run --example canonical-pdf -- <produced.pdf> [<other.pdf>]  # review a changed page digest
 cargo test                                # the crate's own tests
 ```
+
+`oracle-compare` needs PDFium fetched once into `~/.cache/page-oracle/pdfium/`; `--library <file>`
+names a copy elsewhere. `compare/fetch-pdfium.sh` fetches and verifies the recorded archive and
+library digests. It never runs as part of a build or a test, and a machine without it fails the
+comparison's mechanism rather than passing it. The comparison is a report, not a gate: a divergence
+does not fail it, and only a failed mechanism does. `compare/README.md` states the exit contract,
+the fixed set, the thresholds and the evidence.
 
 `--record` surveys the corpus **twice**, in one temporary area with a directory per survey and a
 profile of its own for each, and refuses to write anything unless the second run reproduces the
@@ -46,14 +65,15 @@ with what else it is doing — neither is a number worth stating precisely. What
 ceiling: one conversion is bounded at 120 s, and a survey starts no further document once its 600 s
 ceiling has passed — a run that reaches it fails rather than reporting a partial record.
 
-`cargo test` here needs no network, and it needs no LibreOffice installed: every test builds its
-subject in code, except the ones that read the committed record — to prove it is whole, to bind it to
-the engine's current output, and to state a font configuration that is a real one. Four others read
-what this machine happens to have — one asks a LibreOffice installation for its version, two read a
-system face and one the reference's own bundled Carlito — and each passes whether or not it is there,
-because the installation test asserts the sentence a run without one gives. The reference is
-otherwise exercised only by the two explicit invocations above, which is why the verification cannot
-be bypassed by a build that does not see it.
+`cargo test` here needs no network, no LibreOffice and no PDFium: every test builds its subject in
+code, except the ones that read the committed record — to prove it is whole, to bind it to the
+engine's current output, and to state a font configuration that is a real one. The comparison's
+controls, calibration consistency, digest check, stale-decision check and determinism all run
+through the engine's own renderer. Four other tests read what this machine happens to have — one
+asks a LibreOffice installation for its version, two read a system face and one the reference's own
+bundled Carlito — and each passes whether or not it is there, because the installation test asserts
+the sentence a run without one gives. The reference is otherwise exercised only by the two explicit
+invocations above, which is why the verification cannot be bypassed by a build that does not see it.
 
 ## The corpus
 
