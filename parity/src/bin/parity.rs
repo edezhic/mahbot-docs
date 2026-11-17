@@ -2,8 +2,8 @@
 //! and report every verdict. Exits non-zero when anything fails.
 //!
 //! Exit codes: `0` the run passed; `1` a verdict failed; `2` the invocation or the harness is
-//! wrong; `3` a signal cut the run short. A cut-short run prints no aggregate summary, so it can
-//! never read as a short, complete run.
+//! wrong; `3` the run was cut short — by a signal or by its own budget. A cut-short run prints no
+//! aggregate summary, so it can never read as a short, complete run.
 //!
 //! The gate is supervised: one child process per case, of the same binary in the hidden
 //! `--internal-run` mode. A case that exhausts memory, writes without limit or hangs costs that
@@ -66,7 +66,8 @@ fn main() {
                      records; `noop` is the negative control. A (operation, family) pair the writer\n\
                      has not landed yet is reported as SKIP; the summary counts judged and unjudged\n\
                      cases per pair. Exit codes: 0 pass, 1 failed verdict, 2 bad invocation, 3 cut\n\
-                     short by a signal. `--engine helper:<path>` is for the harness's own tests."
+                     short (by a signal or by the run's budget). `--engine helper:<path>` is for the\n\
+                     harness's own tests."
                 );
                 return;
             }
@@ -152,8 +153,10 @@ fn run(engine: &str, baseline_path: &Path, quiet: bool) -> anyhow::Result<i32> {
     };
     let supervised = harness.supervise(&baseline, &mut printer, &supervision)?;
     // A cut-short run never reaches the aggregate: the absence of that line is what makes it
-    // visibly cut short, and no new terminating line is invented for it.
-    if supervised.cut_short {
+    // visibly cut short, and no new terminating line is invented for it. The reason goes to
+    // standard error, so the report itself stays the verdicts and nothing else.
+    if let Some(reason) = supervised.cut_short {
+        eprintln!("parity: cut short: {}", reason.reason());
         return Ok(3);
     }
     let report = &supervised.report;

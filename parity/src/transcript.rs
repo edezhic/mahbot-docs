@@ -126,15 +126,29 @@ pub struct ReadingTranscript {
 /// the document or the engine happens to contain is not this run's and is left as it is.
 #[must_use]
 pub fn normalise(text: &str, run_root: &Path) -> String {
-    let root = run_root.to_string_lossy().into_owned();
-    let mut text = text.replace(&root, "<run>");
-    if let Some(nonce) = nonce_of(run_root) {
+    normalise_paths(text, &[run_root])
+}
+
+/// The same, for prose that may name any of several temporary paths — a case's own root beside the
+/// directory its transcript was written to. Every path is replaced before any nonce is: a nonce is a
+/// substring of the path that carries it, so replacing one first would leave the other's path
+/// half-stripped and unrecognisable to the later pass.
+#[must_use]
+pub(crate) fn normalise_paths(text: &str, roots: &[&Path]) -> String {
+    let mut text = text.to_string();
+    let mut nonces = Vec::new();
+    for root in roots {
+        text = text.replace(&root.to_string_lossy().into_owned(), "<run>");
+        nonces.extend(nonce_of(root));
+    }
+    for nonce in nonces {
         text = text.replace(nonce, "<nonce>");
     }
     replace_dates(&text)
 }
 
-/// The nonce [`crate::harness::Harness::temp_root`] mints into the root's name.
+/// The nonce [`crate::harness::Harness::temp_root`] mints into a root's name: a path that carries it
+/// names this run's root, or a name derived from it, and [`normalise`] strips it either way.
 fn nonce_of(run_root: &Path) -> Option<&str> {
     run_root
         .file_name()
@@ -291,6 +305,21 @@ pub fn identity_line(identity: &crate::engine::EngineIdentity) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_path_is_stripped_before_any_nonce() {
+        // A run's transcript directory is named from its root, so both paths carry the same nonce:
+        // stripping one path and its nonce before the other path would leave that one half-stripped
+        // and unrecognisable to the later pass.
+        let root = Path::new("/tmp/document-parity-4242-6a1b-0-1111222233334444");
+        let transcripts =
+            Path::new("/tmp/parity-transcripts-document-parity-4242-6a1b-0-1111222233334444");
+        let text = format!("{} and {} were busy", root.display(), transcripts.display());
+        assert_eq!(
+            normalise_paths(&text, &[transcripts, root]),
+            "<run> and <run> were busy"
+        );
+    }
 
     #[test]
     fn a_sorted_value_puts_every_object_key_in_order() {

@@ -36,9 +36,17 @@ impl Baseline {
             .join("baseline.json")
     }
 
-    /// Record a run.
-    #[must_use]
-    pub fn record(run: &Run) -> Self {
+    /// Record a run that completed. A cut-short run has no entry for what it never reached, and a
+    /// baseline with holes would make every later gate run report "no baseline entry" for cases
+    /// nobody judged.
+    pub fn record(run: &Run) -> Result<Self> {
+        if let Some(reason) = run.cut_short {
+            anyhow::bail!(
+                "the run was cut short ({}): a baseline from it would be missing every entry it \
+                 did not reach",
+                reason.reason()
+            );
+        }
         let cases = run
             .outcomes
             .iter()
@@ -59,7 +67,7 @@ impl Baseline {
                     .map(|transcript| (outcome.document.clone(), transcript.clone()))
             })
             .collect();
-        Self {
+        Ok(Self {
             note: NOTE.to_string(),
             recorded_at_unix: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -69,7 +77,7 @@ impl Baseline {
             reader: run.reader.clone(),
             cases,
             readings,
-        }
+        })
     }
 
     pub fn load(path: &Path) -> Result<Self> {
@@ -86,5 +94,27 @@ impl Baseline {
         let text = transcript::to_json(self)?;
         std::fs::write(path, text)
             .with_context(|| format!("cannot write the baseline to {}", path.display()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::harness::CutShort;
+    use std::time::Duration;
+
+    #[test]
+    fn a_cut_short_run_is_never_recorded() {
+        // A baseline from a run that stopped early would be missing every entry it did not reach,
+        // and every later gate run would report "no baseline entry" for cases nobody judged.
+        let run = Run {
+            writer: EngineIdentity::default(),
+            reader: EngineIdentity::default(),
+            outcomes: Vec::new(),
+            readings: Vec::new(),
+            cut_short: Some(CutShort::Budget(Duration::from_secs(1))),
+        };
+        let refused = Baseline::record(&run).expect_err("a cut-short run is refused");
+        assert!(refused.to_string().contains("cut short"), "{refused}");
     }
 }

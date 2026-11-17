@@ -12,7 +12,7 @@ use document_parity::baseline::Baseline;
 use document_parity::engine::{
     Coverage, EngineIdentity, Family, Key, Kind, Reader, Reading, Writer, WriterOutcome,
 };
-use document_parity::harness::{CaseOutcome, Harness, Judgement, Run};
+use document_parity::harness::{CaseOutcome, CutShort, Harness, Judgement, Run};
 use document_parity::reference::{NoOpReader, NoOpWriter, ReferenceReader, ReferenceWriter};
 use document_parity::transcript::CaseTranscript;
 use serde_json::{Value, json};
@@ -271,8 +271,8 @@ fn reference_run() -> Run {
         .supervise(&baseline, &mut common::NullSink, &supervision)
         .expect("the reference run is supervised");
     assert!(
-        !supervised.cut_short,
-        "the reference run was cut short by a signal"
+        supervised.cut_short.is_none(),
+        "the reference run was cut short"
     );
     supervised.run.expect("the run collected its transcripts")
 }
@@ -737,9 +737,11 @@ fn an_output_over_the_read_limit_is_a_case_problem() {
 }
 
 #[test]
-fn a_run_stops_when_its_budget_is_spent() {
-    // A real hang, not a zero budget: the slow engine runs a few cases, then the budget stops the
-    // run before the rest.
+fn a_run_that_spends_its_budget_is_cut_short_and_fails_nothing_it_did_not_reach() {
+    // A real hang, not a zero budget: the slow engine runs a few cases, then the budget cuts the
+    // run short. A case nobody ran is not a case that failed, so the unreached cases are absent
+    // rather than reported as budget failures.
+    let budget = Duration::from_millis(200);
     let started = std::time::Instant::now();
     let harness = Harness::at(
         Harness::temp_root(),
@@ -747,33 +749,31 @@ fn a_run_stops_when_its_budget_is_spent() {
         Box::new(NoOpReader),
     )
     .expect("a harness root")
-    .with_budget(Duration::from_millis(200));
+    .with_budget(budget);
     let run = harness.run();
     assert!(
         started.elapsed() < Duration::from_secs(5),
         "the run stopped in bounded time"
     );
-    // Every entry still has a verdict: the ones the budget reached ran, and the rest report the
-    // budget rather than vanishing from the run.
     assert_eq!(
-        run.outcomes.len(),
-        document_parity::corpus::writer_cases().len(),
-        "every case still has an outcome"
+        run.cut_short,
+        Some(CutShort::Budget(budget)),
+        "the budget cut the run short"
     );
-    let budgeted = run
-        .outcomes
-        .iter()
-        .filter(|outcome| {
-            outcome
-                .problem
-                .as_deref()
-                .is_some_and(|problem| problem.contains("budget"))
-        })
-        .count();
-    assert!(budgeted > 0, "the budget stopped at least one case");
     assert!(
-        budgeted < run.outcomes.len(),
-        "the slow engine ran some cases"
+        !run.outcomes.is_empty(),
+        "the run kept every verdict it reached"
+    );
+    assert!(
+        run.outcomes.len() < document_parity::corpus::writer_cases().len(),
+        "the run stopped before the end"
+    );
+    assert!(
+        run.outcomes.iter().all(|outcome| !outcome
+            .problem
+            .as_deref()
+            .is_some_and(|problem| problem.contains("budget"))),
+        "no case is failed for the run's budget"
     );
 }
 
@@ -849,23 +849,54 @@ fn a_hung_reading_does_not_take_the_later_ones_with_it() {
 }
 
 #[test]
-fn a_failing_gate_removes_its_temporary_root() {
+fn a_failing_gate_reclaims_what_it_finds_and_leaves_nothing_behind() {
     let _permit = common::permit();
-    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_parity"))
+    // A temporary directory of the run's own, handed to the gate and to every child it starts: the
+    // run's root, each case's root and the transcript directory all land in it, so whatever the
+    // run leaves behind is exactly what is still there when it exits.
+    let scratch = tempfile::tempdir().expect("a scratch temporary directory");
+    // A dead root an earlier run left, old enough for the sweep to collect. The gate names it on
+    // standard error, which is also what proves the run really used this directory: an empty
+    // directory afterwards would otherwise be equally true of a run that ignored TMPDIR.
+    let stale = scratch.path().join("document-parity-stale");
+    std::fs::create_dir(&stale).expect("a stale root");
+    std::fs::write(
+        stale.join(".document-parity-root"),
+        format!("{} 1 0\n", std::process::id()),
+    )
+    .expect("a stale marker");
+    std::fs::File::open(&stale)
+        .expect("the stale root")
+        .set_times(
+            std::fs::FileTimes::new()
+                .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600)),
+        )
+        .expect("an old modification time");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_parity"))
         .args(["--engine", "noop", "--quiet"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
+        .env("TMPDIR", scratch.path())
+        .env("TMP", scratch.path())
+        .env("TEMP", scratch.path())
+        .output()
         .expect("the gate binary");
-    let pid = child.id();
-    let status = child.wait().expect("the gate finishes");
-    assert!(!status.success(), "a no-op engine fails the gate");
-    let prefix = format!("document-parity-{pid}-");
-    let leftover = std::fs::read_dir(std::env::temp_dir())
-        .expect("the temporary directory")
+    assert!(!output.status.success(), "a no-op engine fails the gate");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(&format!(
+            "parity: reclaimed the leftover root {}",
+            stale.display()
+        )),
+        "the sweep says what it reclaimed: {stderr}"
+    );
+    let leftover: Vec<String> = std::fs::read_dir(scratch.path())
+        .expect("the run's temporary directory")
         .filter_map(Result::ok)
-        .any(|entry| entry.file_name().to_string_lossy().starts_with(&prefix));
-    assert!(!leftover, "a failing gate left its temporary root behind");
+        .map(|entry| entry.path().display().to_string())
+        .collect();
+    assert!(
+        leftover.is_empty(),
+        "a failing gate left {leftover:?} behind"
+    );
 }
 
 #[test]
@@ -1328,6 +1359,7 @@ fn a_discriminated_key_has_its_own_slug_and_both_appear_in_a_report() {
         reader: EngineIdentity::default(),
         outcomes: vec![outcome(overlap), outcome(adjacent)],
         readings: Vec::new(),
+        cut_short: None,
     };
     let baseline = Baseline::load(&Baseline::default_path()).expect("the baseline is recorded");
     let report = run.report(&baseline);

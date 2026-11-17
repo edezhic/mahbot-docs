@@ -13,7 +13,7 @@ mod common;
 
 use document_parity::baseline::Baseline;
 use document_parity::engine::{Reader, Writer};
-use document_parity::harness::{Harness, Report, Supervised};
+use document_parity::harness::{CutShort, Harness, Report, Supervised};
 use document_parity::reference::HelperProbe;
 use document_parity::supervisor::{Bounds, EngineKind, Supervision};
 use std::io::{BufRead as _, BufReader, Read as _};
@@ -133,8 +133,8 @@ fn failures_naming(report: &Report, phrase: &str) -> Vec<String> {
 
 #[test]
 fn the_documented_bounds_are_the_defaults() {
-    // `Bounds::default()` is the one construction site of these numbers, so the README is checked
-    // against the values the gate actually uses rather than against a second copy of them. The
+    // The values the gate actually uses, not a second copy of them: the per-case bounds come from
+    // `Bounds::default()`, and the run budget from `RUN_BUDGET`, which is outside `Bounds`. The
     // value must be the row's Default cell, not merely somewhere in the row: a number stated for
     // the wrong bound would otherwise pass.
     let bounds = Bounds::default();
@@ -191,6 +191,10 @@ fn the_documented_bounds_are_the_defaults() {
         (
             "one reading's supervisor budget",
             format!("{} s", bounds.reading_timeout.as_secs()),
+        ),
+        (
+            "the whole run's budget",
+            format!("{} s", document_parity::harness::RUN_BUDGET.as_secs()),
         ),
     ] {
         let stated = row(name);
@@ -252,7 +256,7 @@ fn a_case_that_allocates_without_limit_is_one_failed_verdict() {
         false,
     );
     let report = &supervised.report;
-    assert!(!supervised.cut_short, "the run was not cut short");
+    assert!(supervised.cut_short.is_none(), "the run was not cut short");
     assert_eq!(
         report.verdicts.len(),
         document_parity::corpus::writer_cases().len(),
@@ -283,7 +287,7 @@ fn a_reading_that_allocates_without_limit_is_one_failed_verdict() {
         false,
     );
     let report = &supervised.report;
-    assert!(!supervised.cut_short, "the run was not cut short");
+    assert!(supervised.cut_short.is_none(), "the run was not cut short");
     assert_eq!(
         report.readings.len(),
         documents.len(),
@@ -314,7 +318,7 @@ fn a_case_that_finishes_above_the_ceiling_is_failed() {
         false,
     );
     let report = &supervised.report;
-    assert!(!supervised.cut_short, "the run was not cut short");
+    assert!(supervised.cut_short.is_none(), "the run was not cut short");
     assert!(
         problem(report, &slug).contains("memory bound"),
         "a case that finished above the ceiling is failed: {}",
@@ -470,7 +474,7 @@ fn a_case_that_outlives_the_supervisor_budget_is_one_failed_verdict() {
         false,
     );
     let report = &supervised.report;
-    assert!(!supervised.cut_short, "the run was not cut short");
+    assert!(supervised.cut_short.is_none(), "the run was not cut short");
     let problem = problem(report, &slug);
     assert!(
         problem.contains("did not finish within the supervisor's 1s budget"),
@@ -504,7 +508,7 @@ fn a_reading_that_outlives_the_supervisor_budget_is_one_failed_verdict() {
         false,
     );
     let report = &supervised.report;
-    assert!(!supervised.cut_short, "the run was not cut short");
+    assert!(supervised.cut_short.is_none(), "the run was not cut short");
     let problem = reading_problem(report, name);
     assert!(
         problem.contains("did not finish within the supervisor's 1s budget"),
@@ -553,7 +557,7 @@ fn an_unparseable_transcript_is_one_failed_verdict() {
     let slug = small_case();
     let supervised = helper_run(None, &[("PARITY_HELPER_BAD_TRANSCRIPT", &slug)], false);
     let report = &supervised.report;
-    assert!(!supervised.cut_short, "the run was not cut short");
+    assert!(supervised.cut_short.is_none(), "the run was not cut short");
     assert!(
         problem(report, &slug).contains("does not parse"),
         "an unparseable transcript is named: {}",
@@ -655,7 +659,7 @@ fn a_child_that_dies_outside_any_bound_is_one_failed_verdict() {
         false,
     );
     let report = &supervised.report;
-    assert!(!supervised.cut_short, "the run was not cut short");
+    assert!(supervised.cut_short.is_none(), "the run was not cut short");
     assert_eq!(
         report.verdicts.len(),
         cases.len(),
@@ -675,31 +679,42 @@ fn a_child_that_dies_outside_any_bound_is_one_failed_verdict() {
 
 #[test]
 fn a_leftover_root_is_reclaimed_only_when_its_owner_is_dead_and_the_grace_passed() {
-    // Each root is removed on drop, so a failing assertion leaves nothing the sweep will never
-    // reclaim.
-    let parent = Temp(Harness::temp_root());
-    std::fs::create_dir_all(&parent.0).expect("the sweep's own root");
+    // A scratch directory of this test's own, so the sweep considers these roots and no other
+    // run's: a dead root an earlier run left in the shared temporary directory cannot change what
+    // the sweep here is expected to reclaim.
+    let scratch = tempfile::tempdir_in(std::env::temp_dir()).expect("a scratch directory");
+
+    // The sweep's own root, marked dead: the `own_root` guard, not the liveness rule, is what has
+    // to keep it.
+    let parent = Temp(scratch.path().join("document-parity-parent"));
+    mark_dead(&parent.0);
 
     // A second marked root whose owner is alive. It is not the sweep's own root, so the liveness
-    // rule — not the `path == parent_root` guard — is what has to leave it alone.
-    let live = Temp(Harness::temp_root());
+    // rule is what has to leave it alone.
+    let live = Temp(scratch.path().join("document-parity-live"));
     std::fs::create_dir_all(&live.0).expect("a live root");
-    document_parity::supervisor::write_marker(&live.0).expect("a live marker");
+    // A marker with no claim held: the claim is taken and released at once, which is the one way a
+    // marker is written.
+    drop(document_parity::supervisor::Claim::take(&live.0).expect("a live marker"));
 
     // A marked root that records a start time which does not match its live identifier: the owner
     // it names is gone, the same evidence a reused identifier leaves. This does not rely on a
     // dead pid or on the platform's errno for one.
-    let dead = Temp(Harness::temp_root());
+    let dead = Temp(scratch.path().join("document-parity-dead"));
     mark_dead(&dead.0);
 
     let bounds = Bounds {
         grace: Duration::from_secs(3600),
         ..Bounds::default()
     };
-    document_parity::supervisor::sweep(&parent.0, &bounds);
+    let reclaimed = document_parity::supervisor::sweep_in(scratch.path(), Some(&parent.0), &bounds);
     assert!(
         dead.0.exists(),
         "a dead owner's root is not reclaimed before the grace"
+    );
+    assert!(
+        reclaimed.is_empty(),
+        "a sweep reports nothing it left alone"
     );
     assert!(live.0.exists(), "a live owner's root is left alone");
 
@@ -710,7 +725,7 @@ fn a_leftover_root_is_reclaimed_only_when_its_owner_is_dead_and_the_grace_passed
         grace: Duration::ZERO,
         ..Bounds::default()
     };
-    document_parity::supervisor::sweep(&parent.0, &bounds);
+    let reclaimed = document_parity::supervisor::sweep_in(scratch.path(), Some(&parent.0), &bounds);
     assert!(
         live.0.exists(),
         "a live owner's root is left alone even after the grace"
@@ -719,20 +734,146 @@ fn a_leftover_root_is_reclaimed_only_when_its_owner_is_dead_and_the_grace_passed
         !dead.0.exists(),
         "a dead owner's root is reclaimed once the grace passes"
     );
+    assert_eq!(
+        reclaimed,
+        vec![dead.0.clone()],
+        "a sweep reports every root it reclaimed, and nothing it left alone"
+    );
     assert!(parent.0.exists(), "the sweep never removes its own root");
 }
 
-/// Write a marker whose recorded start time cannot match the live process it names.
+#[test]
+fn a_root_whose_claim_is_held_survives_a_sweep_that_reads_its_owner_as_dead() {
+    // The liveness probe can be wrong — a reused identifier, another pid namespace, a filesystem
+    // clock — so the guarantee must not rest on it. Every root the harness creates is claimed, and
+    // the claim outranks the probe. Going through `Harness::at` is the point: a harness that stopped
+    // claiming its root would leave this root to the probe, and this test would fail.
+    // A scratch directory under the OS temporary area, so the sweep below considers this test's
+    // root and no other test's: sweeping the shared temporary directory would race the tests that
+    // keep their own dead roots there.
+    let scratch = tempfile::tempdir_in(std::env::temp_dir()).expect("a scratch directory");
+    let root = scratch.path().join("document-parity-claimed");
+    let harness = Harness::at(
+        root.clone(),
+        Box::new(document_parity::reference::NoOpWriter),
+        Box::new(document_parity::reference::NoOpReader),
+    )
+    .expect("a harness root");
+    // The probe now reads the marker's owner as gone: the identifier is live, its recorded start
+    // time is not. Before the claim, that was the whole decision.
+    mark_dead(&root);
+
+    let bounds = Bounds {
+        grace: Duration::ZERO,
+        ..Bounds::default()
+    };
+    std::thread::sleep(Duration::from_millis(20));
+    let reclaimed = document_parity::supervisor::sweep_in(scratch.path(), None, &bounds);
+    assert!(
+        reclaimed.is_empty(),
+        "a sweep reports nothing it left alone"
+    );
+    assert!(
+        root.exists(),
+        "a root a live harness created is left alone, whatever the probe says"
+    );
+    // The harness removes its own root, so nothing is left for a later sweep to collect.
+    drop(harness);
+    assert!(!root.exists(), "the harness removes its own root");
+}
+
+#[test]
+fn an_abandoned_root_is_reclaimed_once_nobody_claims_it() {
+    let scratch = tempfile::tempdir().expect("a scratch directory");
+    let abandoned = scratch.path().join("document-parity-abandoned");
+    std::fs::create_dir_all(&abandoned).expect("an abandoned root");
+    let claim = document_parity::supervisor::Claim::take(&abandoned).expect("a claim");
+    mark_dead(&abandoned);
+    // The owner is gone in truth: the lock is released with the guard.
+    drop(claim);
+    std::thread::sleep(Duration::from_millis(20));
+    let bounds = Bounds {
+        grace: Duration::ZERO,
+        ..Bounds::default()
+    };
+    let reclaimed = document_parity::supervisor::sweep_in(scratch.path(), None, &bounds);
+    assert_eq!(
+        reclaimed,
+        vec![abandoned.clone()],
+        "an abandoned root is reclaimed once nobody claims it"
+    );
+}
+
+#[test]
+fn a_sweep_never_takes_a_runs_transcripts() {
+    // A transcript is what a verdict is read from, so it lives beside the run's root and is not
+    // named like one: a sweep working in that same directory reclaims the dead root and leaves the
+    // transcripts alone.
+    let scratch = tempfile::tempdir().expect("a scratch directory");
+    let root = scratch.path().join("document-parity-run");
+    let transcripts = Harness::transcripts_root(&root);
+    assert_eq!(
+        transcripts.parent(),
+        root.parent(),
+        "a run's transcripts live beside its root"
+    );
+    std::fs::create_dir(&transcripts).expect("a transcript directory");
+
+    let dead = scratch.path().join("document-parity-dead");
+    mark_dead(&dead);
+    std::thread::sleep(Duration::from_millis(20));
+    let bounds = Bounds {
+        grace: Duration::ZERO,
+        ..Bounds::default()
+    };
+    let reclaimed = document_parity::supervisor::sweep_in(scratch.path(), None, &bounds);
+    assert_eq!(
+        reclaimed,
+        vec![dead.clone()],
+        "a sweep in a transcript's own directory reclaims roots and nothing else"
+    );
+    assert!(
+        transcripts.exists(),
+        "a sweep takes a root, never a transcript directory"
+    );
+}
+
+#[test]
+fn a_supervised_run_that_spends_its_budget_is_cut_short_without_failing_a_case() {
+    // The gate's own path: a spent budget stops the run. It does not report the cases it never
+    // reached as failed, because a case nobody ran says nothing about the engine.
+    let _permit = common::permit();
+    let harness = Harness::new_with(|_| {
+        Ok((
+            Box::new(HelperProbe) as Box<dyn Writer>,
+            Box::new(HelperProbe) as Box<dyn Reader>,
+        ))
+    })
+    .expect("a harness root")
+    .with_budget(Duration::ZERO);
+    let baseline = Baseline::load(&Baseline::default_path()).expect("a baseline");
+    let supervision = Supervision::new(EngineKind::Helper, PathBuf::from(HELPER));
+    let supervised = harness
+        .supervise(&baseline, &mut common::NullSink, &supervision)
+        .expect("a supervised run");
+    assert_eq!(
+        supervised.cut_short,
+        Some(CutShort::Budget(Duration::ZERO)),
+        "the budget cut the run short"
+    );
+    assert!(
+        supervised.report.verdicts.is_empty() && supervised.report.readings.is_empty(),
+        "a cut-short run fails nothing it did not reach"
+    );
+}
+
+/// Write a marker naming this live process with a start time it does not have: the identifier is
+/// live, the owner it names is gone, the same evidence a reused identifier leaves. Written by hand
+/// because a claim cannot be taken on a root that already holds one.
 fn mark_dead(root: &std::path::Path) {
     std::fs::create_dir_all(root).expect("a dead root");
-    document_parity::supervisor::write_marker(root).expect("a marker");
     let marker = root.join(document_parity::supervisor::ROOT_MARKER);
-    let text = std::fs::read_to_string(&marker).expect("the marker");
-    let mut fields = text.split_whitespace();
-    let pid = fields.next().expect("a pid");
-    let seconds: u64 = fields.next().expect("seconds").parse().expect("seconds");
-    let micros = fields.next().expect("microseconds");
-    std::fs::write(&marker, format!("{pid} {} {micros}\n", seconds + 1)).expect("the marker");
+    std::fs::write(marker, format!("{} 1 0\n", std::process::id())).expect("a dead marker");
 }
 
 #[test]
@@ -861,6 +1002,18 @@ fn interrupt(signal: i32) {
         status.code(),
         Some(3),
         "a cut-short run exits three after signal {signal}"
+    );
+    // The reason is on standard error, where the report's verdicts cannot be confused with it.
+    let mut stderr = String::new();
+    child
+        .stderr
+        .take()
+        .expect("the gate's error pipe")
+        .read_to_string(&mut stderr)
+        .expect("the gate's error output");
+    assert!(
+        stderr.contains(&format!("parity: cut short: signal {signal} arrived")),
+        "a cut-short run says why on standard error: {stderr}"
     );
     // The descendant in its own process group must not outlive the interrupt.
     let deadline = Instant::now() + Duration::from_secs(10);

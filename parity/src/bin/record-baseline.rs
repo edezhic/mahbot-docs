@@ -65,7 +65,7 @@ fn record(path: &Path) -> anyhow::Result<()> {
             broken.join("\n  ")
         );
     }
-    let baseline = Baseline::record(&run);
+    let baseline = Baseline::record(&run)?;
     baseline.save(path)?;
     println!(
         "recorded {} cases and {} readings",

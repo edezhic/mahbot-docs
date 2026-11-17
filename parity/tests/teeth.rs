@@ -65,6 +65,7 @@ fn compare(transcript: ReadingTranscript) -> document_parity::harness::ReadingVe
             transcript: Some(transcript),
             problem: None,
         }],
+        cut_short: None,
     };
     let mut verdicts = run.report(&baseline).readings;
     assert_eq!(verdicts.len(), 1, "one reading, one verdict");
@@ -222,6 +223,7 @@ fn compare_case(transcript: CaseTranscript) -> document_parity::harness::Verdict
             judgement: Judgement::Judged,
         }],
         readings: Vec::new(),
+        cut_short: None,
     };
     let mut verdicts = run.report(&baseline).verdicts;
     assert_eq!(verdicts.len(), 1, "one case, one verdict");

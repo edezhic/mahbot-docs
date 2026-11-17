@@ -40,11 +40,13 @@ use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-/// The whole run's budget. A kit that hangs on every case must fail the gate in bounded time
-/// rather than once per case, each at its own timeout: once the budget is spent, every entry it
-/// did not reach fails with a budget problem. `parity/README.md` records the supervised timings the
-/// budget is derived from, and why it is 1200 s rather than the slowest of them.
-const RUN_BUDGET: Duration = Duration::from_secs(1200);
+/// Whether the one warning about a root that could not be claimed has been printed.
+static CLAIM_WARNING: std::sync::Once = std::sync::Once::new();
+
+/// The whole run's budget: a backstop, not a target. The reference engine measures at about
+/// 560–600 s and the crate at about 55–70 s, so a legitimate run does not come near it.
+/// [`CutShort::Budget`] states what reaching it means; `parity/README.md` states the measurement.
+pub const RUN_BUDGET: Duration = Duration::from_secs(3600);
 
 /// How long one writer case may take before it is one failed case. An in-process writer cannot be
 /// interrupted, so the thread is abandoned rather than killed; the verdict is already decided.
@@ -63,7 +65,12 @@ pub const NO_CASE_JUDGED: &str =
 /// are small; a bigger file is a case failure with a message, not an exhaustion of the run.
 pub const MAX_OUTPUT_BYTES: u64 = 64 * 1024 * 1024;
 
-/// A harness owns one temporary root, and nothing outside it is ever written.
+/// The prefix a run's transcript directory carries, which is deliberately not the root prefix.
+const TRANSCRIPTS_PREFIX: &str = "parity-transcripts-";
+
+/// A harness owns one temporary root, and a supervised run creates one sibling root per case. The
+/// one thing written outside those is the run's transcript directory
+/// ([`Harness::transcripts_root`]), a sibling of the root and deliberately not named like one.
 pub struct Harness {
     root: PathBuf,
     writer: Arc<dyn Writer>,
@@ -73,6 +80,9 @@ pub struct Harness {
     read_timeout: Duration,
     /// Whether this harness created the root, and may therefore remove it.
     owned: bool,
+    /// The claim on the root, held for as long as this harness may still be using it: a concurrent
+    /// run's sweep proves the owner alive from it instead of guessing from its identifier.
+    claim: Option<supervisor::Claim>,
 }
 
 impl Harness {
@@ -87,10 +97,11 @@ impl Harness {
 
     /// A harness rooted at `root`, which must be a directory this harness may own: one named the
     /// way [`Harness::temp_root`] names it, under the OS temporary directory. A root this call
-    /// creates is removed by `Drop`; one that already exists is left alone.
+    /// creates is removed by `Drop` and claimed for as long as the harness lives; one that already
+    /// exists is left alone, because its creator is the one that claimed it.
     pub fn at(root: PathBuf, writer: Box<dyn Writer>, reader: Box<dyn Reader>) -> Result<Self> {
-        let owned = create_root(&root, RootState::Adopt)?;
-        Ok(Self::new(root, writer, reader, owned))
+        let created = create_root(&root, RootState::Adopt)?;
+        Ok(Self::new(root, writer, reader, created))
     }
 
     /// A harness with a fresh temporary root, whose engines are built against that root.
@@ -101,21 +112,26 @@ impl Harness {
         engines: impl FnOnce(&Path) -> Result<(Box<dyn Writer>, Box<dyn Reader>)>,
     ) -> Result<Self> {
         let root = Self::temp_root();
-        let owned = create_root(&root, RootState::Adopt)?;
+        let created = create_root(&root, RootState::Adopt)?;
         let (writer, reader) = match engines(&root) {
             Ok(engines) => engines,
             Err(e) => {
                 // A root this call created is removed when the engine cannot be built.
-                if owned {
-                    supervisor::discard(&root);
+                if created.owned {
+                    supervisor::remove_root(&root, created.claim);
                 }
                 return Err(e);
             }
         };
-        Ok(Self::new(root, writer, reader, owned))
+        Ok(Self::new(root, writer, reader, created))
     }
 
-    fn new(root: PathBuf, writer: Box<dyn Writer>, reader: Box<dyn Reader>, owned: bool) -> Self {
+    fn new(
+        root: PathBuf,
+        writer: Box<dyn Writer>,
+        reader: Box<dyn Reader>,
+        created: Created,
+    ) -> Self {
         Self {
             root,
             writer: Arc::from(writer),
@@ -123,8 +139,18 @@ impl Harness {
             budget: RUN_BUDGET,
             write_timeout: WRITE_TIMEOUT,
             read_timeout: READ_TIMEOUT,
-            owned,
+            owned: created.owned,
+            claim: created.claim,
         }
+    }
+
+    /// The directory a run rooted at `root` writes its children's transcripts into: beside the root
+    /// and named from it. No sweep may take it: a transcript is what a verdict is read from.
+    #[must_use]
+    pub fn transcripts_root(root: &Path) -> PathBuf {
+        let mut name = std::ffi::OsString::from(TRANSCRIPTS_PREFIX);
+        name.push(root.file_name().unwrap_or_default());
+        root.with_file_name(name)
     }
 
     /// A harness whose whole run is bounded by `budget` rather than `RUN_BUDGET`.
@@ -149,42 +175,37 @@ impl Harness {
     }
 
     /// Run every writer case and every reading.
-    ///
-    /// Nothing here fails the run: an entry the budget did not reach is that entry's problem, so a
-    /// slow engine still produces a verdict for every other case rather than erasing them all.
     pub fn run(&self) -> Run {
         // The sweep runs once, in the parent, before any case: a child would sweep its siblings.
         supervisor::sweep(&self.root, &supervisor::Bounds::default());
         let cases = crate::corpus::writer_cases();
         let documents = crate::corpus::reader_documents();
         let started = Instant::now();
-        let outcomes = cases
-            .iter()
-            .map(|case| match self.classify(case, started) {
+        let (outcomes, cut_short) =
+            self.collect(&cases, started, |case| match self.classify(case) {
                 Some(outcome) => outcome,
                 None => self.run_case(case),
+            });
+        let (readings, cut_short) = if cut_short.is_none() {
+            self.collect(&documents, started, |document| {
+                self.read_document(*document)
             })
-            .collect();
-        let readings = documents
-            .iter()
-            .map(|document| {
-                self.classify_reading(*document, started)
-                    .unwrap_or_else(|| self.read_document(*document))
-            })
-            .collect();
+        } else {
+            (Vec::new(), cut_short)
+        };
         Run {
             writer: self.writer.identity(),
             reader: self.reader.identity(),
             outcomes,
             readings,
+            cut_short,
         }
     }
 
-    /// A case's outcome when it is decided without running the engine: a corpus defect, a case the
-    /// writer does not carry out, or one the run's budget did not reach; `None` means the case must
-    /// run. The streaming gate and the collected report both use this, so the two cannot classify a
-    /// case differently.
-    fn classify(&self, case: &Case, started: Instant) -> Option<CaseOutcome> {
+    /// A case's outcome when it is decided without running the engine: a corpus defect or a case the
+    /// writer does not carry out; `None` means the case must run. The streaming gate and the
+    /// collected report both use this, so the two cannot classify a case differently.
+    fn classify(&self, case: &Case) -> Option<CaseOutcome> {
         let key = case.key();
         match self.writer.coverage(&key) {
             Coverage::Unaccepted => {
@@ -197,22 +218,39 @@ impl Harness {
                 let why = unjudged_reason(&key);
                 Some(CaseOutcome::unjudged(key, why))
             }
-            Coverage::Delivered if self.spent(started) => {
-                Some(CaseOutcome::problem(key, self.over_budget()))
-            }
             Coverage::Delivered => None,
         }
     }
 
-    /// A reading's outcome when the run's budget did not reach it.
-    fn classify_reading(&self, document: Document, started: Instant) -> Option<ReadingOutcome> {
-        self.spent(started)
-            .then(|| ReadingOutcome::problem(document.name.to_string(), self.over_budget()))
+    /// The run's cut-short reason when its whole budget is spent, and `None` while it has time left.
+    fn spent(&self, started: Instant) -> Option<CutShort> {
+        (started.elapsed() > self.budget).then_some(CutShort::Budget(self.budget))
     }
 
-    /// Whether the run has spent its whole budget.
-    fn spent(&self, started: Instant) -> bool {
-        started.elapsed() > self.budget
+    /// Why the run must stop before this entry: a signal outranks the budget, so a run that both
+    /// was interrupted and ran out of time reports the signal.
+    fn cut_short_before(&self, started: Instant) -> Option<CutShort> {
+        supervisor::signal_raised()
+            .map(CutShort::Signal)
+            .or_else(|| self.spent(started))
+    }
+
+    /// Run every entry in order, stopping at the first one the budget cuts short. The answers it did
+    /// reach are kept: a case nobody ran is absent, not failed.
+    fn collect<T, U>(
+        &self,
+        entries: &[T],
+        started: Instant,
+        mut turn: impl FnMut(&T) -> U,
+    ) -> (Vec<U>, Option<CutShort>) {
+        let mut answers = Vec::with_capacity(entries.len());
+        for entry in entries {
+            if let Some(reason) = self.spent(started) {
+                return (answers, Some(reason));
+            }
+            answers.push(turn(entry));
+        }
+        (answers, None)
     }
 
     /// The two engines' identities, as the gate prints them before any case runs.
@@ -264,47 +302,43 @@ impl Harness {
         supervisor::sweep(&self.root, &supervision.bounds);
         let cases = crate::corpus::writer_cases();
         let documents = crate::corpus::reader_documents();
-        let transcripts = self.root.join("transcripts");
-        std::fs::create_dir_all(&transcripts).with_context(|| {
-            format!(
-                "cannot create the transcript directory {}",
-                transcripts.display()
-            )
-        })?;
+        // The transcripts live outside every root the sweep considers: a verdict is read from one,
+        // and no sweep may take it. The run removes the directory itself, however it ends.
+        let transcripts = Transcripts::create(&self.root)?;
         let started = Instant::now();
         let mut verdicts = Vec::with_capacity(cases.len());
         let mut outcomes = Vec::new();
         let mut readings = Vec::with_capacity(documents.len());
         let mut reading_outcomes = Vec::new();
-        let mut cut_short = false;
+        let mut cut_short = None;
         for case in &cases {
-            let outcome = match self.step_case(case, started, supervision, &transcripts) {
+            let outcome = match self.step_case(case, started, supervision, &transcripts.path) {
                 Step::Outcome(outcome) => outcome,
-                Step::CutShort => {
-                    cut_short = true;
+                Step::CutShort(reason) => {
+                    cut_short = Some(reason);
                     break;
                 }
             };
             let verdict = judge(&outcome, Some(case), baseline);
             // Every outcome is collected, whether the case ran or was classified without running:
-            // a collected report recomputes staleness from these, so an unjudged or over-budget
-            // case must be here too, or it would read as a stale baseline entry.
+            // a collected report recomputes staleness from these, so an unjudged case must be here
+            // too, or it would read as a stale baseline entry.
             if supervision.collect {
                 outcomes.push(outcome);
             }
             sink.writer(&verdict);
             verdicts.push(verdict);
         }
-        if !cut_short {
+        if cut_short.is_none() {
             for document in &documents {
-                let outcome = match self.step_reading(*document, started, supervision, &transcripts)
-                {
-                    Step::Outcome(outcome) => outcome,
-                    Step::CutShort => {
-                        cut_short = true;
-                        break;
-                    }
-                };
+                let outcome =
+                    match self.step_reading(*document, started, supervision, &transcripts.path) {
+                        Step::Outcome(outcome) => outcome,
+                        Step::CutShort(reason) => {
+                            cut_short = Some(reason);
+                            break;
+                        }
+                    };
                 let verdict = compare_reading(&outcome, baseline);
                 if supervision.collect {
                     reading_outcomes.push(outcome);
@@ -335,6 +369,7 @@ impl Harness {
             reader: report.reader.clone(),
             outcomes,
             readings: reading_outcomes,
+            cut_short,
         });
         Ok(Supervised {
             report,
@@ -351,10 +386,10 @@ impl Harness {
         supervision: &Supervision,
         transcripts: &Path,
     ) -> Step<CaseOutcome> {
-        if supervisor::signal_raised().is_some() {
-            return Step::CutShort;
+        if let Some(reason) = self.cut_short_before(started) {
+            return Step::CutShort(reason);
         }
-        if let Some(outcome) = self.classify(case, started) {
+        if let Some(outcome) = self.classify(case) {
             return Step::Outcome(outcome);
         }
         let key = case.key();
@@ -386,11 +421,8 @@ impl Harness {
         supervision: &Supervision,
         transcripts: &Path,
     ) -> Step<ReadingOutcome> {
-        if supervisor::signal_raised().is_some() {
-            return Step::CutShort;
-        }
-        if let Some(outcome) = self.classify_reading(document, started) {
-            return Step::Outcome(outcome);
+        if let Some(reason) = self.cut_short_before(started) {
+            return Step::CutShort(reason);
         }
         let name = document.name.to_string();
         let answered = name.clone();
@@ -408,14 +440,6 @@ impl Harness {
                 ChildReport::Case(_) => Err("the reading's child answered with a case".to_string()),
             },
             move |problem| ReadingOutcome::problem(name, problem),
-        )
-    }
-
-    /// What an entry the budget did not reach reports.
-    fn over_budget(&self) -> String {
-        format!(
-            "the run spent its {}s budget before reaching this entry",
-            self.budget.as_secs_f64()
         )
     }
 
@@ -671,7 +695,7 @@ impl Harness {
 impl Drop for Harness {
     fn drop(&mut self) {
         if self.owned {
-            supervisor::discard(&self.root);
+            supervisor::remove_root(&self.root, self.claim.take());
         }
     }
 }
@@ -688,7 +712,7 @@ fn step<T>(
     failed: impl FnOnce(String) -> T,
 ) -> Step<T> {
     match run_child(supervision, &target, transcripts, transcript) {
-        ChildRun::CutShort => Step::CutShort,
+        ChildRun::CutShort(signal) => Step::CutShort(CutShort::Signal(signal)),
         ChildRun::Failed(problem) => Step::Outcome(failed(problem)),
         ChildRun::Report(report) => Step::Outcome(match answered(*report) {
             Ok(outcome) => outcome,
@@ -759,10 +783,16 @@ enum RootState {
     Adopt,
 }
 
-/// Validate a root and create or adopt it, answering whether this call created it. A symlink is
-/// refused: it would make the harness write outside the root it validated. A file is not a root at
-/// all.
-fn create_root(root: &Path, state: RootState) -> Result<bool> {
+/// What creating or adopting a root found: whether this call created it, and the claim it took on
+/// it. An adopted root is claimed by whoever created it, so this call takes none.
+struct Created {
+    owned: bool,
+    claim: Option<supervisor::Claim>,
+}
+
+/// Validate a root and create or adopt it. A symlink is refused: it would make the harness write
+/// outside the root it validated. A file is not a root at all.
+fn create_root(root: &Path, state: RootState) -> Result<Created> {
     validate_root(root)?;
     match std::fs::symlink_metadata(root) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
@@ -775,16 +805,33 @@ fn create_root(root: &Path, state: RootState) -> Result<bool> {
         Ok(_) if matches!(state, RootState::Fresh) => {
             bail!("the harness root {} already exists", root.display())
         }
-        Ok(_) => Ok(false),
+        Ok(_) => Ok(Created {
+            owned: false,
+            claim: None,
+        }),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             std::fs::create_dir(root)
                 .with_context(|| format!("cannot create the harness root {}", root.display()))?;
-            // The marker is what lets a later run reclaim this root if this run dies without
-            // removing it. A root the harness did not create carries no marker and is never swept.
-            // A marker that cannot be written is not the root's: it still works, it just cannot be
-            // reclaimed by the sweep.
-            let _ = supervisor::write_marker(root);
-            Ok(true)
+            // The claim is what proves this root's owner alive to a concurrent run's sweep, and the
+            // kernel releases it when this process dies, however it dies. A claim that cannot be
+            // taken still leaves a working root, and an unwritten marker means no later sweep can
+            // collect it: litter in the temporary directory, not a lost verdict.
+            let claim = match supervisor::Claim::take(root) {
+                Ok(claim) => Some(claim),
+                Err(e) => {
+                    // One line per process: a `flock` that fails fails for every root the run
+                    // creates, and a line per case root would be hundreds of the same line.
+                    CLAIM_WARNING.call_once(|| {
+                        eprintln!(
+                            "parity: cannot claim the harness root {}: {e}; a sweep will leave \
+                             every root this run creates alone",
+                            root.display()
+                        );
+                    });
+                    None
+                }
+            };
+            Ok(Created { owned: true, claim })
         }
         Err(e) => {
             Err(e).with_context(|| format!("cannot inspect the harness root {}", root.display()))
@@ -793,7 +840,7 @@ fn create_root(root: &Path, state: RootState) -> Result<bool> {
 }
 
 /// Refuse a root the harness may not own: it must be named the way [`Harness::temp_root`] names
-/// one, and its parent must be the OS temporary directory.
+/// one, and it must lie under the OS temporary directory.
 fn validate_root(root: &Path) -> Result<()> {
     let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
     let parent = root
@@ -848,7 +895,7 @@ enum ChildRun {
     /// The case is one failed verdict for this reason.
     Failed(String),
     /// The harness received a signal; the child tree is dead and the run must stop.
-    CutShort,
+    CutShort(i32),
 }
 
 /// Run the named case or reading in this process and write its transcript. This is the harness's own
@@ -880,8 +927,9 @@ pub fn run_invocation(
         }
     };
     let text = transcript::to_json(&report)?;
-    // The transcript lives in the parent's root, which this child cannot normalise away; naming only
-    // its file name keeps a raw temporary path out of the parent's verdict.
+    // The transcript lives in the run's transcript directory, outside the root this child
+    // normalises away; naming only its file name keeps a raw temporary path out of the parent's
+    // verdict.
     let name = invocation
         .transcript
         .file_name()
@@ -904,12 +952,17 @@ fn run_child(
 ) -> ChildRun {
     let root = Harness::temp_root();
     let transcript = transcripts.join(transcript);
-    if let Err(e) = create_root(&root, RootState::Fresh) {
-        return ChildRun::Failed(transcript::normalise(
-            &format!("cannot create the case's own root: {e:#}"),
-            &root,
-        ));
-    }
+    // The parent creates the case's root and holds its claim until it reclaims it: a concurrent
+    // run's sweep then sees a live owner, whatever its probe would have said.
+    let claim = match create_root(&root, RootState::Fresh) {
+        Ok(created) => created.claim,
+        Err(e) => {
+            return ChildRun::Failed(transcript::normalise(
+                &format!("cannot create the case's own root: {e:#}"),
+                &root,
+            ));
+        }
+    };
     let bounds = supervision.bounds_for(target);
     let mut command = Command::new(&supervision.child);
     command
@@ -958,7 +1011,7 @@ fn run_child(
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(e) => {
-            supervisor::discard(&root);
+            supervisor::remove_root(&root, claim);
             return ChildRun::Failed(transcript::normalise(
                 &format!("cannot start the case's child process: {e}"),
                 &root,
@@ -977,8 +1030,8 @@ fn run_child(
     let stdout = supervisor::drain(stdout);
     let stderr = supervisor::drain(stderr);
     let status = supervisor::wait(&mut child, pid);
-    let outcome = if supervisor::signal_raised().is_some() {
-        ChildRun::CutShort
+    let outcome = if let Some(signal) = supervisor::signal_raised() {
+        ChildRun::CutShort(signal)
     } else if let Some(reason) =
         supervisor::bounds_tripped(&root, bounds, sampled.child_peak, sampled.descendants_peak)
     {
@@ -993,6 +1046,7 @@ fn run_child(
             Some(status) => outcome_from(
                 &status,
                 &root,
+                transcripts,
                 &transcript,
                 &stdout,
                 &stderr,
@@ -1001,7 +1055,7 @@ fn run_child(
             None => ChildRun::Failed("cannot reap the case's child process".to_string()),
         }
     };
-    supervisor::discard(&root);
+    supervisor::remove_root(&root, claim);
     // A transcript is absent on exactly the paths that killed the case — a bound, the supervisor's
     // budget, a signal, an abort or a non-zero exit — so only a real removal failure is reported.
     if let Err(e) = std::fs::remove_file(&transcript)
@@ -1019,6 +1073,7 @@ fn run_child(
 fn outcome_from(
     status: &std::process::ExitStatus,
     root: &Path,
+    transcripts: &Path,
     transcript: &Path,
     stdout: &str,
     stderr: &str,
@@ -1031,7 +1086,9 @@ fn outcome_from(
                 text.push_str(&format!("; {what} ends: {stream}"));
             }
         }
-        transcript::normalise(&text, root)
+        // The directory the transcript was written to, and the case's own root: the two paths a
+        // child's failure prose can name.
+        transcript::normalise_paths(&text, &[transcripts, root])
     };
     let mut bytes = Vec::new();
     let read = std::fs::File::open(transcript).and_then(|file| {
@@ -1336,6 +1393,31 @@ pub struct Run {
     pub reader: EngineIdentity,
     pub outcomes: Vec<CaseOutcome>,
     pub readings: Vec<ReadingOutcome>,
+    /// Why the run stopped before every entry had an outcome; `None` for a complete run.
+    pub cut_short: Option<CutShort>,
+}
+
+/// Why a run stopped before every entry had a verdict.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CutShort {
+    /// An interrupt, termination or hang-up signal; the case tree was killed.
+    Signal(i32),
+    /// The whole run's budget was spent. Reaching it means something is wrong, not that the machine
+    /// was busy: the run stops, and the entries it never reached are absent rather than failed.
+    Budget(Duration),
+}
+
+impl CutShort {
+    /// The reason in the gate's own words, so every cut-short path says the same thing.
+    #[must_use]
+    pub fn reason(self) -> String {
+        match self {
+            Self::Signal(signal) => format!("signal {signal} arrived"),
+            Self::Budget(budget) => {
+                format!("the run spent its {}s budget", budget.as_secs_f64())
+            }
+        }
+    }
 }
 
 /// What one entry's turn in a supervised run produced. A named answer rather than `Option`, whose
@@ -1343,8 +1425,8 @@ pub struct Run {
 enum Step<T> {
     /// The entry is decided: classified without running, or answered by its child.
     Outcome(T),
-    /// A signal cut the run short before this entry was decided.
-    CutShort,
+    /// A signal or the run's budget cut the run short before this entry was decided.
+    CutShort(CutShort),
 }
 
 /// What a supervised run emits as each verdict is decided, so a run that dies leaves everything
@@ -1361,9 +1443,35 @@ pub struct Supervised {
     /// The transcripts, when the supervision asked to collect them. The gate does not: the parent
     /// holds no transcript it has already judged.
     pub run: Option<Run>,
-    /// Whether a signal cut the run short. A cut-short run prints no aggregate summary and exits
-    /// with its own code; it is not a pass, however many verdicts it emitted.
-    pub cut_short: bool,
+    /// Why the run stopped before every entry had a verdict. A cut-short run prints no aggregate
+    /// summary and exits with its own code; it is not a pass, however many verdicts it emitted.
+    pub cut_short: Option<CutShort>,
+}
+
+/// A run's transcript directory: created for the run beside its root and removed when the run ends,
+/// however it ends. Its name carries no root prefix, so no sweep is ever allowed to take it.
+#[must_use = "dropping the guard removes the directory the run's children write their transcripts to"]
+struct Transcripts {
+    path: PathBuf,
+}
+
+impl Transcripts {
+    /// One run per harness: a directory that already exists belongs to a run still in flight on the
+    /// same root, which would share the file names and lose both runs' verdicts. This creation is
+    /// what refuses the second run; the name only makes one directory per root.
+    fn create(root: &Path) -> Result<Self> {
+        let path = Harness::transcripts_root(root);
+        std::fs::create_dir(&path).with_context(|| {
+            format!("cannot create the transcript directory {}", path.display())
+        })?;
+        Ok(Self { path })
+    }
+}
+
+impl Drop for Transcripts {
+    fn drop(&mut self) {
+        supervisor::discard(&self.path);
+    }
 }
 
 /// The baseline entries the run did not reach, in sorted order. Staleness is a fact about the
@@ -1581,8 +1689,8 @@ impl Run {
             readings.push(compare_reading(reading, baseline));
         }
         // Staleness is a fact about the corpus, not about what this engine can judge: every case
-        // produced an outcome, judged or not, so an entry the corpus still holds is never stale
-        // merely because the engine cannot answer it.
+        // the run reached produced an outcome, judged or not, so an entry the corpus still holds is
+        // never stale merely because the engine cannot answer it.
         let seen: BTreeSet<String> = self.outcomes.iter().map(|o| o.key.slug()).collect();
         let seen_readings: BTreeSet<String> =
             self.readings.iter().map(|r| r.document.clone()).collect();
@@ -1879,6 +1987,33 @@ mod tests {
         });
         let problem = outcome.problem.expect("a problem");
         assert!(problem.contains("panicked"), "{problem}");
+    }
+
+    #[test]
+    fn a_transcript_directory_is_removed_with_its_guard() {
+        // A verdict is read from a transcript, so the directory the run's children write into must
+        // not outlive the run that created it.
+        let transcripts =
+            Transcripts::create(&Harness::temp_root()).expect("a transcript directory");
+        let path = transcripts.path.clone();
+        assert!(
+            path.exists(),
+            "the transcript directory exists while the run does"
+        );
+        drop(transcripts);
+        assert!(
+            !path.exists(),
+            "the transcript directory is removed when the run ends"
+        );
+    }
+
+    #[test]
+    fn a_cut_short_reason_names_what_cut_the_run() {
+        assert_eq!(
+            CutShort::Budget(RUN_BUDGET).reason(),
+            format!("the run spent its {}s budget", RUN_BUDGET.as_secs_f64())
+        );
+        assert_eq!(CutShort::Signal(15).reason(), "signal 15 arrived");
     }
 
     #[test]

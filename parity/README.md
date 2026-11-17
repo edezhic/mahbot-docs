@@ -46,8 +46,8 @@ its own. The whole test suite runs the corpus several times (once per determinis
 the supervised reference test, once per bound test), so it is much slower than a single pass.
 
 The gate exits `0` when the run passes, `1` when a verdict fails, `2` when the invocation or the
-harness is wrong, and `3` when a signal cut the run short. A cut-short run prints no aggregate
-summary: the absence of that line is what makes it visibly cut short.
+harness is wrong, and `3` when the run was cut short — by a signal or by its own budget. A cut-short
+run prints no aggregate summary: the absence of that line is what makes it visibly cut short.
 
 `parity --engine noop` runs the same corpus against the do-nothing engine. That engine exists only
 to prove the gate rejects it: a case passes only if its transcript matches the baseline **and** its
@@ -76,12 +76,12 @@ landed yet is shown as `SKIP`, not failed, and a run that judged no case at all 
 | `src/canonical/` | The canonical model, one module per format; each states what it compares, normalises, does not compare and refuses, and the diff. |
 | `src/pptx_capture.rs`, `src/docx_capture.rs`, `src/notices.rs` | The created deck's and created Word document's invariant parts: the matrices, the two-halves rule and the sets the crate captures, driven by both the capture commands and the parts tests; and the one home of the licence notices' names, which `build.rs` includes so the crate's identity leaves them out. |
 | `src/harness.rs` | Runs a corpus against an engine, compares, and produces verdicts. `run()` is the in-process path (the recorder and the fake-engine tests); `supervise()` is the gate's, one child per case. |
-| `src/supervisor.rs` | The supervised seam: the child protocol, the per-case bounds and their defaults, the poller, the descendant walk and its teardown, the signal flag, and the leftover-root sweep. `parity/README.md` is the one statement of what is bounded and what is not. |
+| `src/supervisor.rs` | The supervised seam: the child protocol, the per-case bounds and their defaults, the poller, the descendant walk and its teardown, the signal flag, the claim that proves a root's owner alive, and the leftover-root sweep. `parity/README.md` is the one statement of what is bounded and what is not. |
 | `src/bin/parity.rs` | The gate, and the same binary's hidden `--internal-run` child mode. |
 | `src/bin/parity-helper.rs` | The harness's helper child: the same protocol, with a runaway (writer or reading), a spike that finishes above a lowered ceiling, a hanging case with an own-group descendant, a path-bearing failure, an oversized transcript, two deaths outside any bound, and the three disk-bound shapes, each selected per case from the environment the supervisor hands the child. The bound and interrupt tests in `tests/supervision.rs` and the gate test that judges nothing use it. |
 | `src/baseline.rs` | The recorded reference, with the identity of the engine that produced it. |
 | `src/transcript.rs` | The normalised transcript: no paths, no nonces, no timings. |
-| `tests/supervision.rs` | The bounds and the containment: a runaway writer and a runaway reading are one failed verdict each (macOS, where the footprint bound is enforced), a case that finishes above the ceiling is failed too, each disk bound names itself and only its target, the directory bound outranks the entry bound when both are tripped, a writer and a reading that outlive the supervisor's own budget name the budget and nothing else, the transcript cap and an unparseable transcript name themselves, an in-process and a supervised transcript agree, a leftover root is reclaimed only when its owner is dead and the grace passed, and each of the interrupt, termination and hang-up signals kills the case's tree and exits three. |
+| `tests/supervision.rs` | The bounds and the containment: a runaway writer and a runaway reading are one failed verdict each (macOS, where the footprint bound is enforced), a case that finishes above the ceiling is failed too, each disk bound names itself and only its target, the directory bound outranks the entry bound when both are tripped, a writer and a reading that outlive the supervisor's own budget name the budget and nothing else, the transcript cap and an unparseable transcript name themselves, and an in-process and a supervised transcript agree. The sweep: a leftover root is reclaimed only when nobody claims it, its owner is dead and the grace passed; a sweep reports exactly what it took; a held claim outranks a probe that reads its owner as dead; a sweep never takes a run's transcript directory, which lives beside its root. The budget: a spent run budget cuts a run short without failing a case it never reached. And each of the interrupt, termination and hang-up signals kills the case's tree and exits three. |
 | `tests/engine_contract.rs` | The engine crate's contract, proved from here: its vocabulary is the reference's data, its result shapes carry every recorded field, its closed operation set holds every corpus operation and edit, the reference copies are byte-for-byte the product's, and the host's media tables are the product's own. |
 | `tests/coverage.rs` | The corpus's depth: every reading mark is witnessed by a recorded reading or recorded as unproducible with its reason, every mark only the writing half prints is witnessed by a recorded case's answer or recorded unreached with its reason, neither ledger's "not produced" side names a mark a recorded answer really prints, every per-family failure verdict is witnessed, and every corpus document is in the baseline. |
 | `tests/teeth.rs` | The comparison has teeth: a reading or a produced case altered in a field its sample populates — a picture dropped, a note or a loss reworded, an output renamed, a produced file's content changed, a status flipped — fails it, and so does a detection answer changed for one input. |
@@ -602,9 +602,11 @@ the default crate writer and reader, is compared on its verdicts alone; its diff
 an expected fact, shown but not failed.
 
 Recording is a deliberate act: only `cargo run --bin record-baseline` writes the file, and it
-refuses to record a run in which a case or a reading could not produce a transcript. Running the
-gate never rewrites the baseline. A baseline entry the corpus no longer holds — a case or a
-reading — is reported as stale and fails the gate, so the two cannot drift apart silently.
+refuses to record a run in which a case or a reading could not produce a transcript, or one that was
+cut short by its budget — a partial baseline would make every later gate run report "no baseline
+entry" for cases nobody judged. Running the gate never rewrites the baseline. A baseline entry the
+corpus no longer holds — a case or a reading — is reported as stale and fails the gate, so the two
+cannot drift apart silently.
 
 ## Determinism and safety
 
@@ -624,9 +626,9 @@ verdict are the parent's. A case that writes without limit or hangs costs that c
 that exhausts memory on a platform that reports physical footprint: its verdict names the bound, and
 every verdict already decided was written and flushed, so a run killed mid-way leaves everything
 judged up to that point. The child is a fresh program image of the same binary, so its footprint is
-its own and not the parent's. The child writes its raw transcript to a file outside its own root —
-reclamation cannot delete it before the parent reads it, and the directory and entry bounds do not
-count it — and the parent reads it back under a cap.
+its own and not the parent's. The child writes its raw transcript to a directory outside every root
+a sweep considers — it is not named like one, so reclamation cannot take it before the parent reads
+it, and the directory and entry bounds do not count it — and the parent reads it back under a cap.
 
 The bounds are configuration with the defaults stated here, because a bound that cannot be set
 small cannot be tested. A test lowers one bound for one named case through `Supervision::override_for`,
@@ -644,6 +646,7 @@ limit.
 | the grace before a dead owner's root is reclaimed | 60 s | the sweep |
 | one writer case's supervisor budget | 240 s | the supervisor |
 | one reading's supervisor budget | 330 s | the supervisor |
+| the whole run's budget | 3600 s | the gate and the recorder |
 
 `RLIMIT_FSIZE` is a property of the child process, not of a file: it bounds **every** file the child
 writes, including the case's own fixture and its transcript. The cap sits above any fixture the
@@ -745,46 +748,67 @@ bound needs a case that lives long enough for the poller to observe it, which an
 finishes in milliseconds does not.
 
 The holes are stated rather than closed: a run killed outright with an uncatchable signal cannot be
-handled by anything and leaves its child alive; a harness killed outright leaves its temporary root
-and its case roots behind; a double-forked descendant escapes a parent-walk; a case child that dies
-on its own leaves its descendants reparented and unidentifiable, so a root whose owner died while its
+handled by anything and leaves its child alive; a harness killed outright leaves its temporary root,
+its case roots and its transcript directory behind — the transcript directory for good, because no
+sweep may take one; a double-forked descendant escapes a parent-walk; a case child that dies on its
+own leaves its descendants reparented and unidentifiable, so a root whose owner died while its
 children still live is reclaimed once the grace has passed rather than waiting for them; a write
-through an already-existing memory mapping is not caught by `RLIMIT_FSIZE`, though extending the file
-is; and the recording mode and the parent's own corpus enumeration stay in process, unbounded in
-memory and on disk — the recorder is run deliberately and rarely, and is named here rather than
+through an already-existing memory mapping is not caught by `RLIMIT_FSIZE`, though extending the
+file is; and the recording mode and the parent's own corpus enumeration stay in process, unbounded
+in memory and on disk — the recorder is run deliberately and rarely, and is named here rather than
 implied to be covered.
 
 A leftover root is reclaimed only when it carries the harness's own `.document-parity-root` marker,
-its recorded owner is no longer alive — decided by the recorded process start time as well as the
-identifier, with a permission error on the probe counting as alive — and it is older than the grace.
-The sweep runs once, in the parent, at the start of a run, never in a child. The harness's own root
-and every case's child root carry the owner's start time before the nonce, so the normaliser strips
-the root it is given and the child's and the parent's texts agree; `tests/supervision.rs` compares
-an in-process and a supervised transcript for a path-bearing failure.
+no live process holds its claim, its recorded owner is no longer alive, and it is older than the
+grace. For a root this harness created, the claim is what proves it live: it is the marker file,
+locked by the run that created the root for as long as that run lives, and the kernel releases it
+when the process dies, however it dies — so a probe that reads a live owner as gone cannot take a
+root a run created and claimed. A free claim is not proof of abandonment: the recorded owner must
+also be gone and the grace passed, and a root nobody claimed — an older harness's, or one created in
+the instant before its claim was taken — is decided by the probe alone, which is the weaker evidence
+it always was. A platform without advisory locking cannot test a claim, so it never reclaims a root
+at all rather than guess; a claim that cannot be opened, a marker that does not parse and a probe
+that cannot decide also leave the root for a later run. Each reclamation is reported on standard
+error once the root is gone, so a root that disappears leaves evidence of what took it. The sweep
+runs once, in the parent, at the start of a run, never in a child. The harness's own root and every
+case's child root carry the owner's start time before the nonce, so the normaliser strips the root
+it is given and the child's and the parent's texts agree; `tests/supervision.rs` compares an
+in-process and a supervised transcript for a path-bearing failure.
 
 The harness writes only inside temporary directories under the OS temporary area — the parent's own
 root, created by `new_with` or validated when `at` is given one, and one child root per case, which
 the parent creates before the child starts and reclaims when the case finishes — never the product's
 storage root: a root must be named `document-parity-…` and lie under the OS temporary directory, or
 the harness refuses it. A root the harness did not create carries no marker, and so the sweep never
-removes it.
+removes it. The transcript directory is not a root: it is a sibling of the run's root, named from it,
+and carries no root prefix, so no sweep may take it, and the run removes it itself however it ends.
+Being a sibling, it cannot collide with a root that happens to share its file name in another
+directory. A child's failure prose is normalised against that directory and against the case's own
+root, both paths before the nonces they carry, so a path either of them names cannot reach a verdict;
+a transcript that parses is normalised against the case's root alone.
 
-The whole run is bounded by a budget, measured under supervision at the timings above (about
-560–600 s for the reference engine, about 55–70 s for the crate engine), so the budget is 1200 s.
-Inside it each case has its own bound: the in-process path runs a writer under a 120 s timeout and a
-reading under one too, and
-the supervised path gives a writer case 240 s (the engine's 120 s, the runtime's 30 s version probe,
-kit materialisation, and fixture construction and canonicalisation) and a reading 330 s (the two
-bounded engine calls and the fixture and canonicalisation). An engine that hangs on every case or
-every document fails in bounded time rather than once per call, and entries the budget does not
-reach fail with a budget problem rather than vanishing from the run. A case or reading that does not
-finish within its bound is that entry's own problem — a timeout recorded as its outcome — and the
-rest of the corpus still runs; the recorder refuses to bake such a run into the baseline, because a
-timeout measures the machine rather than the bytes. The in-process path — the recorder and the
-fake-engine tests — still abandons a timed-out writer thread, which may keep writing into that
-case's directory after the verdict is decided, and still has the product's two conversion permits
-held by an abandoned reading thread, so two hung readings there make every later reading time out
-(each still with its own verdict). The gate's supervised path has neither limit: each case is a
+The whole run is bounded by a budget of 3600 s, a backstop rather than a target: the reference engine
+measures about 560–600 s under supervision and the crate about 55–70 s, so reaching the budget means
+something is wrong — a case spending its full per-case bound over and over — not that the machine
+was busy. A spent budget cuts the run short: it prints no aggregate summary, reports the entries it
+did not reach as absent rather than failed, and exits 3, the same cut-short exit a signal produces. A
+case nobody ran is not a case that failed, and a case that is genuinely wrong or genuinely over its
+own bound still fails on its own verdict. The budget is checked between entries, so a run that
+reaches it overshoots by at most one case's own bound before it stops: it is a backstop on the run,
+not a hard ceiling on the case in flight, which its own bound decides. The recorder refuses a
+cut-short run, so a baseline can never be missing an entry nobody judged. Inside the budget each case
+has its own bound: the in-process path runs a writer under a 120 s timeout and a reading under one
+too, and the supervised path gives a writer case 240 s (the engine's 120 s, the runtime's 30 s
+version probe, kit materialisation, and fixture construction and canonicalisation) and a reading
+330 s (the two bounded engine calls and the fixture and canonicalisation). An engine that hangs on
+every case or every document is cut short in bounded time rather than once per call. A case or reading
+that does not finish within its bound is that entry's own problem — a timeout recorded as its
+outcome — and the rest of the corpus still runs; the recorder refuses to bake such a run into the
+baseline, because a timeout measures the machine rather than the bytes. The in-process path — the
+recorder and the fake-engine tests — still abandons a timed-out writer thread, which may keep writing
+into that case's directory after the verdict is decided, and still has the product's two conversion
+permits held by an abandoned reading thread, so two hung readings there make every later reading time
+out (each still with its own verdict). The gate's supervised path has neither limit: each case is a
 process, and per-case reclamation bounds what is live. The recording mode is the one unbounded
 phase, in memory and on disk.
 

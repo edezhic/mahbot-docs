@@ -22,7 +22,7 @@
 
 use crate::engine::EngineIdentity;
 use anyhow::{Context as _, Result, bail};
-use std::io::Read;
+use std::io::{Read, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ExitStatus};
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -52,9 +52,9 @@ const POLL: Duration = Duration::from_millis(100);
 /// cap rather than a parent allocation that grows with a runaway's output.
 const TRANSCRIPT_BYTES: usize = 4 * 1024 * 1024;
 
-/// How old a leftover root must be before it is reclaimed. A live owner is decided by its recorded
-/// process start time as well as its identifier, so the grace is not what keeps a live root alive;
-/// it keeps a root from being reclaimed in the moment between its creation and its marker.
+/// How old a leftover root must be before it is reclaimed. The claim, not the grace, is what keeps a
+/// live root alive: the grace covers the moment between a root's creation and its claim, and a root
+/// that was never claimed at all.
 const GRACE: Duration = Duration::from_secs(60);
 
 /// How much of a child's stream is kept. Only the tail is ever quoted.
@@ -810,23 +810,111 @@ fn process_start(pid: u32) -> Probe {
     Probe::Unknown
 }
 
-/// Write a root's marker: the owner's identifier and start time.
-pub fn write_marker(root: &Path) -> std::io::Result<()> {
+/// A root's marker text: the owning process's identifier and start time.
+fn marker_text() -> String {
     let (seconds, microseconds) = owner_start();
-    let marker = format!("{} {seconds} {microseconds}\n", std::process::id());
-    std::fs::write(root.join(ROOT_MARKER), marker)
+    format!("{} {seconds} {microseconds}\n", std::process::id())
 }
 
-/// Reclaim leftover roots at the start of a run: only those carrying the harness's own marker, whose
-/// recorded owner is no longer alive, and which are older than the grace. A permission error on the
-/// probe counts as alive. The sweep never runs in a child, which would sweep its siblings' roots.
-pub fn sweep(parent_root: &Path, bounds: &Bounds) {
-    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
-        return;
+/// A root's claim: its marker file, locked exclusively for as long as the guard lives.
+///
+/// The kernel drops the lock when the process exits, however it exits, so a sweep proves an owner
+/// gone instead of inferring it from an identifier that may have been reused. A root with no claim
+/// is not proof of death — an older harness never took one, and the moment between creating a root
+/// and claiming it is real — so the sweep still asks the marker's owner.
+#[must_use = "dropping the claim releases the lock, which is the root's only proof of life"]
+pub struct Claim {
+    _marker: std::fs::File,
+}
+
+impl Claim {
+    /// Write `root`'s marker and lock it. The lock is taken before the marker is rewritten, so a
+    /// refused lock leaves the previous owner's recorded identity intact.
+    pub fn take(root: &Path) -> std::io::Result<Self> {
+        let mut marker = std::fs::OpenOptions::new()
+            .create(true)
+            // Truncated only after the lock is taken, so a refused lock leaves the marker honest.
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(root.join(ROOT_MARKER))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::AsRawFd as _;
+            // SAFETY: the descriptor is open for the guard's lifetime; `flock` only takes a lock.
+            if unsafe { libc::flock(marker.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+        marker.set_len(0)?;
+        marker.write_all(marker_text().as_bytes())?;
+        marker.flush()?;
+        Ok(Self { _marker: marker })
+    }
+}
+
+/// What a root's claim says about its owner.
+enum Claimed {
+    /// A live process holds it: the root belongs to a run that is still going.
+    Held,
+    /// Nobody holds it, so its owner is gone or never claimed it. Not yet proof of abandonment.
+    Free,
+    /// It cannot be tested: the safe answer is to leave the root for a later run.
+    Unknown,
+}
+
+/// Whether a live process holds `root`'s claim.
+fn claimed(root: &Path) -> Claimed {
+    let Ok(marker) = std::fs::File::open(root.join(ROOT_MARKER)) else {
+        return Claimed::Unknown;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::AsRawFd as _;
+        // SAFETY: the descriptor is open for the duration of the calls. A successful lock is
+        // released at once: holding it would hide a root this sweep leaves in place from a later
+        // sweep.
+        unsafe {
+            if libc::flock(marker.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) == 0 {
+                libc::flock(marker.as_raw_fd(), libc::LOCK_UN);
+                return Claimed::Free;
+            }
+        }
+        if std::io::Error::last_os_error().raw_os_error() == Some(libc::EWOULDBLOCK) {
+            Claimed::Held
+        } else {
+            Claimed::Unknown
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        // No advisory locking here, so no claim can be tested: every leftover root is left for a
+        // later run. That is litter, never a lost verdict.
+        let _ = marker;
+        Claimed::Unknown
+    }
+}
+
+/// Reclaim leftover roots under the OS temporary directory: see [`sweep_in`].
+pub fn sweep(own_root: &Path, bounds: &Bounds) {
+    sweep_in(&std::env::temp_dir(), Some(own_root), bounds);
+}
+
+/// Reclaim leftover roots under `directory`: only those carrying the harness's own marker, which no
+/// live process claims, whose recorded owner is no longer alive, and which are older than the
+/// grace. `own_root` is the sweeping run's own root, never considered; `None` considers every root
+/// under `directory`. A claim that cannot be tested counts as alive, and so does a probe that cannot
+/// decide. Each reclamation is reported on standard error, so a root that disappears leaves evidence
+/// of what took it, and every reclaimed path is returned. The sweep never runs in a child, which
+/// would sweep its siblings' roots.
+pub fn sweep_in(directory: &Path, own_root: Option<&Path>, bounds: &Bounds) -> Vec<PathBuf> {
+    let mut reclaimed = Vec::new();
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return reclaimed;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path == parent_root {
+        if own_root == Some(path.as_path()) {
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -850,6 +938,14 @@ pub fn sweep(parent_root: &Path, bounds: &Bounds) {
         let Some((pid, seconds, microseconds)) = parse_marker(&marker) else {
             continue;
         };
+        // The claim is the proof of life: a live owner holds it, and the kernel drops it when the
+        // owner dies, however it dies.
+        match claimed(&path) {
+            Claimed::Held | Claimed::Unknown => continue,
+            Claimed::Free => {}
+        }
+        // A root that was never claimed — an older harness's, or one created in the moment before
+        // its claim was taken — is decided by the probe instead.
         if owner_alive(pid, seconds, microseconds) {
             continue;
         }
@@ -862,15 +958,41 @@ pub fn sweep(parent_root: &Path, bounds: &Bounds) {
         if age <= bounds.grace {
             continue;
         }
-        discard(&path);
+        // The reclamation is reported only once the root is gone: a removal that failed already
+        // named itself, and must not also read as reclaimed.
+        if discard(&path) {
+            eprintln!(
+                "parity: reclaimed the leftover root {} (owner {pid} is gone)",
+                path.display()
+            );
+            reclaimed.push(path);
+        }
     }
+    reclaimed
+}
+
+/// Remove a root, releasing its claim first: a platform where an open file blocks removal would
+/// otherwise leak the marker inside it. The one home of that order.
+pub(crate) fn remove_root(root: &Path, claim: Option<Claim>) {
+    drop(claim);
+    discard(root);
 }
 
 /// Remove a directory tree, reporting a failure rather than swallowing it: a root that cannot be
-/// removed is a leak, retried by a later run's sweep once the grace has passed.
-pub(crate) fn discard(path: &Path) {
-    if let Err(e) = std::fs::remove_dir_all(path) {
-        eprintln!("parity: cannot reclaim {}: {e}", path.display());
+/// removed is a leak, retried by a later run's sweep once the grace has passed. Returns whether
+/// this call removed it: a tree another sweep already took is gone, but not this call's to report.
+pub(crate) fn discard(path: &Path) -> bool {
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => {
+            // A concurrent sweep can empty the tree from under this one, which the platform then
+            // reports as a failure. The tree is gone either way; only a survivor is a leak.
+            if path.exists() {
+                eprintln!("parity: cannot reclaim {}: {e}", path.display());
+            }
+            false
+        }
     }
 }
 
@@ -909,5 +1031,35 @@ pub fn helper_identity() -> EngineIdentity {
         build: "helper".to_string(),
         runtime: None,
         components: std::collections::BTreeMap::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A claim is the only evidence the sweep treats as proof, so each of its three answers is
+    /// pinned: free means abandoned, held means alive, and unknown means leave it alone.
+    #[test]
+    #[cfg(unix)]
+    fn a_claim_reads_free_held_or_untestable() {
+        let scratch = tempfile::tempdir().expect("a scratch directory");
+        let root = scratch.path().join("document-parity-claim");
+        std::fs::create_dir(&root).expect("a root");
+        let claim = Claim::take(&root).expect("a claim");
+        assert!(
+            matches!(claimed(&root), Claimed::Held),
+            "a held claim is held"
+        );
+        drop(claim);
+        assert!(
+            matches!(claimed(&root), Claimed::Free),
+            "the kernel releases the claim with the guard"
+        );
+        std::fs::remove_file(root.join(ROOT_MARKER)).expect("remove the marker");
+        assert!(
+            matches!(claimed(&root), Claimed::Unknown),
+            "a claim that cannot be opened cannot be tested"
+        );
     }
 }
