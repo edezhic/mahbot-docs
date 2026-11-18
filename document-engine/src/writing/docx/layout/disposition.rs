@@ -119,21 +119,23 @@ pub const TABLE: &[Row] = &[
         module: "src/text-layout/text-styles.ts",
         disposition: Disposition::Partly,
         note: Some(
-            "The reference's own defaults are what a created document's empty `docDefaults` leaves standing — Times New Roman at ten points, single spacing, a Normal paragraph style with no formatting — and the paragraph and run styles the document states are read. A style naming a theme font is not read: the port resolves no theme font, and a created document states none, nor a `w:rFonts` at all. The probe reports that no run of a created document names a face.",
+            "The reference's own defaults are what a created document's empty `docDefaults` leaves standing — Times New Roman at ten points, single spacing, a Normal paragraph style with no formatting — and the paragraph and run properties a created document's styles state are read: a paragraph's style chain gives its runs their font and size, and its mark its own. A style naming a theme font is not read: the port resolves no theme font, and a created document states none, nor a `w:rFonts` at all. The probe reads both the body and the styles part and reports that no run of the body names a face or a size, while the styles part states the three heading sizes — 16, 13 and 12 points — that the port measures a heading at.",
         ),
         probe: Some("fonts.mjs"),
     },
     Row {
         module: "src/text-layout/line-breaking.ts",
-        disposition: Disposition::Ported,
-        note: None,
-        probe: None,
+        disposition: Disposition::Partly,
+        note: Some(
+            "The port carries a tab stop's alignment — a left stop starts the text after a tab there, a right or centred one lines it up with the stop — keeps a `bar` or `clear` stop out of the layout, and measures a line nothing has been started on as the paragraph's mark. A `decimal` stop is kept as a left one, where the reference lines the text up by the decimal point. What a created document cannot reach is not ported: justification and distributed alignment, hyphenation, a character grid, end-border room, a centred stop's clamp at the line's end, and a `clear` stop's removal of an inherited stop. Where the port does something else instead, it takes the next stop past the cursor for a stop behind it, leaves the text at the tab for one past the right indent, and takes the last list of stops a style chain states rather than merging them by position. The probe packs a created document with a contents block: it reports the one right stop at the column's end that each entry states, no `w:jc` or `w:suppressAutoHyphens` in either part, no grid type, and the entries' line counts, one for a fitting title and two for the long one.",
+        ),
+        probe: Some("tabs.mjs"),
     },
     Row {
         module: "src/text-layout/office-cloud-fonts.ts",
         disposition: Disposition::Excluded,
         note: Some(
-            "A created document names no font of its own: its runs carry no `w:rFonts`, so no run names a cloud font and none is fetched. Its text measures in the default face the width tables state, and its East Asian characters in the fallback East Asian face those tables state. The probe packs a created document and reports that no run states a face or a size and that no font is embedded.",
+            "A created document names no font of its own: its runs carry no `w:rFonts`, so no run names a cloud font and none is fetched. Its text measures in the default face the width tables state, and its East Asian characters in the fallback East Asian face those tables state. The probe packs a created document and reports that no run of its body states a face and that no font is embedded.",
         ),
         probe: Some("fonts.mjs"),
     },

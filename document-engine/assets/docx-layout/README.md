@@ -117,8 +117,8 @@ Read by `document-engine/tests/docx_layout_modules.rs`, which walks it against t
 
 ### `probes/`
 
-Scripts that report what a created document reaches, one per module the disposition table does not
-port in full; run one as `bun document-engine/assets/docx-layout/probes/<name>.mjs`. They are
+Scripts that report what a created document reaches, each named by the disposition table rows whose
+gap it backs; run one as `bun document-engine/assets/docx-layout/probes/<name>.mjs`. They are
 documentation: the layout reads none of them, so they are not part of the data's identity.
 
 ## Licence

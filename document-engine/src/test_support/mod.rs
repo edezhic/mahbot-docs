@@ -26,7 +26,7 @@ pub mod docx_fixture;
 pub mod legacy_formats;
 
 pub use crate::writing::docx::layout::disposition::{Disposition, Row};
-pub use crate::writing::docx::layout::{Layout, Summary};
+pub use crate::writing::docx::layout::{Estimate, Layout, Summary};
 pub use docx_fixture::{arabic_case_heading, arabic_case_text, tall_cell_text};
 
 /// One generated input document: a name and the code that builds its bytes.

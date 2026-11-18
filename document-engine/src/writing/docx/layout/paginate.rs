@@ -10,10 +10,9 @@
 //!
 //! One section, one column, inline pictures, tables whose rows break across pages between the lines
 //! of their cells, footnotes at the page's bottom, a header and a footer, and the compatibility mode
-//! the created document's settings state (Word 2013's, at which every older-mode rule is out of
-//! reach, so East Asian breaking is on). Widow and orphan control, and a table row that may not split
-//! across a page, are not carried: the created styles state no `w:widowControl` and the created
-//! tables state no `w:cantSplit`, so neither rule can fire.
+//! the created document's settings state, which the East Asian break rule reads. Widow and orphan
+//! control, and a table row that may not split across a page, are not carried: the created styles
+//! state no `w:widowControl` and the created tables no `w:cantSplit`, so neither rule can fire.
 //!
 //! A shape a created document does not write — a document in columns, a text box, a frame, an
 //! equation, a floating drawing, a footnote that continues past its page — is not read by
@@ -33,7 +32,8 @@ use std::collections::BTreeMap;
 
 use super::breaks;
 use super::read::{
-    Block, Cell, Content, Field, Item, LineSpacing, Paragraph, ParagraphFormat, Table,
+    Block, Cell, Content, Field, Item, LineSpacing, Paragraph, ParagraphFormat, TabAlignment,
+    TabStop, Table,
 };
 use super::text::{
     Font, measure_descent, measure_line_height, measure_text_height, measure_text_width,
@@ -93,9 +93,10 @@ struct Filling {
 }
 
 impl Filling {
-    fn new() -> Self {
+    /// A line that starts `position` across the column, with nothing on it yet.
+    fn at(position: f64) -> Self {
         Self {
-            position: 0.0,
+            position,
             ascent: 0.0,
             descent: 0.0,
             tallest: 0.0,
@@ -357,107 +358,98 @@ fn blocks_height(blocks: &[Block], column: f64, pass: &Pass<'_>) -> Option<f64> 
 }
 
 /// A paragraph's lines, with the width the column leaves it.
+///
+/// Positions are points from the page's left text margin, which is the frame the paragraph's tab
+/// stops are stated in: a right stop at the column's end lines text up with the column's end, and a
+/// level's indent moves the text, not the stop.
 fn paragraph_lines(paragraph: &Paragraph, column: f64, pass: &Pass<'_>) -> Option<Vec<Line>> {
     let format = &paragraph.format;
     let left = format.indent_left.max(0.0);
     let right = format.indent_right.max(0.0);
-    let width = (column - left - right).max(1.0);
+    let limit = (column - right).max(left + 1.0);
+    let stops = Stops::of(format);
     let tokens = tokens_of(paragraph, pass)?;
-    if tokens.is_empty() {
-        // An empty paragraph is one empty line of its own default font.
-        return Some(vec![empty_line(format)]);
-    }
     let mut lines = Vec::new();
-    let mut line = Filling::new();
-    let mut available = width - format.first_line;
-    for token in tokens {
+    let mut line = Filling::at(left + format.first_line);
+    for (index, token) in tokens.iter().enumerate() {
         match token {
             Token::Space(font) => {
-                line.position += measure_text_width(" ", &font, line.position);
-                line.started = true;
+                // A space starts no line and adds no height, so a paragraph of nothing but spaces is
+                // measured as its mark.
+                line.position += measure_text_width(" ", font, line.position);
             }
             Token::Tab(font) => {
-                let next = next_tab(format, line.position);
-                if next > available + tolerance() && line.started {
-                    lines.push(finish_line(&line, format, lines.is_empty()));
-                    line = Filling::new();
-                    available = width;
-                    line.position = next_tab(format, 0.0);
-                } else {
-                    line.position = next;
-                }
-                let descent = measure_descent(&font);
-                let natural = measure_line_height(&font);
-                line.descent = line.descent.max(descent);
-                line.ascent = line.ascent.max(natural - descent);
-                line.tallest = line.tallest.max(natural);
+                // A tab is as tall as the run that carries it, and starts the line whether or not it
+                // moves it.
+                raise_line(&mut line, font, measure_line_height(font));
                 line.started = true;
+                let stop = if lines.is_empty() {
+                    stops.first_line(line.position)
+                } else {
+                    stops.line(line.position)
+                };
+                if stop.position > limit + tolerance() {
+                    // A tab whose stop is past the end of the line moves nothing: the text stays
+                    // where it is.
+                    continue;
+                }
+                line.position = at_stop(line.position, stop, &tokens[index + 1..]);
             }
             Token::Picture {
                 width: picture,
                 height,
             } => {
-                if line.position + picture > available + tolerance() && line.started {
-                    lines.push(finish_line(&line, format, lines.is_empty()));
-                    line = Filling::new();
-                    available = width;
+                if line.position + picture > limit + tolerance() && line.started {
+                    lines.push(finish_line(&line, paragraph, lines.is_empty()));
+                    line = Filling::at(left);
                 }
                 line.position += picture;
-                line.picture = line.picture.max(height);
-                line.tallest = line.tallest.max(height);
+                line.picture = line.picture.max(*height);
+                line.tallest = line.tallest.max(*height);
                 line.started = true;
             }
             Token::Word(pieces) => {
-                let word_width = width_of(&pieces, line.position);
-                if line.position + word_width > available + tolerance() && line.started {
-                    lines.push(finish_line(&line, format, lines.is_empty()));
-                    line = Filling::new();
-                    available = width;
+                let word_width = width_of(pieces, line.position);
+                if line.position + word_width > limit + tolerance() && line.started {
+                    lines.push(finish_line(&line, paragraph, lines.is_empty()));
+                    line = Filling::at(left);
                 }
                 // A word wider than the whole line is cut character by character, as Word cuts it.
                 if !line.started
-                    && width_of(&pieces, line.position) > available - line.position + tolerance()
+                    && width_of(pieces, line.position) > limit - line.position + tolerance()
                 {
                     // One buffer for a character's own spelling, reused across the cut: a cut is per
                     // character, and an allocation per character is what a long unbroken word pays
                     // for.
                     let mut character = String::new();
-                    for (text, font) in &pieces {
+                    for (text, font) in pieces {
                         for scalar in text.chars() {
                             character.clear();
                             character.push(scalar);
                             let advance = measure_text_width(&character, font, line.position);
-                            if line.started && line.position + advance > available + tolerance() {
-                                lines.push(finish_line(&line, format, lines.is_empty()));
-                                line = Filling::new();
-                                available = width;
+                            if line.started && line.position + advance > limit + tolerance() {
+                                lines.push(finish_line(&line, paragraph, lines.is_empty()));
+                                line = Filling::at(left);
                             }
-                            line.position += measure_text_width(&character, font, line.position);
-                            let descent = measure_descent(font);
-                            let natural = measure_line_height(font);
-                            line.descent = line.descent.max(descent);
-                            line.ascent = line.ascent.max(natural - descent);
-                            line.tallest = line.tallest.max(natural);
+                            line.position += advance;
+                            raise_line(&mut line, font, measure_line_height(font));
                             line.started = true;
                         }
                     }
                     continue;
                 }
-                line.position += width_of(&pieces, line.position);
-                for (text, font) in &pieces {
+                line.position += width_of(pieces, line.position);
+                for (text, font) in pieces {
                     let height = measure_text_height(text, font)
                         .unwrap_or_else(|| measure_line_height(font));
-                    let descent = measure_descent(font);
-                    line.descent = line.descent.max(descent);
-                    line.ascent = line.ascent.max(height - descent);
-                    line.tallest = line.tallest.max(height);
+                    raise_line(&mut line, font, height);
                 }
                 line.started = true;
             }
         }
     }
     if line.started || lines.is_empty() {
-        lines.push(finish_line(&line, format, lines.is_empty()));
+        lines.push(finish_line(&line, paragraph, lines.is_empty()));
     }
     // The paragraph's space after belongs to its last line, so a cut row keeps the same total height
     // however its lines are shared between pages.
@@ -467,23 +459,34 @@ fn paragraph_lines(paragraph: &Paragraph, column: f64, pass: &Pass<'_>) -> Optio
     Some(lines)
 }
 
-/// One empty line of the paragraph's own default font.
-fn empty_line(format: &ParagraphFormat) -> Line {
-    let font = Font::default();
-    Line {
-        height: line_height(&font, format)
-            + format.space_before.unwrap_or(0.0)
-            + format.space_after.unwrap_or(0.0),
-        page_break_before: format.page_break_before,
-    }
+/// Raise a line's heights by one run, whose line height the caller measured as `height`: the run is
+/// that tall, and its font says how much of it sits below the baseline.
+fn raise_line(line: &mut Filling, font: &Font, height: f64) {
+    let descent = measure_descent(font);
+    line.descent = line.descent.max(descent);
+    line.ascent = line.ascent.max(height - descent);
+    line.tallest = line.tallest.max(height);
 }
 
 /// One finished line, with the paragraph's own spacing before on the line that carries it. The space
 /// after is added to the paragraph's last line once it is known (see [`paragraph_lines`]).
-fn finish_line(line: &Filling, format: &ParagraphFormat, first: bool) -> Line {
-    let natural = (line.ascent.max(line.picture) + line.descent).max(line.tallest);
+///
+/// A line nothing has been placed on yet — no text, no tab and no picture, so a paragraph of nothing
+/// or of spaces alone — is as tall as the paragraph's mark, which is the font the reference measures
+/// it in.
+fn finish_line(line: &Filling, paragraph: &Paragraph, first: bool) -> Line {
+    let format = &paragraph.format;
+    let (natural, tallest) = if line.started {
+        (
+            (line.ascent.max(line.picture) + line.descent).max(line.tallest),
+            line.tallest,
+        )
+    } else {
+        let height = measure_line_height(&paragraph.mark_font);
+        (height, height)
+    };
     Line {
-        height: spaced(natural, line.tallest, format)
+        height: spaced(natural, tallest, format)
             + if first {
                 format.space_before.unwrap_or(0.0)
             } else {
@@ -503,24 +506,90 @@ fn spaced(natural: f64, tallest: f64, format: &ParagraphFormat) -> f64 {
     }
 }
 
-/// The line height a paragraph's own spacing states.
-fn line_height(font: &Font, format: &ParagraphFormat) -> f64 {
-    let natural = measure_line_height(font);
-    spaced(natural, natural, format)
+/// Where a paragraph's tabs move to: its own stops, and, on its first line, the hanging indent a
+/// list marker's tab moves to.
+struct Stops<'a> {
+    stops: &'a [TabStop],
+    hanging: Option<TabStop>,
 }
 
-/// The next tab stop after `position`, from the paragraph's own stops or the whole ones.
-fn next_tab(format: &ParagraphFormat, position: f64) -> f64 {
+impl Stops<'_> {
+    fn of(format: &ParagraphFormat) -> Stops<'_> {
+        Stops {
+            stops: &format.tabs,
+            hanging: (format.first_line < 0.0).then(|| TabStop {
+                position: format.indent_left.max(0.0),
+                alignment: TabAlignment::Left,
+            }),
+        }
+    }
+
+    /// The stop a line after the first moves to.
+    fn line(&self, position: f64) -> TabStop {
+        next_stop(position, self.stops, None)
+    }
+
+    /// The stop the paragraph's first line moves to.
+    fn first_line(&self, position: f64) -> TabStop {
+        next_stop(position, self.stops, self.hanging)
+    }
+}
+
+/// The next of `stops` and `hanging` past `position`, or the next default one. Whether it is past
+/// the end of the line is the caller's to decide, since a paragraph's widths have no end.
+fn next_stop(position: f64, stops: &[TabStop], hanging: Option<TabStop>) -> TabStop {
     let slack = tolerance();
-    let stated = format
-        .tabs
+    stops
         .iter()
-        .find(|tab| **tab > position + slack)
-        .copied();
-    let stop = super::text::tab_stop();
-    // A plain multiply and add, as the reference writes it: a fused operation would round once
-    // where the reference rounds twice.
-    stated.unwrap_or_else(|| ((position + slack) / stop).floor() * stop + stop)
+        .copied()
+        .chain(hanging)
+        .filter(|stop| stop.position > position + slack)
+        .min_by(|one, other| one.position.total_cmp(&other.position))
+        .unwrap_or_else(|| {
+            let step = super::text::tab_stop();
+            TabStop {
+                position: (((position + slack) / step).floor() + 1.0) * step,
+                alignment: TabAlignment::Left,
+            }
+        })
+}
+
+/// Where the text after a tab starts at `stop`: at the stop itself for a left one, and as far before
+/// it as that text is wide for a centred or a right one — never behind where the line already is.
+fn at_stop(position: f64, stop: TabStop, rest: &[Token]) -> f64 {
+    (stop.position - shift_at(stop.alignment, rest)).max(position)
+}
+
+/// How far before its stop the text after a tab starts: none for a left stop, half its width for a
+/// centred one, and all of it for a right one.
+fn shift_at(alignment: TabAlignment, rest: &[Token]) -> f64 {
+    match alignment {
+        TabAlignment::Left => 0.0,
+        TabAlignment::Center => width_after_tab(rest) / 2.0,
+        TabAlignment::Right => width_after_tab(rest),
+    }
+}
+
+/// The width of the text after a tab, up to the next tab or the end of the paragraph, trailing
+/// spaces left out: what a right or centred stop lines up.
+fn width_after_tab(rest: &[Token]) -> f64 {
+    let mut width = 0.0;
+    let mut committed = 0.0;
+    for token in rest {
+        match token {
+            Token::Word(pieces) => {
+                width += width_of(pieces, 0.0);
+                committed = width;
+            }
+            Token::Space(font) => width += measure_text_width(" ", font, 0.0),
+            Token::Picture { width: picture, .. } => {
+                width += picture;
+                committed = width;
+            }
+            Token::Tab(_) => break,
+        }
+    }
+    committed
 }
 
 /// A word's width, measured piece by piece from `start`.
@@ -577,14 +646,14 @@ fn tokens_of(paragraph: &Paragraph, pass: &Pass<'_>) -> Option<Vec<Token>> {
                     return None;
                 }
             }
-            Item::Tab => {
-                let at = font_of(&Font::default(), &mut fonts);
+            Item::Tab(font) => {
+                let at = font_of(font, &mut fonts);
                 pieces.push(Piece::Tab(at));
             }
             Item::PageBreak => {}
-            Item::Field(field) => {
+            Item::Field(field, font) => {
                 let text = field_text(field, pass);
-                let at = font_of(&Font::default(), &mut fonts);
+                let at = font_of(font, &mut fonts);
                 for character in text.chars() {
                     pieces.push(Piece::Character(character, at));
                 }
@@ -738,22 +807,28 @@ fn content_widths(cell: &Cell, pass: &Pass<'_>) -> Option<(f64, f64)> {
 fn paragraph_widths(paragraph: &Paragraph, pass: &Pass<'_>) -> Option<(f64, f64)> {
     let tokens = tokens_of(paragraph, pass)?;
     let format = &paragraph.format;
+    // The port lays a paragraph out as one segment, so every token of it is on the first line, which
+    // is the stop list the reference gives that segment.
+    let stops = Stops::of(format);
     let left = format.indent_left.max(0.0);
     let right = format.indent_right.max(0.0);
     let mut position = left + format.first_line;
     let mut min = 0.0_f64;
     let mut first = true;
-    for token in tokens {
+    for (index, token) in tokens.iter().enumerate() {
         // The first token starts where the first line starts; every later one where a line starts.
         let start = if first { position } else { left };
         match token {
             Token::Word(pieces) => {
-                let width = width_of(&pieces, position);
+                let width = width_of(pieces, position);
                 min = min.max(start + width + right);
                 position += width;
             }
-            Token::Space(font) => position += measure_text_width(" ", &font, position),
-            Token::Tab(_) => position = next_tab(format, position),
+            Token::Space(font) => position += measure_text_width(" ", font, position),
+            Token::Tab(_) => {
+                let stop = stops.first_line(position);
+                position = at_stop(position, stop, &tokens[index + 1..]);
+            }
             Token::Picture { width, .. } => {
                 min = min.max(start + width + right);
                 position += width;
@@ -1184,9 +1259,10 @@ mod tests {
         text.pop();
         let mut paragraph = Paragraph::default();
         paragraph.items.push(Item::Text(Run { text, font }));
-        paragraph
-            .items
-            .push(Item::Field(Field::PageReference("_Toc60".to_string())));
+        paragraph.items.push(Item::Field(
+            Field::PageReference("_Toc60".to_string()),
+            Font::default(),
+        ));
         document.blocks[0] = Block::Paragraph(paragraph);
         document
     }
@@ -1203,5 +1279,26 @@ mod tests {
         let estimate = passes(&document).expect("the layout settles on its third pass");
         assert_eq!(estimate.bookmark_numbers.get("_Toc60"), Some(&2));
         assert_eq!(estimate.page_count, Some(2));
+    }
+
+    #[test]
+    fn a_stop_places_the_text_after_a_tab_by_its_alignment() {
+        // No created document states a centred stop, so this pins the port's own arithmetic against
+        // the measurer rather than a recorded case: the text after a tab ends on a right stop, is
+        // centred on a centred one, and starts at a left one — and it never starts behind where the
+        // line already is.
+        let font = Font::default();
+        let rest = [Token::Word(vec![("centred".to_string(), font.clone())])];
+        let width = measure_text_width("centred", &font, 0.0);
+        let stop = |alignment| TabStop {
+            position: 200.0,
+            alignment,
+        };
+        assert!((at_stop(0.0, stop(TabAlignment::Left), &rest) - 200.0).abs() < 1e-9);
+        assert!(
+            (at_stop(0.0, stop(TabAlignment::Center), &rest) - (200.0 - width / 2.0)).abs() < 1e-9
+        );
+        assert!((at_stop(0.0, stop(TabAlignment::Right), &rest) - (200.0 - width)).abs() < 1e-9);
+        assert!((at_stop(300.0, stop(TabAlignment::Right), &rest) - 300.0).abs() < 1e-9);
     }
 }

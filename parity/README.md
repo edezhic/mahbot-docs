@@ -40,10 +40,12 @@ compares the engine's own PDF pages against PDFium, reporting the other families
 resolution therefore cannot move a codec version the comparison identity covers.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 808 cases and 91 readings — takes about 55–70 s for the crate engine
-and about 560–600 s for the reference engine, because the gate runs every case in a child process of
-its own. The whole test suite runs the corpus several times (once per determinism check, once for
-the supervised reference test, once per bound test), so it is much slower than a single pass.
+managed runtime. A full pass — 820 cases and 91 readings — is bounded by the run budget below, a
+backstop rather than a target. The reference engine's pass takes several times the crate engine's,
+because every reference case starts the runtime and materialises the kit; both depend on the
+machine and on the corpus. The whole test suite runs the corpus several times (once per
+determinism check, once for the supervised reference test, once per bound test), so it is much
+slower than a single pass.
 
 The gate exits `0` when the run passes, `1` when a verdict fails, `2` when the invocation or the
 harness is wrong, and `3` when the run was cut short — by a signal or by its own budget. A cut-short
@@ -89,7 +91,7 @@ landed yet is shown as `SKIP`, not failed, and a run that judged no case at all 
 | `tests/pptx_create_parts.rs`, `tests/pptx_create.rs` | What the model cannot see about a created deck: the captured parts really are invariant and really are the reference's bytes, the core properties carry fixed strings, two stamps and the reference's revision, the application properties agree over decks differing in slide count, notes count, titles and size, the archive states exactly the entry set the reference writes, a `.jpg` and a `.jpeg` source both arrive as a `.jpeg` media part, and a deck that compares equal to the reference's is the one fed to the crate's editor, so a failure there is the editor's. Permanent and outside the baseline. |
 | `tests/docx_create_parts.rs`, `tests/docx_create_entries.rs`, `tests/docx_assets_identity.rs` | What the model cannot see about a created Word document: the shipped parts and fragments are the reference's own bytes, the archive states exactly the reference's entry list as a set — folder entries included — and the crate's identity covers the captured parts and the layout data but leaves out the notices, the README and the probes. Permanent and outside the baseline. |
 | `tests/pdf_create_shapes.rs` | What the PDF model cannot see about a created document: one request driven through both writers, both produced files walked with the same parser, and every drawn string's position, size and fill colour, every path's geometry, and the description entries the model drops compared. Permanent and outside the baseline. |
-| `baseline/baseline.json` | The recorded reference (about 31 MB of canonical documents). |
+| `baseline/baseline.json` | The recorded reference (canonical documents, tens of megabytes — it grows with the corpus). |
 | `src/bin/parity.rs`, `src/bin/record-baseline.rs`, `src/bin/capture-pptx-parts.rs`, `src/bin/capture-docx-parts.rs` | The gate, the deliberate recorder, and the commands that re-capture a created deck's or a created Word document's invariant parts from the reference's output. |
 | `tests/docx_layout_modules.rs` (in the engine crate) | The layout's disposition table against the committed module list, walked in both directions in the isolated copy where the pinned package does not exist, with every row that is not a full port naming a probe the crate ships. |
 
@@ -281,11 +283,15 @@ builders have one home in `document_engine::test_support`, which the crate's own
   no count beside it, and the `size` and `metadata` values the family never reads; the text the
   layout must break without a space (Chinese and Japanese, and Arabic); the layout situations that
   move a number — rows spanning pages, a footnote at the bottom of the first page, a picture pushed
-  to the next one, a tall header, and a contents entry that wraps; the four link shapes a caller can
-  state, beside the two addresses the reference refuses; and the direct-call shapes a typed port
-  would guess wrong: a scalar bullet, a level that is text, a list with no `items` beside an empty
-  one, a row or a `headers` value that is not an array, a block that is not an object, and a table
-  whose rows mix an array with a number;
+  to the next one, a tall header, and a contents entry that wraps — and the numbers a heading's own
+  size decides: forty level-1, fifty level-2 and sixty level-3 headings each cross a page boundary,
+  sixteen of each level together cross it, and an empty or space-only heading is the line that
+  crosses it; a contents entry's page number ends on its right stop, at each level and mixed, with
+  the wrapped title whose last line carries the number, and a contents block with no page-count token
+  beside it; the four link shapes a caller can state beside the two addresses the reference refuses;
+  and the direct-call shapes a typed port would guess wrong: a scalar bullet, a level that is text, a
+  list with no `items` beside an empty one, a row or a `headers` value that is not an array, a block
+  that is not an object, and a table whose rows mix an array with a number;
 - `fill_template` for all three template families;
 - the workbook fill in depth, since it is one of the families of `fill_template` the crate's writer
   carries out: a shared-string table's whole-cell, partial and unreferenced entries, a whole-cell
@@ -792,30 +798,29 @@ directory. A child's failure prose is normalised against that directory and agai
 root, both paths before the nonces they carry, so a path either of them names cannot reach a verdict;
 a transcript that parses is normalised against the case's root alone.
 
-The whole run is bounded by a budget of 3600 s, a backstop rather than a target: the reference engine
-measures about 560–600 s under supervision and the crate about 55–70 s, so reaching the budget means
-something is wrong — a case spending its full per-case bound over and over — not that the machine
-was busy. A spent budget cuts the run short: it prints no aggregate summary, reports the entries it
-did not reach as absent rather than failed, and exits 3, the same cut-short exit a signal produces. A
-case nobody ran is not a case that failed, and a case that is genuinely wrong or genuinely over its
-own bound still fails on its own verdict. The budget is checked between entries, so a run that
-reaches it overshoots by at most one case's own bound before it stops: it is a backstop on the run,
-not a hard ceiling on the case in flight, which its own bound decides. The recorder refuses a
-cut-short run, so a baseline can never be missing an entry nobody judged. Inside the budget each case
-has its own bound: the in-process path runs a writer under a 120 s timeout and a reading under one
-too, and the supervised path gives a writer case 240 s (the engine's 120 s, the runtime's 30 s
-version probe, kit materialisation, and fixture construction and canonicalisation) and a reading
-330 s (the two bounded engine calls and the fixture and canonicalisation). An engine that hangs on
-every case or every document is cut short in bounded time rather than once per call. A case or reading
-that does not finish within its bound is that entry's own problem — a timeout recorded as its
-outcome — and the rest of the corpus still runs; the recorder refuses to bake such a run into the
-baseline, because a timeout measures the machine rather than the bytes. The in-process path — the
-recorder and the fake-engine tests — still abandons a timed-out writer thread, which may keep writing
-into that case's directory after the verdict is decided, and still has the product's two conversion
-permits held by an abandoned reading thread, so two hung readings there make every later reading time
-out (each still with its own verdict). The gate's supervised path has neither limit: each case is a
-process, and per-case reclamation bounds what is live. The recording mode is the one unbounded
-phase, in memory and on disk.
+The whole run is bounded by a budget of 3600 s, a backstop rather than a target: a pass measures a
+fraction of it, so reaching the budget means something is wrong — a case spending its full per-case
+bound over and over — not that the machine was busy. A spent budget cuts the run short: it prints no
+aggregate summary, reports the entries it did not reach as absent rather than failed, and exits 3,
+the same cut-short exit a signal produces. A case nobody ran is not a case that failed, and a case
+that is genuinely wrong or genuinely over its own bound still fails on its own verdict. The budget
+is checked between entries, so a run that reaches it overshoots by at most one case's own bound
+before it stops: it is a backstop on the run, not a hard ceiling on the case in flight, which its
+own bound decides. The recorder refuses a cut-short run, so a baseline can never be missing an entry
+nobody judged. Inside the budget each case has its own bound: the in-process path runs a writer
+under a 120 s timeout and a reading under one too, and the supervised path gives a writer case 240 s
+(the engine's 120 s, the runtime's 30 s version probe, kit materialisation, and fixture construction
+and canonicalisation) and a reading 330 s (the two bounded engine calls and the fixture and
+canonicalisation). An engine that hangs on every case or every document is cut short in bounded time
+rather than once per call. A case or reading that does not finish within its bound is that entry's
+own problem — a timeout recorded as its outcome — and the rest of the corpus still runs; the
+recorder refuses to bake such a run into the baseline, because a timeout measures the machine rather
+than the bytes. The in-process path — the recorder and the fake-engine tests — still abandons a
+timed-out writer thread, which may keep writing into that case's directory after the verdict is
+decided, and still has the product's two conversion permits held by an abandoned reading thread, so
+two hung readings there make every later reading time out (each still with its own verdict). The
+gate's supervised path has neither limit: each case is a process, and per-case reclamation bounds
+what is live. The recording mode is the one unbounded phase, in memory and on disk.
 
 The writer engine runs with the kit's own directory under its case root as its working directory —
 never a workspace — with `--no-install` and `--no-env-file`, the same guards the product passes.

@@ -43,9 +43,8 @@ use std::time::{Duration, Instant};
 /// Whether the one warning about a root that could not be claimed has been printed.
 static CLAIM_WARNING: std::sync::Once = std::sync::Once::new();
 
-/// The whole run's budget: a backstop, not a target. The reference engine measures at about
-/// 560–600 s and the crate at about 55–70 s, so a legitimate run does not come near it.
-/// [`CutShort::Budget`] states what reaching it means; `parity/README.md` states the measurement.
+/// The whole run's budget: a backstop, not a target. A legitimate run does not come near it, at
+/// either engine. [`CutShort::Budget`] states what reaching it means.
 pub const RUN_BUDGET: Duration = Duration::from_secs(3600);
 
 /// How long one writer case may take before it is one failed case. An in-process writer cannot be

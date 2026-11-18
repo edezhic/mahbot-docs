@@ -153,6 +153,48 @@ fn laid_out(
     content
 }
 
+/// `count` one-line headings of one level: the shape whose height alone decides a page boundary.
+fn headings(count: usize, level: u64) -> Vec<Value> {
+    (0..count)
+        .map(|index| json!({ "type": "heading", "level": level, "text": format!("Heading {index}") }))
+        .collect()
+}
+
+/// `count` one-line headings of each of the three levels, in level order.
+fn headings_of_every_level(count: usize) -> Vec<Value> {
+    (1..=3)
+        .flat_map(|level| {
+            (0..count).map(move |index| {
+                json!({ "type": "heading", "level": level, "text": format!("Heading {level}.{index}") })
+            })
+        })
+        .collect()
+}
+
+/// A contents block over `content`.
+fn with_contents(content: Vec<Value>) -> Vec<Value> {
+    let mut all = vec![json!({ "type": "contents" })];
+    all.extend(content);
+    all
+}
+
+/// A contents block over `count` one-line headings of one level.
+fn contents_of(count: usize, level: u64) -> Vec<Value> {
+    with_contents(headings(count, level))
+}
+
+/// `count` one-line headings of one level, and one more heading of the same level whose text is
+/// `last`.
+fn headings_then(count: usize, level: u64, last: &str) -> Vec<Value> {
+    let mut content = headings(count, level);
+    content.push(json!({ "type": "heading", "level": level, "text": last }));
+    content
+}
+
+/// A heading title wider than the contents column, so its contents entry wraps: the reference breaks
+/// it before its last word, `column`, and the entry costs two lines.
+const WRAPPED_TITLE: &str = "A very long heading text that must wrap inside the table of contents entry because it is much wider than the column";
+
 fn create_cases() -> Vec<Case> {
     // A table past the writer's Word-only column bound: 64 columns, one header each.
     let wide_headers: Vec<String> = (0..64).map(|index| format!("h{index}")).collect();
@@ -2030,7 +2072,7 @@ fn create_cases() -> Vec<Case> {
                 "content": laid_out(
                     json!({ "type": "contents" }),
                     vec![
-                        json!({ "type": "heading", "level": 1, "text": "A very long heading text that must wrap inside the table of contents entry because it is much wider than the column" }),
+                        json!({ "type": "heading", "level": 1, "text": WRAPPED_TITLE }),
                         json!({ "type": "heading", "level": 1, "text": "Second" }),
                     ],
                     50,
@@ -2068,6 +2110,456 @@ fn create_cases() -> Vec<Case> {
             ],
         )
         .named("wrapped_contents_entry"),
+        // ── create: the Word layout's heading sizes and its contents' tab stops ──────────────────
+        //
+        // A created document states its heading sizes in its styles part — 16, 13 and 12 points for
+        // the three levels — and the layout measures a heading at its style's size. The body is
+        // 697.9 points tall: 37 level-1 headings fit a page (18.4 each), 46 level-2 (14.95) and 50
+        // level-3 (13.8). A pass that measured every heading at the body's ten points (11.5 a line)
+        // would fit 60 of any level and answer one page where the reference answers two.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": headings(40, 1),
+                "footer": "{pages}",
+                "output": "$out/headings-one.docx",
+            }),
+            vec!["headings-one.docx"],
+            vec![Effect::FieldValue {
+                output: None,
+                part: "word/footer1.xml",
+                instruction: "NUMPAGES",
+                value: Some("2"),
+            }],
+        )
+        .named("headings_level_one_pages"),
+        // 50 level-2 headings: 747.5 points at 14.95 a line, so two pages, where 46 fit one; at the
+        // body's 11.5 a line the same 50 are 575 points and fit one.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": headings(50, 2),
+                "footer": "{pages}",
+                "output": "$out/headings-two.docx",
+            }),
+            vec!["headings-two.docx"],
+            vec![Effect::FieldValue {
+                output: None,
+                part: "word/footer1.xml",
+                instruction: "NUMPAGES",
+                value: Some("2"),
+            }],
+        )
+        .named("headings_level_two_pages"),
+        // 60 level-3 headings: 828 points at 13.8 a line, so two pages, where 50 fit one; at the
+        // body's 11.5 a line the same 60 are 690 points and fit one.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": headings(60, 3),
+                "footer": "{pages}",
+                "output": "$out/headings-three.docx",
+            }),
+            vec!["headings-three.docx"],
+            vec![Effect::FieldValue {
+                output: None,
+                part: "word/footer1.xml",
+                instruction: "NUMPAGES",
+                value: Some("2"),
+            }],
+        )
+        .named("headings_level_three_pages"),
+        // Sixteen headings of each level: 16 x 18.4 + 16 x 14.95 + 16 x 13.8 = 754.4 points, two
+        // pages, where forty-eight lines at the body's 11.5 are 552 and fit one. Sixteen is the
+        // count that also refuses a fix measuring one level right and the others at the body's size:
+        // a level 1 at its own size with the other thirty-two at the body's is 662.4 points, a level
+        // 2's is 607.2 and a level 3's 588.8, so each of those answers one page and this case
+        // refuses it.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": headings_of_every_level(16),
+                "footer": "{pages}",
+                "output": "$out/headings-mixed.docx",
+            }),
+            vec!["headings-mixed.docx"],
+            vec![Effect::FieldValue {
+                output: None,
+                part: "word/footer1.xml",
+                instruction: "NUMPAGES",
+                value: Some("2"),
+            }],
+        )
+        .named("headings_mixed_levels_pages"),
+        // An empty heading is a heading: the reference measures its paragraph mark in the style's own
+        // run properties, 18.4 points for a level-1 heading, not the body's 11.5. Thirty-seven
+        // headings with text take 680.8 of the page's 697.9 points; the empty one after them is the
+        // thirty-eighth line and crosses it, where a pass that measured the mark at the body's size
+        // would leave the page count at one.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": headings_then(37, 1, ""),
+                "footer": "{pages}",
+                "output": "$out/empty-heading.docx",
+            }),
+            vec!["empty-heading.docx"],
+            vec![Effect::FieldValue {
+                output: None,
+                part: "word/footer1.xml",
+                instruction: "NUMPAGES",
+                value: Some("2"),
+            }],
+        )
+        .named("empty_heading_measures_its_mark"),
+        // A space is no text: a heading whose text is one has nothing started on its line, and the
+        // reference measures that line as the paragraph's mark, 14.95 points at level 2. Forty-six
+        // headings with text take 687.7 of the page's 697.9 points and the space-only one after them
+        // crosses it, where a pass that gave a line of spaces no height would leave the count at one.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": headings_then(46, 2, " "),
+                "footer": "{pages}",
+                "output": "$out/space-heading.docx",
+            }),
+            vec!["space-heading.docx"],
+            vec![Effect::FieldValue {
+                output: None,
+                part: "word/footer1.xml",
+                instruction: "NUMPAGES",
+                value: Some("2"),
+            }],
+        )
+        .named("space_only_heading_measures_its_mark"),
+        // A contents entry's tab stop is a right stop at the column's end: the page number ends on
+        // it, so a title that fits the column costs one line. Thirty entries and the empty paragraph
+        // that ends the field take 31 of the page's 60 short lines, so 18 headings fit after them and
+        // `_Toc19` onwards start on page two. A pass that let the number start at the stop instead of
+        // ending on it costs every entry two lines and places all thirty headings on page two.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": contents_of(30, 1),
+                "footer": "{pages}",
+                "output": "$out/contents-level-one.docx",
+            }),
+            vec!["contents-level-one.docx"],
+            vec![
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc1 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc18 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc19 \\h",
+                    value: Some("2"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc30 \\h",
+                    value: Some("2"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: Some("2"),
+                },
+            ],
+        )
+        .named("contents_entries_level_one"),
+        // The same document with no page-count token: a contents block asks for the pass on its own,
+        // and the entries carry the numbers the footer case's page count agrees with. `_Toc1` is the
+        // witness — a pass that started each number at the stop instead of ending it there would cost
+        // every entry two lines, put all thirty headings on page two and answer two here.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": contents_of(30, 1),
+                "output": "$out/contents-only.docx",
+            }),
+            vec!["contents-only.docx"],
+            vec![
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc1 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc18 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc19 \\h",
+                    value: Some("2"),
+                },
+            ],
+        )
+        .named("contents_only_document"),
+        // The same thirty entries at level 2, whose indent is 220 twips: the stop stays at the
+        // column's end while the text starts 220 twips in, so the entry is one line only when the
+        // stop and the text share the frame. The entries take 31 short lines, so 22 level-2 headings
+        // fit after them on page one; a pass that read the stop as an absolute position against an
+        // indent-relative line costs three lines an entry and moves the boundary.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": contents_of(30, 2),
+                "footer": "{pages}",
+                "output": "$out/contents-level-two.docx",
+            }),
+            vec!["contents-level-two.docx"],
+            vec![
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc1 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc22 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc23 \\h",
+                    value: Some("2"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc30 \\h",
+                    value: Some("2"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: Some("2"),
+                },
+            ],
+        )
+        .named("contents_entries_level_two"),
+        // And at level 3, 440 twips in: the entries take 31 short lines and twenty-four headings fit
+        // after them on page one.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": contents_of(30, 3),
+                "footer": "{pages}",
+                "output": "$out/contents-level-three.docx",
+            }),
+            vec!["contents-level-three.docx"],
+            vec![
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc1 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc24 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc25 \\h",
+                    value: Some("2"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc30 \\h",
+                    value: Some("2"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: Some("2"),
+                },
+            ],
+        )
+        .named("contents_entries_level_three"),
+        // Ten entries of each level, where a per-level fix and the reference's own flow can still
+        // disagree: each level's own height and indent take part, and the twenty headings that fit
+        // after the entries are ten of level 1 and ten of level 2, not ten or twenty-two.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": with_contents(headings_of_every_level(10)),
+                "footer": "{pages}",
+                "output": "$out/contents-mixed.docx",
+            }),
+            vec!["contents-mixed.docx"],
+            vec![
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc1 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc20 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc21 \\h",
+                    value: Some("2"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc30 \\h",
+                    value: Some("2"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: Some("2"),
+                },
+            ],
+        )
+        .named("contents_mixed_levels"),
+        // A title the reference wraps, with its wrap point stated: at the entry's ten-point face the
+        // title is wider than the 451.3-point column, and the reference breaks it before its last
+        // word, `column`, so the entry costs two lines — the title's second line carries the number
+        // up to the right stop. Forty-nine one-line paragraphs after the entries leave the document
+        // at 694.5 of its 697.9 points, so the two lines fit and a third would not: a pass that
+        // started the number at the stop instead of ending it there would cost three, and would put
+        // the tail heading and the page count on a second page.
+        produced(
+            Family::Docx,
+            "create",
+            None,
+            Vec::new(),
+            json!({
+                "op": "create",
+                "format": "docx",
+                "content": laid_out(
+                    json!({ "type": "contents" }),
+                    vec![
+                        json!({ "type": "heading", "level": 1, "text": WRAPPED_TITLE }),
+                        json!({ "type": "heading", "level": 1, "text": "Second" }),
+                    ],
+                    49,
+                    Vec::new(),
+                    json!({ "type": "heading", "level": 1, "text": "Tail" }),
+                ),
+                "footer": "{pages}",
+                "output": "$out/contents-wrapped.docx",
+            }),
+            vec!["contents-wrapped.docx"],
+            vec![
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc1 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc2 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/document.xml",
+                    instruction: "PAGEREF _Toc3 \\h",
+                    value: Some("1"),
+                },
+                Effect::FieldValue {
+                    output: None,
+                    part: "word/footer1.xml",
+                    instruction: "NUMPAGES",
+                    value: Some("1"),
+                },
+            ],
+        )
+        .named("contents_wrapped_title_boundary"),
         produced(
             Family::Xlsx,
             "create",

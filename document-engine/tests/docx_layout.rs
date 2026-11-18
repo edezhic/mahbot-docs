@@ -1,10 +1,9 @@
 //! The layout pass, from the outside: the parts a created document is made of, read back and laid
 //! out, and the contents field the writer writes read back by the reader that finds its bookmarks.
 //!
-//! The first three steps of the port are closed here, over parts the independent fixture builder
-//! (`test_support::docx_fixture`) makes, and one test holds that builder to the writer: the parts it
-//! builds are the parts `create` writes. The recorded `docx/create` cases close the fourth step, in
-//! the parity crate.
+//! Most tests lay out parts the independent fixture builder (`test_support::docx_fixture`) makes, and
+//! one holds that builder to the writer: the parts it builds are the parts `create` writes. The
+//! recorded `docx/create` cases judge the writer against the reference, in the parity crate.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read as _;
@@ -12,7 +11,8 @@ use std::path::Path;
 
 use document_engine::operation::{Destination, Request, execute};
 use document_engine::test_support::{
-    Layout, docx_content, docx_fixture, docx_layout, docx_rewritten_parts, docx_written_parts,
+    Estimate, Layout, docx_content, docx_fixture, docx_layout, docx_rewritten_parts,
+    docx_written_parts,
 };
 use serde_json::{Value, json};
 
@@ -45,12 +45,22 @@ fn paragraphs(count: usize) -> Vec<Value> {
         .collect()
 }
 
-/// The page count from a settled layout.
-fn pages_of(layout: Layout) -> Option<u32> {
+/// The numbers from a layout that settled.
+fn settled(layout: Layout) -> Estimate {
     match layout {
-        Layout::Numbers(estimate) => estimate.page_count,
+        Layout::Numbers(estimate) => estimate,
         other => panic!("the layout did not settle: {other:?}"),
     }
+}
+
+/// The page count from a settled layout.
+fn pages_of(layout: Layout) -> Option<u32> {
+    settled(layout).page_count
+}
+
+/// The numbers from the layout of a document made of `content`, with a page-count footer.
+fn numbers_of(content: Value) -> Estimate {
+    settled(docx_layout(&parts(document(content, "{pages}"))))
 }
 
 /// Every part of a produced package, by its archive name.
@@ -81,8 +91,8 @@ fn text(parts: &[(String, Vec<u8>)], name: &str) -> String {
 
 #[test]
 fn the_fixture_parts_are_read_as_the_document_they_are() {
-    // Step 1: the document model the layout reads. The fixture is one of every shape a created
-    // document can carry, and the model answers each of them.
+    // The document model the layout reads: the fixture is one of every shape a created document can
+    // carry, and the model answers each of them.
     let content = docx_content(&docx_fixture::parts(3, 1));
     assert_eq!(content.tables, 1);
     assert_eq!(content.footnotes, 1);
@@ -95,17 +105,13 @@ fn the_fixture_parts_are_read_as_the_document_they_are() {
 
 #[test]
 fn the_fixture_parts_are_laid_out() {
-    // Step 2: the line and page machinery, over the same independent builder's parts.
+    // The line and page machinery, over the same independent builder's parts.
     assert_eq!(pages_of(docx_layout(&docx_fixture::parts(3, 1))), Some(1));
 
     // Sixty one-line paragraphs take a second page, and the heading's bookmark stays on the first.
-    match docx_layout(&docx_fixture::parts(60, 1)) {
-        Layout::Numbers(estimate) => {
-            assert_eq!(estimate.page_count, Some(2));
-            assert_eq!(estimate.bookmark_numbers.get("_Toc1"), Some(&1));
-        }
-        other => panic!("the layout did not settle: {other:?}"),
-    }
+    let estimate = settled(docx_layout(&docx_fixture::parts(60, 1)));
+    assert_eq!(estimate.page_count, Some(2));
+    assert_eq!(estimate.bookmark_numbers.get("_Toc1"), Some(&1));
 
     // A table's rows break across pages: eighty rows take more than one page.
     assert_eq!(pages_of(docx_layout(&docx_fixture::parts(3, 80))), Some(2));
@@ -149,6 +155,136 @@ fn the_writer_s_documents_are_laid_out() {
     assert_eq!(pages_of(docx_layout(&tall)), Some(2));
 }
 
+/// `count` one-line headings of one level.
+fn headings(count: usize, level: u64) -> Vec<Value> {
+    (0..count)
+        .map(|index| json!({ "type": "heading", "level": level, "text": format!("Heading {index}") }))
+        .collect()
+}
+
+/// A contents block over `count` one-line headings of one level.
+fn contents_of(count: usize, level: u64) -> Value {
+    let mut content = vec![json!({ "type": "contents" })];
+    content.extend(headings(count, level));
+    Value::Array(content)
+}
+
+/// The page count of a document made of `content`, with a page-count footer.
+fn pages_with_a_page_count(content: Value) -> Option<u32> {
+    numbers_of(content).page_count
+}
+
+#[test]
+fn a_heading_is_measured_at_the_size_its_style_states() {
+    // The body is 697.9 points tall. A level-1 heading is 18.4 points a line, so 37 fit and 38 do
+    // not; level 2's 14.95 fit 46 and level 3's 13.8 fit 50. At the body's ten points — 11.5 a line —
+    // sixty would fit and every count here would answer one page.
+    for (count, level, pages) in [
+        (37, 1, Some(1)),
+        (38, 1, Some(2)),
+        (46, 2, Some(1)),
+        (47, 2, Some(2)),
+        (50, 3, Some(1)),
+        (51, 3, Some(2)),
+    ] {
+        assert_eq!(
+            pages_with_a_page_count(Value::Array(headings(count, level))),
+            pages,
+            "{count} level-{level} headings"
+        );
+    }
+}
+
+#[test]
+fn a_heading_of_nothing_but_a_space_is_as_tall_as_its_mark() {
+    // A space is no text, so a heading that carries one has nothing started on its line and the
+    // reference measures the line as the paragraph's mark: 14.95 points at level 2. Forty-six
+    // headings with text fill the page and the forty-seventh line crosses it; measured at nothing it
+    // would leave the count at one.
+    let mut content = headings(46, 2);
+    content.push(json!({ "type": "heading", "level": 2, "text": " " }));
+    assert_eq!(pages_with_a_page_count(Value::Array(content)), Some(2));
+}
+
+#[test]
+fn an_empty_heading_is_as_tall_as_its_mark() {
+    // An empty level-1 heading is a paragraph with no run, and the reference measures its mark in the
+    // style's own run properties: 18.4 points. Thirty-seven headings with text fill the page; the
+    // empty thirty-eighth line crosses it. Measured at the body's 11.5 it would fit.
+    let mut content = headings(37, 1);
+    content.push(json!({ "type": "heading", "level": 1, "text": "" }));
+    assert_eq!(pages_with_a_page_count(Value::Array(content)), Some(2));
+    let mut content = headings(36, 1);
+    content.push(json!({ "type": "heading", "level": 1, "text": "" }));
+    assert_eq!(pages_with_a_page_count(Value::Array(content)), Some(1));
+}
+
+#[test]
+fn a_contents_entry_s_page_number_ends_on_its_right_stop() {
+    // Thirty level-1 entries cost one line each, and the empty paragraph that ends the contents
+    // field is one more: thirty-one short lines of the page's sixty, which leave room for eighteen
+    // 18.4-point headings, so the nineteenth heading starts page two. A number that started at the
+    // stop instead of ending on it would cost two lines an entry, and no heading would fit page one.
+    let estimate = numbers_of(contents_of(30, 1));
+    assert_eq!(estimate.bookmark_numbers.get("_Toc1"), Some(&1));
+    assert_eq!(estimate.bookmark_numbers.get("_Toc18"), Some(&1));
+    assert_eq!(estimate.bookmark_numbers.get("_Toc19"), Some(&2));
+    assert_eq!(estimate.page_count, Some(2));
+
+    // The same at level 2 (220 twips in) and level 3 (440): the stop stays at the column's end while
+    // the text starts at the indent, which only works when both are in one frame.
+    let estimate = numbers_of(contents_of(30, 2));
+    assert_eq!(estimate.bookmark_numbers.get("_Toc22"), Some(&1));
+    assert_eq!(estimate.bookmark_numbers.get("_Toc23"), Some(&2));
+    let estimate = numbers_of(contents_of(30, 3));
+    assert_eq!(estimate.bookmark_numbers.get("_Toc24"), Some(&1));
+    assert_eq!(estimate.bookmark_numbers.get("_Toc25"), Some(&2));
+}
+
+#[test]
+fn a_contents_block_alone_writes_its_field() {
+    // No page-count token anywhere in the request: the contents block alone writes the field, and
+    // there is no footer part to carry a count. What its entries read is the right-stop test's and
+    // the recorded `contents_only_document` case's.
+    let parts = parts(json!({ "format": "docx", "content": contents_of(30, 1) }));
+    let body = text(&parts, "word/document.xml");
+    assert!(body.contains("TOC \\h"), "{body}");
+    assert!(body.contains("PAGEREF _Toc19 \\h"), "{body}");
+    let footer = parts
+        .iter()
+        .any(|(name, _)| name.starts_with("word/footer"));
+    assert!(!footer, "a contents block alone needs no footer");
+}
+
+#[test]
+fn a_wrapped_contents_title_costs_exactly_the_two_lines_the_reference_lays_it_in() {
+    // At the entry's ten-point face the title is wider than the 451.3-point column and the reference
+    // breaks it before its last word, `column`; the number follows on that second line. The pair of
+    // documents below pins the count at two: forty-nine one-line paragraphs leave the body at 694.5
+    // of its 697.9 points, so the entry's second line fits and a third would not, while one paragraph
+    // more crosses the boundary with it — at one line both documents are one page, at three both are
+    // two. The tail heading rides the same boundary, which is what `_Toc3` reads.
+    let title = "A very long heading text that must wrap inside the table of contents entry because it is much wider than the column";
+    let case = |count: usize| {
+        let mut content = vec![
+            json!({ "type": "contents" }),
+            json!({ "type": "heading", "level": 1, "text": title }),
+            json!({ "type": "heading", "level": 1, "text": "Second" }),
+        ];
+        content.extend(
+            (0..count).map(|index| json!({ "type": "paragraph", "text": format!("Line {index}") })),
+        );
+        content.push(json!({ "type": "heading", "level": 1, "text": "Tail" }));
+        Value::Array(content)
+    };
+    let estimate = numbers_of(case(49));
+    assert_eq!(estimate.page_count, Some(1));
+    assert_eq!(estimate.bookmark_numbers.get("_Toc3"), Some(&1));
+    let estimate = numbers_of(case(50));
+    assert_eq!(estimate.page_count, Some(2));
+    assert_eq!(estimate.bookmark_numbers.get("_Toc3"), Some(&2));
+}
+
 #[test]
 fn a_document_that_carries_no_contents_and_no_page_count_is_never_laid_out() {
     // A `{page}` token neither asks for the pass nor is filled; the writer's own answer is that the
@@ -161,7 +297,7 @@ fn a_document_that_carries_no_contents_and_no_page_count_is_never_laid_out() {
 
 #[test]
 fn the_contents_field_the_writer_writes_is_the_one_the_reader_finds() {
-    // Step 3: the structured field, its entries, its bookmarks and its page references.
+    // The structured field, its entries, its bookmarks and its page references.
     let parts = parts(document(
         json!([
             { "type": "contents" },
@@ -186,7 +322,7 @@ fn the_contents_field_the_writer_writes_is_the_one_the_reader_finds() {
 
 #[test]
 fn the_fixture_builder_and_the_writer_produce_the_same_parts() {
-    // The parts the first three steps were proved against are the parts the writer actually produces.
+    // The parts the tests above were proved against are the parts the writer actually produces.
     let fixture = docx_fixture::parts(3, 1);
     let directory = tempfile::TempDir::new().expect("a directory");
     let request = Request {

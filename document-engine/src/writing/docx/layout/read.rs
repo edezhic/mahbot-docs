@@ -42,10 +42,12 @@ pub(super) struct Run {
 #[derive(Clone)]
 pub(super) enum Item {
     Text(Run),
-    Tab,
+    /// A tab, in the font of the run that carries it, which is what its line height is measured with.
+    Tab(Font),
     PageBreak,
-    /// A page reference, a page count or a page number, as the field's instruction names it.
-    Field(Field),
+    /// A page reference, a page count or a page number, as the field's instruction names it, in the
+    /// font of the run its cached result stands in.
+    Field(Field, Font),
     /// An inline picture, by its own size in points. The line it stands in carries it, so it stands on
     /// the line's baseline and adds its height to the line.
     Drawing {
@@ -86,7 +88,23 @@ pub(super) struct ParagraphFormat {
     pub(super) space_after: Option<f64>,
     pub(super) line_spacing: Option<LineSpacing>,
     pub(super) page_break_before: bool,
-    pub(super) tabs: Vec<f64>,
+    /// The paragraph's own tab stops, in points from the left text margin, as `w:tabs` states them.
+    pub(super) tabs: Vec<TabStop>,
+}
+
+/// A tab stop: where it stands, and how the text after a tab lines up with it.
+#[derive(Clone, Copy)]
+pub(super) struct TabStop {
+    pub(super) position: f64,
+    pub(super) alignment: TabAlignment,
+}
+
+/// How a tab stop lines the text after a tab up with it.
+#[derive(Clone, Copy)]
+pub(super) enum TabAlignment {
+    Left,
+    Center,
+    Right,
 }
 
 /// One paragraph: its items, its format, and what the pass must place for it.
@@ -94,6 +112,10 @@ pub(super) struct ParagraphFormat {
 pub(super) struct Paragraph {
     pub(super) items: Vec<Item>,
     pub(super) format: ParagraphFormat,
+    /// The font of the paragraph's mark: the paragraph style chain's own run properties with the
+    /// paragraph's own `w:pPr/w:rPr` over them, which is what an empty paragraph's line is measured
+    /// with.
+    pub(super) mark_font: Font,
     /// The bookmark a `_Toc` name stands at the paragraph's start, which is what a table of
     /// contents' page reference reads.
     pub(super) bookmark: Option<String>,
@@ -177,7 +199,9 @@ struct ParagraphStyle {
     space_after: Option<f64>,
     line_spacing: Option<LineSpacing>,
     page_break_before: Option<bool>,
-    tabs: Vec<f64>,
+    tabs: Vec<TabStop>,
+    /// The style's own run properties, which a paragraph of the style draws its text and its mark in.
+    run: RunStyle,
 }
 
 /// A run's own properties, before they are resolved against the styles.
@@ -523,6 +547,7 @@ impl Styles {
                             .child("w:basedOn")
                             .and_then(|base| base.attribute("w:val"))
                             .map(str::to_string);
+                        read.run = style.child("w:rPr").map(read_run_style).unwrap_or_default();
                         table.paragraphs.insert(id.to_string(), read);
                     }
                     Some("character") => {
@@ -569,6 +594,14 @@ impl Styles {
         chain
     }
 
+    /// A paragraph's chain of paragraph styles, from the one its first is based on to its own.
+    fn chain_of(&self, properties: Option<&Node>) -> Vec<&ParagraphStyle> {
+        let style_id = properties
+            .and_then(|properties| properties.child("w:pStyle"))
+            .and_then(|style| style.attribute("w:val"));
+        self.chain(style_id)
+    }
+
     /// The run style a character style states.
     fn run_style(&self, style: Option<&str>) -> Option<&RunStyle> {
         style.and_then(|style| self.runs.get(style))
@@ -577,12 +610,10 @@ impl Styles {
     /// A paragraph's resolved format.
     fn paragraph_format(
         &self,
+        chain: &[&ParagraphStyle],
         properties: Option<&Node>,
         numbering: Option<&Level>,
     ) -> ParagraphFormat {
-        let style_id = properties
-            .and_then(|properties| properties.child("w:pStyle"))
-            .and_then(|style| style.attribute("w:val"));
         let mut format = ParagraphFormat::default();
         let mut apply = |read: &ParagraphStyle| {
             if let Some(value) = read.indent_left {
@@ -614,7 +645,7 @@ impl Styles {
             }
         };
         apply(&self.default_paragraph);
-        for read in self.chain(style_id) {
+        for read in chain {
             apply(read);
         }
         if let Some(properties) = properties {
@@ -630,37 +661,61 @@ impl Styles {
         format
     }
 
-    /// A run's resolved font.
-    fn font(&self, properties: Option<&Node>) -> Font {
-        let mut font = Font {
-            scale: 100.0,
-            ..Font::default()
-        };
-        let mut apply = |read: &RunStyle| {
-            if let Some(name) = &read.font {
-                font.name = Some(name.clone());
-            }
-            if let Some(size) = read.size {
-                font.size = Some(size);
-            }
-            if let Some(bold) = read.bold {
-                font.bold = bold;
-            }
-            if let Some(italic) = read.italic {
-                font.italic = italic;
-            }
-        };
-        apply(&self.default_run);
-        if let Some(properties) = properties {
+    /// A run's resolved font: the paragraph's own, the character style it names, and its own
+    /// properties, in the order the reference combines them.
+    fn run_font(&self, base: &Font, run: Option<&Node>) -> Font {
+        let mut font = base.clone();
+        if let Some(properties) = run {
             let character = properties
                 .child("w:rStyle")
                 .and_then(|style| style.attribute("w:val"));
             if let Some(read) = self.run_style(character) {
-                apply(read);
+                apply_run(&mut font, read);
             }
-            apply(&read_run_style(properties));
+            apply_run(&mut font, &read_run_style(properties));
         }
         font
+    }
+
+    /// The font a paragraph's text is measured in before its runs' own properties: the document's
+    /// defaults and the paragraph style chain's run properties, which is what a created document's
+    /// headings take their size from.
+    fn paragraph_font(&self, chain: &[&ParagraphStyle]) -> Font {
+        let mut font = Font {
+            scale: 100.0,
+            ..Font::default()
+        };
+        apply_run(&mut font, &self.default_run);
+        for read in chain {
+            apply_run(&mut font, &read.run);
+        }
+        font
+    }
+}
+
+/// The font of a paragraph's mark: the paragraph's own font, and the run properties its `w:pPr`
+/// states, which is what an empty paragraph is measured with.
+fn mark_font(base: &Font, properties: Option<&Node>) -> Font {
+    let mut font = base.clone();
+    if let Some(run) = properties.and_then(|properties| properties.child("w:rPr")) {
+        apply_run(&mut font, &read_run_style(run));
+    }
+    font
+}
+
+/// Apply one run style's properties over a font.
+fn apply_run(font: &mut Font, read: &RunStyle) {
+    if let Some(name) = &read.font {
+        font.name = Some(name.clone());
+    }
+    if let Some(size) = read.size {
+        font.size = Some(size);
+    }
+    if let Some(bold) = read.bold {
+        font.bold = bold;
+    }
+    if let Some(italic) = read.italic {
+        font.italic = italic;
     }
 }
 
@@ -684,10 +739,29 @@ fn read_paragraph_style(properties: &Node) -> ParagraphStyle {
     if let Some(tabs) = properties.child("w:tabs") {
         read.tabs = tabs
             .children_named("w:tab")
-            .filter_map(|tab| twips(tab.attribute("w:pos")))
+            .filter_map(|tab| {
+                // A tab that states no position sits at the margin, as the reference reads it.
+                let position = twips(tab.attribute("w:pos")).unwrap_or(0.0);
+                tab_alignment(tab.attribute("w:val")).map(|alignment| TabStop {
+                    position,
+                    alignment,
+                })
+            })
             .collect();
     }
     read
+}
+
+/// The alignment a `w:tab` states: `start` and `left` are a left stop, `end` and `right` a right one,
+/// `center` a centred one, and any other value — `decimal` among them — is a left stop. A `bar` or
+/// `clear` stop is not one the layout uses, and is dropped.
+fn tab_alignment(value: Option<&str>) -> Option<TabAlignment> {
+    match value {
+        Some("right" | "end") => Some(TabAlignment::Right),
+        Some("center") => Some(TabAlignment::Center),
+        Some("bar" | "clear") => None,
+        _ => Some(TabAlignment::Left),
+    }
 }
 
 /// A paragraph style element's own properties.
@@ -859,8 +933,14 @@ fn read_paragraph(
         .and_then(|number| number.attribute("w:val"))
         .and_then(|id| styles.numbering.get(id))
         .cloned();
+    // One walk of the paragraph's style chain serves both its font and its format; its mark builds on
+    // the font with the paragraph's own `w:rPr`.
+    let chain = styles.chain_of(properties);
+    let font = styles.paragraph_font(&chain);
+    let mark = mark_font(&font, properties);
     let mut paragraph = Paragraph {
-        format: styles.paragraph_format(properties, numbering.as_ref()),
+        format: styles.paragraph_format(&chain, properties, numbering.as_ref()),
+        mark_font: mark.clone(),
         ..Paragraph::default()
     };
     // A numbered paragraph starts with its marker and the tab after it.
@@ -868,15 +948,14 @@ fn read_paragraph(
         .as_ref()
         .and_then(|level| marker_text(level, counters))
     {
-        let font = styles.font(properties);
         paragraph.items.push(Item::Text(Run {
             text,
-            font: font.clone(),
+            font: mark.clone(),
         }));
-        paragraph.items.push(Item::Tab);
+        paragraph.items.push(Item::Tab(mark));
     }
     for child in &node.children {
-        read_inline(child, styles, properties, &mut paragraph, fields);
+        read_inline(child, styles, &font, &mut paragraph, fields);
     }
     paragraph
 }
@@ -944,15 +1023,15 @@ impl Fields {
 fn read_inline(
     node: &Node,
     styles: &Styles,
-    properties: Option<&Node>,
+    font: &Font,
     paragraph: &mut Paragraph,
     fields: &mut Fields,
 ) {
     match node.name.as_str() {
-        "w:r" => read_run(node, styles, properties, paragraph, fields),
+        "w:r" => read_run(node, styles, font, paragraph, fields),
         "w:hyperlink" => {
             for child in &node.children {
-                read_inline(child, styles, properties, paragraph, fields);
+                read_inline(child, styles, font, paragraph, fields);
             }
         }
         "w:bookmarkStart" => {
@@ -970,12 +1049,11 @@ fn read_inline(
 fn read_run(
     node: &Node,
     styles: &Styles,
-    properties: Option<&Node>,
+    paragraph_font: &Font,
     paragraph: &mut Paragraph,
     fields: &mut Fields,
 ) {
-    let run_properties = node.child("w:rPr");
-    let font = styles.font(run_properties.or(properties));
+    let font = styles.run_font(paragraph_font, node.child("w:rPr"));
     for child in &node.children {
         // A field's own characters come first: `begin` opens one, `separate` opens its result and
         // `end` closes it. A field's number is placed where the reference places it, at `separate`,
@@ -995,7 +1073,7 @@ fn read_run(
                         if let Some(field) = fields.open.last_mut() {
                             field.replaced = true;
                         }
-                        paragraph.items.push(Item::Field(worked));
+                        paragraph.items.push(Item::Field(worked, font.clone()));
                     }
                 }
                 Some("end") => {
@@ -1023,7 +1101,7 @@ fn read_run(
                 text: child.text.clone(),
                 font: font.clone(),
             })),
-            "w:tab" => paragraph.items.push(Item::Tab),
+            "w:tab" => paragraph.items.push(Item::Tab(font.clone())),
             "w:br" => {
                 if child.attribute("w:type") == Some("page") {
                     paragraph.items.push(Item::PageBreak);
@@ -1364,10 +1442,10 @@ mod tests {
             vec!["First entry"],
             "the entry is read, its cache is not"
         );
-        assert!(matches!(paragraph.items[1], Item::Tab));
+        assert!(matches!(paragraph.items[1], Item::Tab(_)));
         assert!(matches!(
             &paragraph.items[2],
-            Item::Field(Field::PageReference(name)) if name == "_Toc1"
+            Item::Field(Field::PageReference(name), _) if name == "_Toc1"
         ));
     }
 
@@ -1421,7 +1499,10 @@ mod tests {
         };
         // The page count is placed at its own separator; the page number inside it is not.
         assert_eq!(paragraph.items.len(), 1, "{:?}", paragraph.items.len());
-        assert!(matches!(paragraph.items[0], Item::Field(Field::PageCount)));
+        assert!(matches!(
+            paragraph.items[0],
+            Item::Field(Field::PageCount, _)
+        ));
     }
 
     #[test]

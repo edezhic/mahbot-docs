@@ -16,37 +16,13 @@
 //! the file parts back through its own reader, which is what the reference does and what makes its
 //! numbers reproducible. It is not a walk over the request's blocks.
 //!
-//! # The order this was built in, and what closed each step
+//! # What it covers
 //!
-//! The port landed whole, and it was built in five steps, each ending at something reviewable and
-//! each closed by a test that could pass at that step. The first three steps are closed by
-//! `document-engine/tests/docx_layout.rs`, whose parts come from the independent builder in
-//! `document-engine/src/test_support/docx_fixture.rs`; the fourth by the recorded `docx/create`
-//! cases; the fifth by the vocabulary scan and `document-engine/tests/docx_layout_modules.rs`.
-//!
-//! 1. **The document model** the layout reads — [`read`], the reader over the formatted body and the
-//!    file parts. Closed by `the_fixture_parts_are_read_as_the_document_they_are`, which reads parts
-//!    the builder produced and checks the model it answers: its blocks, its page, its bookmarks and
-//!    its footnotes.
-//! 2. **The line and page machinery** — [`text`]'s measurer, [`breaks`]'s break opportunities and
-//!    [`paginate`]'s line breaking and pagination. Closed by `the_fixture_parts_are_laid_out`, which
-//!    lays the same parts out and checks the pages it answers: a short document on one page, a long
-//!    one across two, and a table whose rows span a page. The same machinery over the writer's own
-//!    documents is `the_writer_s_documents_are_laid_out`: a footnote at the page's bottom, a picture
-//!    pushed to the next page and a header tall enough to shift the body.
-//! 3. **The contents field generator** — the structured field, its entries, its bookmarks and its
-//!    page references, in `create::fields`. Closed by
-//!    `the_contents_field_the_writer_writes_is_the_one_the_reader_finds` and
-//!    `docx::contents::tests::the_bookmark_the_writer_places_is_the_one_this_reader_finds`.
-//! 4. **The create writer itself** — the block kinds, the refusals and the notes. Closed by the
-//!    recorded `docx/create` cases, which judge it against the reference.
-//! 5. **The vocabulary, data and documentation** — the marks, the width data, the module list and the
-//!    disposition table. Closed by the vocabulary scan and `document-engine/tests/docx_layout_modules.rs`.
-//!
-//! A test holds the fixture builder and the writer together:
-//! `the_fixture_builder_and_the_writer_produce_the_same_parts` builds a document both ways and
-//! compares every part, so the parts the first three steps were proved against are the parts the
-//! writer actually produces.
+//! What the pass covers is what [`disposition`] states, not the whole of the library. The crate's own
+//! tests close it from the outside: `document-engine/tests/docx_layout.rs` lays out parts from the
+//! independent builder in `document-engine/src/test_support/docx_fixture.rs` and the writer's own
+//! documents, `document-engine/tests/docx_layout_modules.rs` holds the table to the module list, and
+//! the recorded `docx/create` cases in the parity crate judge the writer against the reference.
 //!
 //! # The outcome no recorded case reaches
 //!

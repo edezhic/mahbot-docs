@@ -144,7 +144,8 @@ proves the shipped copies are the reference's bytes. A created Word document is 
 port, one library deeper: `docx/create/` walks the content list and serialises each block, and
 `docx/layout/` is the pinned library's layout pass — the measurer over the width tables shipped as
 data, the line breaker, the paginator and the passes that settle a table of contents' page numbers
-and a page-count token — so the numbers a created document shows are the reference's own.
+and a page-count token — so the numbers a created document shows are the reference's own for the
+shapes a created document reaches, which `docx/layout/disposition.rs` states one module at a time.
 
 For a PDF, `src/writing/pdf/` is the object model the page actions build on (`lopdf`, which the
 crate's lockfile already resolved through `pdf-extract`): a page is deep-copied between documents
@@ -169,8 +170,9 @@ serialiser, or a workbook made from one list of sheets, each with its name, rows
 written part by part and sharing the edit path's styles part and merge reading. A created Word
 document is the pinned writer library's serialiser transliterated — its body walk, its package, its
 table of contents field — and the page numbers its contents entries and its page-count token show are
-the library's own layout pass, ported module for module under `docx/layout/`: the measurer over the
-width tables shipped as data, the line breaker, the paginator, and the passes that settle the numbers.
+the library's own layout pass, ported under `docx/layout/` to the reach its disposition table states:
+the measurer over the width tables shipped as data, the line breaker for the column and the tab stops
+a created document states, the paginator, and the passes that settle the numbers.
 `create` carries out all four families, and `fill_template` all three of its OOXML families — a
 Word or presentation sample through the template library, a workbook through the kit's own
 cell-wise filler. The engine states which (operation, family) pairs it carries out as data, and the

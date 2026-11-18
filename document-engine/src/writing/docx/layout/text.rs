@@ -10,8 +10,8 @@
 //! # What a created document reaches
 //!
 //! A created document's runs name no font and no kerning, so every run measures in the default face
-//! — Times New Roman at ten points, which is what the reference's measurer falls back to when neither
-//! the run nor the style chain states one — and the kerning and ligature tables are never consulted:
+//! — Times New Roman, at the size the paragraph's style chain states and ten points when neither the
+//! run nor the style chain states one — and the kerning and ligature tables are never consulted:
 //! `measureTextWidthAsDrawn` is `measureTextWidth` whenever the run asks for neither. Arabic is not
 //! gated the same way: its letters are joined whenever the face has an Arabic table, which Times New
 //! Roman does, so a joined run is measured narrower than the sum of its isolated letters.
@@ -926,9 +926,8 @@ pub(crate) fn measure_text_width(text: &str, font: &Font, start: f64) -> f64 {
     for (index, character) in characters.iter().enumerate() {
         if *character == '\t' {
             let stop = tab_stop();
-            // A plain multiply and add, as the reference writes it: a fused operation would round
-            // once where the reference rounds twice.
-            position = (position / stop).floor() * stop + stop;
+            // The next whole tab stop, as the reference measures a tab.
+            position = ((position / stop).floor() + 1.0) * stop;
             continue;
         }
         let width = if font.monospaced {
