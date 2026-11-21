@@ -44,8 +44,16 @@ pub const FONT: &[u8] = include_bytes!("../assets/NotoSans-Regular.ttf");
 /// The vocabulary key of the reason a reading gives for a file it could not open or parse.
 pub(crate) const REASON_COULD_NOT_BE_READ: &str = "reason_could_not_be_read";
 
+/// The vocabulary key of the reason a reading gives for a file neither of its PDF passes could
+/// open.
+pub(crate) const REASON_COULD_NOT_BE_PARSED: &str = "reason_could_not_be_parsed";
+
 /// The vocabulary key of the reason a reading gives for an encrypted package.
 pub(crate) const REASON_PASSWORD_PROTECTED: &str = "reason_password_protected";
+
+/// The vocabulary key of the reason a reading gives for a document whose pages the structure
+/// reader resolved none of, and whose reading holds nothing else.
+pub(crate) const REASON_PAGES_COULD_NOT_BE_READ: &str = "reason_pages_could_not_be_read";
 
 /// The engine's vocabulary, parsed once.
 ///
@@ -1098,7 +1106,12 @@ mod tests {
     #[test]
     fn every_reason_the_engine_prints_exists() {
         let marks = &vocabulary().marks;
-        for key in [REASON_COULD_NOT_BE_READ, REASON_PASSWORD_PROTECTED] {
+        for key in [
+            REASON_COULD_NOT_BE_PARSED,
+            REASON_COULD_NOT_BE_READ,
+            REASON_PAGES_COULD_NOT_BE_READ,
+            REASON_PASSWORD_PROTECTED,
+        ] {
             assert!(!marks.get(key).is_empty(), "mark `{key}`");
         }
     }

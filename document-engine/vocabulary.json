@@ -1115,6 +1115,12 @@
         "reading"
       ]
     },
+    "note_pages_unaligned": {
+      "text": "the page tree and the text reader name different pages, so page text and page pictures may be numbered differently",
+      "printed_by": [
+        "reading"
+      ]
+    },
     "note_pdf_annotations_truncated": {
       "text": "only the first {max} annotations were read",
       "printed_by": [
@@ -1538,6 +1544,12 @@
     },
     "reason_old_office_version": {
       "text": "an old Office version this tool cannot read",
+      "printed_by": [
+        "reading"
+      ]
+    },
+    "reason_pages_could_not_be_read": {
+      "text": "its pages could not be read",
       "printed_by": [
         "reading"
       ]

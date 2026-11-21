@@ -24,11 +24,30 @@ pub const CODECS: &[&str] = &[
     "hayro-jbig2",
     "hayro-ccitt",
     "hayro-jpeg2000",
+    // The PostScript scanner a CMap program is tokenized with, and the Brotli decompressor the
+    // embedded CMaps are unpacked with (`brotli` is its facade): what a character is mapped to, and
+    // so which glyph a character names. A glyph's *outline* is the font group's business, above.
+    "hayro-postscript",
+    "brotli",
+    "brotli-decompressor",
+    // The font program parser and the rasterizer the renderer draws a glyph with: what a glyph's
+    // outline is and which pixels it covers. `font-types` is the OpenType table-type and number
+    // layer `read-fonts` parses through, `glifo` holds the glyph-outline processing `vello_cpu`
+    // runs, and `fearless_simd` is the kernel dispatch every SIMD path below it chooses from, so a
+    // bump in any of them can move a raster's bytes without moving a version this crate names.
+    "hayro-font",
+    "font-types",
+    "ab_glyph_rasterizer",
+    "glifo",
+    "fearless_simd",
     "vello_cpu",
     "vello_common",
     "peniko",
     "kurbo",
     "pic-scale",
+    // The filter math `pic-scale` resamples with: a bump there moves a downscaled page's pixels as
+    // surely as the resampler that calls it.
+    "pxfm",
     "moxcms",
     "skrifa",
     "read-fonts",

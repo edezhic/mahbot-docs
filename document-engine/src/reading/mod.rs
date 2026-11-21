@@ -15,11 +15,12 @@
 //!   Scheduling, wall-clock limits and how many readings run at once are the caller's business.
 //! - **No panics of its own**, for any input including empty or truncated bytes: every fallible
 //!   step degrades to a skipped artifact, a note, or [`Reading::Unreadable`]. The structure parse
-//!   and the `pdf-extract` text pass run inside `contain_panics`, so a panic
-//!   costs the pass it happens in: in the text pass one page, unless it strikes while the reader is
-//!   opened, when it costs every page. The decoders are trusted, not hardened: a malicious PDF can
-//!   overflow the stack or exhaust memory inside one and abort the process, which no reading can
-//!   contain.
+//!   and the `pdf-extract` text pass run inside `contain_panics`, so a panic costs the pass it
+//!   happens in: in the text pass one page, unless it strikes while the reader is opened, when it
+//!   costs every page. A stack overflow is not a panic, so containment cannot answer one: the page
+//!   tree is walked with the engine's own stack (`reading::page_tree`), and the pages the structure
+//!   reader declines are reported rather than dropped. Which nesting that covers, and what it leaves
+//!   open, is the crate's own claim (`lib.rs`).
 //! - **No input-size bound.** A reading reads the whole file it is given, however large; a gate
 //!   that refuses a file for its size belongs to the caller, above the reading.
 //! - **One page never costs another.** Every page that produced any text contributes it, however
@@ -37,13 +38,55 @@
 //! - **The reading owns the pictures, the caller owns delivery.** Every picture the reading
 //!   produced is returned, in its own order; capping how many are delivered, spilling the text and
 //!   wording the sentences around them belong to the caller.
+//!
+//! # Divergences from the reference
+//!
+//! The reading half answers these shapes differently on purpose; no corpus reading is one of them.
+//!
+//! - **A page the page tree names twice.** The reference lists it twice: its reading carries the
+//!   page's text twice and, for a page without usable text, two rasters of it. The structure reader
+//!   delivers it once, so the reading keeps both namings' text, draws the page once and reports the
+//!   second naming as not shown — `page-named-twice.pdf` gives two text blocks, no picture and one
+//!   page not shown, and `page-named-twice-with-a-raster.pdf` gives two text blocks, `page_1.jpg`
+//!   and one page not shown where the reference writes `page_1.jpg` and `page_2.jpg`. A repeated
+//!   naming is reported out of one budget for the document — see `reading::page_tree` — so a hostile
+//!   `/Count` adds no more than the pages the document delivers, or one when it delivers none. What
+//!   bounds the report is the pages the two readers name, not the pages the file holds: a page the
+//!   text reader names and the library did not deliver is reported as one. The public page renderer
+//!   answers with the same single page: a request for the second naming is
+//!   [`RenderError::NoSuchPage`] with the count the reader resolved.
+//! - **A page whose dictionary nests past the structure reader's bound.** The reference parses it;
+//!   the reader declines it, so the page is reported as not shown, and a document all of whose
+//!   pages are declined that way answers that its pages could not be read rather than reading as a
+//!   document that holds no text. The public page renderer answers from the reader's page list, so
+//!   a document whose only page nests that deep has no page there: a request for it is
+//!   [`RenderError::NoSuchPage`] with a count of zero, where the reference renders it.
+//! - **A `/Kids` entry the file does not resolve.** A reference to an object the file does not hold,
+//!   or one nested past the reader's bound: the reader delivers nothing of either, so the reading
+//!   reports one page not shown — where the reference renders the nested page (the bullet above) and
+//!   skips a missing object silently. The bound is what makes a nested object unresolvable, so the
+//!   two are one shape here. A kid the walk visits once is reported whatever the repeated namings'
+//!   budget says; one the tree names again is a repeated naming, reported as that bullet says. An
+//!   entry that resolves to something other than a dictionary is not a page, and both readers skip
+//!   it however often the tree names it.
+//! - **A page position the two page lists name differently.** The text pass numbers its pages from
+//!   its own list, so the text printed at such a position belongs to another page. The reading
+//!   draws the page the tree names there and says in a note that the text's numbering is not the
+//!   tree's, rather than pairing a picture with text by position.
+//!
+//! What is not a divergence but a limit of the public page renderer: the structure reader keeps a
+//! page's nearest `/Resources` dictionary rather than the inherited set, so a page whose own
+//! dictionary states only part of what it inherits renders without the inherited part. Its
+//! pictures are still extracted, because the engine carries the inheritance itself.
 
 pub(crate) mod legacy;
 pub(crate) mod marks;
 pub(crate) mod ooxml;
 pub(crate) mod output;
+pub(crate) mod page_tree;
 
 use crate::reading::output::{Unshown, UnshownKind, mark, note};
+use crate::reading::page_tree::PageEntry;
 use hayro::hayro_interpret::InterpreterSettings;
 use hayro::hayro_syntax::content::TypedIter;
 use hayro::hayro_syntax::content::ops::TypedInstruction;
@@ -52,9 +95,9 @@ use hayro::hayro_syntax::object::stream::{ImageColorSpace, ImageDecodeParams, St
 use hayro::hayro_syntax::object::{Array, Name, Object, ObjectIdentifier, Rect};
 use hayro::hayro_syntax::page::Page;
 use hayro::hayro_syntax::{DecryptionError, LoadPdfError, Pdf};
-use hayro::vello_cpu::color::Rgba8;
 use hayro::vello_cpu::color::palette::css::WHITE;
-use hayro::{RenderCache, RenderSettings};
+use hayro::vello_cpu::peniko::ImageAlphaType;
+use hayro::{PixmapSettings, RenderCache, RenderSettings};
 use image::codecs::jpeg::JpegEncoder;
 use image::{RgbImage, RgbaImage};
 use pdf_extract::{
@@ -367,24 +410,25 @@ fn render_page_image(page: &Page<'_>, long_side: f32, max_scale: f32) -> Option<
     // stays finite.
     let (width, height) = page.render_dimensions();
     let scale = (long_side / width.max(height)).min(max_scale);
-    let settings = RenderSettings {
-        x_scale: scale,
-        y_scale: scale,
-        bg_color: WHITE,
-        ..RenderSettings::default()
-    };
     let pixmap = hayro::render(
         page,
         &RenderCache::new(),
         &InterpreterSettings::default(),
-        &settings,
+        &RenderSettings {
+            // The renderer's text defaults are off: hinted and cached glyphs are pixels a reading
+            // has never produced, and off is what makes a raster the same file it was before.
+            hinting: false,
+            glyph_caching: false,
+            ..RenderSettings::default()
+        },
+        &PixmapSettings {
+            x_scale: scale,
+            y_scale: scale,
+            bg_color: WHITE,
+        },
     );
     let (pixel_width, pixel_height) = (pixmap.width(), pixmap.height());
-    let raw: Vec<u8> = pixmap
-        .take_unpremultiplied()
-        .into_iter()
-        .flat_map(Rgba8::to_u8_array)
-        .collect();
+    let raw = pixmap.take_rgba8(ImageAlphaType::Alpha);
     RgbaImage::from_raw(u32::from(pixel_width), u32::from(pixel_height), raw)
 }
 
@@ -539,11 +583,13 @@ fn convert_document(
 /// The text pass is per page ([`PdfTextReader`]), so a page the reader cannot read costs that
 /// page and nothing else; [`UnreadablePages`] names them. A page's text is limited to what
 /// its `/CropBox` shows.
+///
+/// The engine walks the page tree itself (`page_tree`) rather than trusting the structure reader's
+/// page list; that module states what the walk adds to it.
 fn convert_pdf(bytes: &[u8], out_dir: &Path, input: Option<&InputFile>) -> DocOutcome {
     // The structure parse also settles encryption: it decrypts with the empty user password, so
     // an owner-password-only document opens, while one that needs a password reports
-    // `Decryption`. hayro also supplies the page list the loop indexes. A panic in the parse is
-    // caught like one in the text pass below it.
+    // `Decryption`. A panic in the parse is caught like one in the text pass below it.
     let pdf = match std::panic::catch_unwind(|| Pdf::new(bytes.to_vec())) {
         Ok(Ok(pdf)) => Some(pdf),
         Ok(Err(LoadPdfError::Decryption(DecryptionError::PasswordProtected))) => {
@@ -557,18 +603,14 @@ fn convert_pdf(bytes: &[u8], out_dir: &Path, input: Option<&InputFile>) -> DocOu
     // Neither pass can read the bytes: nothing to deliver in any form.
     if matches!(reader, PdfTextReader::Unavailable) && pdf.is_none() {
         return DocOutcome::Unreadable {
-            reason: reason("reason_could_not_be_parsed"),
+            reason: reason(crate::vocabulary::REASON_COULD_NOT_BE_PARSED),
         };
     }
-    // Either list running short degrades safely: a page past the reader's list has no text to
-    // inline, and one past the page tree has nothing to render.
-    let page_count = reader
-        .page_count()
-        .max(pdf.as_ref().map_or(0, |pdf| pdf.pages().len()));
-
+    let entries = pdf.as_ref().map(page_tree::entries).unwrap_or_default();
     ensure_out_dir(out_dir);
-
-    let pages = read_pdf_pages(&reader, pdf.as_ref(), out_dir, page_count, input);
+    // Where every picture of this reading goes.
+    let place = Place { out_dir, input };
+    let pages = read_pdf_pages(&reader, pdf.as_ref(), &entries, place);
     // The marks the pages carry (description, comments, form fields) are document content too:
     // the description leads, the page-named marks follow the pages, and none is gated on the
     // page text.
@@ -589,6 +631,9 @@ fn convert_pdf(bytes: &[u8], out_dir: &Path, input: Option<&InputFile>) -> DocOu
     }
     // The unread pages lead: they qualify the text and the notes below them.
     let mut notes = pages.unread.notes();
+    if pages.unaligned {
+        notes.push(note("note_pages_unaligned", &[]));
+    }
     notes.extend(marks.notes);
     notes.extend(pages.skipped.notes());
     // The description is the document's own statement about itself, so it leads the reading.
@@ -598,6 +643,14 @@ fn convert_pdf(bytes: &[u8], out_dir: &Path, input: Option<&InputFile>) -> DocOu
     }
     blocks.extend(marks.annotations.take());
     blocks.extend(marks.fields.take());
+    // A document whose pages the structure reader declined, and whose reading would otherwise be
+    // empty, is not one that holds no text: it says its pages could not be read. Text and marks
+    // win, because the text pass reads pages of its own.
+    if !entries.is_empty() && entries.iter().all(PageEntry::is_declined) && blocks.is_empty() {
+        return DocOutcome::Unreadable {
+            reason: reason(crate::vocabulary::REASON_PAGES_COULD_NOT_BE_READ),
+        };
+    }
     DocOutcome::Text {
         text: blocks.join("\n\n"),
         images: pages.images,
@@ -618,22 +671,29 @@ struct PdfPageReading {
     skipped: SkippedImages,
     unshown: Unshown,
     unread: UnreadablePages,
+    /// Whether the text pass's page and the tree's page differ at some position, so page text and
+    /// page pictures may be numbered differently.
+    unaligned: bool,
 }
 
 /// One page-by-page pass over `pdf`: each page's text, and a raster of every page without text.
 fn read_pdf_pages(
     reader: &PdfTextReader,
     pdf: Option<&Pdf>,
-    out_dir: &Path,
-    page_count: usize,
-    input: Option<&InputFile>,
+    entries: &[PageEntry<'_>],
+    place: Place<'_>,
 ) -> PdfPageReading {
+    // Every page either list names: the tree's entries include the reader's pages, so either list
+    // running short degrades safely — a page past the text pass has no text to inline, and one past
+    // the tree has nothing to render.
+    let page_count = reader.page_ids().len().max(entries.len());
     let mut reading = PdfPageReading {
         blocks: Vec::new(),
         page_text: false,
         images: Vec::new(),
         skipped: SkippedImages::default(),
         unshown: Unshown::default(),
+        unaligned: false,
         unread: UnreadablePages {
             total: page_count,
             ..UnreadablePages::default()
@@ -643,7 +703,24 @@ fn read_pdf_pages(
     let mut written = WrittenImages::default();
     for index in 0..page_count {
         let page_number = index + 1;
-        let page = pdf.and_then(|pdf| pdf.pages().get(index));
+        let entry = entries.get(index);
+        // Whether the text pass's page at this position is the tree's page at this position. Where
+        // they differ, the text printed under this number belongs to another page: the page is drawn
+        // from its own entry rather than described by that text, and the note says so. A position
+        // only one list names is not a misalignment.
+        let paired = match (entry, reader.page_ids().get(index)) {
+            (Some(entry), Some(number)) => entry.number() == Some(*number),
+            _ => true,
+        };
+        reading.unaligned |= !paired;
+        // The page the structure reader delivered for this entry, with the `/Resources` it inherits.
+        // A page it declined has no index, so there is neither, and nothing can be rendered or read
+        // from it. Both come from the entry, so they are present together.
+        let delivered = entry.and_then(|entry| {
+            let page = pdf?.pages().get(entry.delivered()?)?;
+            Some((page, entry.resources()))
+        });
+        let page = delivered.map(|(page, _)| page);
         // What the page shows is what it reads as: a crop box that hides part of the page hides
         // its text too.
         let visible = page.and_then(VisibleArea::of);
@@ -677,26 +754,32 @@ fn read_pdf_pages(
             } else {
                 reading.unread.lost.push(page_number);
             }
-            if !rasterize_page(page, page_number, out_dir, &mut reading.images, input) {
+        }
+        // Whether the page needs a picture of itself: its text failed, it has no usable text, or the
+        // text at this position is another page's, so the page is drawn rather than described by a
+        // page it is not.
+        let needs_picture = failed || !is_usable_page_text(text) || !paired;
+        if entry.is_some_and(PageEntry::is_declined) {
+            // A page the tree names and the structure reader did not deliver — a page nested past
+            // the reader's bound, or one the tree names twice. It is reported whatever the text
+            // pass found, so a declined page that carries text is not silently stripped of its
+            // pictures.
+            reading.unshown.add(UnshownKind::Page, 1);
+        } else if needs_picture {
+            if !rasterize_page(page, page_number, place, &mut reading.images) {
                 reading.unshown.add(UnshownKind::Page, 1);
             }
-        } else if is_usable_page_text(text) {
-            if let Some(page) = page {
-                write_embedded_images(
-                    page,
-                    page_number,
-                    out_dir,
-                    input,
-                    &mut written,
-                    &mut reading.images,
-                    &mut reading.skipped,
-                );
-            }
-        } else {
-            // No usable text layer, so the page is rendered — its text kept beside it.
-            if !rasterize_page(page, page_number, out_dir, &mut reading.images, input) {
-                reading.unshown.add(UnshownKind::Page, 1);
-            }
+        } else if let Some((page, inherited)) = delivered {
+            // The page's own pictures, from its own resources and the ones it inherits.
+            write_embedded_images(
+                page,
+                inherited,
+                page_number,
+                place,
+                &mut written,
+                &mut reading.images,
+                &mut reading.skipped,
+            );
         }
     }
     reading
@@ -716,9 +799,11 @@ enum PageText {
 /// rebuilds the processor — the accepted price of the pages after a failing one.
 #[expect(clippy::large_enum_variant)] // the engine it holds is inherently large
 enum PdfTextReader {
-    /// The document opened: `doc` is the reader's engine and `pages` how many its tree holds. A
-    /// page past the count is one the reader does not know, and is never named as unread.
-    Open { doc: Document, pages: usize },
+    /// The document opened: `doc` is the reader's engine and `ids` the object number each page is,
+    /// in the reader's page order. Its length is how many pages the reader holds — a page past it is
+    /// one the reader does not know, and is never named as unread — and its numbers pair its text
+    /// with a page the tree names.
+    Open { doc: Document, ids: Vec<u32> },
     /// The document could not be opened at all, or holds no page: each of its pages counts as
     /// one whose text failed.
     Unavailable,
@@ -743,23 +828,26 @@ impl PdfTextReader {
                 return Self::Unavailable;
             }
         }
-        let Ok(pages) =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| doc.get_pages().len()))
-        else {
+        let Ok(ids) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            doc.get_pages()
+                .into_values()
+                .map(|(number, _generation)| number)
+                .collect::<Vec<u32>>()
+        })) else {
             return Self::Unavailable;
         };
-        if pages == 0 {
+        if ids.is_empty() {
             return Self::Unavailable;
         }
-        Self::Open { doc, pages }
+        Self::Open { doc, ids }
     }
 
-    /// The page count the text pass walks to: how many pages the reader holds,
-    /// `0` for one that could not be opened.
-    fn page_count(&self) -> usize {
+    /// The object number each page is, in the reader's page order: its length is how many pages the
+    /// reader holds, and empty for one that did not open.
+    fn page_ids(&self) -> &[u32] {
         match self {
-            Self::Open { pages, .. } => *pages,
-            Self::Unavailable => 0,
+            Self::Open { ids, .. } => ids,
+            Self::Unavailable => &[],
         }
     }
 
@@ -769,16 +857,16 @@ impl PdfTextReader {
     /// to the part the crop box leaves visible. A panic is contained like an error, and the text
     /// produced before the failure is kept in [`PageText::Failed`].
     fn read_page(&self, page_number: usize, visible: Option<VisibleArea>) -> Option<PageText> {
-        let Self::Open { doc, pages } = self else {
+        let Self::Open { doc, ids } = self else {
             // The reader never opened: nothing was produced and the read failed.
             return Some(PageText::Failed(String::new()));
         };
-        // The reader holds pages `1..=pages` in its own `u32` numbering: a page outside that
+        // The reader holds pages `1..=ids.len()` in its own `u32` numbering: a page outside that
         // range is one it does not know.
-        if !(1..=*pages).contains(&page_number) {
+        if !(1..=ids.len()).contains(&page_number) {
             return None;
         }
-        // Page numbers count in that numbering and `pages` is its count, so the number fits a
+        // Page numbers count in that numbering and `ids.len()` is its count, so the number fits a
         // `u32`. `allow`, not `expect`: an unfired expectation would itself warn on 32-bit targets.
         #[allow(clippy::cast_possible_truncation)]
         let number = page_number as u32;
@@ -1069,43 +1157,34 @@ struct WrittenImages {
 }
 
 /// Write every image in scope for `page` — its image XObjects, plus the inline images its own
-/// content stream and those of the forms it paints through draw — into `out_dir` as
+/// content stream and those of the forms it paints through draw — into `place`'s directory as
 /// `page_<n>_img_<k>.jpg`, pushing each path onto `images` and counting each one left out onto
-/// `skipped`. `written` carries what the document has already written: an image object is
-/// skipped when an earlier page wrote it, and a form when an earlier page collected its images.
+/// `skipped`. `inherited` is the `/Resources` chain the page tree gives the page, most specific
+/// first; `written` carries what the document has already written: an image object is skipped when
+/// an earlier page wrote it, and a form when an earlier page collected its images.
 fn write_embedded_images(
     page: &Page<'_>,
+    inherited: &[Dict<'_>],
     page_number: usize,
-    out_dir: &Path,
-    input: Option<&InputFile>,
+    place: Place<'_>,
     written: &mut WrittenImages,
     images: &mut Vec<PathBuf>,
     skipped: &mut SkippedImages,
 ) {
     let mut slot = 0;
-    let (image_streams, form_streams) = page_image_streams(page);
+    let (image_streams, form_streams) = page_image_streams(page, inherited);
     for stream in image_streams {
         if let Some(id) = stream.dict().obj_id()
             && !written.x_objects.insert(id)
         {
             continue;
         }
-        if let Some(reason) =
-            write_embedded_image(&stream, page_number, &mut slot, out_dir, input, images)
-        {
+        if let Some(reason) = write_embedded_image(&stream, page_number, &mut slot, place, images) {
             skipped.add(reason);
         }
     }
     if let Some(content) = page.page_stream() {
-        write_inline_images(
-            content,
-            page_number,
-            &mut slot,
-            out_dir,
-            input,
-            images,
-            skipped,
-        );
+        write_inline_images(content, page_number, &mut slot, place, images, skipped);
     }
     // A form is a content stream an inline image can sit in just as well.
     for form in form_streams {
@@ -1115,15 +1194,7 @@ fn write_embedded_images(
             continue;
         }
         if let Ok(content) = form.decoded() {
-            write_inline_images(
-                &content,
-                page_number,
-                &mut slot,
-                out_dir,
-                input,
-                images,
-                skipped,
-            );
+            write_inline_images(&content, page_number, &mut slot, place, images, skipped);
         }
     }
 }
@@ -1135,8 +1206,7 @@ fn write_embedded_image(
     stream: &Stream<'_>,
     page_number: usize,
     slot: &mut usize,
-    out_dir: &Path,
-    input: Option<&InputFile>,
+    place: Place<'_>,
     images: &mut Vec<PathBuf>,
 ) -> Option<SkipReason> {
     let jpeg = match embedded_image_jpeg(stream) {
@@ -1147,7 +1217,7 @@ fn write_embedded_image(
     // the next one reuse its number.
     let name = format!("page_{page_number}_img_{slot}.jpg");
     *slot += 1;
-    let Some(path) = name_avoiding_input(out_dir, &name, input) else {
+    let Some(path) = name_avoiding_input(place.out_dir, &name, place.input) else {
         return Some(SkipReason::Failed);
     };
     match std::fs::write(&path, jpeg) {
@@ -1168,16 +1238,14 @@ fn write_inline_images(
     content: &[u8],
     page_number: usize,
     slot: &mut usize,
-    out_dir: &Path,
-    input: Option<&InputFile>,
+    place: Place<'_>,
     images: &mut Vec<PathBuf>,
     skipped: &mut SkippedImages,
 ) {
     let mut operations = TypedIter::new(content);
     while let Some(operation) = operations.next() {
         if let TypedInstruction::InlineImage(image) = operation
-            && let Some(reason) =
-                write_embedded_image(image.0, page_number, slot, out_dir, input, images)
+            && let Some(reason) = write_embedded_image(image.0, page_number, slot, place, images)
         {
             skipped.add(reason);
         }
@@ -1187,12 +1255,15 @@ fn write_inline_images(
 /// The `(image XObjects, form XObjects)` in scope for `page`: those its own resources and the
 /// inherited page-tree resources name, plus those inside any form reachable from either — a
 /// form is a container the page paints through, so its images are the page's images.
-fn page_image_streams<'a>(page: &Page<'a>) -> (Vec<Stream<'a>>, Vec<Stream<'a>>) {
+fn page_image_streams<'a>(
+    page: &Page<'a>,
+    inherited: &[Dict<'a>],
+) -> (Vec<Stream<'a>>, Vec<Stream<'a>>) {
     let mut images = Vec::new();
     let mut forms = Vec::new();
     // A form reachable down more than one path is entered once, which also bounds the walk.
     let mut visited: HashSet<ObjectIdentifier> = HashSet::new();
-    let mut pending: VecDeque<Stream<'a>> = page_x_objects(page).into();
+    let mut pending: VecDeque<Stream<'a>> = page_x_objects(page, inherited).into();
     while let Some(stream) = pending.pop_front() {
         if let Some(id) = stream.dict().obj_id()
             && !visited.insert(id)
@@ -1211,21 +1282,30 @@ fn page_image_streams<'a>(page: &Page<'a>) -> (Vec<Stream<'a>>, Vec<Stream<'a>>)
     (images, forms)
 }
 
-/// The XObjects the page's own resources name, then those inherited from the page-tree
-/// resources: a name defined twice is taken from the most specific definition.
-fn page_x_objects<'a>(page: &Page<'a>) -> Vec<Stream<'a>> {
+/// The XObjects in scope for `page`: the page's own resources first, then the `/Resources`
+/// dictionaries it inherits from its ancestors — the structure reader keeps only the nearest, so
+/// the inheritance is carried here. A name defined twice is taken from the most specific
+/// definition.
+fn page_x_objects<'a>(page: &Page<'a>, inherited: &[Dict<'a>]) -> Vec<Stream<'a>> {
     let mut seen: HashSet<Name<'a>> = HashSet::new();
     let mut streams = Vec::new();
-    let mut level = Some(page.resources());
-    while let Some(resources) = level {
-        for name in resources.x_objects.keys() {
+    // A page the tree walk did not name has no chain to carry: the reader's nearest resources are
+    // all there is.
+    let nearest = inherited
+        .is_empty()
+        .then(|| page.resources().x_objects.clone());
+    let levels = inherited
+        .iter()
+        .filter_map(|level| level.get::<Dict<'a>>(b"XObject"))
+        .chain(nearest);
+    for x_objects in levels {
+        for name in x_objects.keys() {
             if seen.insert(name.clone())
-                && let Some(stream) = resources.get_x_object(&name)
+                && let Some(stream) = x_objects.get::<Stream<'a>>(&name)
             {
                 streams.push(stream);
             }
         }
-        level = resources.parent();
     }
     streams
 }
@@ -1683,9 +1763,8 @@ fn encode_jpeg(image: &RgbImage) -> Result<Vec<u8>, ()> {
 fn rasterize_page(
     page: Option<&Page<'_>>,
     page_number: usize,
-    out_dir: &Path,
+    place: Place<'_>,
     images: &mut Vec<PathBuf>,
-    input: Option<&InputFile>,
 ) -> bool {
     let Some(page) = page else {
         return false;
@@ -1697,7 +1776,8 @@ fn rasterize_page(
         );
         return false;
     };
-    let Some(path) = name_avoiding_input(out_dir, &format!("page_{page_number}.jpg"), input) else {
+    let name = format!("page_{page_number}.jpg");
+    let Some(path) = name_avoiding_input(place.out_dir, &name, place.input) else {
         return false;
     };
     match std::fs::File::create(&path) {
@@ -1719,6 +1799,14 @@ fn rasterize_page(
             false
         }
     }
+}
+
+/// Where one reading's pictures are written: the caller's directory, and the file being read, which
+/// an artifact name must never resolve to.
+#[derive(Clone, Copy)]
+struct Place<'a> {
+    out_dir: &'a Path,
+    input: Option<&'a InputFile>,
 }
 
 /// The file being read, as the one name a picture must never take. The identity is the file's own

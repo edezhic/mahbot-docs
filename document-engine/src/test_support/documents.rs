@@ -1080,6 +1080,89 @@ pub const PAGE_TREE_DEEP_PDF: Document = Document {
     build: build::pdf_page_tree_deep,
 };
 
+/// The one-page file whose page tree is a chain of thousands of nodes: a stack overflow for the
+/// reference's recursive walk; the engine walks it and delivers its page, text and picture alike.
+pub const PAGE_TREE_NESTED_THOUSANDS_PDF: Document = Document {
+    name: "page-tree-nested-thousands.pdf",
+    build: build::pdf_page_tree_nested_thousands,
+};
+
+/// The one-page file whose page dictionary holds a value nested past the structure reader's bound:
+/// the reader declines the page, and the reading says its pages could not be read.
+pub const PAGE_OBJECT_NESTED_PAST_THE_BOUND_PDF: Document = Document {
+    name: "page-object-nested-past-the-bound.pdf",
+    build: build::pdf_page_object_nested_past_the_bound,
+};
+
+/// The three-page file whose middle page nests past the structure reader's bound: the reader
+/// declines it, so the text pass numbers the page after it one lower than the tree does.
+pub const PAGE_TREE_WITH_A_DECLINED_PAGE_BETWEEN_PDF: Document = Document {
+    name: "page-tree-with-a-declined-page-between.pdf",
+    build: build::pdf_page_tree_with_a_declined_page_between,
+};
+
+/// One delivered page and two the reader declines: both declined pages are reported.
+pub const PAGE_TREE_DECLINING_MORE_PAGES_THAN_IT_DELIVERS_PDF: Document = Document {
+    name: "page-tree-declining-more-pages-than-it-delivers.pdf",
+    build: build::pdf_page_tree_declining_more_pages_than_it_delivers,
+};
+
+/// The two-page file whose tree names one node a hundred times and states a million pages under it:
+/// the not-shown report is bounded by the pages the file delivers, not by the stated count.
+pub const PAGE_TREE_WITH_A_HOSTILE_COUNT_PDF: Document = Document {
+    name: "page-tree-with-a-hostile-count.pdf",
+    build: build::pdf_page_tree_with_a_hostile_count,
+};
+
+/// The one-page file whose picture is defined on the page's ancestor node: the page's own resources
+/// name only its font, so the picture is delivered only by carrying the inheritance.
+pub const INHERITED_IMAGE_PDF: Document = Document {
+    name: "inherited-image.pdf",
+    build: build::pdf_page_with_inherited_image,
+};
+
+/// The one-page file whose page tree names the page twice, with text long enough that no raster is
+/// needed: the reading keeps both namings' text and reports the second as not shown.
+pub const PAGE_NAMED_TWICE_PDF: Document = Document {
+    name: "page-named-twice.pdf",
+    build: build::pdf_page_named_twice_with_text,
+};
+
+/// The one-page file whose page tree names the page twice, with text too short to be usable: both
+/// namings need a raster, and the second is reported as not shown rather than silently dropped.
+pub const PAGE_NAMED_TWICE_WITH_A_RASTER_PDF: Document = Document {
+    name: "page-named-twice-with-a-raster.pdf",
+    build: build::pdf_page_named_twice_with_a_raster,
+};
+
+/// Two pages, the first stated inline in `/Kids`: the text pass knows only the referenced page, so
+/// the two page lists cannot be paired and the reading says so rather than pairing by position.
+pub const PAGE_DICTIONARY_INLINE_BESIDE_A_REFERENCE_PDF: Document = Document {
+    name: "page-dictionary-inline-beside-a-reference.pdf",
+    build: build::pdf_page_dictionary_inline_beside_a_reference,
+};
+
+/// Two pages, both stated inline under one `/Pages` node: their dictionaries carry that node's object
+/// number, so the two are claimed in order and neither is reported as not delivered.
+pub const PAGE_TREE_WITH_TWO_INLINE_PAGES_PDF: Document = Document {
+    name: "page-tree-with-two-inline-pages.pdf",
+    build: build::pdf_page_tree_with_two_inline_pages,
+};
+
+/// One readable page and a `/Kids` entry naming an object the file does not hold: nothing is
+/// delivered for the second naming, so it is reported as a page not shown.
+pub const PAGE_TREE_WITH_A_DANGLING_KID_PDF: Document = Document {
+    name: "page-tree-with-a-dangling-kid.pdf",
+    build: build::pdf_page_tree_with_a_dangling_kid,
+};
+
+/// One readable page and a `/Kids` entry naming an object that is not a dictionary: it is not a
+/// page, so nothing is reported as not shown.
+pub const PAGE_TREE_WITH_A_KID_THAT_IS_NOT_A_DICTIONARY_PDF: Document = Document {
+    name: "page-tree-with-a-kid-that-is-not-a-dictionary.pdf",
+    build: build::pdf_page_tree_with_a_kid_that_is_not_a_dictionary,
+};
+
 /// The two-page file with an object nested well past the depth the scan builds, and past where the
 /// reference's own parser gives up, so both sides carry it however the runtime's stack is set.
 pub const OBJECT_NESTED_PAST_THE_BOUND_PDF: Document = Document {
@@ -1673,6 +1756,7 @@ pub fn reader_documents() -> Vec<Document> {
         MANY_PICTURES_PPTX,
         BROKEN_DECK_PPTX,
         MANY_IMAGES_PDF,
+        INHERITED_IMAGE_PDF,
         LONG_TEXT_PDF,
         LARGE_IMAGE_PDF,
         OVER_FIFTY_MEGABYTES_PDF,

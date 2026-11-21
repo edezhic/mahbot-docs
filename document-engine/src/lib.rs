@@ -50,11 +50,29 @@
 //!
 //! The engine is synchronous and contains its own panics: a malformed document must not take the
 //! process down. Containment relies on unwinding panics, so a caller that builds with
-//! `panic = "abort"` loses it. The first containment installs a panic hook that keeps a contained
-//! panic silent; a caller that installs its own hook afterwards replaces it, so that hook must
-//! chain to the one it found. Diagnostics are `tracing` records only, and the crate neither
-//! installs a subscriber nor requires one. Scheduling, wall-clock limits and how many readings run
-//! at once are the caller's business.
+//! `panic = "abort"` loses it, and a stack overflow is not a panic it can answer. What a reading
+//! does answer is nesting: it walks a PDF's page tree with its own stack (`reading::page_tree`)
+//! and the structure reader refuses an object nested past its own bound, so a page tree thousands of
+//! levels deep is read and a document whose pages all nest past the bound says its pages could not
+//! be read. What it does not answer is the text pass's own recursion: the extractor enters every
+//! form a content stream draws with no depth counter, so a page that draws a deep or
+//! self-referential form chain still overflows the stack and aborts the process — measured, a page
+//! whose content draws a form that draws itself does. Nor is memory bounded here: a file that asks
+//! for more than the machine has can still abort the process.
+//!
+//! Two limits of the reading half are stated rather than implied: a reading's pictures are
+//! byte-identical to the reference's except on the shapes the reading module names — a page that
+//! draws a downscaled image, one that draws an annotation appearance, one whose own `/Resources`
+//! states only part of what it inherits — and the public page renderer answers from the structure
+//! reader's page list, so it differs wherever the library declines a page. Both are stated with
+//! their witnesses in `reading`'s "Divergences from the reference", which is their one home; a
+//! reading that rasterized one of those shapes is named with its reason rather than recorded again
+//! quietly.
+//!
+//! The first containment installs a panic hook that keeps a contained panic silent; a caller that
+//! installs its own hook afterwards replaces it, so that hook must chain to the one it found.
+//! Diagnostics are `tracing` records only, and the crate neither installs a subscriber nor requires
+//! one. Scheduling, wall-clock limits and how many readings run at once are the caller's business.
 //!
 //! `test_support` is the one home of the generated corpus documents the crate's own tests and
 //! the parity harness both read; it is not part of the engine's behaviour, and it is compiled only

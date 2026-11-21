@@ -177,6 +177,15 @@ form: measured, the reference decodes a container of eighty mebibytes in a third
 produces, so a ceiling there refused a file it edits. What replaced it is the typed array's own limit
 above, which is the wall the reference hits rather than one of the engine's choosing.
 
+The reading half states no nesting bound of its own: the structure reader's object reader is the one
+that decides, so the table above states no bound a reading applies. Its page-tree walk is iterative
+and bounds nothing, which is why a tree nested thousands of levels deep is answered. The table's one
+nesting number, `engine.object_depth_max`, bounds the object graph the *writing* half's PDF body scan
+builds. What the reading half answers and what it leaves open is stated in the crate's own claim
+(`src/lib.rs`). The walk that carries a page's inherited resources, reports the pages the reader
+declined and pairs the text pass's pages with the tree's is `src/reading/page_tree.rs`, and
+`tests/pdf_page_tree.rs` witnesses it on the two-mebibyte stack a product conversion runs on.
+
 Two spill numbers are deliberately separate because they bound different things: `text_spill_bytes`
 is the read caller's budget for its whole composed answer, in bytes, and `text_spill_chars` is the
 inbound caller's cap on the extracted text it inlines, in characters. Neither is the reading's.

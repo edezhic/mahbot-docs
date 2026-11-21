@@ -6456,10 +6456,8 @@ pub fn pdf_generation_out_of_range() -> Vec<u8> {
         .into_bytes()
 }
 
-/// [`pdf_basic`] whose page tree is a chain of two hundred `/Pages` nodes: the reference walks it, and
-/// the engine used to refuse a tree deeper than sixty-four.
-#[must_use]
-pub fn pdf_page_tree_deep() -> Vec<u8> {
+/// One A4 page under a chain of `depth` `/Pages` nodes, each naming the next as its only kid.
+fn pdf_page_tree_chain(depth: usize) -> Vec<u8> {
     let mut pdf = PdfObjects::default();
     let font = pdf.push(PDF_FONT);
     let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
@@ -6473,7 +6471,7 @@ pub fn pdf_page_tree_deep() -> Vec<u8> {
     );
     let root = pdf.reserve();
     let mut current = page;
-    for _ in 0..200 {
+    for _ in 0..depth {
         current = pdf.push(format!("<< /Type /Pages /Kids [{current}] /Count 1 >>"));
     }
     pdf.set(
@@ -6481,6 +6479,370 @@ pub fn pdf_page_tree_deep() -> Vec<u8> {
         format!("<< /Type /Pages /Kids [{current}] /Count 1 >>"),
     );
     let catalog = pdf.push(format!("<< /Type /Catalog /Pages {root} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// [`pdf_basic`] whose page tree is a chain of two hundred `/Pages` nodes: the reference walks it, and
+/// the engine used to refuse a tree deeper than sixty-four.
+#[must_use]
+pub fn pdf_page_tree_deep() -> Vec<u8> {
+    pdf_page_tree_chain(200)
+}
+
+/// How deep [`pdf_page_tree_nested_thousands`] nests its `/Pages` nodes, one kid a node: a recursive
+/// walk spends a frame per level here, which is what a conversion thread's stack does not survive.
+pub const NESTED_THOUSANDS_CHAIN_DEPTH: usize = 4_000;
+
+// The witness is one only while it is thousands of levels deep.
+const _: () = assert!(NESTED_THOUSANDS_CHAIN_DEPTH > 1_000);
+
+/// [`pdf_page_tree_deep`] with a chain of thousands of `/Pages` nodes: a page tree the reference's
+/// own walk takes down with a stack overflow, and the engine must answer.
+#[must_use]
+pub fn pdf_page_tree_nested_thousands() -> Vec<u8> {
+    pdf_page_tree_chain(NESTED_THOUSANDS_CHAIN_DEPTH)
+}
+
+/// How deep the `/Nested` value of a page dictionary is stated: past the structure reader's own
+/// nesting bound, which is 512 and private, so the depth is stated here rather than read.
+const NESTED_PAST_THE_READERS_BOUND: usize = 600;
+
+/// The dictionary of one A4 page that nests past the structure reader's bound: the reader declines
+/// it, so nothing of it is delivered.
+fn page_nested_past_the_readers_bound(pages: &str, font: &str, content: &str) -> String {
+    let mut body = format!("<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} /Nested ");
+    body.extend(std::iter::repeat_n('[', NESTED_PAST_THE_READERS_BOUND));
+    body.extend(std::iter::repeat_n(']', NESTED_PAST_THE_READERS_BOUND));
+    body.push_str(&format!(
+        " /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+    ));
+    body
+}
+
+/// One A4 page whose own dictionary holds a value nested past the structure reader's bound: the
+/// reader declines the page, where the reference parses it.
+#[must_use]
+pub fn pdf_page_object_nested_past_the_bound() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    // The page's own dictionary carries the nesting, so reading the page is what reaches it.
+    pdf.set(
+        &page,
+        page_nested_past_the_readers_bound(&pages, &font, &content),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// Three pages whose middle one nests past the structure reader's bound: the reader declines it, so
+/// the text pass numbers the pages after it one lower than the tree does.
+#[must_use]
+pub fn pdf_page_tree_with_a_declined_page_between() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let pages = pdf.reserve();
+    let first = pdf.reserve();
+    let nested = pdf.reserve();
+    let last = pdf.reserve();
+    for (page, text) in [(&first, "First page text"), (&last, "Last page text")] {
+        let font = pdf.push(PDF_FONT);
+        let content = pdf.stream(
+            "",
+            format!("BT /F1 24 Tf 72 760 Td ({text}) Tj ET").as_bytes(),
+        );
+        pdf.set(
+            page,
+            format!(
+                "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+                 /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+            ),
+        );
+    }
+    let font = pdf.push(PDF_FONT);
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Nested page text) Tj ET");
+    pdf.set(
+        &nested,
+        page_nested_past_the_readers_bound(&pages, &font, &content),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{first} {nested} {last}] /Count 3 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// One A4 page the reader delivers and two whose dictionaries nest past its bound: the report names
+/// both declined pages.
+#[must_use]
+pub fn pdf_page_tree_declining_more_pages_than_it_delivers() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let pages = pdf.reserve();
+    let delivered = pdf.reserve();
+    let font = pdf.push(PDF_FONT);
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Delivered page text) Tj ET");
+    pdf.set(
+        &delivered,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    let mut kids = vec![delivered];
+    for _ in 0..2 {
+        let nested = pdf.reserve();
+        let font = pdf.push(PDF_FONT);
+        let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Nested page text) Tj ET");
+        pdf.set(
+            &nested,
+            page_nested_past_the_readers_bound(&pages, &font, &content),
+        );
+        kids.push(nested);
+    }
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{}] /Count 3 >>", kids.join(" ")),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// Two A4 pages whose tree names one node a hundred times, that node's own `/Count` a million: a
+/// hostile page count that must not inflate the not-shown report past the pages the file delivers.
+#[must_use]
+pub fn pdf_page_tree_with_a_hostile_count() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
+    let pages = pdf.reserve();
+    let mut kids = Vec::new();
+    for _ in 0..2 {
+        kids.push(pdf.push(format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        )));
+    }
+    let node = pdf.push(format!(
+        "<< /Type /Pages /Kids [{}] /Count 1000000 >>",
+        kids[0]
+    ));
+    let mut all = kids.clone();
+    all.extend(std::iter::repeat_n(node, 100));
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{}] /Count 2 >>", all.join(" ")),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// One A4 page whose picture is defined on its ancestor `/Pages` node, not on the page: its own
+/// `/Resources` names only the font its text draws with, so the picture is delivered only by
+/// carrying the inheritance the structure reader stopped carrying.
+#[must_use]
+pub fn pdf_page_with_inherited_image() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let image = pdf.stream(
+        &format!(
+            "/Type /XObject /Subtype /Image /Width {PICTURE_WIDTH} /Height {PICTURE_HEIGHT} \
+             /ColorSpace /DeviceRGB /BitsPerComponent 8"
+        ),
+        &picture_samples(),
+    );
+    let content = pdf.stream(
+        "",
+        b"BT /F1 18 Tf 72 780 Td (Page one text beside an inherited picture) Tj ET",
+    );
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!(
+            "<< /Type /Pages /Kids [{page}] /Count 1 \
+             /Resources << /Font << /F1 {font} >> /XObject << /Im1 {image} >> >> >>"
+        ),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// One A4 page whose page tree names the page twice, with text long enough that the page needs no
+/// raster: the reading keeps the text of both namings and reports the second as a page not shown.
+#[must_use]
+pub fn pdf_page_named_twice_with_text() -> Vec<u8> {
+    page_named_twice(b"BT /F1 24 Tf 72 760 Td (Page one text, named twice) Tj ET")
+}
+
+/// One A4 page whose page tree names it twice, with text too short to be usable: both namings need a
+/// raster, so the second naming is a page the reading keeps the text of and reports as not shown.
+#[must_use]
+pub fn pdf_page_named_twice_with_a_raster() -> Vec<u8> {
+    page_named_twice(b"BT /F1 24 Tf 72 760 Td (Hi) Tj ET")
+}
+
+/// One A4 page the page tree names twice, drawing `content`.
+fn page_named_twice(content: &[u8]) -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let content = pdf.stream("", content);
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page} {page}] /Count 2 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// Two A4 pages, the first stated inline in `/Kids` and the second by reference: the text pass knows
+/// only the referenced one, so its page list and the tree's cannot be paired by object and the
+/// reading says so instead of pairing a picture with a page number by position.
+#[must_use]
+pub fn pdf_page_dictionary_inline_beside_a_reference() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let inline_content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Inline page) Tj ET");
+    let referenced = pdf.reserve();
+    let referenced_content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Referenced page text) Tj ET");
+    pdf.set(
+        &referenced,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {referenced_content} >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!(
+            "<< /Type /Pages /Kids [<< /Type /Page /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {inline_content} >> {referenced}] \
+             /Count 2 >>"
+        ),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// Two A4 pages, both stated inline under the same `/Pages` node: their dictionaries carry that
+/// node's object number, so the two are claimed in the order the two lists state them and neither is
+/// reported as a page the reader did not deliver.
+#[must_use]
+pub fn pdf_page_tree_with_two_inline_pages() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let first = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Hi) Tj ET");
+    let second = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Ho) Tj ET");
+    pdf.set(
+        &pages,
+        format!(
+            "<< /Type /Pages /Kids [\
+             << /Type /Page /MediaBox {PDF_PAGE} /Resources << /Font << /F1 {font} >> >> \
+             /Contents {first} >> \
+             << /Type /Page /MediaBox {PDF_PAGE} /Resources << /Font << /F1 {font} >> >> \
+             /Contents {second} >>] /Count 2 >>"
+        ),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// One A4 page and a `/Kids` entry naming an object the file does not hold: the reader delivers
+/// nothing for the second naming, and the reading reports it as a page not shown.
+#[must_use]
+pub fn pdf_page_tree_with_a_dangling_kid() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    // Object 99 is past every object the file holds: a reference to nothing.
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page} 99 0 R] /Count 2 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// One A4 page and `/Kids` entries that are not pages: an object that is a number, which the tree
+/// names twice, and a number stated inline. Neither reader counts either as a page, so nothing is
+/// reported as not shown however often the tree names one.
+#[must_use]
+pub fn pdf_page_tree_with_a_kid_that_is_not_a_dictionary() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    let number = pdf.push("42");
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page} {number} {number} 7] /Count 2 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// One A4 page and an empty subtree named twice: a `/Pages` node that states no page, so the two
+/// namings report none.
+#[must_use]
+pub fn pdf_page_tree_with_an_empty_subtree_named_twice() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    let empty = pdf.push("<< /Type /Pages /Kids [] /Count 0 >>");
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page} {empty} {empty}] /Count 1 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
     pdf.finish(&catalog, "")
 }
 

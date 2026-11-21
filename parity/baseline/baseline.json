@@ -1,14 +1,14 @@
 {
   "note": "Recorded from the reference engine by `cargo run --bin record-baseline`. The harness never rewrites this file: recording is a deliberate act.",
-  "recorded_at_unix": 1795223230,
+  "recorded_at_unix": 1795283261,
   "writer": {
     "engine": "reference-writer",
-    "build": "8718d0113496f4521535de222eb9b236ad719e14e9fedeb8b30daa07e9e2e86a",
+    "build": "aec3235eca456a85ef1baa19cc4becc43d748cde816177f9d168b37eab113fc7",
     "runtime": "bun 1.4.5",
     "components": {
       "bun.lock": "bd6aae02cbd5b8837a19e9c16ba3f7ddfa6a28300a2bfefb52829f64c39541d9",
       "bundle": "04c76d7108056641f77e3efdb4a08cce69658dd0119aedfba5c2cad86d0eb267",
-      "codecs": "79539e3adb785dcd9cc9d3bb576d349986d3e195981ef27488d52fb0d07c325d",
+      "codecs": "8f5955bd7191dd02e553b82a22e944a288746025d02cc33ae4eedf191cd69751",
       "font": "b85c38ecea8a7cfb39c24e395a4007474fa5a4fc864f6ee33309eb4948d232d5",
       "kit": "40e3f54211688e737cf9985ffca098234d7ba4311ed5a65dd941b68f97969455",
       "package": "8093a9d27cffe6137cdd27f3e7daff36c3998bc8c00cb2515680947ee71ff906",
@@ -18,12 +18,12 @@
   },
   "reader": {
     "engine": "reference-reader",
-    "build": "005bdf1d75de675dfa0376de3ba3dd07129be77741e0db726d1a077f1e06e7d1",
+    "build": "f8db8df323632c599698137e9173ae15d74599e0dc3c502e4b8054484dbb578b",
     "runtime": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
     "components": {
       "assets/docgen/NotoSans-Regular.ttf": "b85c38ecea8a7cfb39c24e395a4007474fa5a4fc864f6ee33309eb4948d232d5",
       "assets/docgen/rules.json": "67e77a24afad336e0b5c5c171be81f740fe901646e07d5ecb77b0055ac596840",
-      "codecs": "79539e3adb785dcd9cc9d3bb576d349986d3e195981ef27488d52fb0d07c325d",
+      "codecs": "8f5955bd7191dd02e553b82a22e944a288746025d02cc33ae4eedf191cd69751",
       "parity/src/host/docgen.rs": "15e9ae6496a0749abdedd8a66984d80d731846f075dc7b1f6b133501e592e4fc",
       "parity/src/host/shutdown.rs": "cdc73c599772c539d6c44cbfb0a68f5caaaff60e7b4fc79fb8a7324f1001be14",
       "parity/src/host/util/html.rs": "b2f4efe29f5f5bc200caecc7296a1e80d5fe8f4c4eb9a9f029c5c2f37a4e520c",
@@ -864110,6 +864110,25 @@
         "outcome": "text",
         "text": "Page 1:\nA form with one field of each kind\n\nForm fields:\nname (text) on page 1: (no value)\nagree (checkbox) on page 1: not checked\nchoice (radio; options: one, two) on page 1: not checked\ncolour (choice; options: red, green, blue) on page 1: red",
         "images": [],
+        "notes": [],
+        "unshown": [],
+        "all_page_text_lost": false,
+        "page_text": true
+      },
+      "detection": "pdf"
+    },
+    "inherited-image.pdf": {
+      "document": "inherited-image.pdf",
+      "reading": {
+        "outcome": "text",
+        "text": "Page 1:\nPage one text beside an inherited picture",
+        "images": [
+          {
+            "name": "page_1_img_0.jpg",
+            "sha256": "6853674c8d7c340c765526617f4bf5194f57f4d33817af261c165348a0d3fd8d",
+            "len": 745
+          }
+        ],
         "notes": [],
         "unshown": [],
         "all_page_text_lost": false,

@@ -41,7 +41,7 @@ compares the engine's own PDF pages against PDFium, reporting the other families
 resolution therefore cannot move a codec version the comparison identity covers.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 847 cases and 91 readings — is bounded by the run budget below, a
+managed runtime. A full pass — 847 cases and 92 readings — is bounded by the run budget below, a
 backstop rather than a target. The reference engine's pass takes several times the crate engine's,
 because every reference case starts the runtime and materialises the kit; both depend on the
 machine and on the corpus. The whole test suite runs the corpus several times (once per
@@ -209,7 +209,16 @@ answers `unreadable`, which is what the converter's own conversion answers for t
 
 A picture a reading writes is recorded by the SHA-256 of its whole bytes, whatever its size: a
 size limit here would replace a large picture with a marker and hide a difference the gate exists
-to see.
+to see. Byte identity is the rule, not an approximation, and it holds across the two libraries the
+two sides render with (see the recording section): the crate turns the newer renderer's text
+defaults off, so a page it rasterizes is the same file the reference produced unless it draws one of
+the shapes below. Three shapes are not reached by any recorded reading — a page that draws a
+downscaled image, whose resampler changed, a page that draws an annotation appearance, which the
+newer renderer draws differently, and a rasterized page whose own `/Resources` states only part of
+what it inherits, which the newer renderer resolves from the nearest node rather than the merged set
+— and the crate states them as limits of its page-render entry and of a reading's pictures. A
+reading that rasterized one of them would fail here with its digest, and the difference would be
+named with its reason rather than recorded again quietly.
 
 ## The vocabulary cross-check
 
@@ -461,6 +470,12 @@ The reader corpus is the same generated documents plus the negative and depth ca
   embedded picture is larger than 64 MiB, and one just over the size the product documents — the
   reading has no size gate and records a big picture by its digest, and the corpus exercises both
   rather than assuming them;
+- a page whose picture is defined only on the page tree's own `/Resources`, not on the page's: both
+  sides read it today (the reference merges the inherited resources), and the crate keeps reading it
+  because it carries the inheritance the newer structure reader stopped carrying. It is a corpus
+  case because both sides can read it; the shapes that cannot be corpus cases — a page tree nested
+  thousands of levels deep, a page whose dictionary nests past the reader's bound, and a page the
+  tree names twice — are witnessed by `document-engine/tests/pdf_page_tree.rs` instead;
 - the negative side: a truncated package and PDF, an empty file, an empty package, a renamed file,
   a package under a name claiming another family, a package under a name claiming none, a ZIP that
   is not an Office package, and an encrypted package;
@@ -615,27 +630,40 @@ copied reader source's digest under `src/reference_sources/`, the host modules, 
 turns a reading into a transcript, the shared `rules.json` and the embedded font the reader
 rasterises with). Every engine identity also records a `codecs` digest over the resolved versions
 of the JPEG encoder and decoder, the PDF parser and object model, rasterizer and image decoders, the
-legacy and OOXML parsers, the ZIP/deflate layer, and the link parser (`url` 2.5.8) with the
-internationalisation crates under it — `idna` 1.1.0, `idna_adapter` 1.2.2, `icu_normalizer` 2.2.0,
-`icu_properties` 2.2.0 and `zerotrie` 0.2.5 — which decide the UTS-46 mapping behind a compared
-link target; all are read from `Cargo.lock`. Every codec a manifest
-names is pinned exactly, and every resolved copy — direct or transitive — is recorded, so a codec
-bump changes the identity rather than silently changing every compared digest. The crate's own
-reader and writer are identified separately from the reference by one build digest — every Rust
-source in `document-engine/src`, its `vocabulary.json`, its font, the parts a created deck is
-captured from (`assets/pptx-create/`), the parts and fragments a created Word document is built from
-(`assets/docx-create/`) and the layout data it is measured with (`assets/docx-layout/`), each
-recorded as its own component under `pptx-create:`, `docx-create:` and `docx-layout:` respectively,
-so the two are one crate and one digest and a re-captured part moves both. A licence notice, the
-layout's `README.md` and its probes are documentation rather than bytes the writer produces or the
-layout reads, so they are left out of the identity. A difference is therefore attributable to a
-build, not merely observed. The gate always prints both identities and states whether they match;
-passing means every verdict matches the baseline. Only the reference gate — `parity --engine
-reference`, and the
-baseline test — treats a differing identity as a failure, because there the question is whether the
-reference engine is still the build the baseline records. Any other engine implementation, including
-the default crate writer and reader, is compared on its verdicts alone; its differing identity is
-an expected fact, shown but not failed.
+font program parser and glyph rasterizer the renderer draws a glyph with (`hayro-font`, the OpenType
+type layer `font-types` under it, `ab_glyph_rasterizer`, `glifo` and the `fearless_simd` kernel
+dispatch under them), the resampler and its filter math (`pic-scale`, `pxfm`), the legacy and OOXML
+parsers, the ZIP/deflate layer, and the link parser (`url` 2.5.8) with the internationalisation
+crates under it — `idna` 1.1.0, `idna_adapter` 1.2.2, `icu_normalizer` 2.2.0, `icu_properties` 2.2.0
+and `zerotrie` 0.2.5 — which decide the UTS-46 mapping behind a compared link target; all are read
+from `Cargo.lock`. Every codec a manifest names is pinned exactly, and every resolved copy — direct
+or transitive — is recorded, so a codec bump changes the identity rather than silently changing
+every compared digest. A codec that cannot decide a compared byte — a hasher (`rustc-hash`,
+`siphasher`) or a casting helper (`bytemuck`) — is not recorded, because a bump there cannot move a
+digest the comparison reads. The crate's own reader and writer are identified separately from the
+reference by one build digest — every Rust source in `document-engine/src`, its `vocabulary.json`,
+its font, the parts a created deck is captured from (`assets/pptx-create/`), the parts and fragments
+a created Word document is built from (`assets/docx-create/`) and the layout data it is measured with
+(`assets/docx-layout/`), each recorded as its own component under `pptx-create:`, `docx-create:` and
+`docx-layout:` respectively, so the two are one crate and one digest and a re-captured part moves
+both. A licence notice, the layout's `README.md` and its probes are documentation rather than bytes
+the writer produces or the layout reads, so they are left out of the identity. A difference is
+therefore attributable to a build, not merely observed. The gate always prints both identities and
+states whether they match; passing means every verdict matches the baseline. Only the reference gate
+— `parity --engine reference`, and the baseline test — treats a differing identity as a failure,
+because there the question is whether the reference engine is still the build the baseline records.
+Any other engine implementation, including the default crate writer and reader, is compared on its
+verdicts alone; its differing identity is an expected fact, shown but not failed.
+
+The reference reader keeps the product's own pin of the PDF structure reader while the crate takes
+the latest release, so two versions of it live side by side in one lockfile — the reference's
+`hayro 0.7.1` and the crate's `hayro 0.9.0`, the latest the registry index lists — and the `codecs`
+digest names both copies. That is deliberate: the reference is the product's behaviour, and
+refreshing it along with the crate would re-record the baseline from the new library and destroy what
+the comparison means. Two consequences follow. A bump of an engine dependency moves the recorded
+codec identity, so the reference gate reports a differing identity until the baseline is recorded
+again deliberately. And `parity/Cargo.toml` pins the reference's version exactly: a lock refresh that
+unified the two copies would be a visible manifest edit, not an accident of resolution.
 
 Recording is a deliberate act on the recording machine: only `cargo run --bin record-baseline`
 writes the file, and it refuses to record a run in which a case or a reading could not produce a
@@ -652,6 +680,13 @@ reading's problem — never to what a document says: a date in a paragraph is co
 timestamp of the run. It replaces the harness's own root, the run's own nonce and calendar dates.
 `tests/gate.rs` runs the whole corpus twice and requires the two transcripts to be identical, and
 asserts the serialised text holds no absolute path, the run's own date or its nonce.
+
+The recorded picture digests come from one machine and one target architecture. The renderer chooses
+its SIMD kernels at compile time, so a run on another architecture is a different build of the same
+versions: its pictures are a deliberate recording there, not a regression here, and the gate compares
+them against the baseline as it does any other difference rather than being assumed portable. Nothing
+in the workspace checks another architecture — this is the boundary of what the recorded bytes mean,
+not a test.
 
 ## Supervision and the bounds
 

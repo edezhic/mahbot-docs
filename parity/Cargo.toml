@@ -25,6 +25,9 @@ tempfile = "3"
 [dependencies]
 document-engine = { path = "../document-engine", features = ["test-support"] }
 anyhow = "1.0"
+# The reference reader's PDF structure reader, at the product's own pin. It is deliberately not
+# refreshed with the crate's (which takes the latest release): the reference is the product's
+# behaviour, and a lock refresh that moved it would re-record the baseline from the new library.
 hayro = "=0.7.1"
 hayro-cmap = "=0.1.1"
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }

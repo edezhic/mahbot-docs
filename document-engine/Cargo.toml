@@ -21,8 +21,12 @@ test-support = []
 # font dictionary that are hand-written either way.
 #
 # Format classification opens a CFB's directory and a ZIP's central directory; no entry is
-# decompressed to decide a family. The versions are the product's own, pinned by its lockfile.
-hayro = "=0.7.1"
+# decompressed to decide a family. Every version here is the product's own (pinned by its lockfile)
+# except hayro's: the reading half takes the latest release, ahead of the product's 0.7.1, because
+# its page-tree walk keeps its own stack and its object reader has a nesting bound, so the structure
+# reader answers a document nested past either instead of taking the process down. What that does not
+# cover — the text pass's own recursion into a drawn form, and memory — is stated in `src/lib.rs`.
+hayro = "=0.9.0"
 # The PDF writing half compresses the streams it adds: the subset font program, an image's samples
 # and the content that draws them. The product's own kit compresses the same streams.
 flate2 = "=1.1.10"
