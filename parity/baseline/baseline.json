@@ -1,10 +1,10 @@
 {
   "note": "Recorded from the reference engine by `cargo run --bin record-baseline`. The harness never rewrites this file: recording is a deliberate act.",
-  "recorded_at_unix": 1795122879,
+  "recorded_at_unix": 1795223230,
   "writer": {
     "engine": "reference-writer",
     "build": "8718d0113496f4521535de222eb9b236ad719e14e9fedeb8b30daa07e9e2e86a",
-    "runtime": "bun 1.4.4",
+    "runtime": "bun 1.4.5",
     "components": {
       "bun.lock": "bd6aae02cbd5b8837a19e9c16ba3f7ddfa6a28300a2bfefb52829f64c39541d9",
       "bundle": "04c76d7108056641f77e3efdb4a08cce69658dd0119aedfba5c2cad86d0eb267",

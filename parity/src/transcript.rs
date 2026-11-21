@@ -2,7 +2,7 @@
 //! (absolute paths, the run's nonce, timestamps) replaced by a marker. Two runs of one engine must
 //! produce identical transcripts, whatever second they happen to land in.
 
-use crate::engine::{Kind, Reading, WriterOutcome};
+use crate::engine::{EngineIdentity, Kind, Reading, WriterOutcome};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -293,13 +293,54 @@ pub fn sorted_value(value: &serde_json::Value) -> serde_json::Value {
 
 /// The identity line a report prints beside a comparison.
 #[must_use]
-pub fn identity_line(identity: &crate::engine::EngineIdentity) -> String {
+pub fn identity_line(identity: &EngineIdentity) -> String {
     let runtime = identity
         .runtime
         .as_deref()
         .map(|runtime| format!(" on {runtime}"))
         .unwrap_or_default();
     format!("{} build {}{runtime}", identity.engine, identity.build)
+}
+
+/// What differs between an engine's identity and the one the baseline records, in the terms a
+/// person needs: a different runtime is not a different build. `None` when the two are the same.
+#[must_use]
+pub fn identity_difference(
+    role: &str,
+    engine: &EngineIdentity,
+    recorded: &EngineIdentity,
+) -> Option<String> {
+    if engine == recorded {
+        return None;
+    }
+    let runtime = || {
+        format!(
+            "{} against {}",
+            engine.runtime.as_deref().unwrap_or("no runtime"),
+            recorded.runtime.as_deref().unwrap_or("no runtime")
+        )
+    };
+    if engine.build != recorded.build || engine.components != recorded.components {
+        let runtime = if engine.runtime != recorded.runtime {
+            format!(" and on a different runtime ({})", runtime())
+        } else {
+            String::new()
+        };
+        return Some(format!(
+            "the baseline was recorded from a different {role} build{runtime}"
+        ));
+    }
+    if engine.engine != recorded.engine {
+        return Some(format!(
+            "the baseline was recorded from a different {role} engine ({} against {})",
+            engine.engine, recorded.engine
+        ));
+    }
+    // Only the runtime label differs: the code that produced the transcripts is the same build.
+    Some(format!(
+        "the baseline was recorded on a different {role} runtime ({})",
+        runtime()
+    ))
 }
 
 #[cfg(test)]
@@ -413,5 +454,44 @@ mod tests {
             normalise_reason(None, "the engine's own words"),
             "the engine's own words"
         );
+    }
+
+    fn identity(runtime: &str) -> EngineIdentity {
+        EngineIdentity {
+            engine: "reference-writer".to_string(),
+            build: "the build".to_string(),
+            runtime: Some(runtime.to_string()),
+            components: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn a_runtime_only_difference_is_not_called_a_build_difference() {
+        // A patch release of the runtime changes the label and nothing else: the message must not
+        // send a person looking for a code change that did not happen.
+        let difference =
+            identity_difference("writer", &identity("bun 1.4.5"), &identity("bun 1.4.4"))
+                .expect("a difference");
+        assert_eq!(
+            difference,
+            "the baseline was recorded on a different writer runtime (bun 1.4.5 against bun 1.4.4)"
+        );
+    }
+
+    #[test]
+    fn a_build_difference_is_named_as_one() {
+        let recorded = identity("bun 1.4.5");
+        let mut engine = recorded.clone();
+        engine.build = "another build".to_string();
+        assert_eq!(
+            identity_difference("writer", &engine, &recorded).as_deref(),
+            Some("the baseline was recorded from a different writer build")
+        );
+    }
+
+    #[test]
+    fn an_identical_identity_has_no_difference() {
+        let recorded = identity("bun 1.4.5");
+        assert_eq!(identity_difference("writer", &recorded, &recorded), None);
     }
 }

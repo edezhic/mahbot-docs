@@ -21,7 +21,7 @@ use document_parity::reference::{
 use document_parity::supervisor::{
     ChildInvocation, EngineKind, Supervision, install_signal_handler,
 };
-use document_parity::transcript::identity_line;
+use document_parity::transcript::{identity_difference, identity_line};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -137,11 +137,11 @@ fn run(engine: &str, baseline_path: &Path, quiet: bool) -> anyhow::Result<i32> {
     println!("baseline writer {}", identity_line(&baseline.writer));
     println!("baseline reader {}", identity_line(&baseline.reader));
     let label = if require_identity { "FAIL" } else { "note" };
-    if writer != baseline.writer {
-        println!("{label} the baseline was recorded from a different writer build");
+    if let Some(difference) = identity_difference("writer", &writer, &baseline.writer) {
+        println!("{label} {difference}");
     }
-    if reader != baseline.reader {
-        println!("{label} the baseline was recorded from a different reader build");
+    if let Some(difference) = identity_difference("reader", &reader, &baseline.reader) {
+        println!("{label} {difference}");
     }
     // The identity lines are flushed with the verdicts: a run killed mid-way leaves them too.
     let _ = std::io::stdout().flush();

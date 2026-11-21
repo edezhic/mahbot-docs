@@ -48,6 +48,15 @@ machine and on the corpus. The whole test suite runs the corpus several times (o
 determinism check, once for the supervised reference test, once per bound test), so it is much
 slower than a single pass.
 
+The baseline is a per-machine record: it names the runtime that produced it, and the reference gate
+refuses a run whose runtime differs, so a `bun` patch release reddens the suite until the baseline
+is recorded again on the new runtime. That is a deliberate act on the recording machine, not a
+repair for a red suite: run `--engine reference` with `PARITY_BUN` unset first and confirm its
+counts — a clean pass still exits `1` on the identity line it is about to fix — then run
+`record-baseline` as the last act on that tree. This baseline was recorded on `bun 1.4.5`. Another
+machine with another runtime is a deliberate re-record of its own, never a failure to fix in
+passing.
+
 The gate exits `0` when the run passes, `1` when a verdict fails, `2` when the invocation or the
 harness is wrong, and `3` when the run was cut short — by a signal or by its own budget. A cut-short
 run prints no aggregate summary: the absence of that line is what makes it visibly cut short.
@@ -628,12 +637,12 @@ reference engine is still the build the baseline records. Any other engine imple
 the default crate writer and reader, is compared on its verdicts alone; its differing identity is
 an expected fact, shown but not failed.
 
-Recording is a deliberate act: only `cargo run --bin record-baseline` writes the file, and it
-refuses to record a run in which a case or a reading could not produce a transcript, or one that was
-cut short by its budget — a partial baseline would make every later gate run report "no baseline
-entry" for cases nobody judged. Running the gate never rewrites the baseline. A baseline entry the
-corpus no longer holds — a case or a reading — is reported as stale and fails the gate, so the two
-cannot drift apart silently.
+Recording is a deliberate act on the recording machine: only `cargo run --bin record-baseline`
+writes the file, and it refuses to record a run in which a case or a reading could not produce a
+transcript, or one that was cut short by its budget — a partial baseline would make every later
+gate run report "no baseline entry" for cases nobody judged. Running the gate never rewrites the
+baseline. A baseline entry the corpus no longer holds — a case or a reading — is reported as stale
+and fails the gate, so the two cannot drift apart silently.
 
 ## Determinism and safety
 

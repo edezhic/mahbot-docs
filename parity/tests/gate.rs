@@ -14,7 +14,7 @@ use document_parity::engine::{
 };
 use document_parity::harness::{CaseOutcome, CutShort, Harness, Judgement, Run};
 use document_parity::reference::{NoOpReader, NoOpWriter, ReferenceReader, ReferenceWriter};
-use document_parity::transcript::CaseTranscript;
+use document_parity::transcript::{CaseTranscript, identity_difference};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -323,14 +323,12 @@ fn the_reference_engine_matches_the_recorded_baseline() {
     // The baseline must have been recorded from THIS build of the engine, or a difference could
     // not be attributed: editing the kit or the reader without re-recording changes the identity
     // and is caught here rather than passing on matching transcripts.
-    assert_eq!(
-        run.writer, baseline.writer,
-        "the baseline was recorded from a different writer build: record it deliberately"
-    );
-    assert_eq!(
-        run.reader, baseline.reader,
-        "the baseline was recorded from a different reader build: record it deliberately"
-    );
+    if let Some(difference) = identity_difference("writer", &run.writer, &baseline.writer) {
+        panic!("{difference}: record it deliberately");
+    }
+    if let Some(difference) = identity_difference("reader", &run.reader, &baseline.reader) {
+        panic!("{difference}: record it deliberately");
+    }
     let report = run.report(&baseline);
     if !report.passes_reference_gate() {
         let mut report_lines = Vec::new();
@@ -946,6 +944,29 @@ fn another_build_is_shown_but_is_not_a_verdict_failure() {
     assert!(
         !report.passes_reference_gate(),
         "the reference gate refuses a build other than the one the baseline records"
+    );
+}
+
+#[test]
+fn a_runtime_only_difference_still_fails_the_reference_gate() {
+    // A patch release of the runtime moves the identity label and nothing else. The reference gate
+    // still refuses it: the baseline is a per-machine record, replaced only by a deliberate
+    // re-record, never by a run that happens to match the transcripts.
+    let mut baseline = Baseline::load(&Baseline::default_path())
+        .expect("the baseline is recorded before the gate is used");
+    baseline.writer.runtime = Some("bun 0.0.0".to_string());
+    let report = shared_reference_run().report(&baseline);
+    assert!(
+        !report.identity_matches(),
+        "the runtime is part of the recorded identity"
+    );
+    assert!(
+        report.passed(),
+        "the transcripts themselves still match the baseline"
+    );
+    assert!(
+        !report.passes_reference_gate(),
+        "the reference gate requires the recorded runtime"
     );
 }
 

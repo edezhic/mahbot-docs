@@ -97,7 +97,7 @@ pub struct EngineIdentity {
     /// A digest of the engine's own bytes — the kit bundle for the writer, the reader sources for
     /// the reader — so two builds of one engine are told apart.
     pub build: String,
-    /// The runtime the engine executed on, when it has one (`bun 1.4.4`).
+    /// The runtime the engine executed on, when it has one (`bun 1.4.5`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime: Option<String>,
     /// Every digest that went into `build`, named, so the identity can be checked rather than
