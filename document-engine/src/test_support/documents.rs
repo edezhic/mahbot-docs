@@ -955,6 +955,20 @@ pub const OBJECT_STREAM_ASCII_HEX_PDF: Document = Document {
     build: build::pdf_object_stream_ascii_hex,
 };
 
+/// A two-page file whose container states `RunLengthDecode` data that stops two bytes before its own
+/// end marker: the reference decodes the runs it holds and edits the file.
+pub const OBJECT_STREAM_TRUNCATED_RUN_LENGTH_PDF: Document = Document {
+    name: "object-stream-truncated-run-length.pdf",
+    build: build::pdf_object_stream_truncated_run_length,
+};
+
+/// The same file whose Flate data stops four bytes before its own end, the checksum neither side
+/// reads, so the container decodes whole.
+pub const OBJECT_STREAM_TRUNCATED_FLATE_PDF: Document = Document {
+    name: "object-stream-truncated-flate.pdf",
+    build: build::pdf_object_stream_truncated_flate,
+};
+
 /// The same modern file whose container decodes to far more than the file holds.
 pub const OBJECT_STREAM_INFLATED_PDF: Document = Document {
     name: "object-stream-inflated.pdf",
@@ -971,6 +985,130 @@ pub const DAMAGED_ENCRYPTED_PDF: Document = Document {
 pub const DAMAGED_BODY_PDF: Document = Document {
     name: "damaged-body.pdf",
     build: build::pdf_damaged_body,
+};
+
+/// Two A4 pages whose font object states a body that does not parse.
+pub const BODY_UNPARSABLE_PDF: Document = Document {
+    name: "body-unparsable.pdf",
+    build: build::pdf_body_unparsable,
+};
+
+/// Two A4 pages, the first naming a font object the file does not hold.
+pub const DANGLING_REFERENCE_PDF: Document = Document {
+    name: "dangling-reference.pdf",
+    build: build::pdf_dangling_reference,
+};
+
+/// Two A4 pages, the last of which states a body that does not parse.
+pub const PAGE_UNPARSABLE_PDF: Document = Document {
+    name: "page-unparsable.pdf",
+    build: build::pdf_page_unparsable,
+};
+
+/// Two A4 pages, the last of which states a value nested past the depth the scan builds.
+pub const PAGE_PAST_THE_DEPTH_PDF: Document = Document {
+    name: "page-past-the-depth.pdf",
+    build: build::pdf_page_past_the_depth,
+};
+
+/// One A4 page whose `/Contents` is a dictionary.
+pub const CONTENTS_DICTIONARY_PDF: Document = Document {
+    name: "contents-dictionary.pdf",
+    build: build::pdf_contents_dictionary,
+};
+
+/// One A4 page whose `/Contents` names the page itself.
+pub const CONTENTS_SELF_PDF: Document = Document {
+    name: "contents-self.pdf",
+    build: build::pdf_contents_self,
+};
+
+/// One A4 page whose page tree names its inner `/Pages` node twice, so the page is reached twice.
+pub const PAGE_TREE_NAMED_TWICE_PDF: Document = Document {
+    name: "page-tree-named-twice.pdf",
+    build: build::pdf_page_tree_named_twice,
+};
+
+/// A file whose page tree names itself: the reference's walk recurses until the runtime throws, and
+/// both sides refuse the file.
+pub const PAGE_TREE_NAMES_ITSELF_PDF: Document = Document {
+    name: "page-tree-names-itself.pdf",
+    build: build::pdf_page_tree_names_itself,
+};
+
+/// Two A4 pages whose page-tree root states no `/Type /Pages`: no page tree to the reference, so both
+/// sides refuse.
+pub const PAGE_TREE_ROOT_WITHOUT_TYPE_PDF: Document = Document {
+    name: "page-tree-root-without-type.pdf",
+    build: build::pdf_page_tree_root_without_type,
+};
+
+/// Two A4 pages whose catalog states no `/Type`: no catalog to the reference, so both sides refuse.
+pub const CATALOG_WITHOUT_TYPE_PDF: Document = Document {
+    name: "catalog-without-type.pdf",
+    build: build::pdf_catalog_without_type,
+};
+
+/// One A4 page whose page tree names the page dictionary itself rather than a reference to it.
+pub const PAGE_DICTIONARY_INLINE_PDF: Document = Document {
+    name: "page-dictionary-inline.pdf",
+    build: build::pdf_page_dictionary_inline,
+};
+
+/// One A4 page whose page object is stated at generation 65536, and named the same way.
+pub const GENERATION_OUT_OF_RANGE_PDF: Document = Document {
+    name: "generation-out-of-range.pdf",
+    build: build::pdf_generation_out_of_range,
+};
+
+/// The two-page file whose container decodes to eighty mebibytes: far more than the file holds, which
+/// is the decode cost the ceiling bounds, though the ceiling itself is past what a case can record.
+pub const OBJECT_STREAM_DECODING_EIGHTY_MIB_PDF: Document = Document {
+    name: "object-stream-decoding-eighty-mib.pdf",
+    build: build::pdf_object_stream_decoding_eighty_mib,
+};
+
+/// The two-page file with an object numbered 1 000 001.
+pub const OBJECT_NUMBERED_PAST_A_MILLION_PDF: Document = Document {
+    name: "object-numbered-past-a-million.pdf",
+    build: build::pdf_object_numbered_past_a_million,
+};
+
+/// The one-page file whose page tree is a chain of two hundred nodes.
+pub const PAGE_TREE_DEEP_PDF: Document = Document {
+    name: "page-tree-deep.pdf",
+    build: build::pdf_page_tree_deep,
+};
+
+/// The two-page file with an object nested well past the depth the scan builds, and past where the
+/// reference's own parser gives up, so both sides carry it however the runtime's stack is set.
+pub const OBJECT_NESTED_PAST_THE_BOUND_PDF: Document = Document {
+    name: "object-nested-past-the-bound.pdf",
+    build: build::pdf_object_nested_past_the_bound,
+};
+
+/// The one-page file whose object stream states every entry at the same offset.
+pub const OBJECT_STREAM_ONE_OFFSET_PDF: Document = Document {
+    name: "object-stream-one-offset.pdf",
+    build: build::pdf_object_stream_one_offset,
+};
+
+/// The one-page file whose page tree states `/Kids` as a reference that names a reference.
+pub const PAGE_TREE_KIDS_BY_REFERENCE_PDF: Document = Document {
+    name: "page-tree-kids-by-reference.pdf",
+    build: build::pdf_page_tree_kids_by_reference,
+};
+
+/// The one-page file whose catalog states `/Pages` as a reference that names a reference.
+pub const PAGE_TREE_ROOT_BY_REFERENCE_PDF: Document = Document {
+    name: "page-tree-root-by-reference.pdf",
+    build: build::pdf_page_tree_root_by_reference,
+};
+
+/// The one-page file whose `/MediaBox` is stated as a reference that names a reference.
+pub const MEDIA_BOX_BY_REFERENCE_PDF: Document = Document {
+    name: "media-box-by-reference.pdf",
+    build: build::pdf_media_box_by_reference,
 };
 
 /// A PDF whose first cross-reference entry is not a number.
@@ -1607,10 +1745,31 @@ pub fn writer_documents() -> Vec<Document> {
         DAMAGED_INDEX_STREAM_PDF,
         DAMAGED_OBJECT_STREAM_LENGTH_PDF,
         OBJECT_STREAM_ASCII_HEX_PDF,
+        OBJECT_STREAM_TRUNCATED_RUN_LENGTH_PDF,
+        OBJECT_STREAM_TRUNCATED_FLATE_PDF,
         OBJECT_STREAM_INFLATED_PDF,
         DAMAGED_ENCRYPTED_PDF,
         DAMAGED_BODY_PDF,
         DAMAGED_INDEX_SYNTAX_PDF,
+        BODY_UNPARSABLE_PDF,
+        PAGE_UNPARSABLE_PDF,
+        PAGE_TREE_NAMED_TWICE_PDF,
+        PAGE_TREE_NAMES_ITSELF_PDF,
+        PAGE_DICTIONARY_INLINE_PDF,
+        PAGE_TREE_ROOT_WITHOUT_TYPE_PDF,
+        CATALOG_WITHOUT_TYPE_PDF,
+        GENERATION_OUT_OF_RANGE_PDF,
+        DANGLING_REFERENCE_PDF,
+        CONTENTS_DICTIONARY_PDF,
+        CONTENTS_SELF_PDF,
+        OBJECT_STREAM_DECODING_EIGHTY_MIB_PDF,
+        OBJECT_NUMBERED_PAST_A_MILLION_PDF,
+        PAGE_TREE_DEEP_PDF,
+        OBJECT_NESTED_PAST_THE_BOUND_PDF,
+        OBJECT_STREAM_ONE_OFFSET_PDF,
+        PAGE_TREE_KIDS_BY_REFERENCE_PDF,
+        PAGE_TREE_ROOT_BY_REFERENCE_PDF,
+        MEDIA_BOX_BY_REFERENCE_PDF,
         DOCX_BODYLESS,
         DOCX_BREAKS,
         DOCX_BROKEN,

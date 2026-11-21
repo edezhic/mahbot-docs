@@ -6,7 +6,9 @@ use std::collections::{BTreeSet, HashSet};
 use std::fmt::Write as _;
 use std::io::Write as _;
 
-use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
+use lopdf::{Dictionary, Object, ObjectId, Stream};
+
+use super::graph::{self, Document};
 use serde_json::Value;
 
 use super::font::{Face, Subset};
@@ -143,7 +145,7 @@ fn deflate(data: &[u8]) -> Vec<u8> {
 /// compression is spelling rather than meaning.
 pub(super) fn stream(document: &mut Document, mut dict: Dictionary, data: &[u8]) -> ObjectId {
     let compressed = deflate(data);
-    dict.set("Filter", Object::Name(b"FlateDecode".to_vec()));
+    graph::set(&mut dict, "Filter", Object::Name(b"FlateDecode".to_vec()));
     document.add_object(Stream::new(dict, compressed))
 }
 
@@ -154,50 +156,35 @@ pub(super) fn name(value: &str) -> Object {
 
 /// The subset font embedded as a Type0 CID font, as the object a page's `/Font` entry names.
 pub(super) fn embed_font(document: &mut Document, subset: &Subset, face: &Face) -> ObjectId {
-    let mut file = Dictionary::new();
-    file.set("Length1", Object::Integer(width_of(subset.program.len())));
-    let program = stream(document, file, &subset.program);
+    let program = stream(
+        document,
+        Dictionary::from_iter([("Length1", Object::Integer(width_of(subset.program.len())))]),
+        &subset.program,
+    );
 
-    let mut descriptor = Dictionary::new();
-    descriptor.set("Type", name("FontDescriptor"));
-    descriptor.set("FontName", name(FONT_BASE));
-    descriptor.set("Flags", Object::Integer(4));
-    descriptor.set("ItalicAngle", Object::Integer(0));
-    descriptor.set("StemV", Object::Integer(0));
-    descriptor.set("Ascent", Object::Integer(i64::from(face.ascender())));
-    descriptor.set("Descent", Object::Integer(i64::from(face.descender())));
     let [x0, y0, x1, y1] = face.font_bbox();
-    descriptor.set(
-        "FontBBox",
-        Object::Array(
-            [x0, y0, x1, y1]
-                .into_iter()
-                .map(|value| Object::Integer(i64::from(value)))
-                .collect(),
+    let descriptor = document.add_object(Object::Dictionary(Dictionary::from_iter([
+        ("Type", name("FontDescriptor")),
+        ("FontName", name(FONT_BASE)),
+        ("Flags", Object::Integer(4)),
+        ("ItalicAngle", Object::Integer(0)),
+        ("StemV", Object::Integer(0)),
+        ("Ascent", Object::Integer(i64::from(face.ascender()))),
+        ("Descent", Object::Integer(i64::from(face.descender()))),
+        (
+            "FontBBox",
+            Object::Array(
+                [x0, y0, x1, y1]
+                    .into_iter()
+                    .map(|value| Object::Integer(i64::from(value)))
+                    .collect(),
+            ),
         ),
-    );
-    descriptor.set("CapHeight", Object::Integer(i64::from(face.cap_height())));
-    descriptor.set("XHeight", Object::Integer(i64::from(face.x_height())));
-    descriptor.set("FontFile2", Object::Reference(program));
-    let descriptor = document.add_object(Object::Dictionary(descriptor));
+        ("CapHeight", Object::Integer(i64::from(face.cap_height()))),
+        ("XHeight", Object::Integer(i64::from(face.x_height()))),
+        ("FontFile2", Object::Reference(program)),
+    ])));
 
-    let mut descendant = Dictionary::new();
-    descendant.set("Type", name("Font"));
-    descendant.set("Subtype", name("CIDFontType2"));
-    descendant.set("BaseFont", name(FONT_BASE));
-    descendant.set("CIDToGIDMap", name("Identity"));
-    descendant.set("FontDescriptor", Object::Reference(descriptor));
-    let mut system = Dictionary::new();
-    system.set(
-        "Registry",
-        Object::String(b"Adobe".to_vec(), lopdf::StringFormat::Literal),
-    );
-    system.set(
-        "Ordering",
-        Object::String(b"Identity".to_vec(), lopdf::StringFormat::Literal),
-    );
-    system.set("Supplement", Object::Integer(0));
-    descendant.set("CIDSystemInfo", Object::Dictionary(system));
     // The widths of every CID the subset carries, in glyph space. CID 0 is the blank box and has no
     // entry of its own; a run from CID 1 states the rest in order.
     let widths: Vec<Object> = subset
@@ -206,15 +193,31 @@ pub(super) fn embed_font(document: &mut Document, subset: &Subset, face: &Face) 
         .skip(1)
         .map(|width| Object::Integer(i64::from(*width)))
         .collect();
-    if widths.is_empty() {
-        descendant.set("W", Object::Array(Vec::new()));
+    let widths = if widths.is_empty() {
+        Object::Array(Vec::new())
     } else {
-        descendant.set(
-            "W",
-            Object::Array(vec![Object::Integer(1), Object::Array(widths)]),
-        );
-    }
-    let descendant = document.add_object(Object::Dictionary(descendant));
+        Object::Array(vec![Object::Integer(1), Object::Array(widths)])
+    };
+    let system = Dictionary::from_iter([
+        (
+            "Registry",
+            Object::String(b"Adobe".to_vec(), lopdf::StringFormat::Literal),
+        ),
+        (
+            "Ordering",
+            Object::String(b"Identity".to_vec(), lopdf::StringFormat::Literal),
+        ),
+        ("Supplement", Object::Integer(0)),
+    ]);
+    let descendant = document.add_object(Object::Dictionary(Dictionary::from_iter([
+        ("Type", name("Font")),
+        ("Subtype", name("CIDFontType2")),
+        ("BaseFont", name(FONT_BASE)),
+        ("CIDToGIDMap", name("Identity")),
+        ("FontDescriptor", Object::Reference(descriptor)),
+        ("CIDSystemInfo", Object::Dictionary(system)),
+        ("W", widths),
+    ])));
 
     let mut cmap = String::from(
         "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n\
@@ -234,17 +237,17 @@ pub(super) fn embed_font(document: &mut Document, subset: &Subset, face: &Face) 
     cmap.push_str("endbfchar\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend");
     let unicode = stream(document, Dictionary::new(), cmap.as_bytes());
 
-    let mut font = Dictionary::new();
-    font.set("Type", name("Font"));
-    font.set("Subtype", name("Type0"));
-    font.set("BaseFont", name(FONT_BASE));
-    font.set("Encoding", name("Identity-H"));
-    font.set(
-        "DescendantFonts",
-        Object::Array(vec![Object::Reference(descendant)]),
-    );
-    font.set("ToUnicode", Object::Reference(unicode));
-    document.add_object(Object::Dictionary(font))
+    document.add_object(Object::Dictionary(Dictionary::from_iter([
+        ("Type", name("Font")),
+        ("Subtype", name("Type0")),
+        ("BaseFont", name(FONT_BASE)),
+        ("Encoding", name("Identity-H")),
+        (
+            "DescendantFonts",
+            Object::Array(vec![Object::Reference(descendant)]),
+        ),
+        ("ToUnicode", Object::Reference(unicode)),
+    ])))
 }
 
 /// A stream length as the object model states it.
@@ -254,58 +257,69 @@ fn width_of(length: usize) -> i64 {
 
 /// A page's `/ExtGState`: the fill alpha, and the stroke alpha when the reference states one.
 pub(super) fn graphics_state(document: &mut Document, fill: f64, stroke: Option<f64>) -> ObjectId {
-    let mut state = Dictionary::new();
-    state.set("Type", name("ExtGState"));
-    state.set("ca", real(fill));
+    // A dictionary built here states its entries in this order and replaces nothing, so it is written
+    // in one expression rather than through `graph::set`.
+    let mut entries = vec![
+        ("Type".to_string(), name("ExtGState")),
+        ("ca".to_string(), real(fill)),
+    ];
     if let Some(stroke) = stroke {
-        state.set("CA", real(stroke));
+        entries.push(("CA".to_string(), real(stroke)));
     }
-    document.add_object(Object::Dictionary(state))
+    document.add_object(Object::Dictionary(Dictionary::from_iter(entries)))
 }
 
 /// Add `id` to the page's own resource dictionary under `category`, returning the name it was given.
 ///
 /// The page's own `/Resources` is used when it states one; an inherited dictionary is copied onto the
 /// page first, so the entries the page's existing content resolves keep resolving. The name is made
-/// unique against the entries already there.
+/// unique against the entries already there. A `/Resources` or category entry the reference's typed
+/// lookup refuses — a value that is neither a dictionary, a null nor a dangling reference — is the
+/// engine's own failure, as it is the reference's.
 pub(super) fn add_resource(
     document: &mut Document,
     page: ObjectId,
     category: &str,
     id: ObjectId,
     base: &str,
-) -> String {
-    let mut resources = own_resources(document, page);
-    let mut entries = resources
-        .get(category.as_bytes())
-        .ok()
-        .and_then(|object| resolve_dictionary(document, object))
-        .unwrap_or_default();
+) -> Result<String, Failure> {
+    let mut resources = own_resources(document, page)?;
+    let mut entries = match resources.get(category.as_bytes()) {
+        Ok(object) => resolved_dictionary(document, object)?.unwrap_or_default(),
+        Err(_) => Dictionary::new(),
+    };
     let mut key = base.to_string();
     let mut suffix = 1_usize;
     while entries.has(key.as_bytes()) {
         key = format!("{base}{suffix}");
         suffix += 1;
     }
-    entries.set(key.as_bytes(), Object::Reference(id));
-    resources.set(category.as_bytes(), Object::Dictionary(entries));
-    if let Ok(dictionary) = document.get_object_mut(page).and_then(Object::as_dict_mut) {
-        dictionary.set("Resources", Object::Dictionary(resources));
+    graph::set(&mut entries, key.as_bytes(), Object::Reference(id));
+    graph::set(
+        &mut resources,
+        category.as_bytes(),
+        Object::Dictionary(entries),
+    );
+    match graph::dictionary_mut(document, page) {
+        Some(dictionary) => graph::set(dictionary, b"Resources", Object::Dictionary(resources)),
+        // The dictionary was copied on the heap and may be nested as deep as the scan builds one, so
+        // it is dismantled rather than dropped by the language.
+        None => graph::discard(Object::Dictionary(resources)),
     }
-    key
+    Ok(key)
 }
 
 /// The page's own resource dictionary, copied from the nearest ancestor that states one when the page
 /// states none.
-fn own_resources(document: &Document, page: ObjectId) -> Dictionary {
+fn own_resources(document: &Document, page: ObjectId) -> Result<Dictionary, Failure> {
     let mut seen = std::collections::HashSet::new();
     let mut current = page;
     while seen.insert(current) {
-        let Ok(dictionary) = document.get_dictionary(current) else {
+        let Some(dictionary) = graph::dictionary(document, current) else {
             break;
         };
         if let Ok(resources) = dictionary.get(b"Resources") {
-            return resolve_dictionary(document, resources).unwrap_or_default();
+            return Ok(resolved_dictionary(document, resources)?.unwrap_or_default());
         }
         let Some(parent) = dictionary
             .get(b"Parent")
@@ -316,7 +330,7 @@ fn own_resources(document: &Document, page: ObjectId) -> Dictionary {
         };
         current = parent;
     }
-    Dictionary::new()
+    Ok(Dictionary::new())
 }
 
 /// A real number as the object model writes it: the format's own reals are single-precision.
@@ -328,45 +342,35 @@ pub(super) fn real(value: f64) -> Object {
     Object::Real(value as f32)
 }
 
-/// The dictionary an object is or names.
-fn resolve_dictionary(document: &Document, object: &Object) -> Option<Dictionary> {
-    match object {
-        Object::Dictionary(dictionary) => Some(dictionary.clone()),
-        Object::Reference(id) => document.get_dictionary(*id).ok().cloned(),
-        _ => None,
+/// The dictionary a file-stated entry is or names, in one step, as the reference's typed lookup reads
+/// it: `Ok(None)` for an absent entry, a null or a reference that names nothing, and `Err` for any
+/// other value — a reference to a further reference included, which is that lookup throwing.
+fn resolved_dictionary(
+    document: &Document,
+    object: &Object,
+) -> Result<Option<Dictionary>, Failure> {
+    match graph::deref(&document.objects, object) {
+        None | Some(Object::Null) => Ok(None),
+        Some(Object::Dictionary(dictionary)) => Ok(Some(graph::clone_dictionary(dictionary))),
+        Some(_) => Err(Failure::engine()),
     }
 }
 
 /// Append a content stream after the page's own content, wrapping that content in `q`/`Q` first as
 /// the reference's own content push does, so an unbalanced state in the page cannot reach the new
 /// drawing.
-pub(super) fn push_content(document: &mut Document, page: ObjectId, content: &[u8]) {
-    page::wrap_contents(document, page, b"q\n", b"Q\n");
+pub(super) fn push_content(
+    document: &mut Document,
+    page: ObjectId,
+    content: &[u8],
+) -> Result<(), Failure> {
+    let holder = page::wrap_contents(document, page, b"q\n", b"Q\n")?;
     let stream =
         Object::Reference(document.add_object(Stream::new(Dictionary::new(), content.to_vec())));
-    let contents = document
-        .get_dictionary(page)
-        .ok()
-        .and_then(|dictionary| dictionary.get(b"Contents").ok())
-        .cloned();
-    let array = match contents {
-        Some(Object::Reference(id)) => {
-            if let Some(Object::Array(values)) = document.objects.get_mut(&id) {
-                values.push(stream);
-                return;
-            }
-            vec![Object::Reference(id), stream]
-        }
-        Some(Object::Array(mut values)) => {
-            values.push(stream);
-            values
-        }
-        Some(contents) => vec![contents, stream],
-        None => vec![stream],
-    };
-    if let Ok(dictionary) = document.get_object_mut(page).and_then(Object::as_dict_mut) {
-        dictionary.set("Contents", Object::Array(array));
-    }
+    // `wrap_contents` leaves an array: the page's own, or one the page names.
+    let values = page::content_array(document, page, holder).ok_or_else(Failure::engine)?;
+    values.push(stream);
+    Ok(())
 }
 
 /// The margin a placement gets by default: the page's own breathing room, kept to a quarter of the
@@ -464,18 +468,14 @@ fn i64_to_f64(value: i64) -> f64 {
 }
 
 /// A rectangle's four corners as the page states them, normalised to a corner pair.
-pub(super) fn rectangle(
-    document: &Document,
-    chains: &page::Chains,
-    dict: &Dictionary,
-) -> Option<[f64; 4]> {
+pub(super) fn rectangle(document: &Document, dict: &Dictionary) -> Option<[f64; 4]> {
     let values = dict.get(b"Rect").ok()?;
-    let Object::Array(items) = chains.resolve(document, values) else {
+    let Object::Array(items) = page::resolved(document, values) else {
         return None;
     };
     let numbers: Vec<f64> = items
         .iter()
-        .filter_map(|item| match chains.resolve(document, item) {
+        .filter_map(|item| match page::resolved(document, item) {
             Object::Integer(value) => Some(i64_to_f64(*value)),
             Object::Real(value) => Some(f64::from(*value)),
             _ => None,

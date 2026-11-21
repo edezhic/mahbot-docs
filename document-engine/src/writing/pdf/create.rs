@@ -35,6 +35,7 @@ use serde_json::Value;
 
 use super::draw;
 use super::font::{Face, Subset};
+use super::graph::Document;
 use super::page;
 use super::{Produced, interpolated, js_round};
 use crate::operation::{Failure, Request};
@@ -552,7 +553,7 @@ impl<'a> Row<'a> {
 /// many runs draw with it: the reference allocates a fresh resource name per drawn run, which the
 /// model does not read — it resolves a run's font through the page's resources — so one name draws
 /// the same marks and keeps a page's construction linear.
-fn render(mut document: lopdf::Document, layout: &Layout) -> Result<Vec<u8>, Failure> {
+fn render(mut document: Document, layout: &Layout) -> Result<Vec<u8>, Failure> {
     let face = Face::bundled();
     let font = match layout.mode {
         Mode::Pictures => None,
@@ -578,15 +579,16 @@ fn render(mut document: lopdf::Document, layout: &Layout) -> Result<Vec<u8>, Fai
         // A page that draws text names its font once, before the runs that use it; a page that draws
         // none names nothing. The two conditions below are one: only the streaming layout states
         // text, and only it has a font, so `page_font` is present exactly when a text mark is.
-        let page_font = font
+        let page_font = match font
             .as_ref()
             .filter(|_| marks.iter().any(|mark| matches!(mark, Mark::Text { .. })))
-            .map(|font| {
-                (
-                    font,
-                    draw::add_resource(&mut document, id, "Font", font.id, draw::FONT_BASE),
-                )
-            });
+        {
+            Some(font) => Some((
+                font,
+                draw::add_resource(&mut document, id, "Font", font.id, draw::FONT_BASE)?,
+            )),
+            None => None,
+        };
         for mark in marks {
             match mark {
                 Mark::Text { x, y, size, line } => {
@@ -632,7 +634,7 @@ fn render(mut document: lopdf::Document, layout: &Layout) -> Result<Vec<u8>, Fai
                         "XObject",
                         pictures[*picture],
                         draw::IMAGE_BASE,
-                    );
+                    )?;
                     let _ = writeln!(
                         content,
                         "q {} 0 0 {} {} {} cm /{key} Do Q",
@@ -645,7 +647,7 @@ fn render(mut document: lopdf::Document, layout: &Layout) -> Result<Vec<u8>, Fai
             }
         }
         if !content.is_empty() {
-            draw::push_content(&mut document, id, content.as_bytes());
+            draw::push_content(&mut document, id, content.as_bytes())?;
         }
     }
     page::save(document, true)

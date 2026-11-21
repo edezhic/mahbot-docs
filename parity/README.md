@@ -24,6 +24,7 @@ cargo run --bin capture-docx-parts # re-capture a created Word document's invari
 cd ..
 bun parity/scripts/derive-docx-layout-data.mjs # re-derive the layout's width data, constants and module list
 bun document-engine/assets/docx-layout/probes/kerning.mjs # run one layout probe (any file under probes/)
+bun parity/scripts/probe-pdf-bounds.mjs # measure the reference on the shapes the PDF bounds are held against
 ```
 
 The derivation command and the probes are deliberate acts, not part of a run. An upgrade of the
@@ -40,7 +41,7 @@ compares the engine's own PDF pages against PDFium, reporting the other families
 resolution therefore cannot move a codec version the comparison identity covers.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 820 cases and 91 readings — is bounded by the run budget below, a
+managed runtime. A full pass — 847 cases and 91 readings — is bounded by the run budget below, a
 backstop rather than a target. The reference engine's pass takes several times the crate engine's,
 because every reference case starts the runtime and materialises the kit; both depend on the
 machine and on the corpus. The whole test suite runs the corpus several times (once per
@@ -91,6 +92,8 @@ landed yet is shown as `SKIP`, not failed, and a run that judged no case at all 
 | `tests/pptx_create_parts.rs`, `tests/pptx_create.rs` | What the model cannot see about a created deck: the captured parts really are invariant and really are the reference's bytes, the core properties carry fixed strings, two stamps and the reference's revision, the application properties agree over decks differing in slide count, notes count, titles and size, the archive states exactly the entry set the reference writes, a `.jpg` and a `.jpeg` source both arrive as a `.jpeg` media part, and a deck that compares equal to the reference's is the one fed to the crate's editor, so a failure there is the editor's. Permanent and outside the baseline. |
 | `tests/docx_create_parts.rs`, `tests/docx_create_entries.rs`, `tests/docx_assets_identity.rs` | What the model cannot see about a created Word document: the shipped parts and fragments are the reference's own bytes, the archive states exactly the reference's entry list as a set — folder entries included — and the crate's identity covers the captured parts and the layout data but leaves out the notices, the README and the probes. Permanent and outside the baseline. |
 | `tests/pdf_create_shapes.rs` | What the PDF model cannot see about a created document: one request driven through both writers, both produced files walked with the same parser, and every drawn string's position, size and fill colour, every path's geometry, and the description entries the model drops compared. Permanent and outside the baseline. |
+| `tests/pdf_damaged_shapes.rs` | What the PDF model cannot see about a damaged document: a damaged body written back as the bytes it stated, a dangling reference — including one at the id a marker stands at — a page's `/Contents` dictionary, containers and numbering the two sides key differently, chained entries both sides refuse, the field tree's one-step reads, its permissive shapes, its cycles and its flag and `/MaxLen` arithmetic, a null box and a stream that never ends, driven through both writers, with what each side wrote compared. Permanent and outside the baseline. |
+| `scripts/probe-pdf-bounds.mjs` | The measurement the PDF bounds are held against: what the reference does with an object nested past the depth the scan builds, a filter chain that multiplies and one past what a typed array holds, a container that decodes to eighty mebibytes, an object numbered in the hundreds of millions, a page tree five thousand nodes deep, and the field tree's cycles and flag arithmetic. Its output is recorded in `../document-engine/VOCABULARY.md` and `../document-engine/PARSER.md`. |
 | `baseline/baseline.json` | The recorded reference (canonical documents, tens of megabytes — it grows with the corpus). |
 | `src/bin/parity.rs`, `src/bin/record-baseline.rs`, `src/bin/capture-pptx-parts.rs`, `src/bin/capture-docx-parts.rs` | The gate, the deliberate recorder, and the commands that re-capture a created deck's or a created Word document's invariant parts from the reference's output. |
 | `tests/docx_layout_modules.rs` (in the engine crate) | The layout's disposition table against the committed module list, walked in both directions in the isolated copy where the pinned package does not exist, with every row that is not a full port naming a probe the crate ships. |
@@ -529,6 +532,19 @@ points, width, colour and dash, and the description entries the model drops: the
 creator, both dates, an unknown key, an unvalidated date and a cleared entry. It is permanent and
 outside the baseline, it hard-fails when the managed runtime is absent rather than skipping, and it
 does not touch the reference writer module, which is part of the recorded identity.
+
+`tests/pdf_damaged_shapes.rs` holds what the model cannot see about a *damaged* document, which is the
+other half of the statement that a produced file is as damaged as its input and no more. The model
+compares no bytes, normalises object bodies and ignores an object no page reaches, so it cannot tell a
+carried-through damaged object from an empty placeholder, nor a dangling reference from a dropped one;
+its page-stream reader follows a dictionary at `/Contents` to the next `stream` keyword in the file
+rather than reading it as an entry, so it cannot see that shape either. The shapes it drives are
+`document-engine/PARSER.md`'s, one per entry; what it asserts is the bytes and the reachability the
+model cannot compare: a damaged body's bytes are written back verbatim by both sides, a reference the
+source does not hold is still stated and resolves to nothing, a dangling reference keeps the number the
+file used rather than a marker's, a dictionary at `/Contents` is carried as the page stated it, a form's
+lists are read one step so a stepped list is filled rather than refused, and a shape neither parser can
+follow is declined rather than guessed at.
 
 ## Effects
 

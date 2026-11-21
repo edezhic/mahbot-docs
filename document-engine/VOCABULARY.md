@@ -13,7 +13,7 @@ copy carries its licence beside it (`NotoSans-LICENSE.txt`).
 | `rules` | The shared writer/reader rules — a copy of `assets/docgen/rules.json`, value for value, the data the JavaScript kit inlines at build time. It is kept as data, not restated as a typed graph: the code that reads a rule adds the view it needs. |
 | `reading` | The bounds and constants of the reading surface: the prefix a caller peeks, the input size a caller caps, the pictures a caller delivers and the text a caller spills, the page-text floor, the crop-box slack, the raster envelope (target, quality, scale ceiling) and the raster decode envelope applied to an embedded image. |
 | `limits` | The reader and producer caps: the ZIP entry, XML depth, Word table/style/field/link, Excel range-probe, chart, number-format, PDF mark/field/catalogue, edit-work and multi-file bounds. Every entry is the reference's own number, read from its sources. |
-| `engine` | The bounds the engine states for itself, where the reference states none: the paragraph-nesting cap that keeps a Word edit's cost bounded on a deeply nested body, the template-nesting cap that keeps a fill's section walk off the stack, the page-tree and object-copy depth caps that keep the PDF writer's walks off the stack, the scan budget the PDF writer's body walk may spend on one file and on each object stream it expands, the bytes one look at what comes next may inspect, the bytes one PDF container may decode to, the highest object number the writer can state in its index, and the most columns a table row may state as a length without holding cells. Nothing here is the reference's number, so nothing here is pinned by the contract test. |
+| `engine` | The bounds the engine states for itself, where the reference states none: the paragraph-nesting cap that keeps a Word edit's cost bounded on a deeply nested body, the template-nesting cap that keeps a fill's section walk off the stack, the depth of the object graph the PDF body scan builds, the bytes one look at what comes next may inspect, the bytes one PDF container may decode to, and the most columns a table row may state as a length without holding cells. Nothing here is the reference's number, so nothing here is pinned by the contract test. |
 | `create` | The layout a created PDF lays its content out with, and the fragments its Word-only refusal is composed from. `heading_size_points` states one point size per level of `rules.heading_levels`, and the list of levels stays in `rules`, which is a value-for-value copy of the reference's file; a crate-side test holds the two to each other and holds the refusal sentence to the levels list, so neither can drift. `word_only_features` holds the words a block, a footnote, a running header and a running footer are named by; they are not marks — the sentence they are interpolated into is — but the restatement scan reads them too, so a fragment spelled in code fails it. |
 | `marks` | The fixed words, labels, templates and note fragments a reading or an operation prints, by key, each with the producers that print it. `{name}` placeholders are replaced with `Marks::format`. A mark the `rules` section already states (a Word tracked-change or chart label, a peripheral part's kind, a PDF form word) is not repeated here: `src/vocabulary.rs` reads it from `rules` under its key. A note with no values ("the workbook declares no sheets") is a fixed sentence and lives here; one that interpolates values is composed at the reporting site from this section's fragments and marks. |
 | `derived_marks` | The `rules` sections whose values are printed marks (Word marks and their chart labels, slide labels, PDF form words and field kinds, metadata keys, and peripheral parts), each naming the producers that print them today. The Word marks and peripheral parts are printed by both halves — a reading labels them and a Word edit names them in a refusal — and so are the presentation marks and slide labels, which a presentation edit names in a refusal and prints for a slide it could not read. The PDF form words and field kinds and the metadata keys are the reading’s alone; a chart’s labels live in `docx_marks`, so both halves print them. They live in `rules` because the kit needs them as request vocabulary; this section says they are marks too. |
@@ -107,26 +107,75 @@ The `enforced` map is the reading of every bound that matters to a caller:
 - the **writing** half owns the edit-work bound, the engine's own paragraph-nesting cap
   (`engine.paragraph_nesting_max`), which no reference bound states — the bound's own doc records
   why it is conservative and the measured curve it sits on — the engine's own template-nesting cap
-  (`engine.template_nesting_max`, the deepest sections a fill walks before it refuses), the
-  engine's own page-tree and object-copy depth caps (`engine.page_tree_depth_max`,
-  `engine.object_depth_max`, the same depth the body scan follows), the engine's own scan budget
-  (`engine.pdf_scan_passes_max`), counted over a file's own bytes and, for an object stream, over
-  the bytes it decodes to, the bytes one look at what comes next may inspect
-  (`engine.scan_look_bytes_max`), the bytes one PDF container — an object stream or an index
-  stream — may decode to (`engine.container_decode_max_bytes`, the same ceiling the OOXML package
-  reader puts on one entry: the crate's own decoders check a run before they allocate it, while a
-  filter lopdf decodes is bounded once it has decoded), the highest object number the writer can
-  state in its index (`engine.object_number_max`), and the four request numbers the crate refuses as
+  (`engine.template_nesting_max`, the deepest sections a fill walks before it refuses), the depth of
+  the object graph the body scan builds (`engine.object_depth_max`), the most a container's bytes may
+  decode to (`engine.container_decode_max_bytes`), the bytes one look at what comes next may inspect
+  (`engine.scan_look_bytes_max`), and the four request numbers the crate refuses as
   usage failures: the most columns a table row may state as a `length` without holding cells
   (`engine.stated_columns_max`, refused because the reference draws one column per whole step below
   the length and never returns from a large one), the most inputs one merge may name, the most bytes
   one merge may read, and the most parts one split may produce. The reference has none of these, so
-  no corpus case can judge them: the depth caps, the two scan and decode budgets and the
-  object-number bound are the engine's own internal refusals, the stated-column bound and the three
-  request caps are usage refusals a caller can fix, and each is read from the vocabulary and pinned
-  by the crate's own tests;
+  no corpus case can judge them: the object-graph depth, the decode ceiling and the look allowance
+  are the engine's own bounds, the stated-column bound and the three request caps are usage refusals
+  a caller can fix, and each is read from the vocabulary and pinned by the crate's own tests;
 - `rules` is enforced by the writing half (the kit refuses out-of-range arguments) and by a caller
   (the tool validates before it builds a request).
+
+### The PDF bounds, and what justifies each
+
+A PDF file the reference reads and edits is never refused where the reference itself does not refuse
+or fault on it, and `PARSER.md` enumerates the whole of the reference's tolerance — one shape per
+entry, with what each side does — so that this section's bounds can be read against it. The three
+bounds recorded here are bounds on the engine's own cost, not on the file, and each is recorded with
+the measurement or the argument that fixes it. The writing half enforces three more numbers on a
+PDF — the most inputs one merge may name, the most bytes they may hold, and the most parts one split
+may produce — and those are usage refusals a caller can fix, pinned to the product's own constants,
+so they are stated with the request caps rather than here. A reading that would otherwise cost the
+square of the file's length is not bounded but remembered instead: the recovery scan's record of the
+tail (`PARSER.md` §3.4) is what keeps a file of never-ending streams to one pass over it.
+
+The probe that measures the reference is `parity/scripts/probe-pdf-bounds.mjs`: it drives the
+committed kit through the same request-and-result contract the harness uses, and prints the table
+below.
+
+| bound | value | why it cannot refuse a file the reference reads |
+|---|---|---|
+| `engine.object_depth_max` | 30 000 | Past it the scan keeps an object as the bytes it states — never refusing the file — so the bound costs nothing a reader can see. The reference's own parser gives up in the same place: measured, a page dictionary holding a value nested 20 000 arrays deep is parsed and its page turned, one nested 30 000 is kept as the bytes it states, page and all, and the point between them is the runtime's own stack rather than a number — 27 000 parsed in one run and threw in another. The bound sits above the deepest depth measured to parse, so nothing the reference parses is carried here. A bound low enough for the language's own clone and drop to survive it was rejected on that evidence: it would carry a page the reference turns. So the depth is not kept away from the language's recursion by this number — the walks are, and `writing/pdf/graph.rs` states that rule. |
+| `engine.container_decode_max_bytes` | 4 294 967 296 | A stream's filter chain applies stage by stage, so a chain of expanding filters multiplies rather than adds: a `RunLengthDecode` stage states up to sixty-four times its input, so five of them over two bytes state 2.1 GiB and a sixth states 135 GiB. The ceiling is the most a typed array holds, which is where the reference's own decoder throws — measured, a five-stage chain decodes to 2.1 GiB in seconds, and a six-stage one, which would decode to 135 GiB, spends tens of seconds and produces too, its decoder having given up at that wall; the probe prints the times each run measures. A container past it is not decoded here either, so it is carried rather than the file refused. The ceiling bounds what the chain retains between stages, not the peak of one stage: every filter but `RunLengthDecode` builds its output and is measured afterwards — `ASCIIHexDecode`, `FlateDecode`, and whatever the object model decodes (LZW, ASCII85) — so a stage that expands holds its own output before the ceiling is consulted, and only `RunLengthDecode`, which states its output's length in each run, is counted before it writes. A container in the corpus never reaches the ceiling; the bound's own witness is the two-stage chain the crate's tests build with the bound injected. The ceiling is held as a `u64` because it is past what a 32-bit `usize` states. |
+| `engine.scan_look_bytes_max` | 512 | A look at what comes next inspects at most this many bytes of its own, so a body built of long comment or digit runs costs at most 4 096 byte-reads per byte of the file, and every other shape costs the file's own length except a container whose entries all name one offset, which costs the entries the file states (`PARSER.md` §3.18) — a stream's recovery scan included, which reads to the file's end and is remembered rather than bounded: a recovery that finds its marker ends the stream where the walk resumes past it, and the first one that reaches the end without balancing records the tail, so every later one inside it reads nothing and is answered by two lookups, except one that begins inside a recorded keyword, which reads the tail once itself (`PARSER.md` §3.4). An exhausted look is not a refusal — it answers "not here" and the walk steps one byte on, which is what the reference does — so the bound costs no file, and no body walk has a budget of its own to refuse one with. Measured: with the look bound lowered to sixteen bytes, every corpus file still reads; 512 is thirty-two times that. |
+
+A separate rule, not a bound, is that no value a file states is ever cloned or dropped with the
+language's own recursion — a stack overflow is not a panic the engine's containment can catch, so a walk
+that recursed over a file-stated value would abort the process rather than answer.
+`writing/pdf/graph.rs` is its one home: it states the rule, the helpers that keep it, and what guards
+it and what cannot. The field tree's cycle stop is the one walk that ends on a shape rather than a
+depth: measured, the reference dies with `Maximum call stack size exceeded` on a field whose kid list
+or parent link returns to itself (the probe rows "a form whose field kid list returns to its own
+container" and "a form whose field parent link returns to itself"), where the engine ends the cycle and
+answers (`PARSER.md` §5.17).
+
+Two bounds the engine used to keep are gone, each because the reference reads and edits the same file
+and the engine refused it:
+
+- the highest object number the writer can state: measured, the reference turns a file whose highest
+  object number is 999 999 999 and produces one. The cost the bound protected — one index entry per
+  number up to the high-water mark — is gone with it: the index now states one section per run of
+  numbers the document holds, so an object numbered in the hundreds of millions costs its own entry;
+- the depth of the page tree: measured, the reference turns a file whose tree nests five thousand
+  nodes and produces one. The walk keeps its own stack, so the depth costs heap rather than the
+  process's stack, and its cost is the nodes it visits: a tree that names one node under two parents
+  is walked once per name, so a tree built to double at every level costs `2^depth` visits. Measured,
+  the reference walks that shape the same way: at twenty levels it visits 1 048 576 pages in a
+  fraction of a second and then refuses the request for naming more pages than one call takes (ten
+  thousand); this engine walks the same `2^depth` nodes and refuses the same request for the same
+  reason. Neither side overflows its stack — the engine keeps its own, and the reference recurses one
+  level per tree level rather than one per visit — and no bound of either stops a deeper tree: a tree
+  deep enough stalls both, and no bound of the engine's is what stops it.
+
+A container's decoded bytes were once bounded at sixty-four mebibytes, and that bound is gone in that
+form: measured, the reference decodes a container of eighty mebibytes in a third of a second and
+produces, so a ceiling there refused a file it edits. What replaced it is the typed array's own limit
+above, which is the wall the reference hits rather than one of the engine's choosing.
 
 Two spill numbers are deliberately separate because they bound different things: `text_spill_bytes`
 is the read caller's budget for its whole composed answer, in bytes, and `text_spill_chars` is the

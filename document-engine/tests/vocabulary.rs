@@ -195,6 +195,13 @@ const FORMAT_NAMES: &[(&str, &[(&str, &str)])] = &[
         )],
     ),
     (
+        "src/writing/pdf/serialise.rs",
+        &[(
+            "null",
+            "the keyword the format states for a null object, format knowledge rather than a printed word",
+        )],
+    ),
+    (
         "src/writing/docx/layout/read.rs",
         &[
             ("page", "the `w:type` a `w:br` states for a page break"),
@@ -912,7 +919,7 @@ const EXEMPTIONS: &[Exemption] = &[
     Exemption {
         file: "src/writing/pdf/picture.rs",
         value: 8.0,
-        count: 2,
+        count: 1,
         quantity: "",
         reason: "the bits per component a written image sample states",
     },
@@ -1112,7 +1119,7 @@ const EXEMPTIONS: &[Exemption] = &[
         reason: "the four bits one hexadecimal digit stands for, and the shift that places a nibble: once in \
          a hex string, once in a name's `#xx` escape, and twice in ASCIIHexDecode, whose odd final \
          digit is padded with a zero; and the bytes a decoded object stream needs to hold one entry \
-         of two numbers",
+         of two numbers, which is what bounds the entries a container can state",
     },
     Exemption {
         file: "src/writing/pdf/scan.rs",
@@ -1121,6 +1128,14 @@ const EXEMPTIONS: &[Exemption] = &[
         quantity: "",
         reason: "the value the hexadecimal digits `a` to `f` stand for, ten through fifteen, and the radix \
          the walk accumulates a number in",
+    },
+    Exemption {
+        file: "src/writing/pdf/scan.rs",
+        value: 8.0,
+        count: 2,
+        quantity: "",
+        reason: "the compression method a zlib header states, and the bits a zlib header's first byte is \
+         shifted by before its check byte is computed",
     },
     Exemption {
         file: "src/writing/mod.rs",

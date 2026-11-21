@@ -230,6 +230,19 @@
 //! page states no text, so the model compares the outlines as path operators
 //! (`text_drawn_as_outlines_is_read_as_vector_content` pins what it does read).
 //!
+//! **The model compares no bytes.** It normalises object numbers, `/Length` and the index, and it
+//! records nothing about an object no page reaches, so a produced file that carries a damaged
+//! object's own bytes and one that writes an empty placeholder in its place are one document to it —
+//! and the same is true of a reference a copied page reaches that the source does not hold, which
+//! the model reads as the null it resolves to, and of a page whose `/Contents` is a dictionary,
+//! which the model's page-stream reader follows to the next `stream` keyword in the file rather
+//! than reading it as an entry. That is a limit of comparison with a named out-of-model witness
+//! rather than a test here: `tests/pdf_damaged_shapes.rs` drives both writers over those shapes — a
+//! body that does not parse, a dictionary that closes on a key with no value, a dangling reference,
+//! and a page whose `/Contents` is a dictionary — and compares what each side wrote. What the model
+//! does witness is the part a user feels — a produced file rather than a refusal, with the same
+//! notes and losses.
+//!
 //! # What the model refuses
 //!
 //! A document of more than 10,000 pages, or a content stream that runs more than 100,000
@@ -237,7 +250,12 @@
 //! not what the parser allocates: the parser materialises the page list before the bound is applied
 //! and recurses through the page tree, so a deeply nested tree overflows its stack rather than
 //! reaching the bound — an abort that no containment can catch. The operator bound is charged per
-//! stream, so a stream that never ends is refused rather than exhausting the run.
+//! stream, so a stream that never ends is refused rather than exhausting the run. A value nested tens
+//! of thousands of levels deep is the same: the parser follows an array or a dictionary by recursing,
+//! so a page dictionary carrying one is not a shape a case can record — the model aborts on it in
+//! either engine's own child. The engine's answer for that shape is pinned by its own test
+//! (`a_page_nested_past_the_scan_depth_is_carried_and_the_rest_turned`) and the reference's by
+//! `parity/scripts/probe-pdf-bounds.mjs`.
 //!
 //! Every stream the model decodes is charged its decoded length against one document-wide total
 //! (256 MiB): a page's content, a form XObject, a font's `/ToUnicode` map. An image is charged at
@@ -1305,10 +1323,12 @@ fn field_kind(field: &Dict<'_>) -> &'static str {
         "Sig" => "signature",
         "Btn" => {
             let flags = field_flags(field);
-            if flags & FIELD_FLAG_RADIO != 0 {
-                "radio"
-            } else if flags & FIELD_FLAG_PUSH_BUTTON != 0 {
+            // `createPDFAcroButton` tests the push-button bit before the radio bit, so a field
+            // stating both is a push button.
+            if flags & FIELD_FLAG_PUSH_BUTTON != 0 {
                 "button"
+            } else if flags & FIELD_FLAG_RADIO != 0 {
+                "radio"
             } else {
                 "checkbox"
             }

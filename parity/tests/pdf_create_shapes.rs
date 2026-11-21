@@ -41,6 +41,8 @@
 //! `PATH`, or `PARITY_BUN`) is absent, and that failure is left to panic: a comparison that did not
 //! run is not a comparison that passed.
 
+mod common;
+
 use document_parity::engine::Writer;
 use document_parity::reference::{CrateWriter, ReferenceWriter};
 use hayro::hayro_syntax::Pdf;
@@ -731,32 +733,21 @@ fn produced(
     metadata: Option<&Value>,
 ) -> Vec<u8> {
     let output = root.join(format!("{name}.pdf"));
-    let scratch = root.join(format!("scratch-{name}"));
-    std::fs::create_dir_all(&scratch).expect("a scratch directory");
     let mut request = json!({
         "op": "create",
         "format": "pdf",
         "content": content,
-        "output": output.to_string_lossy(),
     });
     if let Some(metadata) = metadata {
         request["metadata"] = metadata.clone();
     }
-    let outcome = writer
-        .run(&request, &scratch)
-        .unwrap_or_else(|error| panic!("{name}: the writer did not run the request: {error}"));
-    assert!(
-        outcome.failure.is_none(),
-        "{name}: the writer refused the request: {:?}",
-        outcome.failure
-    );
+    let (outcome, bytes) = common::carried_out(writer, root, name, &request);
     assert_eq!(
         outcome.outputs,
-        vec![output.clone()],
+        vec![output],
         "{name}: the writer named the file it wrote"
     );
-    std::fs::read(&output)
-        .unwrap_or_else(|error| panic!("{name}: cannot read {}: {error}", output.display()))
+    bytes
 }
 
 /// Run one request through both writers and read back the pages each drew.

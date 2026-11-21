@@ -494,12 +494,9 @@
   "engine": {
     "paragraph_nesting_max": 1000,
     "template_nesting_max": 100,
-    "page_tree_depth_max": 64,
-    "object_depth_max": 128,
-    "pdf_scan_passes_max": 8,
+    "object_depth_max": 30000,
+    "container_decode_max_bytes": 4294967296,
     "scan_look_bytes_max": 512,
-    "container_decode_max_bytes": 67108864,
-    "object_number_max": 1000000,
     "stated_columns_max": 1000
   },
   "create": {
@@ -3081,6 +3078,30 @@
         "writing"
       ]
     },
+    "pdf_page_objects_lost": {
+      "text": "{objects} object(s) the produced file does not hold as an object",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_objects_unread": {
+      "text": "{objects} object(s) stated in a container that could not be read are not in the produced file",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_objects_unread_over": {
+      "text": "more objects are stated in containers that could not be read than this engine can count, and the produced file holds none of them",
+      "printed_by": [
+        "writing"
+      ]
+    },
+    "pdf_page_references_lost": {
+      "text": "{references} reference(s) the produced file states no longer name what the input named",
+      "printed_by": [
+        "writing"
+      ]
+    },
     "pdf_page_point": {
       "text": "\"{name}\" must be within ±{max} points, got {value}",
       "printed_by": [
@@ -3191,36 +3212,6 @@
     },
     "note_pdf_past_area": {
       "text": "[the {what}'s box reaches past the visible area of {named} — the part beyond is not shown on it]",
-      "printed_by": [
-        "writing"
-      ]
-    },
-    "pdf_page_tree_nested": {
-      "text": "the page tree nests deeper than this engine walks (limit {max})",
-      "printed_by": [
-        "writing"
-      ]
-    },
-    "pdf_page_object_nested": {
-      "text": "an object in this file nests deeper than this engine follows (limit {max})",
-      "printed_by": [
-        "writing"
-      ]
-    },
-    "pdf_page_scan_limit": {
-      "text": "reading this file's body takes more passes than this engine scans (limit {max})",
-      "printed_by": [
-        "writing"
-      ]
-    },
-    "pdf_page_container_limit": {
-      "text": "a container in this file holds more than this engine decodes (limit {max})",
-      "printed_by": [
-        "writing"
-      ]
-    },
-    "pdf_page_object_limit": {
-      "text": "this file numbers an object past what this engine writes (limit {max})",
       "printed_by": [
         "writing"
       ]
@@ -4059,10 +4050,10 @@
     "split_parts_max": [
       "writing"
     ],
-    "page_tree_depth_max": [
+    "object_depth_max": [
       "writing"
     ],
-    "object_depth_max": [
+    "container_decode_max_bytes": [
       "writing"
     ],
     "paragraph_nesting_max": [
@@ -4071,16 +4062,7 @@
     "template_nesting_max": [
       "writing"
     ],
-    "pdf_scan_passes_max": [
-      "writing"
-    ],
     "scan_look_bytes_max": [
-      "writing"
-    ],
-    "container_decode_max_bytes": [
-      "writing"
-    ],
-    "object_number_max": [
       "writing"
     ],
     "stated_columns_max": [

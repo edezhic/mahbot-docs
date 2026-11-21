@@ -4966,8 +4966,7 @@ pub fn pdf_damaged_length_absent() -> Vec<u8> {
 }
 
 /// One page drawing twelve lines from twelve content streams, each stating a length far longer than
-/// its own: the reference recovers every one, so the recovery must not spend its bound on the
-/// distances those lengths name.
+/// its own: the reference recovers every one, and the walk reads each to its own end marker.
 #[must_use]
 pub fn pdf_damaged_length_long_many() -> Vec<u8> {
     let mut pdf = PdfObjects::default();
@@ -5060,6 +5059,7 @@ fn pdf_object_stream(index: ObjectStreamIndex, padding: usize) -> Vec<u8> {
         object_stream_payload(padding),
         " /Filter /FlateDecode",
         deflate_fixed,
+        0,
     )
 }
 
@@ -5088,9 +5088,13 @@ fn pdf_with_object_stream(
     (payload, first, held): (Vec<u8>, usize, usize),
     filter: &str,
     encode: impl Fn(&[u8]) -> Vec<u8>,
+    cut: usize,
 ) -> Vec<u8> {
     let texts = ["Page one text", "Page two text"];
-    let container = encode(&payload);
+    let mut container = encode(&payload);
+    // A container whose own bytes stop short of the encoder's end: the filter's data is cut, not the
+    // objects it holds.
+    container.truncate(container.len().saturating_sub(cut));
     let stated = match index {
         ObjectStreamIndex::WrongContainerLength => 7,
         _ => container.len(),
@@ -5148,9 +5152,9 @@ pub fn pdf_damaged_object_stream_length() -> Vec<u8> {
     pdf_object_stream(ObjectStreamIndex::WrongContainerLength, 0)
 }
 
-/// The same modern shape whose container is ASCII-hex encoded. `ASCIIHexDecode` is one of the two
-/// filters the reference's library reads and lopdf does not, so this file is what exercises the
-/// decoder end to end through the gate.
+/// The same modern shape whose container is ASCII-hex encoded. `ASCIIHexDecode` is a filter the
+/// engine decodes itself rather than through the object model, so this file exercises that decoder
+/// end to end through the gate.
 #[must_use]
 pub fn pdf_object_stream_ascii_hex() -> Vec<u8> {
     pdf_with_object_stream(
@@ -5158,7 +5162,51 @@ pub fn pdf_object_stream_ascii_hex() -> Vec<u8> {
         object_stream_payload(0),
         " /Filter /ASCIIHexDecode",
         ascii_hex,
+        0,
     )
+}
+
+/// The modern shape whose container stops short of its own end: the filter's data is cut `cut` bytes
+/// from the end, which the reference's decoder reads as far as it goes, so the objects it holds are
+/// found and the file is edited rather than refused.
+fn pdf_object_stream_truncated(
+    filter: &str,
+    encode: impl Fn(&[u8]) -> Vec<u8>,
+    cut: usize,
+) -> Vec<u8> {
+    pdf_with_object_stream(
+        ObjectStreamIndex::Stated,
+        object_stream_payload(0),
+        filter,
+        encode,
+        cut,
+    )
+}
+
+/// A two-page PDF whose container states `RunLengthDecode` data that stops two bytes before its own
+/// end marker. The reference decodes the runs it holds and produces a two-page file.
+#[must_use]
+pub fn pdf_object_stream_truncated_run_length() -> Vec<u8> {
+    pdf_object_stream_truncated(" /Filter /RunLengthDecode", run_length, 2)
+}
+
+/// The same file whose Flate data stops four bytes before its own end — the checksum, which neither
+/// side reads — so the container decodes whole and the file is edited.
+#[must_use]
+pub fn pdf_object_stream_truncated_flate() -> Vec<u8> {
+    pdf_object_stream_truncated(" /Filter /FlateDecode", deflate_fixed, 4)
+}
+
+/// `data` in the runs a `RunLengthDecode` filter reads: literal runs of at most 128 bytes, then the end
+/// marker.
+fn run_length(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len() + data.len() / 128 + 1);
+    for chunk in data.chunks(128) {
+        out.push(u8::try_from(chunk.len()).expect("a run of at most 128 bytes") - 1);
+        out.extend_from_slice(chunk);
+    }
+    out.push(0x80);
+    out
 }
 
 /// `data` in the hexadecimal digits an `ASCIIHexDecode` filter reads.
@@ -5243,6 +5291,1214 @@ pub fn pdf_object_number_overflow() -> Vec<u8> {
 #[must_use]
 pub fn pdf_damaged_body() -> Vec<u8> {
     first_percent(&pdf_basic(), 55)
+}
+
+/// Two A4 pages whose font object states a body that does not parse, with an `endobj` after it: the
+/// reference's parser keeps those bytes and copies them out, and so does the engine.
+#[must_use]
+pub fn pdf_body_unparsable() -> Vec<u8> {
+    two_pages(
+        "<< /Type /Font /Subtype /Type1 /BaseFont !! broken",
+        None,
+        None,
+    )
+}
+
+/// The same file with a dictionary that closes while its last key still states no value. The
+/// reference's parser throws on it and keeps the object's bytes, so the engine must not repair the
+/// dictionary into one the file does not state.
+#[must_use]
+pub fn pdf_dictionary_unparsable() -> Vec<u8> {
+    two_pages("<< /Type /Font /Subtype /Type1 /BaseFont >>", None, None)
+}
+
+/// Two A4 pages, each drawing one line. `font` is the font object's body; `damaged` states, for the
+/// page at that index, a body of its own in place of the intact page's; and `catalog` replaces the
+/// catalog the builder writes. A replaced body may name `{pages}`, `{font}`, `{content}` and
+/// `{media}`, which the builder substitutes.
+fn two_pages(font: &str, damaged: Option<(usize, &str)>, catalog: Option<&str>) -> Vec<u8> {
+    two_pages_with(font, damaged, catalog, PAGES_BODY)
+}
+
+/// The page-tree root the two-page scaffold states.
+const PAGES_BODY: &str = "<< /Type /Pages /Kids [{kids}] /Count {count} >>";
+
+/// [`two_pages`] with a page-tree root of its own, stating `{kids}` and `{count}`.
+fn two_pages_with(
+    font: &str,
+    damaged: Option<(usize, &str)>,
+    catalog: Option<&str>,
+    pages_body: &str,
+) -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(font);
+    let pages = pdf.reserve();
+    let mut kids = Vec::new();
+    for (index, text) in ["Page one text", "Page two text"].iter().enumerate() {
+        let content = pdf.stream(
+            "",
+            format!("BT /F1 24 Tf 72 {} Td ({text}) Tj ET", 760 - index * 24).as_bytes(),
+        );
+        let page = pdf.reserve();
+        kids.push(page.clone());
+        let body = match damaged {
+            Some((at, body)) if at == index => body
+                .replace("{pages}", &pages)
+                .replace("{font}", &font)
+                .replace("{content}", &content)
+                .replace("{media}", PDF_PAGE),
+            _ => format!(
+                "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+                 /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+            ),
+        };
+        pdf.set(&page, body);
+    }
+    pdf.set(
+        &pages,
+        pages_body
+            .replace("{kids}", &kids.join(" "))
+            .replace("{count}", &kids.len().to_string()),
+    );
+    let catalog = match catalog {
+        Some(body) => body.replace("{pages}", &pages),
+        None => format!("<< /Type /Catalog /Pages {pages} >>"),
+    };
+    let catalog = pdf.push(catalog);
+    pdf.finish(&catalog, "")
+}
+
+/// Two A4 pages, the last of which states a body that does not parse: the reference keeps that page as
+/// the bytes it states, so its own walk finds only the first page and produces a file holding it.
+#[must_use]
+pub fn pdf_page_unparsable() -> Vec<u8> {
+    two_pages(
+        PDF_FONT,
+        Some((
+            1,
+            "<< /Type /Page /Parent {pages} /MediaBox {media} !! broken >>",
+        )),
+        None,
+    )
+}
+
+/// Two A4 pages, the last of which states a value nested past the depth the engine's scan builds: the
+/// page is carried as the bytes it states, so the same walk finds only the first page.
+#[must_use]
+pub fn pdf_page_past_the_depth() -> Vec<u8> {
+    let depth = crate::vocabulary::vocabulary().engine.object_depth_max + 1;
+    let mut deep = String::with_capacity(2 * depth + 1);
+    for _ in 0..depth {
+        deep.push('[');
+    }
+    deep.push('0');
+    for _ in 0..depth {
+        deep.push(']');
+    }
+    two_pages(
+        PDF_FONT,
+        Some((
+            1,
+            &format!("<< /Type /Page /Parent {{pages}} /MediaBox {{media}} /Deep {deep} >>"),
+        )),
+        None,
+    )
+}
+
+/// Two A4 pages, the first of which names a font object the file does not hold: the reference leaves
+/// that reference dangling in what it writes, and so does the engine.
+#[must_use]
+pub fn pdf_dangling_reference() -> Vec<u8> {
+    two_pages(
+        PDF_FONT,
+        Some((
+            0,
+            "<< /Type /Page /Parent {pages} /MediaBox {media} \
+             /Resources << /Font << /F1 99 0 R >> >> /Contents {content} >>",
+        )),
+        None,
+    )
+}
+
+/// A file whose page tree names itself: `traverse` recurses until the runtime throws, and the load
+/// turns that into the refusal both sides print.
+#[must_use]
+pub fn pdf_page_tree_names_itself() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{pages}] /Count 1 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// Two A4 pages whose page-tree root states no `/Type /Pages`: the reference has no `traverse` for such
+/// a root, so both sides refuse the file.
+#[must_use]
+pub fn pdf_page_tree_root_without_type() -> Vec<u8> {
+    two_pages_with(PDF_FONT, None, None, "<< /Kids [{kids}] /Count {count} >>")
+}
+
+/// Two A4 pages whose catalog states no `/Type`: the reference builds a catalog only for a dictionary
+/// that says it is one, so both sides refuse the file.
+#[must_use]
+pub fn pdf_catalog_without_type() -> Vec<u8> {
+    two_pages(PDF_FONT, None, Some("<< /Pages {pages} >>"))
+}
+
+/// One A4 page whose `/Contents` is a dictionary rather than a stream: a turn carries it, and the
+/// reference's own library faults when an action appends to it.
+#[must_use]
+pub fn pdf_contents_dictionary() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let contents = pdf.push("<< /A 1 >>");
+    let page = pdf.reserve();
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {contents} >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// One A4 page whose `/Contents` names the page itself: a turn carries it, and the reference's own
+/// library faults when an action appends to it.
+#[must_use]
+pub fn pdf_contents_self() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {page} >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// One A4 page under a page tree that names its inner `/Pages` node twice, so the page is reached
+/// twice: the reference's walk visits it twice and turns it twice, and so does this engine's.
+#[must_use]
+pub fn pdf_page_tree_named_twice() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let inner = pdf.reserve();
+    let page = pdf.reserve();
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {inner} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    pdf.set(
+        &inner,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 /Parent {pages} >>"),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{inner} {inner}] /Count 2 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// One A4 page whose page tree names the page dictionary itself rather than a reference to it: the
+/// reference's walk takes it for a page and then has no reference to build one from, so it refuses
+/// the file.
+#[must_use]
+pub fn pdf_page_dictionary_inline() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
+    pdf.set(
+        &pages,
+        format!(
+            "<< /Type /Pages /Kids [<< /Type /Page /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>] /Count 1 >>"
+        ),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// The two-page file whose container decodes to eighty mebibytes: the reference reads it, and the
+/// engine used to refuse it.
+#[must_use]
+pub fn pdf_object_stream_decoding_eighty_mib() -> Vec<u8> {
+    pdf_object_stream(ObjectStreamIndex::Stated, 80 * 1024 * 1024)
+}
+
+/// [`pdf_basic`] with an object numbered past the million the engine used to refuse, holding nothing a
+/// page reaches: the reference turns the file, and the index it writes states one entry for it.
+#[must_use]
+pub fn pdf_object_numbered_past_a_million() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(b"\n1000001 0 obj\nnull\nendobj\n");
+    pdf
+}
+
+/// [`pdf_basic`] followed by `count` objects whose stream states a length far past the file and no
+/// `endstream` of its own: every recovery reads to the end of the file and finds nothing, which is
+/// what the reference does too — it keeps each object as the bytes it states and turns the pages. A
+/// walk that charges the whole file for each recovery refuses a file the reference edits.
+#[must_use]
+pub fn pdf_many_damaged_streams(count: usize) -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    for index in 0..count {
+        pdf.extend_from_slice(
+            format!(
+                "\n{} 0 obj\n<< /Length 99999 >> stream\n{}\nendobj\n",
+                100 + index,
+                "x".repeat(40)
+            )
+            .as_bytes(),
+        );
+    }
+    pdf
+}
+
+/// A modern file whose object stream states every entry at the same offset: the font the page draws
+/// with is stated thirty-two times, each entry naming the same bytes. The reference parses the entry
+/// per offset the file states and produces, so an engine must read it rather than refuse it.
+#[must_use]
+pub fn pdf_object_stream_one_offset() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
+    // The font the container holds, numbered past every object the file states outside it.
+    let held = 6_u32;
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {held} 0 R >> >> /Contents {content} >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    let entries = 32;
+    let mut header = String::new();
+    for _ in 0..entries {
+        header.push_str(&format!("{held} 0 "));
+    }
+    let mut data = header.into_bytes();
+    let first = data.len();
+    data.extend_from_slice(PDF_FONT.as_bytes());
+    pdf.stream(&format!("/Type /ObjStm /N {entries} /First {first}"), &data);
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// [`pdf_basic`] whose `/Kids` is stated as a reference that names a reference: the reference's typed
+/// lookup takes one step, finds a reference and faults at load; so does this engine.
+#[must_use]
+pub fn pdf_page_tree_kids_by_reference() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    let kids = pdf.push(format!("[{page}]"));
+    let link = pdf.push(kids);
+    pdf.set(&pages, format!("<< /Type /Pages /Kids {link} /Count 1 >>"));
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// The same file with the catalog's `/Pages` stated as a reference that names a reference: the
+/// reference's typed lookup faults at load, and so does this engine.
+#[must_use]
+pub fn pdf_page_tree_root_by_reference() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    let link = pdf.push(pages);
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {link} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// The same file with the page's `/MediaBox` stated as a reference that names a reference: the
+/// reference's own `lookup` takes one step and its type check faults, and so does this engine.
+#[must_use]
+pub fn pdf_media_box_by_reference() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
+    let box_value = pdf.push(PDF_PAGE);
+    let link = pdf.push(box_value);
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {link} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// One A4 page stating `/CropBox null`. The reference reads `/CropBox` with `lookupMaybe`, which
+/// answers "no crop" for a null and falls back to the media box; this engine does the same rather
+/// than fault on the entry.
+#[must_use]
+pub fn pdf_crop_box_null() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} /CropBox null \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// One A4 page carrying a text field, whose catalog states `/AcroForm` as a reference that names a
+/// reference. The reference reads the form with a typed lookup, which takes one step and finds a
+/// reference rather than the dictionary it wanted, so its fill faults; so does this engine.
+#[must_use]
+pub fn pdf_acroform_by_reference() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let helvetica = pdf.push(PDF_FONT);
+    let content = pdf.stream("", b"BT /F1 14 Tf 72 780 Td (A chained form) Tj ET");
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let link = pdf.reserve();
+    let acroform = pdf.reserve();
+    let name = pdf.push(format!(
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /Rect [72 700 272 724] \
+         /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+    ));
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {helvetica} >> >> /Contents {content} \
+             /Annots [{name}] >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    pdf.set(
+        &acroform,
+        format!(
+            "<< /Fields [{name}] /DA (/Helv 0 Tf 0 g) \
+             /DR << /Font << /Helv {helvetica} >> >> >>"
+        ),
+    );
+    pdf.set(&link, acroform);
+    let catalog = pdf.push(format!(
+        "<< /Type /Catalog /Pages {pages} /AcroForm {link} >>"
+    ));
+    pdf.finish(&catalog, "")
+}
+
+/// One A4 page carrying the text field `name`, whose `/Parent` is a reference that names a further
+/// reference. The reference reads a field's inherited entries by ascending that chain with a typed
+/// lookup, which takes one step and finds a reference rather than the dictionary it wanted, so its
+/// fill faults before it applies a value; so does this engine. Everything else about the form is one
+/// the fill would carry out, so the entry is the only reason it does not.
+#[must_use]
+pub fn pdf_field_parent_by_reference() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let helvetica = pdf.push(PDF_FONT);
+    let content = pdf.stream("", b"BT /F1 14 Tf 72 780 Td (A chained parent) Tj ET");
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let parent_field = pdf.reserve();
+    let acroform = pdf.reserve();
+    let link = pdf.reserve();
+    let name = pdf.push(format!(
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /Parent {link} \
+         /Rect [72 700 272 724] /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+    ));
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {helvetica} >> >> /Contents {content} \
+             /Annots [{name}] >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    pdf.set(&parent_field, "<< /T (name) >>");
+    pdf.set(&link, parent_field);
+    pdf.set(
+        &acroform,
+        format!(
+            "<< /Fields [{name}] /DA (/Helv 0 Tf 0 g) \
+             /DR << /Font << /Helv {helvetica} >> >> >>"
+        ),
+    );
+    let catalog = pdf.push(format!(
+        "<< /Type /Catalog /Pages {pages} /AcroForm {acroform} >>"
+    ));
+    pdf.finish(&catalog, "")
+}
+
+/// The same page whose form holds its one field through a `/Fields` entry that is a reference naming
+/// a further reference. The reference builds its field tree eagerly and reads every element with the
+/// same one-step lookup, so the fill faults on the entry rather than leaving the field it names out
+/// of a form it otherwise fills; so does this engine.
+#[must_use]
+pub fn pdf_fields_by_reference() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let helvetica = pdf.push(PDF_FONT);
+    let content = pdf.stream("", b"BT /F1 14 Tf 72 780 Td (A chained entry) Tj ET");
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let acroform = pdf.reserve();
+    let link = pdf.reserve();
+    let name = pdf.push(format!(
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) \
+         /Rect [72 700 272 724] /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+    ));
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {helvetica} >> >> /Contents {content} \
+             /Annots [{name}] >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    pdf.set(&link, name);
+    pdf.set(
+        &acroform,
+        format!(
+            "<< /Fields [{link}] /DA (/Helv 0 Tf 0 g) \
+             /DR << /Font << /Helv {helvetica} >> >> >>"
+        ),
+    );
+    let catalog = pdf.push(format!(
+        "<< /Type /Catalog /Pages {pages} /AcroForm {acroform} >>"
+    ));
+    pdf.finish(&catalog, "")
+}
+
+/// The same page whose `/Fields` entry names an array of its own. `PDFAcroForm.Fields` is
+/// `dict.lookup('Fields')`, one step, so the reference reads the list and fills the field it holds.
+#[must_use]
+pub fn pdf_fields_through_a_reference() -> Vec<u8> {
+    form_page_entry("A stepped list", |pdf, page| {
+        let name = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) \
+             /Rect [72 700 272 724] /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        let array = pdf.push(format!("[{name}]"));
+        (vec![name], array)
+    })
+}
+/// A form whose one container states its `/Kids` as a reference to the array: `isNonTerminalAcroField`
+/// and `PDFAcroField.Kids` both take one step, so the child is a field of the reference's and is
+/// filled under the name its `/Parent` chain builds.
+#[must_use]
+pub fn pdf_kids_through_a_reference() -> Vec<u8> {
+    form_page_entry("A stepped kid list", |pdf, page| {
+        let parent = pdf.reserve();
+        let child = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (Q) /Parent {parent} \
+             /Rect [72 700 272 724] /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        let array = pdf.push(format!("[{child}]"));
+        pdf.set(&parent, format!("<< /T (P) /Kids {array} >>"));
+        (vec![child], format!("[{parent}]"))
+    })
+}
+/// A form whose container states a field dictionary in place inside its `/Kids`.
+/// `createPDFAcroFields` keeps a kid only when the array states a reference that names a dictionary,
+/// so the reference has no field to list or to fill.
+#[must_use]
+pub fn pdf_field_kid_in_place() -> Vec<u8> {
+    form_page_with("A field stated in place", |pdf, page| {
+        let parent = pdf.reserve();
+        pdf.set(
+            &parent,
+            format!(
+                "<< /T (P) /Kids [<< /Type /Annot /Subtype /Widget /FT /Tx /T (Q) /Parent {parent} \
+                 /Rect [72 700 272 724] /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>] >>"
+            ),
+        );
+        (Vec::new(), vec![parent])
+    })
+}
+/// A form whose one text field states `/FT null` under a parent that states `/FT /Tx`: the
+/// reference's inheritable read skips a stated null — `PDFDict.get` answers `undefined` for one — so
+/// the field is the kind its parent states.
+#[must_use]
+pub fn pdf_field_type_inherited_past_a_null() -> Vec<u8> {
+    form_page_with("A field that inherits its type", |pdf, page| {
+        let parent = pdf.reserve();
+        let child = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT null /T (Q) /Parent {parent} \
+             /Rect [72 700 272 724] /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        pdf.set(&parent, format!("<< /T (P) /FT /Tx /Kids [{child}] >>"));
+        (vec![child], vec![parent])
+    })
+}
+/// A form whose one text field states its `/T` as a reference that names nothing: `lookupMaybe`
+/// answers undefined for one, as for an absent entry, so the field is named by its chain's other
+/// links — `P.undefined` here.
+#[must_use]
+pub fn pdf_field_name_that_names_nothing() -> Vec<u8> {
+    form_page_with("A field whose name names nothing", |pdf, page| {
+        let parent = pdf.reserve();
+        let child = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T 99 0 R /Parent {parent} \
+             /Rect [72 700 272 724] /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        pdf.set(&parent, format!("<< /T (P) /Kids [{child}] >>"));
+        (vec![child], vec![parent])
+    })
+}
+/// A form with two text fields, the second stating a normal appearance and a `/Ff` that is a
+/// reference to a reference. The reference reads a text field's `/Ff` only where it regenerates that
+/// field's appearance, so the field the request does not fill keeps the appearance the file states and
+/// its flags are never read.
+#[must_use]
+pub fn pdf_clean_field_whose_flags_are_a_reference() -> Vec<u8> {
+    form_page("A form whose second field is not filled", |pdf, page| {
+        let link = pdf.reserve();
+        let number = pdf.reserve();
+        let appearance = pdf.stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 200 24] /Resources << >>",
+            b"",
+        );
+        let filled = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (f0) /Rect [72 700 272 724] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        let clean = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (f1) /Ff {link} /Rect [72 660 272 684] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) /AP << /N {appearance} >> >>"
+        ));
+        pdf.set(&link, number.clone());
+        pdf.set(&number, "0");
+        vec![filled, clean]
+    })
+}
+
+/// A form whose one text field states an empty `/Kids` array: `getWidgets` answers no widget, so the
+/// value is written and no appearance is.
+#[must_use]
+pub fn pdf_field_with_no_widgets() -> Vec<u8> {
+    form_page("A field whose kid list is empty", |pdf, page| {
+        let field = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (f0) /Kids [] /Rect [72 700 272 724] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        vec![field]
+    })
+}
+
+/// A form whose one text field states a kid that is not a dictionary: the reference reads a terminal's
+/// widget list with a typed lookup for every fillable kind, so the read throws.
+#[must_use]
+pub fn pdf_field_kid_that_is_not_a_dictionary() -> Vec<u8> {
+    form_page("A field whose kid is a number", |pdf, page| {
+        let field = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (f0) /Kids [42] /Rect [72 700 272 724] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        vec![field]
+    })
+}
+
+/// A form whose one text field states a `/Kids` that is a number rather than an array: the container
+/// test reads the entry untyped and sees no kids, and `Kids()` throws where the appearance is
+/// regenerated.
+#[must_use]
+pub fn pdf_field_kids_that_is_not_an_array() -> Vec<u8> {
+    form_page("A field whose kid list is a number", |pdf, page| {
+        let field = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (f0) /Kids 42 /Rect [72 700 272 724] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        vec![field]
+    })
+}
+
+/// A form whose one choice field states a `/Ff` that is a reference naming nothing: `Ff()` is a
+/// `lookupMaybe`, which answers no flags for one, so the field is a list box of its two options.
+#[must_use]
+pub fn pdf_choice_field_whose_flags_name_nothing() -> Vec<u8> {
+    form_page("A field whose flags name nothing", |pdf, page| {
+        let field = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Ch /T (f0) /Ff 99 0 R /Opt [(a) (b)] \
+             /Rect [72 700 272 724] /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        vec![field]
+    })
+}
+
+/// A form whose one text field states its `/Parent` as a dictionary in place: the constructor's
+/// `ascend` reads each link with `lookupMaybe(…, PDFDict)`, which follows it, so the field inherits the
+/// parent's type; `getParent` — the link a name is built through — follows a reference only, so the
+/// field is named by its own `/T`.
+#[must_use]
+pub fn pdf_field_parent_in_place() -> Vec<u8> {
+    form_page("A field whose parent is in place", |pdf, page| {
+        let field = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /T (Q) /Parent << /FT /Tx /T (P) >> \
+             /Rect [72 700 272 724] /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        vec![field]
+    })
+}
+
+/// A form of two containers whose `/Kids` name each other, so the field tree has no end: the
+/// reference's `getFields` recurses on a non-terminal field and dies with a stack overflow.
+#[must_use]
+pub fn pdf_field_kids_cycle() -> Vec<u8> {
+    form_page_with("A form whose kid list returns to itself", |pdf, _page| {
+        let first = pdf.reserve();
+        let second = pdf.push(format!("<< /T (Q) /Kids [{first}] >>"));
+        pdf.set(&first, format!("<< /T (P) /Kids [{second}] >>"));
+        (Vec::new(), vec![first])
+    })
+}
+
+/// A form whose one text field names itself as its `/Parent`: the reference's `getFullyQualifiedName`
+/// and its constructor's `ascend` both recurse on the link and die with a stack overflow.
+#[must_use]
+pub fn pdf_field_parent_cycle() -> Vec<u8> {
+    form_page("A field whose parent returns to itself", |pdf, page| {
+        let field = pdf.reserve();
+        pdf.set(
+            &field,
+            format!(
+                "<< /Type /Annot /Subtype /Widget /FT /Tx /T (P) /Parent {field} \
+                 /Rect [72 700 272 724] /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+            ),
+        );
+        vec![field]
+    })
+}
+
+/// A form whose one choice field states its `/Ff` as the negative real `-1.5`. The reference tests
+/// the flags with JavaScript's `&`, which converts `-1.5` to the 32-bit integer `-1`: every bit is
+/// set, so the field is a combo box (a dropdown) and accepts a value outside its own list.
+#[must_use]
+pub fn pdf_choice_field_whose_flags_are_a_negative_real() -> Vec<u8> {
+    form_page("A field whose flags are a negative real", |pdf, page| {
+        let field = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Ch /T (f0) /Ff -1.5 /Opt [(a) (b)] \
+             /Rect [72 700 272 724] /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        vec![field]
+    })
+}
+
+/// A form whose one button field states its `/Ff` as `-1.5`: the same 32-bit read sets the
+/// push-button bit before the radio bit, so the field is one no fill can take a value for.
+#[must_use]
+pub fn pdf_button_field_whose_flags_are_a_negative_real() -> Vec<u8> {
+    form_page("A button whose flags are a negative real", |pdf, page| {
+        let field = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Btn /T (f0) /Ff -1.5 \
+             /Rect [72 700 272 724] /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        vec![field]
+    })
+}
+
+/// A form whose one choice field states its `/Ff` as a real past 2^32: the 32-bit read keeps no bit
+/// the field's kind reads, so it is a list box and the value the request gives is not one of its own.
+#[must_use]
+pub fn pdf_choice_field_whose_flags_are_a_huge_real() -> Vec<u8> {
+    form_page("A field whose flags are a huge real", |pdf, page| {
+        let field = pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Ch /T (f0) \
+             /Ff 100000000000000000000.0 /Opt [(a) (b)] \
+             /Rect [72 700 272 724] /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ));
+        vec![field]
+    })
+}
+
+/// A form whose one choice field states its `/Ff` as `4294967295.5`: the reference reads the decimal
+/// as a double and gets the 32-bit `-1`, while this model's 32-bit float rounds it to 2^32 and gets
+/// zero. The two sides answer differently, and `PARSER.md` §5.16 states the band.
+#[must_use]
+pub fn pdf_choice_field_whose_flags_are_a_real_past_the_float() -> Vec<u8> {
+    form_page(
+        "A field whose flags are a real past the float",
+        |pdf, page| {
+            let field = pdf.push(format!(
+                "<< /Type /Annot /Subtype /Widget /FT /Ch /T (f0) /Ff 4294967295.5 /Opt [(a) (b)] \
+                 /Rect [72 700 272 724] /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+            ));
+            vec![field]
+        },
+    )
+}
+
+/// One A4 page whose `/Resources` is stated as a reference that names a reference. The reference
+/// reads a page's resources with `lookupMaybe(PDFDict)`, which takes one step, finds a reference
+/// and throws whenever an action adds a font or an image; so this engine must not follow it either.
+#[must_use]
+pub fn pdf_resources_by_reference() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let link = pdf.reserve();
+    let resources = pdf.reserve();
+    pdf.set(&resources, format!("<< /Font << /F1 {font} >> >>"));
+    pdf.set(&link, resources);
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources {link} /Contents {content} >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// [`pdf_basic`] with an object past the model holding an annotation, and an object whose body does
+/// not parse naming it: the object is given a number of this document's own, while the carried body
+/// keeps the bytes it states — so its reference names nothing in the produced file, and the answer
+/// says so.
+#[must_use]
+pub fn pdf_carried_reference_to_a_placed_object() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(
+        b"\n5000000000 0 obj\n<< /Type /Annot /Rect [0 0 10 10] >>\nendobj\n\
+          200 0 obj\n<< /Type /Annot /Rect 5000000000 0 R !! broken\nendobj\n",
+    );
+    pdf
+}
+
+/// [`pdf_basic`] with an object past the model and a carried body naming object 201, which the file
+/// does not hold and which is the number the walk would give the first object it places: the number a
+/// placed object is given is one no reference in the file names, so the reference inside the carried
+/// body keeps naming nothing.
+#[must_use]
+pub fn pdf_carried_reference_to_a_free_number() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(
+        b"\n200 0 obj\n<< /Type /Annot !! broken /Rect 201 0 R\nendobj\n\
+          5000000000 0 obj\nnull\nendobj\n",
+    );
+    pdf
+}
+
+/// [`pdf_basic`] with an object past the model and an object that names `4294967295 65535 R` — an id
+/// no object in the file states, and the very one the walk's first marker stands at, because the
+/// object past the model is read first. The reference is written back at the id the file used, where
+/// the model can hold it, rather than at the marker's number.
+#[must_use]
+pub fn pdf_dangling_reference_at_a_marker_number() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(
+        b"\n5000000000 0 obj\n<< /Type /Annot /Rect [0 0 10 10] >>\nendobj\n\
+          200 0 obj\n<< /Type /Annot /Rect [0 0 10 10] /P 4294967295 65535 R >>\nendobj\n",
+    );
+    pdf
+}
+
+/// [`pdf_basic`] with an object naming one number past every object the file states, and nothing at
+/// it: a number the engine gives a new object is one no reference the file states names, so the
+/// reference keeps naming nothing.
+#[must_use]
+pub fn pdf_dangling_reference_above_the_objects() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(b"\n200 0 obj\n<< /Type /Annot /Rect 201 0 R >>\nendobj\n");
+    pdf
+}
+
+/// [`pdf_basic`] with an object stated at number zero at a generation the format does not reserve:
+/// the reference keeps it and writes an index that names neither it nor the object after it, while
+/// this engine leaves it out of a produced file a reader can follow, and says it did.
+#[must_use]
+pub fn pdf_object_at_number_zero() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(b"\n0 1 obj\nnull\nendobj\n");
+    pdf
+}
+
+/// [`pdf_basic`] with one object number stated at two generations: an index states one entry per
+/// number, so a produced file names one of the two bodies and the other is unreachable.
+#[must_use]
+pub fn pdf_two_generations_of_one_number() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(b"\n20 0 obj\nnull\nendobj\n20 1 obj\nnull\nendobj\n");
+    pdf
+}
+
+/// [`pdf_basic`] with two object numbers longer than a `u64`: the container the first states is
+/// expanded and discarded, so the second replaces nothing a produced file would hold.
+#[must_use]
+pub fn pdf_saturated_container_header() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(
+        b"\n18446744073709551616 0 obj\n<< /Type /ObjStm /N 0 /First 0 /Length 0 >>\nstream\n\n\
+          endstream\nendobj\n18446744073709551617 0 obj\nnull\nendobj\n",
+    );
+    pdf
+}
+
+/// [`pdf_basic`] with a container that decodes and states a count past what its own bytes could hold:
+/// the reference's parser runs out of entries, keeps the container as the bytes it states, and places
+/// nothing — the count the answer reports is the file's `/N`.
+#[must_use]
+pub fn pdf_container_count_past_its_bytes() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(
+        b"\n900 0 obj\n<< /Type /ObjStm /N 4096 /First 12 /Length 12 >>\nstream\n910 0 911 5\nendstream\nendobj\n",
+    );
+    pdf
+}
+
+/// [`pdf_basic`] with a container stating a fractional count and holding two objects. The reference
+/// counts `for (idx = 0; idx < 1.5; idx++)`, so it reads both entries; a count truncated to its whole
+/// part would read one and drop the other with nothing to report.
+#[must_use]
+pub fn pdf_container_with_a_fractional_count() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(
+        b"\n900 0 obj\n<< /Type /ObjStm /N 1.5 /First 12 /Length 22 >>\nstream\n910 0 911 5\n(one)(two)endstream\nendobj\n",
+    );
+    pdf
+}
+
+/// [`pdf_basic`] with an object stated at number zero at the generation the walk's own markers state:
+/// the model keys that pair like one past what it holds, so the object is given a number of the
+/// document's own and nothing is lost.
+#[must_use]
+pub fn pdf_object_at_number_zero_at_the_marker_generation() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(b"\n0 65535 obj\n(zero-marker) endobj\n");
+    pdf
+}
+
+/// [`pdf_basic`] with an object number longer than a `u64` and then a container at another such
+/// number: the container is expanded and discarded, so the object the first header states is still in
+/// the produced file and the answer reports nothing.
+#[must_use]
+pub fn pdf_container_after_a_saturated_object() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(
+        b"\n18446744073709551616 0 obj\nnull\nendobj\n18446744073709551617 0 obj\n\
+          << /Type /ObjStm /N 0 /First 0 /Length 0 >>\nstream\n\nendstream\nendobj\n",
+    );
+    pdf
+}
+
+/// [`pdf_basic`] with a container stating a count no container could hold, behind a filter that does
+/// not decode: both sides keep it as the bytes it states, and the count the answer reports is the
+/// number the file states rather than one the engine counted.
+#[must_use]
+pub fn pdf_container_stating_an_absurd_count() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(
+        b"\n900 0 obj\n<< /Type /ObjStm /N 9223372036854775807 /First 0 /Length 8 /Filter /NoSuchDecode >>\nstream\n901 0 902 3 \nendstream\nendobj\n",
+    );
+    pdf
+}
+
+/// [`pdf_basic`] with a container that states no count: its `/N` is a name, so the reference's
+/// constructor cannot build it and both sides carry the container as the bytes it states, placing
+/// nothing the entries name.
+#[must_use]
+pub fn pdf_container_without_a_count() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(
+        b"\n900 0 obj\n<< /Type /ObjStm /N /Name /First 4 /Length 8 >>\nstream\n1 0 2 3 \nendstream\nendobj\n",
+    );
+    pdf
+}
+
+/// [`pdf_basic`] with two object numbers longer than a `u64` that both hold an object: the second
+/// replaces the first, and the answer reports the object the produced file does not hold.
+#[must_use]
+pub fn pdf_two_numbers_longer_than_a_u64() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(
+        b"\n18446744073709551616 0 obj\nnull\nendobj\n\
+          18446744073709551617 0 obj\nnull\nendobj\n",
+    );
+    pdf
+}
+
+/// [`pdf_basic`] with two object numbers past what a `u64` holds that the reference keeps apart: a
+/// run of digits is a double to it, and these two runs are two doubles, so it keys two objects and
+/// keeps both bodies. Each body states a marker of its own, so a test can find each in the produced
+/// bytes rather than trusting the count alone.
+#[must_use]
+pub fn pdf_two_numbers_the_reference_keys_apart() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(
+        b"\n18446744073709551616 0 obj\n\
+          << /Type /Annot /Rect [0 0 1 1] /NM (kept-apart-one) >>\nendobj\n\
+          36893488147419103232 0 obj\n\
+          << /Type /Annot /Rect [1 1 2 2] /NM (kept-apart-two) >>\nendobj\n",
+    );
+    pdf
+}
+
+/// One A4 page beside one object stream whose two entries state the two numbers the reference keeps
+/// apart, each naming a dictionary of its own. The walk keys a container's entries the way it keys an
+/// object header, so both bodies must reach the produced file.
+#[must_use]
+pub fn pdf_container_naming_two_numbers_the_reference_keys_apart() -> Vec<u8> {
+    pdf_container_naming(&["18446744073709551616", "36893488147419103232"])
+}
+
+/// The same container with both entries stating one number in two runs of digits: the reference
+/// rounds both to one double, so they are one object to it and one of the two bodies is dropped.
+#[must_use]
+pub fn pdf_container_naming_one_number_in_two_digit_runs() -> Vec<u8> {
+    pdf_container_naming(&["18446744073709551616", "18446744073709551617"])
+}
+
+/// One A4 page beside one container whose two entries state `numbers`, each naming a dictionary of
+/// its own: the header states every number beside the offset of its body in the container's data.
+fn pdf_container_naming(numbers: &[&str; 2]) -> Vec<u8> {
+    use std::fmt::Write as _;
+    let bodies = [
+        "<< /Type /Annot /Rect [0 0 1 1] /NM (in-container-one) >>",
+        "<< /Type /Annot /Rect [1 1 2 2] /NM (in-container-two) >>",
+    ];
+    let mut header = String::new();
+    let mut body = String::new();
+    for (number, entry) in numbers.iter().zip(bodies) {
+        write!(header, "{number} {} ", body.len()).expect("a string writes");
+        body.push_str(entry);
+    }
+    let data = format!("{header}{body}");
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    pdf.stream(
+        &format!("/Type /ObjStm /N 2 /First {}", header.len()),
+        data.as_bytes(),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// [`pdf_basic`] with one number stated in two runs of digits that round to one double, the second
+/// body one that does not parse: the reference keeps one object at that number and the carried bytes
+/// are what it holds, so the produced file no longer holds the body the first header stated.
+#[must_use]
+pub fn pdf_carried_body_replacing_a_number() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(
+        b"\n18446744073709551616 0 obj\n(NEEDLE)\nendobj\n\
+          18446744073709551617 0 obj\n<< broken\nendobj\n",
+    );
+    pdf
+}
+
+/// [`pdf_basic`] naming the format's object-number ceiling in a reference, beside `count` objects
+/// numbered past the model: placing them is the shape the search for a free number is measured on.
+#[must_use]
+pub fn pdf_many_objects_past_the_model(count: u32) -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    pdf.extend_from_slice(b"\n200 0 obj\n<< /Type /Annot /Rect 4294967295 0 R >>\nendobj\n");
+    for index in 0..count {
+        pdf.extend_from_slice(
+            format!(
+                "\n{} 0 obj\nnull\nendobj\n",
+                5_000_000_000_u64 + u64::from(index)
+            )
+            .as_bytes(),
+        );
+    }
+    pdf
+}
+
+/// One A4 page whose page tree the catalog states in place rather than referencing: the reference's
+/// lookup reads the dictionary as the node itself and walks it, so the page is turned.
+#[must_use]
+pub fn pdf_pages_inline() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let page = pdf.reserve();
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    let catalog = pdf.push(format!(
+        "<< /Type /Catalog /Pages << /Type /Pages /Kids [{page}] /Count 1 >> >>"
+    ));
+    pdf.finish(&catalog, "")
+}
+
+/// One A4 page whose page object is stated at a generation past the format's own range, and named the
+/// same way: the reference reads the number as it stands, while this engine holds the pair the file
+/// states and gives the page a number of the document's own, with every reference to it following —
+/// so the page is found and turned either way.
+#[must_use]
+pub fn pdf_generation_out_of_range() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let pages = pdf.reserve();
+    let page = pdf.reserve();
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /Parent {pages} /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    pdf.set(
+        &pages,
+        format!("<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {pages} >>"));
+    let number = page
+        .split(' ')
+        .next()
+        .expect("a reference states a number")
+        .to_string();
+    String::from_utf8(pdf.finish(&catalog, ""))
+        .expect("the builder writes ASCII")
+        .replace(&format!("{number} 0 obj"), &format!("{number} 65536 obj"))
+        .replace(&format!("{number} 0 R"), &format!("{number} 65536 R"))
+        .into_bytes()
+}
+
+/// [`pdf_basic`] whose page tree is a chain of two hundred `/Pages` nodes: the reference walks it, and
+/// the engine used to refuse a tree deeper than sixty-four.
+#[must_use]
+pub fn pdf_page_tree_deep() -> Vec<u8> {
+    let mut pdf = PdfObjects::default();
+    let font = pdf.push(PDF_FONT);
+    let content = pdf.stream("", b"BT /F1 24 Tf 72 760 Td (Page one text) Tj ET");
+    let page = pdf.reserve();
+    pdf.set(
+        &page,
+        format!(
+            "<< /Type /Page /MediaBox {PDF_PAGE} \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>"
+        ),
+    );
+    let root = pdf.reserve();
+    let mut current = page;
+    for _ in 0..200 {
+        current = pdf.push(format!("<< /Type /Pages /Kids [{current}] /Count 1 >>"));
+    }
+    pdf.set(
+        &root,
+        format!("<< /Type /Pages /Kids [{current}] /Count 1 >>"),
+    );
+    let catalog = pdf.push(format!("<< /Type /Catalog /Pages {root} >>"));
+    pdf.finish(&catalog, "")
+}
+
+/// [`pdf_basic`] with an object nested past the depth the scan builds, which nothing reaches: the
+/// object is kept as the bytes it states, as the reference keeps one past its own stack.
+#[must_use]
+pub fn pdf_object_nested_past_the_bound() -> Vec<u8> {
+    let mut pdf = pdf_basic();
+    // Twice the bound, not one past it: the reference's own parser gives up somewhere around the
+    // bound, and where exactly is the runtime's stack rather than a number — measured, a value one
+    // past it is parsed in one run and throws `Maximum call stack size exceeded` in another. A case
+    // must answer the same way every run, so the object sits well past the point either side parses.
+    let depth = crate::vocabulary::vocabulary().engine.object_depth_max * 2;
+    pdf.extend_from_slice(b"\n200 0 obj\n");
+    pdf.extend(std::iter::repeat_n(b'[', depth));
+    pdf.extend(std::iter::repeat_n(b']', depth));
+    pdf.extend_from_slice(b"\nendobj\n");
+    pdf
 }
 
 /// [`pdf_basic`] whose first cross-reference entry starts with a digit and then states something
@@ -5744,6 +7000,18 @@ pub fn pdf_option_form() -> Vec<u8> {
     })
 }
 
+/// One A4 page carrying a text widget whose `/T` is absent: a field the form holds and no request can
+/// address, because the reference never looks up an empty name and never lists one.
+#[must_use]
+pub fn pdf_form_with_a_nameless_field() -> Vec<u8> {
+    form_page("A form with a nameless field", |pdf, page| {
+        vec![pdf.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /Rect [72 700 272 724] \
+             /F 4 /P {page} /DA (/Helv 0 Tf 0 g) >>"
+        ))]
+    })
+}
+
 /// One A4 page carrying an AcroForm whose option list offers no choice at all: filling it is the
 /// refusal this document is the input for.
 #[must_use]
@@ -5899,6 +7167,14 @@ pub fn pdf_max_length_form() -> Vec<u8> {
     text_form("/MaxLen 3", "/Helv 0 Tf 0 g")
 }
 
+/// The same field with `/MaxLen` stated as the real `3.5`: the reference reads it as a number and
+/// faults a six-character value, printing `maxLength=3.5`, where this engine reads only a whole number
+/// and writes the value.
+#[must_use]
+pub fn pdf_real_max_length_form() -> Vec<u8> {
+    text_form("/MaxLen 3.5", "/Helv 0 Tf 0 g")
+}
+
 /// One A4 page carrying a combed text widget with `/MaxLen 5`: its appearance draws one character
 /// per cell rather than the value as one line.
 #[must_use]
@@ -6022,6 +7298,18 @@ fn form_page_with(
     title: &str,
     lists: impl FnOnce(&mut PdfObjects, &str) -> (Vec<String>, Vec<String>),
 ) -> Vec<u8> {
+    form_page_entry(title, |pdf, page| {
+        let (annots, fields) = lists(pdf, page);
+        (annots, format!("[{}]", fields.join(" ")))
+    })
+}
+
+/// The same page whose `/Fields` entry is `names` as it stands — the list `[a b]`, or the reference to
+/// an array the closure registered — and whose annotations the closure writes.
+fn form_page_entry(
+    title: &str,
+    names: impl FnOnce(&mut PdfObjects, &str) -> (Vec<String>, String),
+) -> Vec<u8> {
     let mut pdf = PdfObjects::default();
     let helvetica = pdf.push(PDF_FONT);
     let content = pdf.stream(
@@ -6031,7 +7319,7 @@ fn form_page_with(
     let pages = pdf.reserve();
     let page = pdf.reserve();
     let acroform = pdf.reserve();
-    let (annots, fields) = lists(&mut pdf, &page);
+    let (annots, names) = names(&mut pdf, &page);
     pdf.set(
         &page,
         format!(
@@ -6048,9 +7336,8 @@ fn form_page_with(
     pdf.set(
         &acroform,
         format!(
-            "<< /Fields [{}] /DA (/Helv 0 Tf 0 g) \
-             /DR << /Font << /Helv {helvetica} >> >> >>",
-            fields.join(" ")
+            "<< /Fields {names} /DA (/Helv 0 Tf 0 g) \
+             /DR << /Font << /Helv {helvetica} >> >> >>"
         ),
     );
     let catalog = pdf.push(format!(

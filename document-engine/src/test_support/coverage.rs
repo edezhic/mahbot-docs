@@ -2479,6 +2479,18 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         marks: &["pdf_image_unreadable"],
     },
     Unreached {
+        reason: "only the crate says it: the reference's answer carries no loss field for a PDF action, so a case would compare the honest note against the reference's silence rather than the two writers' files; the writer's own tests raise it from a container it cannot expand, from two inputs that each lose one object, from one number stated twice in two runs that key as one, and — for the count a container the walk could not read states — from a container whose filters it cannot decode or whose count its bytes could not hold, and from one whose count, or whose total, is past what a count holds",
+        marks: &[
+            "pdf_page_objects_lost",
+            "pdf_page_objects_unread",
+            "pdf_page_objects_unread_over",
+        ],
+    },
+    Unreached {
+        reason: "a reference inside an object the walk carried as bytes, naming an object that was given a number of this document's own: the reference's answer carries no loss field for a PDF action, so a case would compare the crate's note against the reference's silence rather than two files",
+        marks: &["pdf_page_references_lost"],
+    },
+    Unreached {
         reason: "the reference prints it for an edit sub-operation it does not know, and the crate's request surface refuses that name before dispatch, so a case carrying one would rest on that surface divergence rather than on the writer",
         marks: &["edit_docx_unknown", "edit_pptx_unknown"],
     },
@@ -2692,26 +2704,6 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
     Unreached {
         reason: "a call that failed after it had written some of its files and could not remove one of them; the harness hands every case its own writable directory, so no recorded run met one",
         marks: &["write_leftover"],
-    },
-    Unreached {
-        reason: "no generated fixture nests a page tree as deep as the engine follows: the cap that refuses one is the crate's own (`engine.page_tree_depth_max`), with no counterpart in the reference",
-        marks: &["pdf_page_tree_nested"],
-    },
-    Unreached {
-        reason: "no generated fixture reads its own bytes more times over than `engine.pdf_scan_passes_max` allows: the cap is the crate's own, so its test lowers the bound through the scan's seam",
-        marks: &["pdf_page_scan_limit"],
-    },
-    Unreached {
-        reason: "no generated fixture holds a container that decodes past `engine.container_decode_max_bytes`: the cap is the crate's own, so its test lowers the ceiling",
-        marks: &["pdf_page_container_limit"],
-    },
-    Unreached {
-        reason: "no generated fixture numbers an object past `engine.object_number_max`: the reference renumbers what its writer holds and so produces, and the crate's own test builds the file",
-        marks: &["pdf_page_object_limit"],
-    },
-    Unreached {
-        reason: "no corpus page nests an object deeper than `engine.object_depth_max`, the depth the body scan and a page copy both follow: the cap is the crate's own, and the crate's own test builds the document that does",
-        marks: &["pdf_page_object_nested"],
     },
     Unreached {
         reason: "a request whose \"inputs\" is absent or is not a list of file paths; the corpus's merge cases all name their inputs, and the surface refuses such a request before the engine runs, so its own test pins the sentence",

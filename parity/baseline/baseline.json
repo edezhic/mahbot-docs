@@ -1,6 +1,6 @@
 {
   "note": "Recorded from the reference engine by `cargo run --bin record-baseline`. The harness never rewrites this file: recording is a deliberate act.",
-  "recorded_at_unix": 1794969274,
+  "recorded_at_unix": 1795122879,
   "writer": {
     "engine": "reference-writer",
     "build": "8718d0113496f4521535de222eb9b236ad719e14e9fedeb8b30daa07e9e2e86a",
@@ -356584,6 +356584,292 @@
       "class": "usage",
       "reason": "cannot read damaged-body.pdf as a PDF — its bytes do not form a PDF this tool can read"
     },
+    "pdf/pdf_merge/body_unparsable": {
+      "status": "produced",
+      "outputs": {
+        "merged.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_merge/contents_self": {
+      "status": "produced",
+      "outputs": {
+        "merged.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_merge/dangling_reference": {
+      "status": "produced",
+      "outputs": {
+        "merged.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
     "pdf/pdf_merge/described": {
       "status": "produced",
       "outputs": {
@@ -357291,6 +357577,109 @@
         }
       }
     },
+    "pdf/pdf_merge/object_stream_truncated_flate": {
+      "status": "produced",
+      "outputs": {
+        "merged.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
     "pdf/pdf_merge/one_input": {
       "status": "produced",
       "outputs": {
@@ -357470,6 +357859,88 @@
               "rotate": 0,
               "text": [
                 "Third document text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_merge/page_unparsable": {
+      "status": "produced",
+      "outputs": {
+        "merged.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [
+                "Page two text"
               ],
               "vector": {
                 "count": 0,
@@ -357967,6 +358438,11 @@
         }
       }
     },
+    "pdf/pdf_resize/contents_dictionary": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
+    },
     "pdf/pdf_resize/described": {
       "status": "produced",
       "outputs": {
@@ -358027,6 +358503,11 @@
           ]
         }
       }
+    },
+    "pdf/pdf_resize/media_box_by_reference": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
     },
     "pdf/pdf_resize/misplaced_index": {
       "status": "produced",
@@ -358633,6 +359114,270 @@
         }
       }
     },
+    "pdf/pdf_rotate/body_unparsable": {
+      "status": "produced",
+      "outputs": {
+        "rotated.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_rotate/catalog_without_type": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "cannot read catalog-without-type.pdf as a PDF — its bytes do not form a PDF this tool can read"
+    },
+    "pdf/pdf_rotate/container_decoding_eighty_mib": {
+      "status": "produced",
+      "outputs": {
+        "rotated.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_rotate/contents_dictionary": {
+      "status": "produced",
+      "outputs": {
+        "rotated.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_rotate/contents_self": {
+      "status": "produced",
+      "outputs": {
+        "rotated.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_rotate/dangling_reference": {
+      "status": "produced",
+      "outputs": {
+        "rotated.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
     "pdf/pdf_rotate/degrees_not_a_quarter_turn": {
       "status": "refused",
       "class": "usage",
@@ -358708,6 +359453,46 @@
       "status": "refused",
       "class": "usage",
       "reason": "damaged-encrypted.pdf is password-protected — the tool cannot open an encrypted PDF"
+    },
+    "pdf/pdf_rotate/generation_out_of_range": {
+      "status": "produced",
+      "outputs": {
+        "rotated.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
     },
     "pdf/pdf_rotate/hybrid_form@hybrid_form": {
       "status": "produced",
@@ -358968,6 +359753,128 @@
       "class": "usage",
       "reason": "no page 5: this document has 2 page(s)"
     },
+    "pdf/pdf_rotate/object_nested_past_the_bound": {
+      "status": "produced",
+      "outputs": {
+        "rotated.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_rotate/object_numbered_past_a_million": {
+      "status": "produced",
+      "outputs": {
+        "rotated.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
     "pdf/pdf_rotate/object_stream": {
       "status": "produced",
       "outputs": {
@@ -359090,6 +359997,107 @@
         }
       }
     },
+    "pdf/pdf_rotate/object_stream_one_offset": {
+      "status": "produced",
+      "outputs": {
+        "rotated.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_rotate/object_stream_truncated_run_length": {
+      "status": "produced",
+      "outputs": {
+        "rotated.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                "Page two text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
     "pdf/pdf_rotate/object_stream_wrong_length": {
       "status": "produced",
       "outputs": {
@@ -359142,6 +360150,191 @@
               "text": [
                 "Page two text"
               ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_rotate/page_dictionary_inline": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "cannot read page-dictionary-inline.pdf as a PDF — its bytes do not form a PDF this tool can read"
+    },
+    "pdf/pdf_rotate/page_tree_deep": {
+      "status": "produced",
+      "outputs": {
+        "rotated.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_rotate/page_tree_kids_by_reference": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "cannot read page-tree-kids-by-reference.pdf as a PDF — its bytes do not form a PDF this tool can read"
+    },
+    "pdf/pdf_rotate/page_tree_named_twice": {
+      "status": "produced",
+      "outputs": {
+        "rotated.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 180,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 180,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_rotate/page_tree_names_itself": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "cannot read page-tree-names-itself.pdf as a PDF — its bytes do not form a PDF this tool can read"
+    },
+    "pdf/pdf_rotate/page_tree_root_by_reference": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "cannot read page-tree-root-by-reference.pdf as a PDF — its bytes do not form a PDF this tool can read"
+    },
+    "pdf/pdf_rotate/page_tree_root_without_type": {
+      "status": "refused",
+      "class": "usage",
+      "reason": "cannot read page-tree-root-without-type.pdf as a PDF — its bytes do not form a PDF this tool can read"
+    },
+    "pdf/pdf_rotate/page_unparsable": {
+      "status": "produced",
+      "outputs": {
+        "rotated.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                "Page one text"
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 0,
+              "text": [],
               "vector": {
                 "count": 0,
                 "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -360126,6 +361319,11 @@
       "status": "refused",
       "class": "usage",
       "reason": "color must be 6 hex digits, with an optional leading \"#\", got: red"
+    },
+    "pdf/pdf_text/contents_self": {
+      "status": "failed",
+      "class": "internal",
+      "reason": "{{variable}}"
     },
     "pdf/pdf_text/defaults@defaults": {
       "status": "produced",

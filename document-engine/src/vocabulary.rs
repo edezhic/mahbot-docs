@@ -391,38 +391,25 @@ pub struct EngineBounds {
     /// render as deep as the file, which this engine's panic containment cannot survive. The
     /// reference has no such bound: its own parser recurses until the runtime's stack runs out.
     pub template_nesting_max: usize,
-    /// The deepest page tree the walk follows before it refuses: a real tree nests a handful of
-    /// levels, and the bound keeps a crafted chain from making the walk as long as the file.
-    pub page_tree_depth_max: usize,
-    /// The deepest object syntax the body scan and a page copy follow. An object nested past it is
-    /// kept unread by the scan and named, and a page that reaches it — or an in-place action that
-    /// writes every object — is refused with the engine's own sentence.
+    /// The deepest object syntax the body scan builds. Past it the scan keeps an object as the bytes
+    /// it states instead of parsing it — never refusing the file — so the bound costs nothing a reader
+    /// can see, and it sits above the deepest nesting the reference's own parser was measured to read.
+    /// It does not keep the depth away from the language's recursion: `graph` states that rule and why,
+    /// and the paths that touch a value a file states have a case on the harness's two-mebibyte stack.
+    /// `VOCABULARY.md` records the measurements that fix this number and the one below.
     pub object_depth_max: usize,
-    /// How many times over a file's own length the body scan may read it before it refuses. A walk
-    /// that reads each byte once stays well inside it; a file built to make the recovery read the
-    /// same bytes over and over is refused rather than scanned indefinitely. A look at what comes
-    /// next is not a read of it and never touches this allowance. An object stream's decoded bytes
-    /// are held to the same number of passes over their own length. The reference has no such bound:
-    /// its library reads the same files without one.
-    pub pdf_scan_passes_max: usize,
-    /// The bytes one look at what comes next may inspect, so the walk's uncharged work is at most
-    /// that many reads per byte. Far more than an object header with comments between its numbers
-    /// takes, and small enough that no look can walk the file.
+    /// The most a container's bytes may decode to. A stream's filter chain applies stage by stage, so a
+    /// chain of expanding filters multiplies rather than adding, and a few hundred bytes can state
+    /// gigabytes. The ceiling is the most a typed array holds, which is where the reference's own
+    /// decoder throws and keeps the container as the bytes it states; past it the container is not
+    /// decoded here either, so nothing is refused and nothing is invented.
+    pub container_decode_max_bytes: u64,
+    /// The bytes one look at what comes next may inspect, so a body built of long comment or digit
+    /// runs costs at most that many reads per byte of its own. Far more than an object header with
+    /// comments between its numbers takes, and small enough that no look can walk the file. An
+    /// exhausted look is not a refusal: it answers "not here" and the walk steps one byte on, which is
+    /// what the reference does.
     pub scan_look_bytes_max: usize,
-    /// The bytes one PDF container — an object stream or an index stream — may decode to: the same
-    /// ceiling the OOXML package reader puts on one entry. A stream's filter chain is decoded before
-    /// its objects are read, and two input bytes of `RunLengthDecode` can state a run of 128, so the
-    /// crate's own decoders check each run before they allocate it; a filter lopdf decodes states its
-    /// output only once it has allocated it, so for those the ceiling is applied to the result. A
-    /// container past it is refused with the engine's own sentence. The reference has no such bound:
-    /// its library decodes whatever the chain states.
-    pub container_decode_max_bytes: usize,
-    /// The highest object number the engine writes. The writer states one index entry per number up
-    /// to a document's high-water mark, so a body that numbers an object past this would make it emit
-    /// an index of hundreds of megabytes — or, at the top of the range, one that wraps to nothing and
-    /// reports success over a file that lost its index. A real file numbers its objects in the
-    /// thousands; the reference's writer renumbers what it holds, so it has no such bound.
-    pub object_number_max: usize,
     /// The most columns a table row may state as a `length` without being a list of cells. The
     /// reference's column loop runs `c < cols` over the widest row's length, so a row that states a
     /// billion draws a billion columns and never returns; a row that holds cells is bounded by the

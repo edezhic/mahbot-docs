@@ -7,6 +7,8 @@ use std::collections::BTreeSet;
 
 use lopdf::{Dictionary, Object};
 
+use super::graph::Document;
+
 use super::draw;
 use super::page;
 use super::{Produced, editable, page_indices};
@@ -19,10 +21,9 @@ pub(super) fn run(request: &Request, produced: &mut Produced) -> Result<(), Fail
     let page::Opened {
         mut document,
         pages: ids,
-        chains,
         ancestry,
         ..
-    } = editable(request)?;
+    } = editable(request, produced)?;
     let picture = read_image(request.values.get("image"))?;
     let image_name = &picture.name;
     if picture.kind == "webp" {
@@ -44,7 +45,7 @@ pub(super) fn run(request: &Request, produced: &mut Produced) -> Result<(), Fail
     let mut past = BTreeSet::new();
     for index in page_indices(&ids, request.values.get("pages"))? {
         let id = ids[index];
-        let frame = page::frame(&document, &chains, &ancestry, id)?;
+        let frame = page::frame(&document, &ancestry, id)?;
         let inset = draw::inset(&frame);
         let natural = Pixels {
             width: f64::from(picture.width),
@@ -76,7 +77,7 @@ pub(super) fn run(request: &Request, produced: &mut Produced) -> Result<(), Fail
         };
         let top = frame.height - y - drawn.1;
         let anchor = frame.to_user(x, top + drawn.1);
-        let key = draw::add_resource(&mut document, id, "XObject", image, draw::IMAGE_BASE);
+        let key = draw::add_resource(&mut document, id, "XObject", image, draw::IMAGE_BASE)?;
         let content = format!(
             "q 1 0 0 1 {} {} cm {} cm {} 0 0 {} 0 0 cm /{} Do Q\n",
             draw::number(anchor.0),
@@ -86,7 +87,7 @@ pub(super) fn run(request: &Request, produced: &mut Produced) -> Result<(), Fail
             draw::number(drawn.1),
             key,
         );
-        draw::push_content(&mut document, id, content.as_bytes());
+        draw::push_content(&mut document, id, content.as_bytes())?;
         if x < 0.0 || top < 0.0 || x + drawn.0 > frame.width || top + drawn.1 > frame.height {
             past.insert(index + 1);
         }
@@ -108,19 +109,26 @@ fn rotation(quarter_turns: i64) -> &'static str {
     }
 }
 
+/// The entries every image XObject states: what it is, how large it is and how deep its samples are.
+fn base(picture: &Picture) -> Vec<(&'static str, Object)> {
+    vec![
+        ("Type", draw::name("XObject")),
+        ("Subtype", draw::name("Image")),
+        ("Width", Object::Integer(i64::from(picture.width))),
+        ("Height", Object::Integer(i64::from(picture.height))),
+        ("BitsPerComponent", Object::Integer(8)),
+    ]
+}
+
 /// The picture as a PDF image XObject: a JPEG is carried through as DCTDecode, a PNG's samples are
-/// decoded and written as raw samples (with an SMask when the picture has alpha).
+/// decoded and written as raw samples (with an SMask when the picture has alpha). Every dictionary here
+/// is one the engine builds, so its entries are stated once, in the order the reference states them.
 pub(super) fn embed(
-    document: &mut lopdf::Document,
+    document: &mut Document,
     picture: &Picture,
     name: &str,
 ) -> Result<lopdf::ObjectId, Failure> {
-    let mut dict = Dictionary::new();
-    dict.set("Type", draw::name("XObject"));
-    dict.set("Subtype", draw::name("Image"));
-    dict.set("Width", Object::Integer(i64::from(picture.width)));
-    dict.set("Height", Object::Integer(i64::from(picture.height)));
-    dict.set("BitsPerComponent", Object::Integer(8));
+    let mut entries = base(picture);
     if picture.kind == "png" {
         let repaired = rechecksummed(&picture.bytes);
         let bytes = repaired.as_deref().unwrap_or(&picture.bytes);
@@ -133,46 +141,52 @@ pub(super) fn embed(
             },
         )?;
         let (samples, channels) = png_samples(&decoded);
-        dict.set(
+        entries.push((
             "ColorSpace",
             draw::name(if channels == 1 {
                 "DeviceGray"
             } else {
                 "DeviceRGB"
             }),
-        );
+        ));
         if let Some(mask) = alpha(&decoded) {
-            let mut mask_dict = Dictionary::new();
-            mask_dict.set("Type", draw::name("XObject"));
-            mask_dict.set("Subtype", draw::name("Image"));
-            mask_dict.set("Width", Object::Integer(i64::from(picture.width)));
-            mask_dict.set("Height", Object::Integer(i64::from(picture.height)));
-            mask_dict.set("ColorSpace", draw::name("DeviceGray"));
-            mask_dict.set("BitsPerComponent", Object::Integer(8));
+            let mask_dict = Dictionary::from_iter(
+                base(picture)
+                    .into_iter()
+                    .chain([("ColorSpace", draw::name("DeviceGray"))]),
+            );
             let mask = draw::stream(document, mask_dict, &mask);
-            dict.set("SMask", Object::Reference(mask));
+            entries.push(("SMask", Object::Reference(mask)));
         }
-        Ok(draw::stream(document, dict, &samples))
+        Ok(draw::stream(
+            document,
+            Dictionary::from_iter(entries),
+            &samples,
+        ))
     } else {
         let components = jpeg_components(&picture.bytes);
-        match components {
-            1 => dict.set("ColorSpace", draw::name("DeviceGray")),
-            4 => {
-                dict.set("ColorSpace", draw::name("DeviceCMYK"));
-                dict.set(
-                    "Decode",
-                    Object::Array(
-                        [1, 0, 1, 0, 1, 0, 1, 0]
-                            .into_iter()
-                            .map(Object::Integer)
-                            .collect(),
-                    ),
-                );
-            }
-            _ => dict.set("ColorSpace", draw::name("DeviceRGB")),
+        let (color_space, decode) = match components {
+            1 => ("DeviceGray", false),
+            4 => ("DeviceCMYK", true),
+            _ => ("DeviceRGB", false),
+        };
+        entries.push(("ColorSpace", draw::name(color_space)));
+        if decode {
+            entries.push((
+                "Decode",
+                Object::Array(
+                    [1, 0, 1, 0, 1, 0, 1, 0]
+                        .into_iter()
+                        .map(Object::Integer)
+                        .collect(),
+                ),
+            ));
         }
-        dict.set("Filter", draw::name("DCTDecode"));
-        Ok(document.add_object(lopdf::Stream::new(dict, picture.bytes.clone())))
+        entries.push(("Filter", draw::name("DCTDecode")));
+        Ok(document.add_object(lopdf::Stream::new(
+            Dictionary::from_iter(entries),
+            picture.bytes.clone(),
+        )))
     }
 }
 

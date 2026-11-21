@@ -154,25 +154,41 @@ the annotations that sit on it are moved. A copy is memoised per destination and
 object two pages share is copied once, and every produced page states the page tree it belongs to.
 The file itself is read by `scan.rs`, the way the reference's library reads it: object by object, in
 order, and never through the cross-reference index, so an index that is shifted, absent or pointing
-at the wrong place changes nothing. `scan.rs` states what the walk recovers, what it refuses and the
-engine's own bounds on it; `page.rs` states the shapes the page model refuses rather than write what
-it cannot carry, and the divergence from the reference by outcome: where the reference's own code
-refuses or produces a file that lost what the input held, this engine either carries the file or
-refuses it. The harness judges only the shapes where both sides produce. The nine PDF operations
-are carried out end to end — `pdf_merge` and `pdf_split` build a fresh document out of the pages,
-`pdf_rotate`, `pdf_crop` and `pdf_resize` change what the pages they name show and keep everything
-else the file holds, `pdf_text`, `pdf_image` and `pdf_form_fill` draw text, a placed picture or a
-filled form into the pages they name, with one embedded general-text font subset to the glyphs the
-call draws, and `create` makes a new PDF from one ordered content list — one page per picture when
-the list is pictures alone, a text column otherwise — or a PowerPoint deck from the same kind of
-list, laid out down a slide's flow and written through the pinned presentation library's own
-serialiser, or a workbook made from one list of sheets, each with its name, rows and merge ranges,
-written part by part and sharing the edit path's styles part and merge reading. A created Word
-document is the pinned writer library's serialiser transliterated — its body walk, its package, its
-table of contents field — and the page numbers its contents entries and its page-count token show are
-the library's own layout pass, ported under `docx/layout/` to the reach its disposition table states:
-the measurer over the width tables shipped as data, the line breaker for the column and the tab stops
-a created document states, the paginator, and the passes that settle the numbers.
+at the wrong place changes nothing. `scan.rs` states what the walk recovers and what it refuses, and
+`graph.rs` and `serialise.rs` are the object graph's own walkers and the writer: every one of them
+keeps its own stack, so a document nested as deep as the scan builds costs heap rather than the
+process's stack, and an object the walk could not parse is written back as the bytes it stated.
+`page.rs` states the shapes the page model refuses rather than write what it cannot carry: where
+the two part company it is usually the reference that loses — its resize faults inside its library
+or its split refuses where this engine carries the file — while a page's `/Contents` shapes and a
+copied page that states no area are where this engine faults as the reference does.
+`document-engine/PARSER.md` enumerates the whole of it: every place the reference's parser and its
+stream decoders accept something a stricter reader refuses, one shape per entry, with what each side
+does and whether the engine matches it or states the difference — and the entries whose answers
+differ are listed there once, rather than in each file that touches them. An object the file held
+that the produced file does not — the objects inside a container the walk could not expand, one a
+later statement of its own number replaced, or one the index cannot name — and a reference inside a
+carried body that no longer names what the input named are reported in the answer's loss field,
+which the reference's PDF answers never carry; both are recorded unreached in `coverage.rs` and
+raised by the crate's tests. A case is judged by the expectation it declares — produced, refused
+or failed — rather than by whether both sides produce, so a refusal where a case expects a produced
+file fails rather than passing quietly, and a shape both sides refuse is a case too.
+
+The nine PDF operations are carried out end to end — `pdf_merge` and `pdf_split` build a fresh
+document out of the pages, `pdf_rotate`, `pdf_crop` and `pdf_resize` change what the pages they name
+show and keep everything else the file holds, `pdf_text`, `pdf_image` and `pdf_form_fill` draw text,
+a placed picture or a filled form into the pages they name, with one embedded general-text font
+subset to the glyphs the call draws, and `create` makes a new PDF from one ordered content list — one
+page per picture when the list is pictures alone, a text column otherwise — or a PowerPoint deck from
+the same kind of list, laid out down a slide's flow and written through the pinned presentation
+library's own serialiser, or a workbook made from one list of sheets, each with its name, rows and
+merge ranges, written part by part and sharing the edit path's styles part and merge reading. A
+created Word document is the pinned writer library's serialiser transliterated — its body walk, its
+package, its table of contents field — and the page numbers its contents entries and its page-count
+token show are the library's own layout pass, ported under `docx/layout/` to the reach its
+disposition table states: the measurer over the width tables shipped as data, the line breaker for
+the column and the tab stops a created document states, the paginator, and the passes that settle the
+numbers.
 `create` carries out all four families, and `fill_template` all three of its OOXML families — a
 Word or presentation sample through the template library, a workbook through the kit's own
 cell-wise filler. The engine states which (operation, family) pairs it carries out as data, and the
@@ -191,7 +207,9 @@ unreached with its reason.
 The document builders live in the crate's `test_support`, the one home shared by the crate's tests
 and the harness. `tests/standalone.rs` builds and tests the crate in a temporary copy with no
 product sources present. `document-engine/VOCABULARY.md` states the vocabulary's boundary, who
-enforces each bound, and the restatement scan's reviewed lists and blind spots.
+enforces each bound, and the restatement scan's reviewed lists and blind spots, and
+`document-engine/PARSER.md` enumerates the reference's parser's tolerance, one shape per entry, with
+what each side does about it.
 
 `assets/docgen/NotoSans-Regular.ttf` is a real copy of `document-engine/assets/NotoSans-Regular.ttf`
 (the harness compares their digests), so the kit, the reference reader and the crate draw with one

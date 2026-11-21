@@ -803,6 +803,19 @@ pub(super) fn js_round(value: f64) -> f64 {
     (value + 0.5).floor()
 }
 
+/// A number the object model holds as a real, as a count of entries, offsets or bits: truncated toward
+/// zero, zero for anything below it, and at the host's own ceiling for anything above. What a negative
+/// value means is each call site's own — no entries for a `/N`, no bits for an `/Ff`.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "truncation toward zero is the reading JavaScript gives it, and neither a value past the \
+              host's ceiling nor one below zero names a position, entry or bit a document can hold"
+)]
+pub(super) fn whole(value: f32) -> usize {
+    value as usize
+}
+
 /// A text's length in UTF-16 code units, the unit the kit's own work budget counts.
 pub(super) fn code_units(text: &str) -> usize {
     text.encode_utf16().count()

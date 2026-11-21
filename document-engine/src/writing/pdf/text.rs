@@ -25,10 +25,9 @@ pub(super) fn run(request: &Request, produced: &mut Produced) -> Result<(), Fail
     let page::Opened {
         mut document,
         pages: ids,
-        chains,
         ancestry,
         ..
-    } = editable(request)?;
+    } = editable(request, produced)?;
     // The reference validates the marks before it touches a page, in this order, so a request with
     // two faults is refused for the first.
     let size = match request.values.get("size") {
@@ -83,7 +82,7 @@ pub(super) fn run(request: &Request, produced: &mut Produced) -> Result<(), Fail
     let height = face.height(size);
     for index in indices {
         let id = ids[index];
-        let frame = page::frame(&document, &chains, &ancestry, id)?;
+        let frame = page::frame(&document, &ancestry, id)?;
         let x = match request.values.get("x") {
             None => draw::inset(&frame),
             value => draw::point(value, "x")?,
@@ -141,11 +140,13 @@ pub(super) fn run(request: &Request, produced: &mut Produced) -> Result<(), Fail
             past.insert(index + 1);
         }
 
-        let key = draw::add_resource(&mut document, id, "Font", font, draw::FONT_BASE);
-        let text_state =
-            text_alpha.map(|state| draw::add_resource(&mut document, id, "ExtGState", state, "GS"));
+        let key = draw::add_resource(&mut document, id, "Font", font, draw::FONT_BASE)?;
+        let text_state = text_alpha
+            .map(|state| draw::add_resource(&mut document, id, "ExtGState", state, "GS"))
+            .transpose()?;
         let stamp_state = stamp_alpha
-            .map(|state| draw::add_resource(&mut document, id, "ExtGState", state, "GS"));
+            .map(|state| draw::add_resource(&mut document, id, "ExtGState", state, "GS"))
+            .transpose()?;
         let state_of = |key: &Option<String>| {
             key.as_ref()
                 .map(|key| format!("/{key} gs "))
@@ -184,7 +185,7 @@ pub(super) fn run(request: &Request, produced: &mut Produced) -> Result<(), Fail
             let _ = write!(content, " <{}> Tj T*", draw::encode(&subset, line));
         }
         content.push_str(" ET Q\n");
-        draw::push_content(&mut document, id, content.as_bytes());
+        draw::push_content(&mut document, id, content.as_bytes())?;
     }
     produced.push(&page::save(document, !ids.is_empty())?)?;
     if any_page {

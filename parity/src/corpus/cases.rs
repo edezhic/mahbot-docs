@@ -18,15 +18,17 @@
 //! against the produced document: an effect that only a no-op could satisfy is not a check.
 
 use super::documents::{
-    BASIC_DOCX, BASIC_PDF, BASIC_PPTX, BASIC_XLSX, BROKEN_FORM_PDF, BROKEN_PAIR_OPTIONS_FORM_PDF,
-    COMBED_FORM_PDF, COMBED_OVERFLOW_FORM_PDF, DAMAGED_BODY_PDF, DAMAGED_ENCRYPTED_PDF,
-    DAMAGED_INCREMENTAL_PDF, DAMAGED_INDEX_STREAM_PDF, DAMAGED_INDEX_SYNTAX_PDF,
-    DAMAGED_LENGTH_ABSENT_PDF, DAMAGED_LENGTH_LONG_MANY_PDF, DAMAGED_LENGTH_LONG_PDF,
-    DAMAGED_LENGTH_SHORT_PDF, DAMAGED_NO_INDEX_PDF, DAMAGED_OBJECT_STREAM_LENGTH_PDF,
-    DAMAGED_OBJECT_STREAM_PDF, DAMAGED_POINTER_PDF, DAMAGED_ROOT_PDF, DAMAGED_SHIFTED_PDF,
-    DECK_AS_DOCX, DEGENERATE_PAGE_PDF, DIAGRAM_MEDIA_PPTX, DOCX_BODYLESS, DOCX_BREAKS, DOCX_BROKEN,
-    DOCX_COLUMNS, DOCX_EDIT, DOCX_MACRO, DOCX_REVISIONS, DOCX_STRICT, EMPTY_CHOICE_FORM_PDF,
-    ENCRYPTED_PDF, FILL_ARCHIVE_DOCX, FILL_BAD_DELIMITERS_DOCX, FILL_COMPILE_BEFORE_RENDER_DOCX,
+    BASIC_DOCX, BASIC_PDF, BASIC_PPTX, BASIC_XLSX, BODY_UNPARSABLE_PDF, BROKEN_FORM_PDF,
+    BROKEN_PAIR_OPTIONS_FORM_PDF, CATALOG_WITHOUT_TYPE_PDF, COMBED_FORM_PDF,
+    COMBED_OVERFLOW_FORM_PDF, CONTENTS_DICTIONARY_PDF, CONTENTS_SELF_PDF, DAMAGED_BODY_PDF,
+    DAMAGED_ENCRYPTED_PDF, DAMAGED_INCREMENTAL_PDF, DAMAGED_INDEX_STREAM_PDF,
+    DAMAGED_INDEX_SYNTAX_PDF, DAMAGED_LENGTH_ABSENT_PDF, DAMAGED_LENGTH_LONG_MANY_PDF,
+    DAMAGED_LENGTH_LONG_PDF, DAMAGED_LENGTH_SHORT_PDF, DAMAGED_NO_INDEX_PDF,
+    DAMAGED_OBJECT_STREAM_LENGTH_PDF, DAMAGED_OBJECT_STREAM_PDF, DAMAGED_POINTER_PDF,
+    DAMAGED_ROOT_PDF, DAMAGED_SHIFTED_PDF, DANGLING_REFERENCE_PDF, DECK_AS_DOCX,
+    DEGENERATE_PAGE_PDF, DIAGRAM_MEDIA_PPTX, DOCX_BODYLESS, DOCX_BREAKS, DOCX_BROKEN, DOCX_COLUMNS,
+    DOCX_EDIT, DOCX_MACRO, DOCX_REVISIONS, DOCX_STRICT, EMPTY_CHOICE_FORM_PDF, ENCRYPTED_PDF,
+    FILL_ARCHIVE_DOCX, FILL_BAD_DELIMITERS_DOCX, FILL_COMPILE_BEFORE_RENDER_DOCX,
     FILL_CORRUPT_DOCX, FILL_DELIMITER_DOCX, FILL_DUPLICATE_CLOSE_DOCX, FILL_DUPLICATE_OPEN_DOCX,
     FILL_DUPLICATE_XLSX, FILL_EMPTY_ZIP, FILL_HEADER_ONLY_DOCX, FILL_INVALID_XML_DOCX,
     FILL_LOOP_POSITION_DOCX, FILL_MACRO_DOCM, FILL_MACRO_PLAIN_XLSX, FILL_MACRO_PPTM,
@@ -44,24 +46,29 @@ use super::documents::{
     FILL_UNREADABLE_DOCX, FILL_UNREADABLE_XLSX, FILL_UNTERMINATED_AFTER_TAG_DOCX,
     FILL_UNTERMINATED_DELIMITER_DOCX, FILL_UNTERMINATED_DELIMITER_THEN_TAG_DOCX,
     FILL_UNTERMINATED_UNCLOSED_DOCX, FILL_UNTERMINATED_UNOPENED_DOCX, FILL_WORD_AS_XLSX,
-    FILL_ZERO_XLSX, FORM_PDF, HYBRID_DIRECT_FORM_PDF, HYBRID_FORM_PDF, LISTED_FIELD_FORM_PDF,
-    MAX_LENGTH_FORM_PDF, MERGE_A_PDF, MERGE_B_PDF, MERGE_C_PDF, MISPLACED_FORM_PDF,
-    MULTILINE_FORM_PDF, NO_GEOMETRY_PDF, OBJECT_STREAM_ASCII_HEX_PDF, OBJECT_STREAM_INFLATED_PDF,
-    OBJECT_STREAM_PDF, OPTION_FORM_PDF, PAIRED_OPTIONS_FORM_PDF, PAIRED_RADIO_FORM_PDF,
-    PICTURE_BMP, PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_LARGE, PICTURE_OVERSIZE, PICTURE_PDF,
-    PICTURE_PIXEL, PICTURE_PNG, PICTURE_STALE_CRC_PNG, PICTURE_TALL, PICTURE_WEBP, PPTX_ASSETS,
-    PPTX_BOXES, PPTX_BROKEN_SLOT, PPTX_LIST_DISAGREES, PPTX_LIST_REORDERED, PPTX_MACRO,
-    PPTX_MISSING_NOTES, PPTX_NO_CONTENT_TYPES, PPTX_NO_LAYOUT, PPTX_NO_NOTES_MASTER,
-    PPTX_NO_SHAPE_TREE, PPTX_NO_SIZE, PPTX_NO_SLIDE_LIST, PPTX_NOTES_NO_BODY, PPTX_NOTES_TWO,
-    PPTX_RUNS, PPTX_SECTIONS, PPTX_SIGNED, PPTX_SLIDE_OUTSIDE, PPTX_TABLE, PPTX_TWO_NOTES_MASTERS,
-    PUSHBUTTON_CAPTION_FORM_PDF, PUSHBUTTON_FORM_PDF, RADIO_OPTIONS_FORM_PDF,
-    RADIO_OUTRUN_FORM_PDF, RECTLESS_BUTTON_FORM_PDF, RECTLESS_FLAT_FORM_PDF, RECTLESS_FORM_PDF,
-    REPEATED_PAGE_ANNOTATED_PDF, REPEATED_PAGE_PDF, RICH_PDF, RICH_PPTX, ROTATED_PDF,
-    SIGNATURE_FORM_PDF, STATE_APPEARANCE_FORM_PDF, STATED_SIZE_FORM_PDF, TEMPLATE_DOCX,
-    TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF, TRUNCATED_XLSX, TWO_CATALOGS_PDF, WORD_AS_PPTX,
-    XLSX_ALL_HIDDEN, XLSX_BAD_MERGE_REF, XLSX_BROKEN_MERGES, XLSX_EDIT, XLSX_MACRO,
-    XLSX_NO_CONTENT_TYPES, XLSX_NO_FAMILY, XLSX_ONE_VISIBLE, XLSX_ONLY_SHEET, XLSX_SELF_CLOSING,
-    XLSX_UNCLOSED_MERGE_CELL,
+    FILL_ZERO_XLSX, FORM_PDF, GENERATION_OUT_OF_RANGE_PDF, HYBRID_DIRECT_FORM_PDF, HYBRID_FORM_PDF,
+    LISTED_FIELD_FORM_PDF, MAX_LENGTH_FORM_PDF, MEDIA_BOX_BY_REFERENCE_PDF, MERGE_A_PDF,
+    MERGE_B_PDF, MERGE_C_PDF, MISPLACED_FORM_PDF, MULTILINE_FORM_PDF, NO_GEOMETRY_PDF,
+    OBJECT_NESTED_PAST_THE_BOUND_PDF, OBJECT_NUMBERED_PAST_A_MILLION_PDF,
+    OBJECT_STREAM_ASCII_HEX_PDF, OBJECT_STREAM_DECODING_EIGHTY_MIB_PDF, OBJECT_STREAM_INFLATED_PDF,
+    OBJECT_STREAM_ONE_OFFSET_PDF, OBJECT_STREAM_PDF, OBJECT_STREAM_TRUNCATED_FLATE_PDF,
+    OBJECT_STREAM_TRUNCATED_RUN_LENGTH_PDF, OPTION_FORM_PDF, PAGE_DICTIONARY_INLINE_PDF,
+    PAGE_TREE_DEEP_PDF, PAGE_TREE_KIDS_BY_REFERENCE_PDF, PAGE_TREE_NAMED_TWICE_PDF,
+    PAGE_TREE_NAMES_ITSELF_PDF, PAGE_TREE_ROOT_BY_REFERENCE_PDF, PAGE_TREE_ROOT_WITHOUT_TYPE_PDF,
+    PAGE_UNPARSABLE_PDF, PAIRED_OPTIONS_FORM_PDF, PAIRED_RADIO_FORM_PDF, PICTURE_BMP,
+    PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_LARGE, PICTURE_OVERSIZE, PICTURE_PDF, PICTURE_PIXEL,
+    PICTURE_PNG, PICTURE_STALE_CRC_PNG, PICTURE_TALL, PICTURE_WEBP, PPTX_ASSETS, PPTX_BOXES,
+    PPTX_BROKEN_SLOT, PPTX_LIST_DISAGREES, PPTX_LIST_REORDERED, PPTX_MACRO, PPTX_MISSING_NOTES,
+    PPTX_NO_CONTENT_TYPES, PPTX_NO_LAYOUT, PPTX_NO_NOTES_MASTER, PPTX_NO_SHAPE_TREE, PPTX_NO_SIZE,
+    PPTX_NO_SLIDE_LIST, PPTX_NOTES_NO_BODY, PPTX_NOTES_TWO, PPTX_RUNS, PPTX_SECTIONS, PPTX_SIGNED,
+    PPTX_SLIDE_OUTSIDE, PPTX_TABLE, PPTX_TWO_NOTES_MASTERS, PUSHBUTTON_CAPTION_FORM_PDF,
+    PUSHBUTTON_FORM_PDF, RADIO_OPTIONS_FORM_PDF, RADIO_OUTRUN_FORM_PDF, RECTLESS_BUTTON_FORM_PDF,
+    RECTLESS_FLAT_FORM_PDF, RECTLESS_FORM_PDF, REPEATED_PAGE_ANNOTATED_PDF, REPEATED_PAGE_PDF,
+    RICH_PDF, RICH_PPTX, ROTATED_PDF, SIGNATURE_FORM_PDF, STATE_APPEARANCE_FORM_PDF,
+    STATED_SIZE_FORM_PDF, TEMPLATE_DOCX, TEMPLATE_PPTX, TEMPLATE_XLSX, TRUNCATED_PDF,
+    TRUNCATED_XLSX, TWO_CATALOGS_PDF, WORD_AS_PPTX, XLSX_ALL_HIDDEN, XLSX_BAD_MERGE_REF,
+    XLSX_BROKEN_MERGES, XLSX_EDIT, XLSX_MACRO, XLSX_NO_CONTENT_TYPES, XLSX_NO_FAMILY,
+    XLSX_ONE_VISIBLE, XLSX_ONLY_SHEET, XLSX_SELF_CLOSING, XLSX_UNCLOSED_MERGE_CELL,
 };
 use super::effect::{BoxKind, Scalar, Scope};
 use super::{
@@ -17071,8 +17078,9 @@ fn pdf_cases() -> Vec<Case> {
                 },
             ],
         ),
-        // A container that decodes to far more than the file that holds it: the allowance its walk
-        // gets is its own decoded length, not a share of the file's.
+        // A container that decodes to far more than the file that holds it: the reference reads and
+        // merges it, so the decode ceiling is the container's own bytes rather than a share of the
+        // file's.
         produced(
             Family::Pdf,
             "pdf_merge",
@@ -17143,6 +17151,63 @@ fn pdf_cases() -> Vec<Case> {
                 },
             ],
         ),
+        // A container whose own bytes stop short of its end marker: the reference's decoder reads the
+        // runs it holds, so the objects inside it are found and the file is edited. A stage that cannot
+        // be read past — a Flate stream whose last block is cut — is carried instead, and the file
+        // refused, which is the answer the two sides give a container whose objects are lost.
+        produced(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("object_stream_truncated_run_length"),
+            vec![OBJECT_STREAM_TRUNCATED_RUN_LENGTH_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/object-stream-truncated-run-length.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 2,
+                },
+                Effect::PageRotate {
+                    output: None,
+                    page: 1,
+                    degrees: 90,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 1,
+                    text: "Page two text",
+                },
+            ],
+        ),
+        produced(
+            Family::Pdf,
+            "pdf_merge",
+            Some("object_stream_truncated_flate"),
+            vec![OBJECT_STREAM_TRUNCATED_FLATE_PDF, BASIC_PDF],
+            json!({
+                "op": "pdf_merge",
+                "inputs": ["$in/object-stream-truncated-flate.pdf", "$in/basic.pdf"],
+                "output": "$out/merged.pdf",
+            }),
+            vec!["merged.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 4,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 1,
+                    text: "Page two text",
+                },
+            ],
+        ),
         // A null description is the reference's own fault on the two fresh-document paths a page
         // action has, exactly as on `create`: its applier reads a field of the value it is handed.
         // The six actions that load an input normalise a null away first, which is why the guard
@@ -17186,7 +17251,7 @@ fn pdf_cases() -> Vec<Case> {
 /// rewrites every object of the file, so both must carry the bytes the body holds.
 fn length_damaged_page_actions(sub_operation: &'static str, document: Document) -> Vec<Case> {
     vec![
-        damaged_merge(sub_operation, document),
+        damaged_merge(sub_operation, document, 2, Some("Page one text")),
         damaged_rotate(
             sub_operation,
             document,
@@ -17226,9 +17291,29 @@ fn damaged_rotate(sub_operation: &'static str, document: Document, effects: Vec<
     )
 }
 
-/// A merge of `document` beside the clean file, which must hold four pages: a file merely copied is
-/// not what the operation promises.
-fn damaged_merge(sub_operation: &'static str, document: Document) -> Case {
+/// A merge of `document` beside the clean file, which must hold `pages` of the damaged document and
+/// the clean file's two: a file merely copied is not what the operation promises. `own` is the text
+/// the damaged document's first page draws, when it draws one.
+fn damaged_merge(
+    sub_operation: &'static str,
+    document: Document,
+    pages: usize,
+    own: Option<&'static str>,
+) -> Case {
+    let mut effects = vec![Effect::PageCount {
+        output: None,
+        count: pages + 2,
+    }];
+    effects.extend(own.map(|text| Effect::PageText {
+        output: None,
+        page: 0,
+        text,
+    }));
+    effects.push(Effect::PageText {
+        output: None,
+        page: pages,
+        text: "Page one text",
+    });
     produced(
         Family::Pdf,
         "pdf_merge",
@@ -17240,22 +17325,7 @@ fn damaged_merge(sub_operation: &'static str, document: Document) -> Case {
             "output": "$out/merged.pdf",
         }),
         vec!["merged.pdf"],
-        vec![
-            Effect::PageCount {
-                output: None,
-                count: 4,
-            },
-            Effect::PageText {
-                output: None,
-                page: 0,
-                text: "Page one text",
-            },
-            Effect::PageText {
-                output: None,
-                page: 2,
-                text: "Page one text",
-            },
-        ],
+        effects,
     )
 }
 
@@ -17267,7 +17337,7 @@ fn damaged_page_actions(sub_operation: &'static str, document: Document) -> Vec<
     vec![
         // The merge names the damaged file beside a clean one, so the produced document holds four
         // pages: a file merely copied is not what the operation promises.
-        damaged_merge(sub_operation, document),
+        damaged_merge(sub_operation, document, 2, Some("Page one text")),
         produced(
             Family::Pdf,
             "pdf_split",
@@ -17353,6 +17423,317 @@ fn damaged_page_actions(sub_operation: &'static str, document: Document) -> Vec<
                 which: BoxKind::Media,
                 value: [0.0, 341.89, 400.0, 841.89],
             }],
+        ),
+    ]
+}
+
+// ── the inputs the reference reads and edits ──────────────────────────────────────────────────
+
+/// The files the reference reads and edits that the engine used to refuse: an object whose body does
+/// not parse, a reference a copied page reaches that the source does not hold, a page whose
+/// `/Contents` is not a stream, a container whose own bytes stop short of their end, a page tree that
+/// names a node twice, and a file at or past each bound the engine used to keep for itself. Each is
+/// produced here, with the effects the operation promises, because that is the whole point: a refusal
+/// would be a verdict that fails. The shapes the reference refuses too are declined beside them, with
+/// the sentence both sides print.
+fn damaged_input_cases() -> Vec<Case> {
+    // Every produced case whose operation can turn a page turns it, because a no-op engine that copies
+    // its input leaves the turn out: a count or a text alone would pass an engine that produced the
+    // file unchanged. A merge cannot turn one, so it declares the page count and the text instead.
+    let turn = |pages: usize| -> Vec<Effect> {
+        (0..pages)
+            .map(|page| Effect::PageRotate {
+                output: None,
+                page,
+                degrees: 90,
+            })
+            .collect()
+    };
+    vec![
+        // An object whose body does not parse: the bytes it states are written back by an in-place
+        // action and copied by a merge, so nothing the file held is lost and the answer is produced.
+        damaged_rotate("body_unparsable", BODY_UNPARSABLE_PDF, turn(2)),
+        damaged_merge(
+            "body_unparsable",
+            BODY_UNPARSABLE_PDF,
+            2,
+            Some("Page one text"),
+        ),
+        // The same when the object is a page: the reference's walk keeps only the kids that are a page
+        // and passes over the one it carried, so the file is produced with the page it does hold — and
+        // the page it holds is the one that turns, which a file merely copied would not show.
+        damaged_rotate("page_unparsable", PAGE_UNPARSABLE_PDF, turn(1)),
+        produced(
+            Family::Pdf,
+            "pdf_merge",
+            Some("page_unparsable"),
+            vec![PAGE_UNPARSABLE_PDF, BASIC_PDF],
+            json!({
+                "op": "pdf_merge",
+                "inputs": [
+                    format!("$in/{}", PAGE_UNPARSABLE_PDF.name),
+                    "$in/basic.pdf",
+                ],
+                "output": "$out/merged.pdf",
+            }),
+            vec!["merged.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 3,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 0,
+                    text: "Page one text",
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 2,
+                    text: "Page two text",
+                },
+            ],
+        ),
+        // A page tree that names one node twice: the reference's walk visits it twice, so the page under
+        // it is turned twice, and this engine walks it the same way rather than refusing the diamond.
+        damaged_rotate(
+            "page_tree_named_twice",
+            PAGE_TREE_NAMED_TWICE_PDF,
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 2,
+                },
+                Effect::PageRotate {
+                    output: None,
+                    page: 0,
+                    degrees: 180,
+                },
+                Effect::PageRotate {
+                    output: None,
+                    page: 1,
+                    degrees: 180,
+                },
+            ],
+        ),
+        // A page dictionary the tree names itself rather than a reference to: the reference's walk takes
+        // it for a page and then has no reference to build one from, so both sides refuse the file.
+        declined(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("page_dictionary_inline"),
+            vec![PAGE_DICTIONARY_INLINE_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/page-dictionary-inline.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            Expect::Refused(Reason::contains(
+                "cannot read page-dictionary-inline.pdf as a PDF",
+            )),
+        ),
+        // A page tree that names itself: the reference's `traverse` recurses until the runtime throws,
+        // and its load turns that into the refusal the engine prints, so both sides refuse the file.
+        declined(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("page_tree_names_itself"),
+            vec![PAGE_TREE_NAMES_ITSELF_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/page-tree-names-itself.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            Expect::Refused(Reason::contains(
+                "cannot read page-tree-names-itself.pdf as a PDF",
+            )),
+        ),
+        // A page-tree root that states no `/Type /Pages`: the reference builds a page tree only for a
+        // dictionary that says it is one, so its walk has no `traverse` to call and the load refuses
+        // the file — and so does the engine.
+        declined(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("page_tree_root_without_type"),
+            vec![PAGE_TREE_ROOT_WITHOUT_TYPE_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/page-tree-root-without-type.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            Expect::Refused(Reason::contains(
+                "cannot read page-tree-root-without-type.pdf as a PDF",
+            )),
+        ),
+        // A catalog that states no `/Type`: the reference builds a catalog only for a dictionary that
+        // says it is one, so its load refuses the file, and so does the engine.
+        declined(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("catalog_without_type"),
+            vec![CATALOG_WITHOUT_TYPE_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/catalog-without-type.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            Expect::Refused(Reason::contains(
+                "cannot read catalog-without-type.pdf as a PDF",
+            )),
+        ),
+        // A reference a copied page reaches that the source does not hold: the reference is carried
+        // dangling, so the merge produces a file exactly as broken as its input, and so does a turn.
+        damaged_merge(
+            "dangling_reference",
+            DANGLING_REFERENCE_PDF,
+            2,
+            Some("Page one text"),
+        ),
+        damaged_rotate("dangling_reference", DANGLING_REFERENCE_PDF, turn(2)),
+        // A page whose `/Contents` is a dictionary or names itself: every action that does not append
+        // to the content carries it. The dictionary shape is witnessed by its turn and by the resize
+        // that faults on it: a merge of it is not a case here, because the canonical model's
+        // page-stream reader follows a dictionary to the next `stream` keyword in the file, which an
+        // uncompressed object model places after it — so the two sides' produced files differ only in
+        // what the model reads.
+        damaged_rotate("contents_dictionary", CONTENTS_DICTIONARY_PDF, turn(1)),
+        damaged_rotate("contents_self", CONTENTS_SELF_PDF, turn(1)),
+        // This one holds a single page, and that page draws nothing (its content is itself), so the
+        // merge's first page carries no text and the clean file's first page follows it.
+        damaged_merge("contents_self", CONTENTS_SELF_PDF, 1, None),
+        // A container that decodes to eighty mebibytes, an object numbered a million and one, a page
+        // tree two hundred nodes deep and an object nested past the scan's own depth bound: each is a
+        // shape the engine used to refuse and the reference answers. The first is named for the cost it
+        // exercises rather than for the ceiling: a container that reached the ceiling would have to
+        // decode four gibibytes, which no recorded case can hold, so the ceiling's witness is the
+        // crate's own test with the bound injected.
+        damaged_rotate(
+            "container_decoding_eighty_mib",
+            OBJECT_STREAM_DECODING_EIGHTY_MIB_PDF,
+            turn(2),
+        ),
+        damaged_rotate(
+            "object_numbered_past_a_million",
+            OBJECT_NUMBERED_PAST_A_MILLION_PDF,
+            turn(2),
+        ),
+        damaged_rotate("page_tree_deep", PAGE_TREE_DEEP_PDF, turn(1)),
+        // A page object stated at a generation past 65535 and named the same way: the engine holds the
+        // pair the file states and gives the object a number of the document's own at generation zero,
+        // with every reference to it following.
+        damaged_rotate(
+            "generation_out_of_range",
+            GENERATION_OUT_OF_RANGE_PDF,
+            turn(1),
+        ),
+        damaged_rotate(
+            "object_nested_past_the_bound",
+            OBJECT_NESTED_PAST_THE_BOUND_PDF,
+            turn(2),
+        ),
+        // A container whose every entry states the same offset: the reference parses the entry per
+        // offset the file states and produces, so the page is turned and nothing is lost.
+        damaged_rotate(
+            "object_stream_one_offset",
+            OBJECT_STREAM_ONE_OFFSET_PDF,
+            turn(1),
+        ),
+        // A page-tree entry stated as a reference that names a reference: the reference's typed lookup
+        // takes one step, finds a reference rather than the node or array it needs, and the load
+        // refuses the file — and so does the engine.
+        declined(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("page_tree_kids_by_reference"),
+            vec![PAGE_TREE_KIDS_BY_REFERENCE_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/page-tree-kids-by-reference.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            Expect::Refused(Reason::contains("cannot read")),
+        ),
+        declined(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("page_tree_root_by_reference"),
+            vec![PAGE_TREE_ROOT_BY_REFERENCE_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/page-tree-root-by-reference.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            Expect::Refused(Reason::contains("cannot read")),
+        ),
+        // The two shapes the reference's own library faults on: an action that appends to a page's
+        // content asks a `/Contents` that is a dictionary, or that names itself, for `push`. The
+        // engine answers as the library does, which is the one place these files' answers differ.
+        declined(
+            Family::Pdf,
+            "pdf_resize",
+            Some("contents_dictionary"),
+            vec![CONTENTS_DICTIONARY_PDF],
+            json!({
+                "op": "pdf_resize",
+                "input": format!("$in/{}", CONTENTS_DICTIONARY_PDF.name),
+                "width": 400,
+                "height": 500,
+                "pages": [1],
+                "output": "$out/resized.pdf",
+            }),
+            vec!["resized.pdf"],
+            Expect::Failed(Reason::third_party()),
+        ),
+        // A `/MediaBox` stated as a reference that names a reference: the reference's own type check
+        // faults inside the resize, and the engine faults as it does.
+        declined(
+            Family::Pdf,
+            "pdf_resize",
+            Some("media_box_by_reference"),
+            vec![MEDIA_BOX_BY_REFERENCE_PDF],
+            json!({
+                "op": "pdf_resize",
+                "input": "$in/media-box-by-reference.pdf",
+                "width": 400,
+                "height": 500,
+                "pages": "all",
+                "output": "$out/resized.pdf",
+            }),
+            vec!["resized.pdf"],
+            Expect::Failed(Reason::third_party()),
+        ),
+        declined(
+            Family::Pdf,
+            "pdf_text",
+            Some("contents_self"),
+            vec![CONTENTS_SELF_PDF],
+            json!({
+                "op": "pdf_text",
+                "input": format!("$in/{}", CONTENTS_SELF_PDF.name),
+                "pages": [1],
+                "text": "stamp",
+                "output": "$out/stamped.pdf",
+            }),
+            vec!["stamped.pdf"],
+            Expect::Failed(Reason::third_party()),
         ),
     ]
 }
@@ -17662,6 +18043,7 @@ pub fn all() -> Vec<Case> {
     cases.extend(pptx_edit_cases());
     cases.extend(pptx_edit_paths());
     cases.extend(pdf_cases());
+    cases.extend(damaged_input_cases());
     cases.extend(failure_cases());
     cases
 }
