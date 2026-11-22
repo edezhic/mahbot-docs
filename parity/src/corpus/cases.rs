@@ -15610,6 +15610,32 @@ fn pdf_cases() -> Vec<Case> {
             }],
         )
         .named("defaults"),
+        // No other case draws a run at a non-zero turn, so this is what exercises the model's
+        // rotation field: a comparison nobody exercises is not a comparison.
+        produced(
+            Family::Pdf,
+            "pdf_text",
+            Some("turned"),
+            vec![BASIC_PDF],
+            json!({
+                "op": "pdf_text",
+                "input": "$in/basic.pdf",
+                "text": "Turned",
+                "pages": [1],
+                "x": 100,
+                "y": 200,
+                "size": 18,
+                "rotate": 45,
+                "output": "$out/text.pdf",
+            }),
+            vec!["text.pdf"],
+            vec![Effect::PageText {
+                output: None,
+                page: 0,
+                text: "Turned",
+            }],
+        )
+        .named("turned"),
         produced(
             Family::Pdf,
             "pdf_text",

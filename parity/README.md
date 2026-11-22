@@ -41,7 +41,7 @@ compares the engine's own PDF pages against PDFium, reporting the other families
 resolution therefore cannot move a codec version the comparison identity covers.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 847 cases and 92 readings — is bounded by the run budget below, a
+managed runtime. A full pass — 848 cases and 92 readings — is bounded by the run budget below, a
 backstop rather than a target. The reference engine's pass takes several times the crate engine's,
 because every reference case starts the runtime and materialises the kit; both depend on the
 machine and on the corpus. The whole test suite runs the corpus several times (once per
@@ -100,7 +100,7 @@ landed yet is shown as `SKIP`, not failed, and a run that judged no case at all 
 | `scripts/derive-docx-layout-data.mjs` | The derivation command for the layout data a created Word document is measured with: it reads the pinned package's bundle and writes `document-engine/assets/docx-layout/` — the width, supplementary, Arabic and East Asian face tables, the character-class ranges the line breaker reads, the constants the port reads, and the module list — refusing a list that omits a source module, a marker that is not one, a constant nothing reads, or a binding the bundle no longer states. |
 | `tests/pptx_create_parts.rs`, `tests/pptx_create.rs` | What the model cannot see about a created deck: the captured parts really are invariant and really are the reference's bytes, the core properties carry fixed strings, two stamps and the reference's revision, the application properties agree over decks differing in slide count, notes count, titles and size, the archive states exactly the entry set the reference writes, a `.jpg` and a `.jpeg` source both arrive as a `.jpeg` media part, and a deck that compares equal to the reference's is the one fed to the crate's editor, so a failure there is the editor's. Permanent and outside the baseline. |
 | `tests/docx_create_parts.rs`, `tests/docx_create_entries.rs`, `tests/docx_assets_identity.rs` | What the model cannot see about a created Word document: the shipped parts and fragments are the reference's own bytes, the archive states exactly the reference's entry list as a set — folder entries included — and the crate's identity covers the captured parts and the layout data but leaves out the notices, the README and the probes. Permanent and outside the baseline. |
-| `tests/pdf_create_shapes.rs` | What the PDF model cannot see about a created document: one request driven through both writers, both produced files walked with the same parser, and every drawn string's position, size and fill colour, every path's geometry, and the description entries the model drops compared. Permanent and outside the baseline. |
+| `tests/pdf_create_shapes.rs` | What the PDF model cannot see about a created document: one request driven through both writers, both produced files walked with the same parser, and every painted path's line width, paint colour and dash, and the description entries the model drops compared; the transform a path is drawn under is a gap neither compares. Permanent and outside the baseline. |
 | `tests/pdf_damaged_shapes.rs` | What the PDF model cannot see about a damaged document: a damaged body written back as the bytes it stated, a dangling reference — including one at the id a marker stands at — a page's `/Contents` dictionary, containers and numbering the two sides key differently, chained entries both sides refuse, the field tree's one-step reads, its permissive shapes, its cycles and its flag and `/MaxLen` arithmetic, a null box and a stream that never ends, driven through both writers, with what each side wrote compared. Permanent and outside the baseline. |
 | `scripts/probe-pdf-bounds.mjs` | The measurement the PDF bounds are held against: what the reference does with an object nested past the depth the scan builds, a filter chain that multiplies and one past what a typed array holds, a container that decodes to eighty mebibytes, an object numbered in the hundreds of millions, a page tree five thousand nodes deep, and the field tree's cycles and flag arithmetic. Its output is recorded in `../document-engine/VOCABULARY.md` and `../document-engine/PARSER.md`. |
 | `baseline/baseline.json` | The recorded reference (canonical documents, tens of megabytes — it grows with the corpus). |
@@ -421,10 +421,10 @@ builders have one home in `document_engine::test_support`, which the crate's own
   description value that is not text, an encrypted file, a page with no visible area, a page the
   document does not have and an input that is a PDF by its magic bytes alone;
 - the three PDF drawing actions: text drawn with defaults, with Greek and Cyrillic, with a
-  character the font lacks (the answer lists it), inside a stamp, and off the page (the note names
-  the page); a picture fitted whole, sized by one side, placed off the page and turned with a
-  rotated page, and one whose image chunk carries a damaged checksum (the reference embeds it, so
-  the writer does too); a picture refused as WebP or as a broken PNG, and a side or implied side
+  character the font lacks (the answer lists it), inside a stamp, turned, and off the page (the
+  note names the page); a picture fitted whole, sized by one side, placed off the page and turned
+  with a rotated page, and one whose image chunk carries a damaged checksum (the reference embeds
+  it, so the writer does too); a picture refused as WebP or as a broken PNG, and a side or implied side
   outside the rule; a form filled and kept, filled and flattened (with its appearance text read),
   with a Greek-and-Cyrillic value, with a value the font cannot draw, with a checkbox and a radio
   set by their states, with a radio whose export value names its widget's on-state and one whose
@@ -551,11 +551,12 @@ rule added to a table without a test fails the table.
 
 `tests/pdf_create_shapes.rs` holds what the PDF model cannot see about a created document. It drives
 one `pdf/create` request through the crate's writer and through the kit, walks both produced files
-with the same parser, and compares every drawn string's position, size and fill colour, every path's
-points, width, colour and dash, and the description entries the model drops: the producer, the
-creator, both dates, an unknown key, an unvalidated date and a cleared entry. It is permanent and
-outside the baseline, it hard-fails when the managed runtime is absent rather than skipping, and it
-does not touch the reference writer module, which is part of the recorded identity.
+with the same parser, and compares every painted path's line width, paint colour and dash, and the
+description entries the model drops: the producer, the creator, both dates, an unknown key, an
+unvalidated date and a cleared entry. The transform a path is drawn under is a further gap neither
+the model nor this test compares. It is permanent and outside the baseline, it hard-fails when the
+managed runtime is absent rather than skipping, and it does not touch the reference writer module,
+which is part of the recorded identity.
 
 `tests/pdf_damaged_shapes.rs` holds what the model cannot see about a *damaged* document, which is the
 other half of the statement that a produced file is as damaged as its input and no more. The model

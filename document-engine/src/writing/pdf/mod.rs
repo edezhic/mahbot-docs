@@ -4598,10 +4598,10 @@ mod tests {
 
     #[test]
     fn a_rotated_mark_states_its_matrix_in_the_library_s_own_spelling() {
-        // The model does not compare a text matrix, so this is the one witness that a turn is
-        // written the way the reference's own PDF library writes it: a quarter turn's cosine is
-        // small enough that JavaScript's `String()` would take the exponent form, which the library
-        // expands in place.
+        // The model compares the turn a matrix states, not the matrix's own spelling, so this is the
+        // one witness that the turn is written the way the reference's own PDF library writes it: a
+        // quarter turn's cosine is small enough that JavaScript's `String()` would take the exponent
+        // form, which the library expands in place.
         let directory = scratch();
         let input = fixture(directory.path(), "basic.pdf", build::pdf_basic());
         let outcome = run(
@@ -4956,9 +4956,10 @@ mod tests {
     #[test]
     fn a_flatten_paints_the_state_the_field_s_value_names() {
         // The reference reads a button's appearance from the field's `/V`, not from the widget's
-        // `/AS`, so a box whose two disagree is painted as its value says. No compared field sees a
-        // form XObject's operators, so this is the one witness: the stream the page's content draws
-        // is the on-state's, not the empty `/Off` the widget itself shows.
+        // `/AS`, so a box whose two disagree is painted as its value says. The model reads the runs
+        // the appearance draws but not its path operators, so this test witnesses the painting
+        // itself: the stream the page's content draws is the on-state's, not the empty `/Off` the
+        // widget itself shows.
         let directory = scratch();
         let input = fixture(
             directory.path(),
@@ -5198,8 +5199,9 @@ mod tests {
     )]
     #[test]
     fn a_combed_field_centres_each_character_in_its_own_cell() {
-        // The model compares the text an appearance draws, not where it draws it, so this is the
-        // one check that a cell's character does not overprint the one before.
+        // The corpus records this fixture's per-cell positions
+        // (`pdf/pdf_form_fill/combed@combed`); this states the rule those positions must obey — one
+        // cell per character, left to right on one baseline.
         let directory = scratch();
         let input = fixture(directory.path(), "combed.pdf", build::pdf_combed_form());
         let outcome = run(
@@ -5252,9 +5254,9 @@ mod tests {
 
     #[test]
     fn a_right_aligned_field_insets_its_box_by_the_border_and_padding() {
-        // `/Q` and `/BS /W` move a line inside its box, which the harness's PDF model's
-        // appearance-geometry limit says it does not compare, so this is the one witness that the
-        // alignment and the border are applied — and that a choice field's own `/Q` is not.
+        // `/Q` and `/BS /W` move a line inside its box. No corpus case fills this fixture, so this
+        // is the one witness that the alignment and the border are applied — and that a choice
+        // field's own `/Q` is not.
         let directory = scratch();
         let input = fixture(directory.path(), "aligned.pdf", build::pdf_aligned_form());
         let outcome = run(
@@ -5351,8 +5353,8 @@ mod tests {
     fn a_button_whose_appearance_is_one_stream_gets_the_states_it_shows() {
         // The reference regenerates a button whose normal appearance is not a state dictionary;
         // the harness's PDF model compares the state the box shows and the text an appearance
-        // draws, but this mark is drawn as paths, which its statement says are not compared, so the
-        // state is the only witness.
+        // draws and where, but this mark is drawn as paths, which its statement says are not
+        // compared, so the state is the only witness.
         let directory = scratch();
         let input = fixture(
             directory.path(),

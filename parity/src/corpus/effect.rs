@@ -750,16 +750,7 @@ impl Effect {
             }
             Self::PageAppearanceText { page, text, .. } => {
                 let entry = page_of(value, page)?;
-                let found = entry
-                    .get("appearance_text")
-                    .and_then(Value::as_array)
-                    .map(|runs| {
-                        runs.iter()
-                            .filter_map(Value::as_str)
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    })
-                    .unwrap_or_default();
+                let found = runs_text(entry.get("appearance_text"));
                 expect(found.contains(text), || {
                     format!(
                         "page {} draws no appearance text {text:?} (it draws {found:?})",
@@ -1731,13 +1722,17 @@ fn box_value(value: &Value) -> Option<Vec<f64>> {
         .collect::<Option<Vec<f64>>>()
 }
 
-/// The text a page draws.
+/// The text a page draws: the characters of every run it states, joined in drawing order.
 fn page_text(page: &Value) -> String {
-    page.get("text")
-        .and_then(Value::as_array)
+    runs_text(page.get("text"))
+}
+
+/// The characters of a list of text runs, joined in drawing order.
+fn runs_text(runs: Option<&Value>) -> String {
+    runs.and_then(Value::as_array)
         .map(|runs| {
             runs.iter()
-                .filter_map(Value::as_str)
+                .filter_map(|run| run.get("text").and_then(Value::as_str))
                 .collect::<Vec<_>>()
                 .join("\n")
         })
@@ -1776,12 +1771,7 @@ fn form_field_part(value: &Value, name: &str, part: &str) -> Result<String, Stri
         .ok_or_else(|| format!("the form has no field {name:?}"))?;
     match field.get(part) {
         Some(Value::String(text)) => Ok(text.clone()),
-        Some(Value::Array(runs)) => Ok(runs
-            .iter()
-            .filter_map(Value::as_str)
-            .collect::<Vec<_>>()
-            .join("\n")),
-        _ => Ok(String::new()),
+        other => Ok(runs_text(other)),
     }
 }
 #[cfg(test)]

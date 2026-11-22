@@ -14,11 +14,21 @@
 //!   area — and a crop that differs in either direction is reported: the model compares the boxes,
 //!   not the area their intersection shows
 //!   (`a_crop_box_that_does_not_narrow_the_page_is_still_a_difference`);
-//! - `"text": […]` — every string the page's own content stream draws, in drawing order: one entry
-//!   per `Tj`/`'`/`"` and one per `TJ` (its string elements concatenated, its kerning numbers
-//!   dropped), each resolved to the characters it draws through the font in force's `/ToUnicode`
-//!   map. The model compares the string, not the marks it is drawn with: see "What the model does
-//!   not compare";
+//! - `"text": [{"text": …, "position": [x, y], "size": …, "colour": …, "rotation": …}]` — every run
+//!   the page's own content stream draws, in drawing order: one entry per `Tj`/`'`/`"` and one per
+//!   `TJ` (its string elements concatenated, its kerning numbers dropped), each resolved to the
+//!   characters it draws through the font in force's `/ToUnicode` map. `position` is the text
+//!   matrix's origin raised by the text rise, under the transform in force, `size` the stated size
+//!   scaled by that transform's vertical scale, `colour` the fill colour resolved to device RGB, and
+//!   `rotation` the direction of the run's x axis in degrees, from zero up to but not including 360.
+//!   A `cs` starts the colour space it names — black for a device space — and the name is resolved
+//!   through the `/ColorSpace` dictionary the page resolves to, its own or one inherited along the
+//!   page tree (`a_space_switch_starts_the_space_it_names`,
+//!   `a_colour_space_inherited_from_the_page_tree_is_the_pages_own`). Every number is held on the
+//!   grid "What is normalised away" states. A colour the model cannot resolve is recorded as
+//!   `{"uncompared": <reason>}`, the reason naming the space's family — or saying the model does
+//!   not resolve it — and never the name the file binds it to; the font's name and glyph program,
+//!   the spacing and the render mode are not compared: see "What the model does not compare";
 //! - `"images": [{"sha256": …, "width": …, "height": …, "placement": [a, b, c, d, e, f]}]` — the
 //!   images the content paints, by the digest of their **decoded** samples, the pixel size they
 //!   decode to, and the current transform at the `Do`/`BI` that paints them: the unit square's image
@@ -29,9 +39,12 @@
 //! - `"forms": n` — how many times the page's own content paints a form XObject: every `Do` of a
 //!   form counts, and a form that paints another form is not counted again. What a form draws is
 //!   not part of this field (see `appearance_text`, and "What the model does not compare");
-//! - `"appearance_text": […]` — the non-empty strings the form XObjects the page paints draw, in
-//!   painting order, resolved the way an appearance is (see below). A flattened field's value is
-//!   here rather than in `text`, which is only what the page's own content draws;
+//! - `"appearance_text": […]` — the non-empty runs the form XObjects the page paints draw, in
+//!   painting order, each recorded as `text` records a page's run, resolved the way an appearance is
+//!   (see below). A flattened field's value is here rather than in `text`, which is only what the
+//!   page's own content draws. A run inside a form is placed in the page's space: the form's
+//!   `/Matrix` is composed onto the transform the page paints the form with, and the run is drawn in
+//!   the graphics state the page paints the form in;
 //! - `"vector": {"count": …, "sha256": …}` — how many path operators the page draws and a digest
 //!   of them with their operands;
 //! - `"annots": [{"subtype": …, "rect": […], "contents": …}]` — the page's own annotations, in
@@ -42,9 +55,9 @@
 //!
 //! The document also carries the four content-bearing Info entries (`title`, `author`, `subject`,
 //! `keywords`; `null` when the document states none), every form field's fully-qualified name,
-//! kind, value, options, shown appearance state and drawn appearance text, whether the form names
-//! an XFA entry, and the names of its embedded files, read from the catalog's `/EmbeddedFiles`
-//! name tree.
+//! kind, value, options, shown appearance state and the runs its normal appearance draws (each
+//! recorded as `text` records a page's run), whether the form names an XFA entry, and the names of
+//! its embedded files, read from the catalog's `/EmbeddedFiles` name tree.
 //!
 //! # How an appearance is read
 //!
@@ -72,8 +85,11 @@
 //! corpus rather than a property of the format, because a simple font's `/ToUnicode` map states
 //! one-byte codes and would be read pairwise here. An odd trailing byte is dropped. A `/ToUnicode`
 //! stream the parser cannot read, and a `Tf` naming a font the resources do not hold, are both read
-//! as a font with no map. The font's identity — its name and its subset numbering — is not part of
-//! the model: engines name and subset fonts differently, and only the characters are compared.
+//! as a font with no map. The font's identity — the name it carries — is not part of the model: the
+//! reference names the embedded face with a suffix its own generator assigns, the engine writes the
+//! name it embeds, and no rule makes the two agree. Only the characters and the run's position,
+//! size, colour and turn are compared, so two faces that draw the same characters that way are not
+//! distinguished.
 //!
 //! # What is normalised away
 //!
@@ -90,10 +106,10 @@
 //! - **The writing application**: `/CreationDate`, `/ModDate`, `/Creator`, `/Producer` and any
 //!   version string an engine stamps are dropped. They name the producer, not the document.
 //! - **Appearance streams** (`/AP`): a widget's appearance is generated from the field's value, so
-//!   two engines may draw it differently. What is compared is the characters the appearance draws
-//!   through its stated map and the appearance state a button shows, never the stream's operators
-//!   (`an_appearances_geometry_and_border_are_not_compared`), and its font only through the
-//!   characters it maps, as "How a drawn string is decoded" states.
+//!   two engines may draw it differently. What is compared is each run the appearance draws — its
+//!   characters, position, size, colour and turn — and the appearance state a button shows, never
+//!   the stream's operators (`an_appearances_box_and_border_are_not_compared`), and its font only
+//!   through the characters it maps, as "How a drawn string is decoded" states.
 //! - **The image's own encoding and the drawing operators around it**: an image is compared by its
 //!   decoded samples, and its placement by the transform it is painted under, not by how the
 //!   writer spelled the `q`/`cm`/`Do` sequence
@@ -112,6 +128,9 @@
 //!   usually not one — two numbers that straddle a grid midpoint differ however close they are — and
 //!   between the two it depends on where they fall. A coordinate no float can express — an overflow
 //!   of composed transforms — is held as `0.0`, so it compares equal to a stated zero.
+//! - **A run's turn**: `rotation` is the x axis direction taken modulo 360 into `[0, 360)` — a turn
+//!   of −90 is 270, and a turn rounded to a full circle is no turn — so a run turned the long way
+//!   round is the same run (`a_run_is_placed_under_the_transform_in_force`).
 //! - **A string that states no encoding**: a PDF string is UTF-16BE when it begins with the
 //!   big-endian byte-order mark `FE FF`, and is otherwise read as UTF-8 with lossy replacement, so
 //!   a high byte that is not UTF-8 reads as U+FFFD. PDFDocEncoding is not decoded: two different
@@ -139,31 +158,51 @@
 //!   `/Rotate 45` therefore compare equal to their resolved counterparts
 //!   (`a_box_inherited_from_the_page_tree_is_the_pages_own`, `a_page_with_no_media_box_is_a4`,
 //!   `a_turn_that_is_not_a_quarter_is_no_turn`).
-//! - **Where a page's text sits, and how it is drawn.** `text` is the strings the page draws and
-//!   nothing else: the position, the font size, the colour, the character and word spacing, the
-//!   render mode and the font it is drawn with are not compared — the font's identity is not part of
-//!   the model, as "How a drawn string is decoded" states — so a stamp drawn in the wrong place, at
-//!   the wrong size or in the wrong colour is not a difference the model sees
-//!   (`page_text_is_compared_as_strings_not_as_marks`).
+//! - **A run's font, spacing, advance and render mode.** The characters, position, size, colour and
+//!   turn are compared, but the font's name and glyph program are not — the reference names the
+//!   embedded face with a suffix its own generator assigns, the engine writes the name it embeds, and
+//!   no rule makes the two agree, as "How a drawn string is decoded" states — and the character and
+//!   word spacing, the horizontal scaling and the render mode are not recorded. The model also reads
+//!   no glyph widths, so a run's position is its text matrix's origin rather than the pen the run
+//!   before it advanced: two runs drawn one after another on one line record that same origin. Two
+//!   runs that state the same characters at the same place, size, colour and turn therefore compare
+//!   equal whatever face, spacing or render mode draws them
+//!   (`page_text_is_compared_as_marks_not_as_a_font`,
+//!   `the_advance_a_show_operator_makes_is_not_compared`).
+//! - **A fill colour the model cannot resolve as a device colour.** A pattern, an ICC-based, a
+//!   separation, a device-N, an indexed or a CIE-based colour is recorded as
+//!   `{"uncompared": <reason>}`, never guessed at. The reason names the space's family, or says the
+//!   model does not resolve it, and never the resource name the file binds it to, so two names bound
+//!   to one kind of space record one reason, and a fill in a space the model does not resolve
+//!   records that reason whatever its components. A device operator that states the wrong number of
+//!   components is uncompared too, its reason naming the count, so two such fills compare equal only
+//!   when they state the same count; a fill that states a device colour never compares equal to one
+//!   that does not (`a_colour_the_model_cannot_resolve_is_recorded_uncompared`,
+//!   `a_device_operator_with_the_wrong_number_of_components_is_uncompared`).
 //! - **A page's vector content beyond its path operators.** The digest covers the path operators
-//!   and their operands; the colour, the line width, the text state and the transform the path is
-//!   drawn under are not in it, so the same path drawn in another colour or at another place
-//!   compares equal (`a_vector_digest_ignores_colour_width_and_transform`).
+//!   and their operands; the colour, the line width, the dash pattern, the text state and the
+//!   transform the path is drawn under are not in it, so the same path drawn in another colour or at
+//!   another place compares equal (`a_vector_digest_ignores_colour_width_dash_and_transform`).
 //! - **A form XObject's own content.** A page records how many times it paints a form, and the
-//!   text those forms draw; a form's images and path operators are not recorded at all, so a form
-//!   that draws only vector marks is indistinguishable from a form that draws nothing, and two
-//!   different drawings are one page
+//!   runs those forms draw and how they are drawn; a form's images and path operators are not
+//!   recorded at all, so a form that draws only vector marks is indistinguishable from a form that
+//!   draws nothing, and two different drawings are one page
 //!   (`a_form_that_draws_only_marks_draws_nothing_the_model_reads`,
-//!   `a_painted_form_is_counted_and_its_drawing_is_not_compared`). A form's or an appearance's
-//!   text is read through its **own** `/Resources`: the format lets a form inherit the page's and
-//!   an appearance the AcroForm's `/DR` when it states none, and the model does neither, so a
-//!   stream without resources states no text (`a_form_without_its_own_resources_states_no_text`,
+//!   `a_painted_form_is_counted_and_its_drawing_is_not_compared`). A page-painted form's runs
+//!   inherit the graphics state the page paints it in — its fill colour, font and size — as the
+//!   format's `Do` does (`a_form_inherits_the_state_the_page_paints_it_in`); an appearance starts
+//!   from the format's initial state, since no page paints it. A form's or an appearance's `Tf` is
+//!   resolved through its **own** `/Resources`: the format lets a form inherit the page's `/Font`
+//!   and an appearance the AcroForm's `/DR` when it states none, and the model does neither, so a
+//!   `Tf` naming a font the stream does not itself hold states no text — while a form that states no
+//!   `Tf` draws with the font the page paints it in
+//!   (`a_form_that_names_a_font_it_does_not_hold_states_no_text`,
 //!   `an_appearance_does_not_inherit_the_form_default_resources`).
-//! - **An appearance's geometry and border.** An appearance is compared by the characters it
-//!   draws, not by where it draws them: the line positions, the font size, the appearance's own
-//!   `/BBox` — the box it draws in, not the widget's `/Rect`, which `annotations` records — and the
-//!   widget's `/BS` border and padding are not part of the model, whatever the field kind
-//!   (`an_appearances_geometry_and_border_are_not_compared`).
+//! - **An appearance's box and border.** A run inside an appearance is compared like any other run,
+//!   but the appearance's own `/BBox` — the box it draws in, not the widget's `/Rect`, which
+//!   `annotations` records — and the widget's `/BS` border and padding are not part of the model,
+//!   whatever the field kind (`an_appearances_box_and_border_are_not_compared`). A run is placed in
+//!   the appearance's own space; the widget's `/Rect` does not move it.
 //! - **An appearance's font when the file does not embed it.** The stream's font must carry an
 //!   embedded program (`/FontFile`, `/FontFile2` or `/FontFile3`) for the appearance to be read at
 //!   all, so a widget whose font carries none states no text and two such widgets compare equal
@@ -289,7 +328,7 @@ use hayro::hayro_syntax::metadata::Metadata;
 use hayro::hayro_syntax::object::dict::Dict;
 use hayro::hayro_syntax::object::stream::{ImageDecodeParams, Stream};
 use hayro::hayro_syntax::object::{Array, Name, Object, ObjectIdentifier, String as PdfString};
-use hayro::hayro_syntax::page::{Page, Rotation};
+use hayro::hayro_syntax::page::{Page, Resources, Rotation};
 use hayro_cmap::{BfString, CMap};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
@@ -479,6 +518,419 @@ fn charge_content(page: &Page<'_>, budget: &mut Decoded) -> Result<()> {
     budget.charge(page.page_stream().map_or(0, |stream| stream.len() as u64))
 }
 
+/// A fill colour as the model holds it: device RGB, or the reason it could not be resolved.
+#[derive(Clone, Debug)]
+enum Fill {
+    Device([f64; 3]),
+    Uncompared(String),
+}
+
+impl Fill {
+    /// The initial fill: device gray zero, which is black.
+    fn black() -> Self {
+        Self::Device([0.0, 0.0, 0.0])
+    }
+
+    /// A fill the model cannot resolve, carrying the reason it records.
+    fn uncompared(reason: &str) -> Self {
+        Self::Uncompared(reason.to_string())
+    }
+
+    /// The colour as the model holds it: three rounded components, or the reason it was not
+    /// resolved.
+    fn value(&self) -> Value {
+        match self {
+            Self::Device([red, green, blue]) => {
+                json!([rounded(*red), rounded(*green), rounded(*blue)])
+            }
+            Self::Uncompared(reason) => json!({ "uncompared": reason }),
+        }
+    }
+}
+
+/// The colour space a fill operator states its components in.
+#[derive(Clone, Debug)]
+enum Space {
+    Gray,
+    Rgb,
+    Cmyk,
+    /// A space the model does not resolve to device components, carrying the reason a fill stated
+    /// in it is uncompared. The reason names the space's family — or says the model does not
+    /// resolve it — and never the name the file binds the space to.
+    Unresolved(&'static str),
+}
+
+impl Space {
+    /// The fill a `cs` starts: the format's initial colour for a device space — gray 0, RGB 0 0 0
+    /// and CMYK 0 0 0 1 (ISO 32000-1, 8.6.4), all black — and the space's reason for one the model
+    /// does not resolve.
+    fn initial(&self) -> Fill {
+        match self {
+            Self::Gray | Self::Rgb | Self::Cmyk => Fill::black(),
+            Self::Unresolved(reason) => Fill::uncompared(reason),
+        }
+    }
+}
+
+/// The reason a fill in a colour space the model does not resolve states.
+const UNRESOLVED_COLOUR_SPACE: &str =
+    "the fill is stated in a colour space the model does not resolve";
+
+/// The reason a fill that names a pattern states, whether the `cs` names `/Pattern` or the `scn`
+/// carries a pattern name.
+const PATTERN_FILL: &str = "the fill is a pattern";
+
+/// How many names a `/ColorSpace` dictionary may bind in a chain before the model stops following
+/// it. A loop would otherwise not terminate.
+const MAX_COLOUR_SPACE_DEPTH: usize = 8;
+
+/// A device component, clamped the way a device colour is: a value outside the unit interval draws
+/// the nearest colour.
+fn unit(value: f64) -> f64 {
+    value.clamp(0.0, 1.0)
+}
+
+/// The fill a colour operator states, in device RGB, or the reason the model cannot resolve it.
+fn resolve(space: &Space, values: &[f64]) -> Fill {
+    match (space, values) {
+        (Space::Gray, [gray]) => Fill::Device([unit(*gray); 3]),
+        (Space::Rgb, [red, green, blue]) => Fill::Device([unit(*red), unit(*green), unit(*blue)]),
+        (Space::Cmyk, [cyan, magenta, yellow, black]) => {
+            let black = unit(*black);
+            Fill::Device([
+                unit((1.0 - unit(*cyan)) * (1.0 - black)),
+                unit((1.0 - unit(*magenta)) * (1.0 - black)),
+                unit((1.0 - unit(*yellow)) * (1.0 - black)),
+            ])
+        }
+        (Space::Gray, values) => wrong_arity("DeviceGray", values),
+        (Space::Rgb, values) => wrong_arity("DeviceRGB", values),
+        (Space::Cmyk, values) => wrong_arity("DeviceCMYK", values),
+        (Space::Unresolved(reason), _) => Fill::uncompared(reason),
+    }
+}
+
+/// The fill a device operator states with the wrong number of components: uncompared, naming how
+/// many it stated and the space.
+fn wrong_arity(space: &str, values: &[f64]) -> Fill {
+    Fill::Uncompared(format!(
+        "the fill states {} component(s) in the /{space} colour space",
+        values.len()
+    ))
+}
+
+/// The colour space a `cs` names, resolved through the stream's `/ColorSpace` dictionary: a device
+/// name is that device space, a name the dictionary binds is the space it is bound to, and an array
+/// is the family its first entry names. A name the dictionary does not bind is not resolved.
+fn colour_space(name: &Name<'_>, lookup: Lookup<'_, '_>, depth: usize) -> Space {
+    if depth > MAX_COLOUR_SPACE_DEPTH {
+        return Space::Unresolved(UNRESOLVED_COLOUR_SPACE);
+    }
+    match name.as_ref() {
+        b"DeviceGray" => Space::Gray,
+        b"DeviceRGB" => Space::Rgb,
+        b"DeviceCMYK" => Space::Cmyk,
+        b"Pattern" => Space::Unresolved(PATTERN_FILL),
+        _ => match lookup.colour_space(name) {
+            Some(Object::Name(alias)) => colour_space(&alias, lookup, depth + 1),
+            Some(Object::Array(items)) => family_space(&items),
+            _ => Space::Unresolved(UNRESOLVED_COLOUR_SPACE),
+        },
+    }
+}
+
+/// The space an array colour space states, from its first entry: a device name is that device
+/// space, and every other family is recorded by name, since the model resolves none of their
+/// components.
+fn family_space(items: &Array<'_>) -> Space {
+    match items
+        .iter::<Object<'_>>()
+        .next()
+        .and_then(|first| match first {
+            Object::Name(name) => Some(name),
+            _ => None,
+        })
+        .as_deref()
+    {
+        Some(b"DeviceGray") => Space::Gray,
+        Some(b"DeviceRGB") => Space::Rgb,
+        Some(b"DeviceCMYK") => Space::Cmyk,
+        Some(b"Separation") => Space::Unresolved("the fill is stated in a Separation colour space"),
+        Some(b"DeviceN") => Space::Unresolved("the fill is stated in a DeviceN colour space"),
+        Some(b"ICCBased") => Space::Unresolved("the fill is stated in an ICC-based colour space"),
+        Some(b"Indexed") => Space::Unresolved("the fill is stated in an indexed colour space"),
+        Some(b"Pattern") => Space::Unresolved(PATTERN_FILL),
+        Some(b"CalGray" | b"CalRGB" | b"Lab") => {
+            Space::Unresolved("the fill is stated in a CIE-based colour space")
+        }
+        _ => Space::Unresolved(UNRESOLVED_COLOUR_SPACE),
+    }
+}
+
+/// Where a content stream's operators look up the fonts, colour spaces and XObjects they name: a
+/// page's resources, which the format lets inherit along the page tree, or a form's or an
+/// appearance's own `/Resources`, which the model does not inherit.
+#[derive(Clone, Copy)]
+enum Lookup<'a, 'r> {
+    Page(&'r Resources<'a>),
+    Own(&'r Dict<'a>),
+}
+
+impl<'a> Lookup<'a, '_> {
+    fn font(self, name: &Name<'_>) -> Option<Dict<'a>> {
+        match self {
+            Self::Page(resources) => resources.get_font(name),
+            Self::Own(dict) => dict
+                .get::<Dict<'a>>(b"Font")
+                .and_then(|fonts| fonts.get(name)),
+        }
+    }
+
+    fn colour_space(self, name: &Name<'_>) -> Option<Object<'a>> {
+        match self {
+            Self::Page(resources) => resources.get_color_space(name),
+            Self::Own(dict) => dict
+                .get::<Dict<'a>>(b"ColorSpace")
+                .and_then(|spaces| spaces.get(name)),
+        }
+    }
+
+    fn x_object(self, name: &Name<'_>) -> Option<Stream<'a>> {
+        match self {
+            Self::Page(resources) => resources.get_x_object(name),
+            Self::Own(dict) => dict
+                .get::<Dict<'a>>(b"XObject")
+                .and_then(|objects| objects.get(name)),
+        }
+    }
+}
+
+/// The graphics state a content stream paints under, as its operators change it. `q`/`Q` save and
+/// restore it; the text and line matrices are not part of it.
+#[derive(Clone)]
+struct Graphics<'a> {
+    ctm: Matrix,
+    fill: Fill,
+    space: Space,
+    font: Option<Dict<'a>>,
+    size: f64,
+    leading: f64,
+    rise: f64,
+}
+
+impl<'a> Graphics<'a> {
+    fn initial() -> Self {
+        Self {
+            ctm: Matrix::IDENTITY,
+            fill: Fill::black(),
+            space: Space::Gray,
+            font: None,
+            size: 0.0,
+            leading: 0.0,
+            rise: 0.0,
+        }
+    }
+}
+
+/// A content stream's painting state: the graphics state `q`/`Q` save, and the text and line
+/// matrices `BT` resets and `Tm`/`Td`/`T*` move.
+struct Paint<'a> {
+    graphics: Graphics<'a>,
+    text: Matrix,
+    line: Matrix,
+    /// The graphics states `q` saved. Each `q` is one operator, so the stack is bounded by the
+    /// stream's operator charge (`charge_operators`) however long the stream is.
+    saved: Vec<Graphics<'a>>,
+}
+
+impl<'a> Paint<'a> {
+    fn new() -> Self {
+        Self {
+            graphics: Graphics::initial(),
+            text: Matrix::IDENTITY,
+            line: Matrix::IDENTITY,
+            saved: Vec::new(),
+        }
+    }
+
+    /// The state a form XObject paints in: the caller's graphics state under the form's own matrix.
+    /// The text and line matrices are reset, as every content stream starts them.
+    fn in_form(graphics: &Graphics<'a>, matrix: Matrix) -> Self {
+        Self {
+            graphics: Graphics {
+                ctm: matrix.compose(&graphics.ctm),
+                ..graphics.clone()
+            },
+            text: Matrix::IDENTITY,
+            line: Matrix::IDENTITY,
+            saved: Vec::new(),
+        }
+    }
+
+    /// `Tf`: the font the following strings are drawn with, resolved through the stream's
+    /// resources, and the size it states.
+    fn set_font(&mut self, instruction: &Instruction<'_, '_>, lookup: Lookup<'a, '_>) {
+        let mut operands = instruction.operands();
+        self.graphics.font = match operands.next() {
+            Some(Object::Name(name)) => lookup.font(name),
+            _ => None,
+        };
+        if let Some(Object::Number(size)) = operands.next() {
+            self.graphics.size = size.as_f64();
+        }
+    }
+
+    /// `'` and `"` step to the next line before they draw; `Tj` and `TJ` draw where the text matrix
+    /// already places them.
+    fn before_show(&mut self, operator: &[u8]) {
+        if operator == b"'" || operator == b"\"" {
+            self.next_line();
+        }
+    }
+
+    /// The run a show operator draws, appended to `out`: a page's own content records even an empty
+    /// run, an appearance states none. `mode` says which stream is being read.
+    fn show(
+        &mut self,
+        instruction: &Instruction<'_, 'a>,
+        cache: &mut ToUnicodeCache,
+        budget: &mut Decoded,
+        mode: RunText,
+        out: &mut Vec<Value>,
+    ) -> Result<()> {
+        self.before_show(instruction.operator);
+        if let Some(drawn) = instruction_text(
+            instruction,
+            self.graphics.font.as_ref(),
+            cache,
+            budget,
+            mode,
+        )? && (mode == RunText::Page || !drawn.is_empty())
+        {
+            out.push(self.run(drawn));
+        }
+        Ok(())
+    }
+
+    /// Apply one operator that only changes state. `Tf` is handled by `set_font`, which resolves
+    /// the font through the stream's resources; `lookup` is that stream's resource view, which `cs`
+    /// uses for colour spaces.
+    fn apply(&mut self, instruction: &Instruction<'_, '_>, lookup: Lookup<'a, '_>) {
+        let operator: &[u8] = instruction.operator;
+        match operator {
+            b"q" => self.saved.push(self.graphics.clone()),
+            b"Q" => {
+                if let Some(previous) = self.saved.pop() {
+                    self.graphics = previous;
+                }
+            }
+            b"cm" => {
+                if let Some(values) = numbers(instruction)
+                    && let Some(transform) = matrix_of(&values)
+                {
+                    self.graphics.ctm = transform.compose(&self.graphics.ctm);
+                }
+            }
+            b"g" | b"rg" | b"k" => self.set_fill(instruction),
+            b"cs" => {
+                if let Some(Object::Name(name)) = instruction.operands().next() {
+                    let space = colour_space(name, lookup, 0);
+                    self.graphics.fill = space.initial();
+                    self.graphics.space = space;
+                }
+            }
+            b"sc" | b"scn" => self.set_components(instruction),
+            b"BT" => {
+                self.text = Matrix::IDENTITY;
+                self.line = Matrix::IDENTITY;
+            }
+            b"Tm" => {
+                if let Some(values) = numbers(instruction)
+                    && let Some(transform) = matrix_of(&values)
+                {
+                    self.text = transform;
+                    self.line = transform;
+                }
+            }
+            b"Td" | b"TD" => {
+                if let Some([x, y]) = numbers(instruction).as_deref() {
+                    if operator == b"TD" {
+                        self.graphics.leading = -y;
+                    }
+                    self.next_line_at(*x, *y);
+                }
+            }
+            b"TL" => {
+                if let Some([leading]) = numbers(instruction).as_deref() {
+                    self.graphics.leading = *leading;
+                }
+            }
+            b"T*" => self.next_line(),
+            b"Ts" => {
+                if let Some([rise]) = numbers(instruction).as_deref() {
+                    self.graphics.rise = *rise;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Move to the next line by the leading, as `T*` and a `'`/`"` do.
+    fn next_line(&mut self) {
+        self.next_line_at(0.0, -self.graphics.leading);
+    }
+
+    /// Move the line matrix by `(x, y)` in text space, and make it the text matrix.
+    fn next_line_at(&mut self, x: f64, y: f64) {
+        self.line = Matrix::translated(x, y).compose(&self.line);
+        self.text = self.line;
+    }
+
+    fn set_fill(&mut self, instruction: &Instruction<'_, '_>) {
+        let Some(values) = numbers(instruction) else {
+            return;
+        };
+        let operator: &[u8] = instruction.operator;
+        self.graphics.space = match operator {
+            b"g" => Space::Gray,
+            b"rg" => Space::Rgb,
+            _ => Space::Cmyk,
+        };
+        self.graphics.fill = resolve(&self.graphics.space, &values);
+    }
+
+    fn set_components(&mut self, instruction: &Instruction<'_, '_>) {
+        let mut values = Vec::new();
+        let mut pattern = false;
+        for operand in instruction.operands() {
+            match operand {
+                Object::Number(number) => values.push(number.as_f64()),
+                Object::Name(_) => pattern = true,
+                _ => {}
+            }
+        }
+        self.graphics.fill = if pattern {
+            Fill::uncompared(PATTERN_FILL)
+        } else {
+            resolve(&self.graphics.space, &values)
+        };
+    }
+
+    /// The run this state draws.
+    fn run(&self, text: String) -> Value {
+        let matrix = self.text.compose(&self.graphics.ctm);
+        let (x, y) = matrix.apply(0.0, self.graphics.rise);
+        let size = self.graphics.size * matrix.vertical_scale();
+        json!({
+            "text": text,
+            "position": [rounded(x), rounded(y)],
+            "size": rounded(size),
+            "colour": self.graphics.fill.value(),
+            "rotation": matrix.rotation(),
+        })
+    }
+}
+
 /// One page: the area it shows, the quarter turn it is displayed at, what it draws and what is
 /// marked on it.
 fn page_value(page: &Page<'_>, budget: &mut Decoded) -> Result<Value> {
@@ -503,13 +955,10 @@ fn page_value(page: &Page<'_>, budget: &mut Decoded) -> Result<Value> {
     let mut forms = 0_usize;
     let mut vector = Sha256::new();
     let mut vector_count = 0_usize;
-    // The font the following text operators draw with, and the maps already parsed for this page.
-    let mut font: Option<Dict<'_>> = None;
+    // The state the content paints under, and the maps already parsed for this page.
+    let mut paint = Paint::new();
+    let lookup = Lookup::Page(page.resources());
     let mut unicode_maps: ToUnicodeCache = HashMap::new();
-    // The transform the content paints under: `cm` composes onto it, and `q`/`Q` save and restore
-    // it. An image's placement is this transform at the `Do` that paints it.
-    let mut ctm = Matrix::IDENTITY;
-    let mut saved: Vec<Matrix> = Vec::new();
     charge_content(page, budget)?;
     let mut operations = page.operations();
     let mut operators = 0_usize;
@@ -517,51 +966,33 @@ fn page_value(page: &Page<'_>, budget: &mut Decoded) -> Result<Value> {
         charge_operators(&mut operators)?;
         let operator: &[u8] = instruction.operator;
         match operator {
-            // The graphics state the page paints under. `q`/`Q` do not nest further than the stack
-            // a stream states, which the operator bound already limits.
-            b"q" => saved.push(ctm),
-            b"Q" => {
-                if let Some(previous) = saved.pop() {
-                    ctm = previous;
-                }
-            }
-            b"cm" => {
-                if let Some(transform) = matrix_of(&instruction) {
-                    ctm = transform.compose(&ctm);
-                }
-            }
-            // `Tf` names the font the following strings are drawn with. `get_font` walks the
-            // resource's parent chain, so an inherited font is found as well.
-            b"Tf" => {
-                font = instruction
-                    .operands()
-                    .next()
-                    .and_then(|operand| match operand {
-                        Object::Name(name) => page.resources().get_font(name),
-                        _ => None,
-                    });
-            }
+            b"Tf" => paint.set_font(&instruction, lookup),
             // Every text-showing operator draws one run; `TJ`'s string elements are concatenated
-            // and its kerning numbers dropped.
+            // and its kerning numbers dropped. `'` and `"` move to the next line first.
             b"Tj" | b"'" | b"\"" | b"TJ" => {
-                if let Some(drawn) = instruction_text(
+                paint.show(
                     &instruction,
-                    font.as_ref(),
                     &mut unicode_maps,
                     budget,
                     RunText::Page,
-                )? {
-                    text.push(Value::from(drawn));
-                }
+                    &mut text,
+                )?;
             }
             b"Do" => {
                 if let Some(Object::Name(name)) = instruction.operands().next()
-                    && let Some(stream) = page.resources().get_x_object(name)
+                    && let Some(stream) = lookup.x_object(name)
                 {
                     if stream.dict().get::<Name<'_>>(b"Subtype").as_deref() == Some(b"Form") {
                         forms += 1;
-                        walk_form(&stream, &mut appearance_text, &mut unicode_maps, budget, 0)?;
-                    } else if let Some(image) = image_value(&stream, budget, &ctm)? {
+                        walk_form(
+                            &stream,
+                            &mut appearance_text,
+                            &mut unicode_maps,
+                            budget,
+                            0,
+                            &paint.graphics,
+                        )?;
+                    } else if let Some(image) = image_value(&stream, budget, &paint.graphics.ctm)? {
                         images.push(image);
                     }
                 }
@@ -569,12 +1000,13 @@ fn page_value(page: &Page<'_>, budget: &mut Decoded) -> Result<Value> {
             // An inline image arrives as the one stream operand of its `BI`.
             b"BI" => {
                 if let Some(Object::Stream(stream)) = instruction.operands().next()
-                    && let Some(image) = image_value(stream, budget, &ctm)?
+                    && let Some(image) = image_value(stream, budget, &paint.graphics.ctm)?
                 {
                     images.push(image);
                 }
             }
             _ => {
+                paint.apply(&instruction, lookup);
                 if VECTOR_OPERATORS.contains(&operator) {
                     vector_count += 1;
                     let mut line = String::from_utf8_lossy(operator).into_owned();
@@ -638,6 +1070,36 @@ impl Matrix {
         }
     }
 
+    /// A translation by `(x, y)`.
+    fn translated(x: f64, y: f64) -> Self {
+        Self {
+            e: x,
+            f: y,
+            ..Self::IDENTITY
+        }
+    }
+
+    /// Where this transform maps the point `(x, y)`.
+    fn apply(&self, x: f64, y: f64) -> (f64, f64) {
+        (
+            self.a * x + self.c * y + self.e,
+            self.b * x + self.d * y + self.f,
+        )
+    }
+
+    /// The length of the y axis this transform gives the unit square: the factor a font size is
+    /// drawn at.
+    fn vertical_scale(&self) -> f64 {
+        self.c.hypot(self.d)
+    }
+
+    /// The direction of the x axis this transform gives the unit square, in degrees from zero to
+    /// 360: the turn a run is drawn at.
+    fn rotation(&self) -> f64 {
+        let degrees = rounded(self.b.atan2(self.a).to_degrees().rem_euclid(360.0));
+        if degrees == 360.0 { 0.0 } else { degrees }
+    }
+
     /// The transform as the model holds it: six coordinates, each rounded like every other number.
     fn value(self) -> Value {
         json!([
@@ -651,16 +1113,24 @@ impl Matrix {
     }
 }
 
-/// The six numbers of a `cm`, or `None` when the operator does not state six numbers.
-fn matrix_of(instruction: &hayro::hayro_syntax::content::Instruction<'_, '_>) -> Option<Matrix> {
-    let numbers = instruction
-        .operands()
+/// Every operand that is a number, or `None` when one is not.
+fn numeric<'a>(operands: impl Iterator<Item = Object<'a>>) -> Option<Vec<f64>> {
+    operands
         .map(|operand| match operand {
             Object::Number(number) => Some(number.as_f64()),
             _ => None,
         })
-        .collect::<Option<Vec<f64>>>()?;
-    match numbers.as_slice() {
+        .collect()
+}
+
+/// Every operand of an operator that is a number, or `None` when one is not.
+fn numbers(instruction: &Instruction<'_, '_>) -> Option<Vec<f64>> {
+    numeric(instruction.operands().cloned())
+}
+
+/// The six numbers of a transform, or `None` when they are not six.
+fn matrix_of(values: &[f64]) -> Option<Matrix> {
+    match values {
         [a, b, c, d, e, f] => Some(Matrix {
             a: *a,
             b: *b,
@@ -671,6 +1141,16 @@ fn matrix_of(instruction: &hayro::hayro_syntax::content::Instruction<'_, '_>) ->
         }),
         _ => None,
     }
+}
+
+/// The `/Matrix` a form XObject states, or the identity when it states none.
+fn form_matrix(stream: &Stream<'_>) -> Matrix {
+    stream
+        .dict()
+        .get::<Array<'_>>(b"Matrix")
+        .and_then(|matrix| numeric(matrix.iter::<Object<'_>>()))
+        .and_then(|values| matrix_of(&values))
+        .unwrap_or(Matrix::IDENTITY)
 }
 
 /// The quarter turn a page is displayed at, in degrees clockwise.
@@ -885,16 +1365,18 @@ fn operand_text(object: &Object<'_>, out: &mut String) {
     }
 }
 
-/// The strings one painted form XObject draws, appended in drawing order.
+/// The runs one painted form XObject draws, appended in drawing order. `graphics` is the state the
+/// form is painted under, and the form's own `/Matrix` is composed onto its transform.
 ///
 /// A form that paints another form is followed, bounded by [`MAX_FORM_DEPTH`]; the module docs
 /// state what the walk does not read.
-fn walk_form(
-    stream: &Stream<'_>,
+fn walk_form<'a>(
+    stream: &Stream<'a>,
     out: &mut Vec<Value>,
     cache: &mut ToUnicodeCache,
     budget: &mut Decoded,
     depth: usize,
+    graphics: &Graphics<'a>,
 ) -> Result<()> {
     if depth > MAX_FORM_DEPTH {
         return Ok(());
@@ -903,51 +1385,31 @@ fn walk_form(
         return Ok(());
     };
     budget.stream(stream, bytes.len() as u64)?;
-    let fonts = stream
+    let own = stream
         .dict()
-        .get::<Dict<'_>>(b"Resources")
-        .and_then(|resources| resources.get::<Dict<'_>>(b"Font"));
-    let mut font: Option<Dict<'_>> = None;
+        .get::<Dict<'a>>(b"Resources")
+        .unwrap_or_else(Dict::empty);
+    let lookup = Lookup::Own(&own);
+    let mut paint = Paint::in_form(graphics, form_matrix(stream));
     let mut operators = 0_usize;
     let mut operations = UntypedIter::new(bytes.as_ref());
     while let Some(instruction) = operations.next() {
         charge_operators(&mut operators)?;
         let operator: &[u8] = instruction.operator;
         match operator {
-            b"Tf" => {
-                font = instruction
-                    .operands()
-                    .next()
-                    .and_then(|operand| match operand {
-                        Object::Name(name) => fonts.as_ref().and_then(|fonts| fonts.get(name)),
-                        _ => None,
-                    });
-            }
+            b"Tf" => paint.set_font(&instruction, lookup),
             b"Tj" | b"'" | b"\"" | b"TJ" => {
-                if let Some(drawn) = instruction_text(
-                    &instruction,
-                    font.as_ref(),
-                    cache,
-                    budget,
-                    RunText::Appearance,
-                )? && !drawn.is_empty()
-                {
-                    out.push(Value::from(drawn));
-                }
+                paint.show(&instruction, cache, budget, RunText::Appearance, out)?;
             }
             b"Do" => {
                 if let Some(Object::Name(name)) = instruction.operands().next()
-                    && let Some(nested) = stream
-                        .dict()
-                        .get::<Dict<'_>>(b"Resources")
-                        .and_then(|resources| resources.get::<Dict<'_>>(b"XObject"))
-                        .and_then(|objects| objects.get::<Stream<'_>>(name))
+                    && let Some(nested) = lookup.x_object(name)
                     && nested.dict().get::<Name<'_>>(b"Subtype").as_deref() == Some(b"Form")
                 {
-                    walk_form(&nested, out, cache, budget, depth + 1)?;
+                    walk_form(&nested, out, cache, budget, depth + 1, &paint.graphics)?;
                 }
             }
-            _ => {}
+            _ => paint.apply(&instruction, lookup),
         }
     }
     Ok(())
@@ -1250,18 +1712,19 @@ fn field_state(field: &Dict<'_>, kind: &str) -> Value {
     }
 }
 
-/// The strings a field's appearance draws, widget by widget, in widget order.
+/// The runs a field's appearance draws, widget by widget, in widget order.
 fn field_appearance(
     field: &Dict<'_>,
     cache: &mut ToUnicodeCache,
     budget: &mut Decoded,
 ) -> Result<Value> {
     let mut out = Vec::new();
+    let graphics = Graphics::initial();
     for widget in field_widgets(field) {
         let Some(stream) = normal_appearance(&widget) else {
             continue;
         };
-        walk_form(&stream, &mut out, cache, budget, 0)?;
+        walk_form(&stream, &mut out, cache, budget, 0, &graphics)?;
     }
     Ok(Value::Array(out))
 }
@@ -1650,14 +2113,15 @@ mod tests {
         let mut budget = Decoded::default();
         let mut out = Vec::new();
         let mut cache = HashMap::new();
-        walk_form(&form, &mut out, &mut cache, &mut budget, 0)
+        let graphics = Graphics::initial();
+        walk_form(&form, &mut out, &mut cache, &mut budget, 0, &graphics)
             .expect("a small form is under the bound");
         assert_eq!(budget.total, 7, "the form's decoded content");
         assert!(
             out.is_empty(),
             "a form that draws no text states none to the model"
         );
-        let error = walk_form(&form, &mut out, &mut cache, &mut spent(), 0)
+        let error = walk_form(&form, &mut out, &mut cache, &mut spent(), 0, &graphics)
             .expect_err("a spent total refuses the form");
         assert!(error.to_string().contains("decoded streams"), "{error}");
     }

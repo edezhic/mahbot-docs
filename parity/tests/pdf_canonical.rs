@@ -146,6 +146,8 @@ struct Variant {
     rotate: i32,
     /// The string the page's text operator draws.
     text: &'static str,
+    /// The text-state operators before the string: `BT`, the font and the placement.
+    text_state: &'static str,
     /// What the page draws after the text: the image and the path operators.
     drawing: &'static str,
     /// The image's samples.
@@ -197,6 +199,7 @@ impl Default for Variant {
             crop: Some("[10 10 190 90]"),
             rotate: 0,
             text: "Hello page",
+            text_state: "BT /F1 12 Tf 10 50 Td ",
             drawing: " q 10 0 0 10 20 20 cm /Im1 Do Q 0 0 m 50 50 l S",
             samples: SAMPLES,
             image_compressed: false,
@@ -231,8 +234,8 @@ fn objects_for(variant: &Variant) -> Vec<Object> {
     let reversed = variant.reversed_keys;
 
     let content = format!(
-        "BT /F1 12 Tf 10 50 Td ({}) Tj ET{}",
-        variant.text, variant.drawing
+        "{}({}) Tj ET{}",
+        variant.text_state, variant.text, variant.drawing
     );
     let content = if variant.compressed {
         stream(
@@ -435,6 +438,17 @@ fn image_value() -> Value {
     })
 }
 
+/// The characters of a list of text runs, joined in drawing order.
+fn runs_text(runs: &Value) -> Vec<&str> {
+    runs.as_array()
+        .map(|runs| {
+            runs.iter()
+                .filter_map(|run| run.get("text").and_then(Value::as_str))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// The canonical value of one variant's bytes, refusing a fixture the model cannot read.
 fn model_of(variant: &Variant) -> Value {
     canonical(&document(variant)).expect("the fixture is a readable PDF")
@@ -453,7 +467,13 @@ fn the_model_reads_what_the_fixture_states() {
             "media": [0.0, 0.0, 200.0, 100.0],
             "crop": [10.0, 10.0, 190.0, 90.0],
             "rotate": 0,
-            "text": ["Hello page"],
+            "text": [{
+                "text": "Hello page",
+                "position": [10.0, 50.0],
+                "size": 12.0,
+                "colour": [0.0, 0.0, 0.0],
+                "rotation": 0.0,
+            }],
             "images": [image_value()],
             "forms": 0,
             "appearance_text": [],
@@ -597,7 +617,7 @@ endcmap
 end end";
     let pdf = pdf_with_text_form("BT /F1 12 Tf 10 10 Td <00010002> Tj ET", cmap, true);
     let value = canonical(&pdf).expect("a readable PDF");
-    assert_eq!(value["pages"][0]["appearance_text"], json!(["Hi"]));
+    assert_eq!(runs_text(&value["pages"][0]["appearance_text"]), ["Hi"]);
     assert_eq!(
         value["pages"][0]["text"],
         json!([]),
@@ -647,46 +667,58 @@ end end";
     );
 }
 
+/// A Type0 font carrying `cmap` as its `/ToUnicode` map and, when `embedded`, a font program on its
+/// descriptor, plus the objects it refers to.
+fn embedded_type0_font(cmap: &str, embedded: bool, program: &[u8]) -> (Object, Vec<Object>) {
+    let descriptor = if embedded {
+        " /FontDescriptor << /Type /FontDescriptor /FontName /Sub /Flags 4 /FontFile2 {program} >>"
+    } else {
+        ""
+    };
+    (
+        Object::new(
+            "font",
+            "<< /Type /Font /Subtype /Type0 /BaseFont /Sub /Encoding /Identity-H \
+             /DescendantFonts [{descendant}] /ToUnicode {tounicode} >>",
+        ),
+        vec![
+            Object::new(
+                "descendant",
+                format!("<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Sub {descriptor} >>"),
+            ),
+            Object::new("program", stream(&[], program, false)),
+            Object::new("tounicode", stream(&[], cmap.as_bytes(), false)),
+        ],
+    )
+}
+
 /// The font `/F1` and the appearance stream that draws `drawing` with it: a Type0 font carrying
-/// `cmap` as its `/ToUnicode` map and, when `embedded`, a font program on its descriptor.
+/// `cmap` as its `/ToUnicode` map and, when `embedded`, a font program on its descriptor. The form
+/// states `matrix` when it names one.
 fn appearance_font(
     drawing: &str,
     cmap: &str,
     embedded: bool,
     bbox: &str,
     program: &[u8],
+    matrix: Option<&str>,
 ) -> Vec<Object> {
-    let descriptor = if embedded {
-        " /FontDescriptor << /Type /FontDescriptor /FontName /Sub /Flags 4 /FontFile2 {program} >>"
-    } else {
-        ""
-    };
-    vec![
-        Object::new(
-            "font",
-            "<< /Type /Font /Subtype /Type0 /BaseFont /Sub /Encoding /Identity-H \
-             /DescendantFonts [{descendant}] /ToUnicode {tounicode} >>",
-        ),
-        Object::new(
-            "descendant",
-            format!("<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Sub {descriptor} >>"),
-        ),
-        Object::new("program", stream(&[], program, false)),
-        Object::new("tounicode", stream(&[], cmap.as_bytes(), false)),
-        Object::new(
-            "appearance",
-            stream(
-                &[
-                    ("Type", "/XObject".to_string()),
-                    ("Subtype", "/Form".to_string()),
-                    ("BBox", bbox.to_string()),
-                    ("Resources", "<< /Font << /F1 {font} >> >>".to_string()),
-                ],
-                drawing.as_bytes(),
-                false,
-            ),
-        ),
-    ]
+    let (font, mut objects) = embedded_type0_font(cmap, embedded, program);
+    let mut form = vec![
+        ("Type", "/XObject".to_string()),
+        ("Subtype", "/Form".to_string()),
+        ("BBox", bbox.to_string()),
+    ];
+    if let Some(matrix) = matrix {
+        form.push(("Matrix", matrix.to_string()));
+    }
+    form.push(("Resources", "<< /Font << /F1 {font} >> >>".to_string()));
+    objects.insert(0, font);
+    objects.push(Object::new(
+        "appearance",
+        stream(&form, drawing.as_bytes(), false),
+    ));
+    objects
 }
 
 /// A form XObject whose text form draws `drawing`, with a Type0 font `/F1` carrying `cmap` as its
@@ -708,6 +740,7 @@ fn pdf_with_text_form(drawing: &str, cmap: &str, embedded: bool) -> Vec<u8> {
         embedded,
         "[0 0 50 50]",
         b"not really a font",
+        None,
     ));
     assemble(&objects, "")
 }
@@ -730,8 +763,8 @@ fn an_appearance_that_is_blank_garbled_or_unrenderable_fails() {
     ))
     .expect("a readable PDF");
     assert_eq!(
-        correct["form"]["fields"][0]["appearance"],
-        json!(["Ada"]),
+        runs_text(&correct["form"]["fields"][0]["appearance"]),
+        ["Ada"],
         "the appearance draws the value it holds"
     );
     for (what, drawing, cmap, embedded) in [
@@ -806,7 +839,9 @@ fn pdf_with_widget(
             ),
         ),
     ];
-    objects.extend(appearance_font(drawing, cmap, embedded, bbox, program));
+    objects.extend(appearance_font(
+        drawing, cmap, embedded, bbox, program, None,
+    ));
     assemble(&objects, "")
 }
 
@@ -1107,41 +1142,28 @@ fn the_same_bytes_canonicalise_to_the_same_value() {
 // ── drawn text ───────────────────────────────────────────────────────────────────────────────
 
 /// A one-page PDF that draws `content` with the font named `/F1`, whose object is `font`, plus the
-/// objects the font refers to.
+/// objects the font refers to. The page's `/Resources` carries no `/ColorSpace` entry.
 fn drawn_with(font: Object, extra: Vec<Object>, content: &str) -> Vec<u8> {
+    drawn_with_spaces(font, extra, "", content)
+}
+
+/// A one-page PDF that draws `content` with the font named `/F1` and the page's `/ColorSpace`
+/// dictionary `spaces`, whose entries are written as they appear inside `<< … >>`, plus the objects
+/// the font refers to.
+fn drawn_with_spaces(font: Object, extra: Vec<Object>, spaces: &str, content: &str) -> Vec<u8> {
+    let resources = if spaces.is_empty() {
+        "<< /Font << /F1 {font} >> >>".to_string()
+    } else {
+        format!("<< /Font << /F1 {{font}} >> /ColorSpace << {spaces} >> >>")
+    };
     let mut objects = vec![
-        Object::new(
-            "catalog",
-            dict(
-                &[
-                    ("Type", "/Catalog".to_string()),
-                    ("Pages", "{pages}".to_string()),
-                ],
-                false,
-            ),
-        ),
-        Object::new(
-            "pages",
-            dict(
-                &[
-                    ("Type", "/Pages".to_string()),
-                    ("Kids", "[{page}]".to_string()),
-                    ("Count", "1".to_string()),
-                ],
-                false,
-            ),
-        ),
+        Object::new("catalog", "<< /Type /Catalog /Pages {pages} >>"),
+        Object::new("pages", "<< /Type /Pages /Kids [{page}] /Count 1 >>"),
         Object::new(
             "page",
-            dict(
-                &[
-                    ("Type", "/Page".to_string()),
-                    ("Parent", "{pages}".to_string()),
-                    ("MediaBox", "[0 0 200 200]".to_string()),
-                    ("Resources", "<< /Font << /F1 {font} >> >>".to_string()),
-                    ("Contents", "{content}".to_string()),
-                ],
-                false,
+            format!(
+                "<< /Type /Page /Parent {{pages}} /MediaBox [0 0 200 200] \
+                 /Resources {resources} /Contents {{content}} >>"
             ),
         ),
         font,
@@ -1198,7 +1220,7 @@ end end";
         "BT /F1 12 Tf 10 50 Td <00010002000300040005> Tj ET",
     ))
     .expect("the fixture is a readable PDF");
-    assert_eq!(value["pages"][0]["text"], json!(["Hello"]));
+    assert_eq!(runs_text(&value["pages"][0]["text"]), ["Hello"]);
 }
 
 /// A `beginbfrange` with a scalar destination increments the last code unit across the range, so
@@ -1221,7 +1243,7 @@ end end";
         "BT /F1 12 Tf 10 50 Td <000100020003> Tj ET",
     ))
     .expect("the fixture is a readable PDF");
-    assert_eq!(value["pages"][0]["text"], json!(["ABC"]));
+    assert_eq!(runs_text(&value["pages"][0]["text"]), ["ABC"]);
 }
 
 /// A Type1 Helvetica font with no `/ToUnicode` map: a simple font whose drawn strings read as their
@@ -1251,7 +1273,7 @@ fn a_font_without_a_to_unicode_map_keeps_the_raw_code_fallback() {
         "BT /F1 12 Tf 10 50 Td (Hello) Tj ET",
     ))
     .expect("the fixture is a readable PDF");
-    assert_eq!(value["pages"][0]["text"], json!(["Hello"]));
+    assert_eq!(runs_text(&value["pages"][0]["text"]), ["Hello"]);
 }
 
 /// A code the map does not name contributes the code point itself rather than panicking or
@@ -1274,7 +1296,7 @@ end end";
         "BT /F1 12 Tf 10 50 Td <00010041> Tj ET",
     ))
     .expect("the fixture is a readable PDF");
-    assert_eq!(value["pages"][0]["text"], json!(["HA"]));
+    assert_eq!(runs_text(&value["pages"][0]["text"]), ["HA"]);
 }
 
 // ── the limits of comparison ─────────────────────────────────────────────────────────────────
@@ -1428,20 +1450,33 @@ fn pdf_with_entries(catalog: &str, page: &str, extra: Vec<Object>) -> Vec<u8> {
     assemble(&objects, "")
 }
 
-/// A page's `text` is the strings it draws, not the marks it draws them with: the place the text is
-/// drawn at, its size, its fill colour, its character and word spacing, its render mode and the
-/// identity of the font it is drawn with are not compared.
+/// A page's `text` records where each run starts, the size it is drawn at, its fill colour and its
+/// turn; the four differences are `compared_cases`' text entries, so this pins what the model does
+/// not see. The font's name, the character and word spacing, the horizontal scaling and the render
+/// mode are not part of the model.
 #[test]
-fn page_text_is_compared_as_strings_not_as_marks() {
+fn page_text_is_compared_as_marks_not_as_a_font() {
     let at = |font: Object, content: &str| {
         let value = canonical(&drawn_with(font, Vec::new(), content)).expect("a readable PDF");
-        assert_eq!(value["pages"][0]["text"], json!(["Hello"]), "{content}");
+        assert_eq!(
+            runs_text(&value["pages"][0]["text"]),
+            ["Hello"],
+            "{content}"
+        );
         value
     };
     let base = at(helvetica(), "BT /F1 12 Tf 10 50 Td (Hello) Tj ET");
+    assert_eq!(
+        base["pages"][0]["text"],
+        json!([{
+            "text": "Hello",
+            "position": [10.0, 50.0],
+            "size": 12.0,
+            "colour": [0.0, 0.0, 0.0],
+            "rotation": 0.0,
+        }])
+    );
     for (what, content) in [
-        ("another place", "BT /F1 12 Tf 100 150 Td (Hello) Tj ET"),
-        ("another size", "BT /F1 24 Tf 10 50 Td (Hello) Tj ET"),
         (
             "another character spacing",
             "BT /F1 12 Tf 2 Tc 10 50 Td (Hello) Tj ET",
@@ -1450,26 +1485,19 @@ fn page_text_is_compared_as_strings_not_as_marks() {
             "another word spacing",
             "BT /F1 12 Tf 3 Tw 10 50 Td (Hello) Tj ET",
         ),
+        (
+            "another horizontal scaling",
+            "BT /F1 12 Tf 200 Tz 10 50 Td (Hello) Tj ET",
+        ),
         ("a render mode", "BT /F1 12 Tf 2 Tr 10 50 Td (Hello) Tj ET"),
     ] {
         let other = at(helvetica(), content);
-        assert_eq!(
-            other["pages"][0]["text"], base["pages"][0]["text"],
-            "{what}"
-        );
         assert!(
             compare(&base, &other).is_same(),
-            "text drawn at {what} is not a difference: {:?}",
+            "text drawn with {what} is not a difference: {:?}",
             compare(&base, &other).lines(4)
         );
     }
-    let red = at(helvetica(), "1 0 0 rg BT /F1 12 Tf 10 50 Td (Hello) Tj ET");
-    let blue = at(helvetica(), "0 0 1 rg BT /F1 12 Tf 10 50 Td (Hello) Tj ET");
-    assert!(
-        compare(&red, &blue).is_same(),
-        "text drawn in another colour is not a difference: {:?}",
-        compare(&red, &blue).lines(4)
-    );
     let times = Object::new(
         "font",
         dict(
@@ -1483,10 +1511,416 @@ fn page_text_is_compared_as_strings_not_as_marks() {
         ),
     );
     let other_font = at(times, "BT /F1 12 Tf 10 50 Td (Hello) Tj ET");
+    assert_eq!(
+        other_font["pages"][0]["text"], base["pages"][0]["text"],
+        "the font's name is not recorded"
+    );
     assert!(
         compare(&base, &other_font).is_same(),
         "text drawn with another font is not a difference: {:?}",
         compare(&base, &other_font).lines(4)
+    );
+}
+
+/// The model reads no glyph widths, so a run's position is its text matrix's origin rather than the
+/// pen the run before it advanced. Two runs drawn one after another on one line therefore both
+/// record that origin, and two files whose fonts advance differently compare equal.
+#[test]
+fn the_advance_a_show_operator_makes_is_not_compared() {
+    let at = |font: Object| {
+        let value = canonical(&drawn_with(
+            font,
+            Vec::new(),
+            "BT /F1 12 Tf 10 50 Td (He) Tj (llo) Tj ET",
+        ))
+        .expect("a readable PDF");
+        assert_eq!(runs_text(&value["pages"][0]["text"]), ["He", "llo"]);
+        value
+    };
+    let times = Object::new(
+        "font",
+        dict(
+            &[
+                ("Type", "/Font".to_string()),
+                ("Subtype", "/Type1".to_string()),
+                ("BaseFont", "/Times-Roman".to_string()),
+                ("Encoding", "/WinAnsiEncoding".to_string()),
+            ],
+            false,
+        ),
+    );
+    let helvetica = at(helvetica());
+    let times = at(times);
+    for value in [&helvetica, &times] {
+        for run in value["pages"][0]["text"].as_array().expect("a text array") {
+            assert_eq!(
+                run["position"],
+                json!([10.0, 50.0]),
+                "both runs record the line's origin"
+            );
+        }
+    }
+    assert!(
+        compare(&helvetica, &times).is_same(),
+        "the advance the first run makes is not compared: {:?}",
+        compare(&helvetica, &times).lines(4)
+    );
+}
+
+/// A fill the model can resolve is held as device RGB: the gray and RGB spellings of one colour are
+/// one value, a component outside the unit interval draws the nearest one, and a CMYK colour is
+/// converted the way a device resolves it.
+#[test]
+fn a_device_colour_is_recorded_as_rgb() {
+    let at = |content: &str| {
+        let value =
+            canonical(&drawn_with(helvetica(), Vec::new(), content)).expect("a readable PDF");
+        value["pages"][0]["text"][0]["colour"].clone()
+    };
+    assert_eq!(
+        at("BT /F1 12 Tf 10 50 Td (Hello) Tj ET"),
+        json!([0.0, 0.0, 0.0]),
+        "the initial fill is black"
+    );
+    assert_eq!(
+        at("0 g BT /F1 12 Tf 10 50 Td (Hello) Tj ET"),
+        json!([0.0, 0.0, 0.0]),
+        "gray and RGB black are one colour"
+    );
+    assert_eq!(
+        at("1 0 0 rg BT /F1 12 Tf 10 50 Td (Hello) Tj ET"),
+        json!([1.0, 0.0, 0.0])
+    );
+    assert_eq!(
+        at("1.5 0 0 rg BT /F1 12 Tf 10 50 Td (Hello) Tj ET"),
+        json!([1.0, 0.0, 0.0]),
+        "a component outside the unit interval is clamped"
+    );
+    assert_eq!(
+        at("0 0 0 1 k BT /F1 12 Tf 10 50 Td (Hello) Tj ET"),
+        json!([0.0, 0.0, 0.0]),
+        "CMYK black is black"
+    );
+    assert_eq!(
+        at("0.2 0.4 0.6 0.1 k BT /F1 12 Tf 10 50 Td (Hello) Tj ET"),
+        json!([0.72, 0.54, 0.36]),
+        "CMYK is converted by (1 - c)(1 - k)"
+    );
+}
+
+/// A device operator that states the wrong number of components is uncompared, its reason naming the
+/// count and the space, so its wording cannot drift out from under a transcript.
+#[test]
+fn a_device_operator_with_the_wrong_number_of_components_is_uncompared() {
+    let at = |content: &str| {
+        let value =
+            canonical(&drawn_with(helvetica(), Vec::new(), content)).expect("a readable PDF");
+        value["pages"][0]["text"][0]["colour"].clone()
+    };
+    assert_eq!(
+        at("1 0 rg BT /F1 12 Tf 10 50 Td (Hello) Tj ET"),
+        json!({ "uncompared": "the fill states 2 component(s) in the /DeviceRGB colour space" }),
+        "a two-component rg"
+    );
+    assert_eq!(
+        at("/DeviceGray cs 0.5 0.5 sc BT /F1 12 Tf 10 50 Td (Hello) Tj ET"),
+        json!({ "uncompared": "the fill states 2 component(s) in the /DeviceGray colour space" }),
+        "a two-component sc in a gray space"
+    );
+}
+
+/// A fill in a colour space the model cannot resolve is recorded as uncompared with its reason,
+/// never guessed at. The reason names the space's family and never the resource name the file binds
+/// it to, so two names bound to one kind of space record one reason; two separation fills with
+/// different components are one value, a separation never compares equal to another family, and a
+/// device colour never compares equal to one that is not.
+#[test]
+fn a_colour_the_model_cannot_resolve_is_recorded_uncompared() {
+    let at = |spaces: &str, content: &str| {
+        let value = canonical(&drawn_with_spaces(helvetica(), Vec::new(), spaces, content))
+            .expect("a readable PDF");
+        value["pages"][0]["text"][0]["colour"].clone()
+    };
+    let separation = "[/Separation /Spot /DeviceCMYK 0 0 0 0]";
+    let spaces = format!("/CS1 {separation} /CS2 {separation} /CS3 [/ICCBased]");
+    let first = at(
+        &spaces,
+        "/CS1 cs 0.2 scn BT /F1 12 Tf 10 50 Td (Hello) Tj ET",
+    );
+    let second = at(
+        &spaces,
+        "/CS2 cs 0.8 scn BT /F1 12 Tf 10 50 Td (Hello) Tj ET",
+    );
+    assert_eq!(
+        first,
+        json!({ "uncompared": "the fill is stated in a Separation colour space" })
+    );
+    assert_eq!(
+        first, second,
+        "an unresolved fill's components and resource name are not compared"
+    );
+    assert_ne!(
+        first,
+        at(
+            &spaces,
+            "/CS3 cs 0.2 scn BT /F1 12 Tf 10 50 Td (Hello) Tj ET"
+        ),
+        "one unresolved family is not another"
+    );
+    assert_ne!(
+        first,
+        at("", "0 0 0 rg BT /F1 12 Tf 10 50 Td (Hello) Tj ET"),
+        "an unresolved fill is not a device colour"
+    );
+    for (space, reason) in [
+        (
+            "[/DeviceN [/Cyan /Magenta] /DeviceCMYK 0 0 0 0]",
+            "the fill is stated in a DeviceN colour space",
+        ),
+        (
+            "[/ICCBased]",
+            "the fill is stated in an ICC-based colour space",
+        ),
+        (
+            "[/Indexed /DeviceRGB 1 <000000ffffff>]",
+            "the fill is stated in an indexed colour space",
+        ),
+        (
+            "[/CalRGB << /WhitePoint [1 1 1] >>]",
+            "the fill is stated in a CIE-based colour space",
+        ),
+        ("[/Pattern]", "the fill is a pattern"),
+    ] {
+        assert_eq!(
+            at(
+                &format!("/CS1 {space}"),
+                "/CS1 cs 0.2 scn BT /F1 12 Tf 10 50 Td (Hello) Tj ET"
+            ),
+            json!({ "uncompared": reason }),
+            "{space}"
+        );
+    }
+    assert_eq!(
+        at(
+            "/CS1 /Pattern",
+            "/CS1 cs /P1 scn BT /F1 12 Tf 10 50 Td (Hello) Tj ET"
+        ),
+        json!({ "uncompared": "the fill is a pattern" }),
+        "a pattern named by the fill and a pattern space state one reason"
+    );
+    assert_eq!(
+        at("", "/CS9 cs BT /F1 12 Tf 10 50 Td (Hello) Tj ET"),
+        json!({ "uncompared": "the fill is stated in a colour space the model does not resolve" }),
+        "a name the dictionary does not bind"
+    );
+}
+
+/// A `cs` starts the colour space it names rather than leaving the fill it replaced: the format's
+/// initial colour for a device space — gray 0, RGB 0 0 0 and CMYK 0 0 0 1 (ISO 32000-1, 8.6.4), all
+/// black — and the space's uncompared reason for one the model does not resolve. A name bound to a
+/// device space is that space.
+#[test]
+fn a_space_switch_starts_the_space_it_names() {
+    let at = |spaces: &str, content: &str| {
+        let value = canonical(&drawn_with_spaces(helvetica(), Vec::new(), spaces, content))
+            .expect("a readable PDF");
+        value["pages"][0]["text"][0]["colour"].clone()
+    };
+    let drawn = "1 0 0 rg /DeviceGray cs BT /F1 12 Tf 10 50 Td (Hello) Tj ET";
+    assert_eq!(
+        at("", drawn),
+        json!([0.0, 0.0, 0.0]),
+        "a switch to gray starts black"
+    );
+    assert_eq!(
+        at(
+            "",
+            "1 0 0 rg /DeviceCMYK cs BT /F1 12 Tf 10 50 Td (Hello) Tj ET"
+        ),
+        json!([0.0, 0.0, 0.0]),
+        "a switch to CMYK starts black"
+    );
+    assert_eq!(
+        at(
+            "",
+            "1 0 0 rg /DeviceCMYK cs BT /F1 12 Tf 10 50 Td (Hello) Tj ET"
+        ),
+        at("", "0 0 0 1 k BT /F1 12 Tf 10 50 Td (Hello) Tj ET"),
+        "the initial CMYK black is the black `0 0 0 1 k` states"
+    );
+    assert_ne!(
+        at(
+            "",
+            "1 0 0 rg /DeviceCMYK cs BT /F1 12 Tf 10 50 Td (Hello) Tj ET"
+        ),
+        at("", "0 0 0 0 k BT /F1 12 Tf 10 50 Td (Hello) Tj ET"),
+        "the initial CMYK black is not the white `0 0 0 0 k` states"
+    );
+    assert_eq!(
+        at(
+            "/CS1 /DeviceRGB",
+            "1 0 0 rg /CS1 cs BT /F1 12 Tf 10 50 Td (Hello) Tj ET"
+        ),
+        json!([0.0, 0.0, 0.0]),
+        "a name bound to a device space starts that space's black"
+    );
+    assert_eq!(
+        at(
+            "/CS1 [/Separation /Spot /DeviceCMYK 0 0 0 0]",
+            "1 0 0 rg /CS1 cs BT /F1 12 Tf 10 50 Td (Hello) Tj ET"
+        ),
+        json!({ "uncompared": "the fill is stated in a Separation colour space" }),
+        "a switch to an unresolved space starts uncompared"
+    );
+    assert_eq!(
+        at(
+            "/CS1 /DeviceRGB",
+            "/CS1 cs 0 0 1 scn BT /F1 12 Tf 10 50 Td (Hello) Tj ET"
+        ),
+        json!([0.0, 0.0, 1.0]),
+        "a name bound to a device space resolves its components"
+    );
+}
+
+/// A page's colour spaces are resolved along the page tree, as its fonts are: a `/ColorSpace` entry
+/// the `/Pages` node states is the page's own, so a `cs` naming it resolves rather than recording
+/// uncompared.
+#[test]
+fn a_colour_space_inherited_from_the_page_tree_is_the_pages_own() {
+    let (font, extra) = embedded_type0_font(HI_CMAP, true, b"not really a font");
+    let mut objects = vec![
+        Object::new("catalog", "<< /Type /Catalog /Pages {pages} >>"),
+        Object::new(
+            "pages",
+            "<< /Type /Pages /Kids [{page}] /Count 1 \
+             /Resources << /ColorSpace << /CS1 /DeviceRGB >> >> >>",
+        ),
+        Object::new(
+            "page",
+            "<< /Type /Page /Parent {pages} /MediaBox [0 0 200 100] \
+             /Resources << /Font << /F1 {font} >> >> /Contents {content} >>",
+        ),
+        Object::new(
+            "content",
+            stream(
+                &[],
+                b"/CS1 cs 0 0 1 sc BT /F1 12 Tf 10 50 Td <00010002> Tj ET",
+                false,
+            ),
+        ),
+        font,
+    ];
+    objects.extend(extra);
+    let value = canonical(&assemble(&objects, "")).expect("a readable PDF");
+    assert_eq!(
+        value["pages"][0]["text"][0]["colour"],
+        json!([0.0, 0.0, 1.0]),
+        "the page tree's /ColorSpace is the page's own"
+    );
+}
+
+/// `q`/`Q` save and restore the fill colour and its space, and `sc` states components in the space
+/// the last `cs` named.
+#[test]
+fn a_saved_state_restores_the_fill_and_sc_states_its_space() {
+    let at = |content: &str| {
+        let value =
+            canonical(&drawn_with(helvetica(), Vec::new(), content)).expect("a readable PDF");
+        value["pages"][0]["text"][0]["colour"].clone()
+    };
+    assert_eq!(
+        at("1 0 0 rg q 0 0 1 rg Q BT /F1 12 Tf 10 50 Td (Hello) Tj ET"),
+        json!([1.0, 0.0, 0.0]),
+        "Q restores the fill colour q saved"
+    );
+    assert_eq!(
+        at("/DeviceRGB cs 0 0 1 sc BT /F1 12 Tf 10 50 Td (Hello) Tj ET"),
+        json!([0.0, 0.0, 1.0]),
+        "sc states RGB components in the named space"
+    );
+    assert_eq!(
+        at("/DeviceCMYK cs 0 0 0 1 sc BT /F1 12 Tf 10 50 Td (Hello) Tj ET"),
+        json!([0.0, 0.0, 0.0]),
+        "sc states CMYK components in the named space"
+    );
+    assert_eq!(
+        at("/DeviceGray cs 0.5 sc BT /F1 12 Tf 10 50 Td (Hello) Tj ET"),
+        json!([0.5, 0.5, 0.5]),
+        "sc states a gray component in the named space"
+    );
+}
+
+/// A run is placed by its text matrix under the transform in force: a scale changes where it starts
+/// and the size it is drawn at, and a turn changes the direction it reads in. The turn is taken
+/// modulo 360, so a run turned below zero is the turn the long way round, and one rounded to a full
+/// circle is no turn.
+#[test]
+fn a_run_is_placed_under_the_transform_in_force() {
+    let run = |content: &str| {
+        let value =
+            canonical(&drawn_with(helvetica(), Vec::new(), content)).expect("a readable PDF");
+        value["pages"][0]["text"][0].clone()
+    };
+    let scaled = run("q 2 0 0 2 5 5 cm BT /F1 12 Tf 10 20 Td (Hi) Tj ET Q");
+    assert_eq!(scaled["position"], json!([25.0, 45.0]));
+    assert_eq!(scaled["size"], json!(24.0));
+    let turned = run("q 0 1 -1 0 0 0 cm BT /F1 12 Tf 10 20 Td (Hi) Tj ET Q");
+    assert_eq!(turned["position"], json!([-20.0, 10.0]));
+    assert_eq!(turned["rotation"], json!(90.0));
+    let the_long_way = run("q 0 -1 1 0 0 0 cm BT /F1 12 Tf 10 20 Td (Hi) Tj ET Q");
+    assert_eq!(
+        the_long_way["rotation"],
+        json!(270.0),
+        "a turn below zero is the turn the long way round"
+    );
+    let a_full_circle = run("q 1 -0.0000001 0 1 0 0 cm BT /F1 12 Tf 10 20 Td (Hi) Tj ET Q");
+    assert_eq!(
+        a_full_circle["rotation"],
+        json!(0.0),
+        "a turn rounded to a full circle is no turn"
+    );
+}
+
+/// The text-state operators place the run they move: `T*`, `'` and `"` step down by the leading,
+/// `TD` steps and states the leading, and `Ts` raises the run.
+#[test]
+fn the_text_state_operators_place_the_run_they_move() {
+    let at = |content: &str| {
+        canonical(&drawn_with(helvetica(), Vec::new(), content)).expect("a readable PDF")
+    };
+    for content in [
+        "BT /F1 12 Tf 14 TL 10 50 Td (A) Tj T* (B) Tj ET",
+        "BT /F1 12 Tf 14 TL 10 50 Td (A) Tj (B) ' ET",
+        "BT /F1 12 Tf 14 TL 10 50 Td (A) Tj 0 0 (B) \" ET",
+    ] {
+        let value = at(content);
+        assert_eq!(
+            runs_text(&value["pages"][0]["text"]),
+            ["A", "B"],
+            "{content}"
+        );
+        assert_eq!(
+            value["pages"][0]["text"][1]["position"],
+            json!([10.0, 36.0]),
+            "{content}"
+        );
+    }
+    let value = at("BT /F1 12 Tf 10 50 Td (A) Tj 0 -20 TD (B) Tj T* (C) Tj ET");
+    assert_eq!(runs_text(&value["pages"][0]["text"]), ["A", "B", "C"]);
+    assert_eq!(
+        value["pages"][0]["text"][1]["position"],
+        json!([10.0, 30.0])
+    );
+    assert_eq!(
+        value["pages"][0]["text"][2]["position"],
+        json!([10.0, 10.0]),
+        "TD states the leading T* then uses"
+    );
+    let raised = at("BT /F1 12 Tf 5 Ts 10 50 Td (A) Tj ET");
+    assert_eq!(
+        raised["pages"][0]["text"][0]["position"],
+        json!([10.0, 55.0]),
+        "Ts raises the run by the rise"
     );
 }
 
@@ -1514,9 +1948,9 @@ fn text_drawn_as_outlines_is_read_as_vector_content() {
 }
 
 /// The digest covers the path operators and their operands alone: the colour, the line width, the
-/// text state and the transform the path is drawn under are not in it.
+/// dash pattern, the text state and the transform the path is drawn under are not in it.
 #[test]
-fn a_vector_digest_ignores_colour_width_and_transform() {
+fn a_vector_digest_ignores_colour_width_dash_and_transform() {
     let at = |content: &str| {
         let value =
             canonical(&drawn_with(helvetica(), Vec::new(), content)).expect("a readable PDF");
@@ -1531,6 +1965,7 @@ fn a_vector_digest_ignores_colour_width_and_transform() {
     for (what, content) in [
         ("another colour", "1 0 0 RG 0 0 m 50 50 l S"),
         ("another line width", "5 w 0 0 m 50 50 l S"),
+        ("another dash", "[3 2] 0 d 0 0 m 50 50 l S"),
         (
             "another text state",
             "BT /F1 12 Tf 2 Tc 3 Tw 0 Tr ET 0 0 m 50 50 l S",
@@ -1573,6 +2008,16 @@ fn form_xobject(drawing: &str, resources: Option<&str>) -> Object {
 /// name `/Fm1` `paints` times, plus `extra` objects the form names.
 fn pdf_painting_form(resources: &str, form: Object, extra: Vec<Object>, paints: usize) -> Vec<u8> {
     let content = format!("q{} Q", " /Fm1 Do".repeat(paints));
+    pdf_painting_form_with_content(resources, form, extra, &content)
+}
+
+/// The same, with the page content `content` rather than a bare `Do` per paint.
+fn pdf_painting_form_with_content(
+    resources: &str,
+    form: Object,
+    extra: Vec<Object>,
+    content: &str,
+) -> Vec<u8> {
     let mut objects = vec![
         Object::new("catalog", "<< /Type /Catalog /Pages {pages} >>"),
         Object::new("pages", "<< /Type /Pages /Kids [{page}] /Count 1 >>"),
@@ -1643,10 +2088,12 @@ fn a_form_that_draws_only_marks_draws_nothing_the_model_reads() {
     }
 }
 
-/// A form's text is read through the form's **own** `/Resources`. The format lets a form inherit the
-/// page's resources when it states none; the model does not, so such a form states no text.
+/// A form's `Tf` is resolved through the form's **own** `/Resources`. The format lets a form inherit
+/// the page's resources when it states none; the model does not, so a `Tf` naming a font the form
+/// does not itself hold states no text — while a form that states no `Tf` draws with the font the
+/// page paints it in (`a_form_inherits_the_state_the_page_paints_it_in`).
 #[test]
-fn a_form_without_its_own_resources_states_no_text() {
+fn a_form_that_names_a_font_it_does_not_hold_states_no_text() {
     let resources = "<< /Font << /F1 {font} >> /XObject << /Fm1 {form} >> >>";
     let bare = canonical(&pdf_painting_form(
         resources,
@@ -1675,6 +2122,122 @@ fn a_form_without_its_own_resources_states_no_text() {
     );
 }
 
+/// A form's `/Matrix` is composed onto the transform the page paints the form under, in that order,
+/// so the run it draws is placed in the page's space. A form that paints another form is placed
+/// under both matrices and the `cm` between them.
+#[test]
+fn a_form_is_placed_under_its_matrix_and_the_transform_that_paints_it() {
+    let mut parts = appearance_font(
+        "BT /F1 12 Tf 5 5 Td <00010002> Tj ET",
+        HI_CMAP,
+        true,
+        "[0 0 50 50]",
+        b"not really a font",
+        Some("[1 0 0 1 10 20]"),
+    );
+    let form = parts.pop().expect("the form is the last object");
+    let value = canonical(&pdf_painting_form_with_content(
+        "<< /XObject << /Fm1 {appearance} >> >>",
+        form,
+        parts,
+        "q 2 0 0 2 0 0 cm /Fm1 Do Q",
+    ))
+    .expect("a readable PDF");
+    assert_eq!(runs_text(&value["pages"][0]["appearance_text"]), ["Hi"]);
+    assert_eq!(
+        value["pages"][0]["appearance_text"][0]["position"],
+        json!([30.0, 50.0]),
+        "the form's matrix is composed onto the painting transform, not the reverse"
+    );
+    assert_eq!(
+        value["pages"][0]["appearance_text"][0]["size"],
+        json!(24.0),
+        "the painting transform scales the stated size"
+    );
+}
+
+/// A page-painted form inherits the graphics state the page paints it in — its fill colour, font
+/// and size — as the format's `Do` does; an appearance, which no page paints, starts from the
+/// format's initial state.
+#[test]
+fn a_form_inherits_the_state_the_page_paints_it_in() {
+    let (font, mut extra) = embedded_type0_font(HI_CMAP, true, b"not really a font");
+    extra.push(font);
+    let form = form_xobject("BT <00010002> Tj ET", None);
+    let value = canonical(&pdf_painting_form_with_content(
+        "<< /Font << /F1 {font} >> /XObject << /Fm1 {form} >> >>",
+        form,
+        extra,
+        "q 1 0 0 rg /F1 24 Tf /Fm1 Do Q",
+    ))
+    .expect("a readable PDF");
+    let run = &value["pages"][0]["appearance_text"][0];
+    assert_eq!(run["text"], json!("Hi"));
+    assert_eq!(run["position"], json!([0.0, 0.0]));
+    assert_eq!(
+        run["size"],
+        json!(24.0),
+        "the form inherits the page's size"
+    );
+    assert_eq!(
+        run["colour"],
+        json!([1.0, 0.0, 0.0]),
+        "the form inherits the page's fill"
+    );
+}
+
+/// A form that paints another form is followed, and the nested run is placed under the inner matrix,
+/// the outer matrix and the `cm` between them.
+#[test]
+fn a_form_that_paints_another_is_placed_under_both_matrices() {
+    let mut parts = appearance_font(
+        "BT /F1 12 Tf 0 0 Td <00010002> Tj ET",
+        HI_CMAP,
+        true,
+        "[0 0 50 50]",
+        b"not really a font",
+        Some("[1 0 0 1 0 20]"),
+    );
+    let inner = parts.pop().expect("the form is the last object");
+    let outer = Object::new(
+        "outer",
+        stream(
+            &[
+                ("Type", "/XObject".to_string()),
+                ("Subtype", "/Form".to_string()),
+                ("BBox", "[0 0 50 50]".to_string()),
+                ("Matrix", "[1 0 0 1 10 0]".to_string()),
+                (
+                    "Resources",
+                    "<< /XObject << /Fm2 {appearance} >> >>".to_string(),
+                ),
+            ],
+            b"q 1 0 0 1 5 0 cm /Fm2 Do Q",
+            false,
+        ),
+    );
+    let mut objects = vec![
+        Object::new("catalog", "<< /Type /Catalog /Pages {pages} >>"),
+        Object::new("pages", "<< /Type /Pages /Kids [{page}] /Count 1 >>"),
+        Object::new(
+            "page",
+            "<< /Type /Page /Parent {pages} /MediaBox [0 0 200 100] \
+             /Resources << /XObject << /Fm1 {outer} >> >> /Contents {content} >>",
+        ),
+        Object::new("content", stream(&[], b"/Fm1 Do", false)),
+        outer,
+        inner,
+    ];
+    objects.extend(parts);
+    let value = canonical(&assemble(&objects, "")).expect("a readable PDF");
+    assert_eq!(value["pages"][0]["forms"].as_u64(), Some(1));
+    assert_eq!(runs_text(&value["pages"][0]["appearance_text"]), ["Hi"]);
+    assert_eq!(
+        value["pages"][0]["appearance_text"][0]["position"],
+        json!([15.0, 20.0])
+    );
+}
+
 /// A widget's appearance is read through its own `/Resources`. The format lets an appearance inherit
 /// the AcroForm's `/DR` when it states none; the model does not, so an appearance whose font is
 /// reachable only there states no text.
@@ -1687,6 +2250,7 @@ fn an_appearance_does_not_inherit_the_form_default_resources() {
             true,
             "[0 0 50 20]",
             b"not really a font",
+            None,
         );
         // The appearance states no `/Resources` of its own: its font is named by the AcroForm's
         // `/DR` and nowhere else.
@@ -1746,10 +2310,11 @@ fn an_appearance_does_not_inherit_the_form_default_resources() {
     );
 }
 
-/// An appearance is compared by the characters it draws, not by where it draws them: the line
-/// positions, the font size and the box the appearance states are not part of the model.
+/// A run inside an appearance is compared like any other run: where it draws its line and at what
+/// size are differences. The box the appearance states and the widget's border and padding are not
+/// part of the model.
 #[test]
-fn an_appearances_geometry_and_border_are_not_compared() {
+fn an_appearances_box_and_border_are_not_compared() {
     let base = canonical(&pdf_with_filled_field(
         "BT /F1 12 Tf 2 2 Td <000100020003> Tj ET",
         ADA_CMAP,
@@ -1784,14 +2349,10 @@ fn an_appearances_geometry_and_border_are_not_compared() {
         "/BS << /W 5 /S /S >> /MK << /BC [1 0 0] /BG [0 1 0] /CA (x) >>",
     ))
     .expect("a readable PDF");
-    for (what, value) in [
-        ("elsewhere", &elsewhere),
-        ("in another box", &other_box),
-        ("with a border and padding", &bordered),
-    ] {
+    for (what, value) in [("in another box", &other_box), ("with a border", &bordered)] {
         assert_eq!(
-            value["form"]["fields"][0]["appearance"],
-            json!(["Ada"]),
+            runs_text(&value["form"]["fields"][0]["appearance"]),
+            ["Ada"],
             "the appearance drawn {what} states the value"
         );
         assert!(
@@ -1800,6 +2361,14 @@ fn an_appearances_geometry_and_border_are_not_compared() {
             compare(&base, value).lines(4)
         );
     }
+    assert_eq!(
+        runs_text(&elsewhere["form"]["fields"][0]["appearance"]),
+        ["Ada"]
+    );
+    assert!(
+        !compare(&base, &elsewhere).is_same(),
+        "where an appearance draws its line and at what size is a difference"
+    );
 }
 
 /// An appearance's font program is not compared: the model reads the characters the stated map
@@ -1816,7 +2385,10 @@ fn an_appearances_glyph_program_is_not_compared() {
             program,
         ))
         .expect("a readable PDF");
-        assert_eq!(value["form"]["fields"][0]["appearance"], json!(["Ada"]));
+        assert_eq!(
+            runs_text(&value["form"]["fields"][0]["appearance"]),
+            ["Ada"]
+        );
         value
     };
     let first = at(b"not really a font");
@@ -1843,8 +2415,11 @@ fn a_fields_default_appearance_is_not_read() {
     let with_da = substituted(&plain, b"/T (name)", b"/T (name) /DA (/Helv 12 Tf 0 g)");
     let base = canonical(&plain).expect("a readable PDF");
     let other = canonical(&with_da).expect("a readable PDF");
-    assert_eq!(base["form"]["fields"][0]["appearance"], json!(["Ada"]));
-    assert_eq!(other["form"]["fields"][0]["appearance"], json!(["Ada"]));
+    assert_eq!(runs_text(&base["form"]["fields"][0]["appearance"]), ["Ada"]);
+    assert_eq!(
+        runs_text(&other["form"]["fields"][0]["appearance"]),
+        ["Ada"]
+    );
     assert!(
         compare(&base, &other).is_same(),
         "a field's default appearance is not a difference: {:?}",
@@ -2013,7 +2588,7 @@ fn a_structure_tree_and_marked_content_are_not_read() {
     let untagged = canonical(&untagged_bytes).expect("a readable PDF");
     let tagged = canonical(&tagged_bytes).expect("a readable PDF");
     for (what, value) in [("untagged", &untagged), ("tagged", &tagged)] {
-        assert_eq!(value["pages"][0]["text"], json!(["Hello"]), "{what}");
+        assert_eq!(runs_text(&value["pages"][0]["text"]), ["Hello"], "{what}");
     }
     assert!(
         compare(&untagged, &tagged).is_same(),
@@ -2197,11 +2772,18 @@ fn a_content_stream_the_model_cannot_decode_draws_nothing() {
     let drawing = "BT /F1 12 Tf 2 2 Td <00010002> Tj ET";
     let readable = canonical(&pdf_with_text_form(drawing, HI_CMAP, true)).expect("a readable PDF");
     assert_eq!(
-        readable["pages"][0]["appearance_text"],
-        json!(["Hi"]),
+        runs_text(&readable["pages"][0]["appearance_text"]),
+        ["Hi"],
         "the form's text is read when its stream is"
     );
-    let mut parts = appearance_font(drawing, HI_CMAP, true, "[0 0 50 50]", b"not really a font");
+    let mut parts = appearance_font(
+        drawing,
+        HI_CMAP,
+        true,
+        "[0 0 50 50]",
+        b"not really a font",
+        None,
+    );
     let mut form = parts.pop().expect("the form is the last object");
     form.body = substituted(
         &form.body,
@@ -2573,7 +3155,7 @@ fn every_list_bound_cuts_off_what_lies_beyond_it() {
     // The text one form above the bound is read, so the case above is the bound and not a chain the
     // model never followed.
     let one_above = canonical(&pdf_with_nested_forms(9, "<0001>")).expect("a readable PDF");
-    assert_eq!(one_above["pages"][0]["appearance_text"], json!(["H"]));
+    assert_eq!(runs_text(&one_above["pages"][0]["appearance_text"]), ["H"]);
     let one_above_changed = canonical(&pdf_with_nested_forms(9, "<0002>")).expect("a readable PDF");
     assert!(!compare(&one_above, &one_above_changed).is_same());
 }
@@ -2645,8 +3227,8 @@ fn a_string_without_a_utf16_marker_is_read_as_utf8() {
         let value =
             canonical(&drawn_with(helvetica(), Vec::new(), &content)).expect("a readable PDF");
         assert_eq!(
-            value["pages"][0]["text"],
-            json!(["\u{FFFD}"]),
+            runs_text(&value["pages"][0]["text"]),
+            ["\u{FFFD}"],
             "the byte {escaped} is not UTF-8"
         );
         value
@@ -2689,6 +3271,34 @@ fn compared_cases() -> Vec<(&'static str, Vec<u8>)> {
             "page text",
             Variant {
                 text: "Hello pages",
+                ..Variant::default()
+            },
+        ),
+        (
+            "text position",
+            Variant {
+                text_state: "BT /F1 12 Tf 30 60 Td ",
+                ..Variant::default()
+            },
+        ),
+        (
+            "text size",
+            Variant {
+                text_state: "BT /F1 20 Tf 10 50 Td ",
+                ..Variant::default()
+            },
+        ),
+        (
+            "text colour",
+            Variant {
+                text_state: "BT /F1 12 Tf 1 0 0 rg 10 50 Td ",
+                ..Variant::default()
+            },
+        ),
+        (
+            "text rotation",
+            Variant {
+                text_state: "BT /F1 12 Tf 0 1 -1 0 10 50 Tm ",
                 ..Variant::default()
             },
         ),
@@ -2921,7 +3531,7 @@ fn one_changed_word_is_reported_at_the_page_that_draws_it() {
         comparison.lines(8)
     );
     assert_eq!(
-        comparison.differences[0].path, r#"["pages"][0]["text"][0]"#,
+        comparison.differences[0].path, r#"["pages"][0]["text"][0]["text"]"#,
         "the difference names the page that draws the text"
     );
 }

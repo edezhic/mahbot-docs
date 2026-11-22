@@ -789,8 +789,9 @@ An option list's `Sort` bit is read by the *later* reader: `isSorted` is `hasFla
 list its appearance draws; one a parent states in place does not. Measured on the reference's own
 appearance streams for `/Opt [(b) (a)]`: "a" is drawn above "b" for the first two and "b" above "a" for
 the third. **Matched**; witnessed by
-`form::tests::a_sort_flag_is_read_through_the_parent_link_that_states_it`. No case: the appearance
-stream is the engine's own, and the canonical model reads the field's entries rather than its drawing.
+`form::tests::a_sort_flag_is_read_through_the_parent_link_that_states_it`. No case: this fixture is
+not a corpus input; the model compares the runs an appearance draws — their characters, place, size,
+colour and turn — so a case that filled it would see the order.
 
 The name is the chain `/Parent` states, not the tree the walk reaches through `/Kids`:
 `getFullyQualifiedName` joins each link's own `/T` with `.`, and a link that states none contributes the
@@ -813,7 +814,7 @@ so the container test finds no field of it and the typed widget read lists it. M
 reference's own output for such a kid carries an appearance stream — 4 253 bytes against the 3 783 of
 the same field whose `/Kids` is empty, which draws none. **Matched**; witnessed by
 `form::tests::a_kid_whose_name_is_a_stated_null_is_a_widget`. No case: the appearance stream is the
-engine's own, so no reader of the canonical model compares it.
+engine's own, and the model compares only the runs it draws, not the rest of its operators.
 
 The tree is walked from a worklist rather than by recursion, so a tree nests as deep as the file
 states. A depth bound cannot stand in for that: measured, the reference fills a 20 000-deep tree in
