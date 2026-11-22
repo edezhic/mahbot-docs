@@ -77,6 +77,81 @@ fn a_container_whose_entries_state_one_offset_is_read() {
 }
 
 #[test]
+fn a_container_stating_a_large_early_change_is_produced() {
+    // `/EarlyChange` is the number the file states, and the reference puts it into its arithmetic: a
+    // single-precision read rounds 33554173 to 33554172, which moves the code width a code later and
+    // leaves the container unreadable. The engine reads the number exactly, so its objects are placed.
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    let outcome = rotate(
+        directory.path(),
+        &build::pdf_object_stream_lzw_early_change(),
+        "lzw-early-change",
+    );
+    let bytes = produced(&outcome);
+    assert!(outcome.losses.is_empty(), "nothing is lost: {outcome:?}");
+    assert!(
+        String::from_utf8_lossy(&bytes).contains("/Rotate 90"),
+        "the page was not turned"
+    );
+}
+
+#[test]
+fn a_container_whose_lzw_stream_is_cut_short_is_expanded() {
+    // The reference's decoder pads the block a stream ends inside with zero codes, so a container it
+    // decodes only partly is expanded rather than carried: the objects before the cut are found and
+    // the file is edited.
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    let outcome = rotate(
+        directory.path(),
+        &build::pdf_object_stream_truncated_lzw(),
+        "lzw-cut",
+    );
+    let bytes = produced(&outcome);
+    assert!(outcome.losses.is_empty(), "nothing is lost: {outcome:?}");
+    assert!(
+        String::from_utf8_lossy(&bytes).contains("/Rotate 90"),
+        "the page was not turned"
+    );
+}
+
+#[test]
+fn an_empty_lzw_index_stream_adopts_its_trailer_where_a_carried_one_does_not() {
+    // An empty `LZWDecode` body decodes to the zero block the reference pads a stream with, so the
+    // index stream is decoded rather than carried and its `/Encrypt` is adopted: the file needs a
+    // password. The same stream under a filter neither side reads is carried, its trailer is never
+    // adopted, and the file is the unencrypted one its body states. That is the difference `Some` and
+    // `None` decide, and neither is a refusal of the file for being unreadable.
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    let refused = rotate(
+        directory.path(),
+        &build::pdf_object_stream_empty_lzw_index(),
+        "empty-index",
+    );
+    assert_eq!(
+        refused
+            .failure
+            .as_ref()
+            .map(|failure| failure.reason.as_str()),
+        Some(
+            vocabulary()
+                .marks
+                .format("pdf_page_encrypted", &[("name", "empty-index-in.pdf")])
+                .as_str()
+        )
+    );
+    let outcome = rotate(
+        directory.path(),
+        &build::pdf_object_stream_undecodable_index(),
+        "unknown-index",
+    );
+    let bytes = produced(&outcome);
+    assert!(
+        String::from_utf8_lossy(&bytes).contains("/Rotate 90"),
+        "the page was not turned"
+    );
+}
+
+#[test]
 fn a_container_stating_a_count_no_container_could_hold_is_turned() {
     // `/N` is the file's own statement and a file may state one nothing could hold. The reference keeps
     // the container as the bytes it states and produces; the count the answer reports is that statement,

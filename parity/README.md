@@ -41,7 +41,7 @@ compares the engine's own PDF pages against PDFium, reporting the other families
 resolution therefore cannot move a codec version the comparison identity covers.
 
 `parity` needs the `bun` runtime on `PATH` (or named by `PARITY_BUN`); it never uses the product's
-managed runtime. A full pass — 848 cases and 92 readings — is bounded by the run budget below, a
+managed runtime. A full pass — 850 cases and 92 readings — is bounded by the run budget below, a
 backstop rather than a target. The reference engine's pass takes several times the crate engine's,
 because every reference case starts the runtime and materialises the kit; both depend on the
 machine and on the corpus. The whole test suite runs the corpus several times (once per

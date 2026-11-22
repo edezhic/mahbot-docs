@@ -975,6 +975,19 @@ pub const OBJECT_STREAM_INFLATED_PDF: Document = Document {
     build: build::pdf_object_stream_inflated,
 };
 
+/// The same modern file whose container states `LZWDecode`, with a table that grows a code early.
+pub const OBJECT_STREAM_LZW_PDF: Document = Document {
+    name: "object-stream-lzw.pdf",
+    build: build::pdf_object_stream_lzw,
+};
+
+/// The same file whose container states a `/Predictor` the reference never applies, so the objects
+/// the container holds are read from the bytes the filter states.
+pub const OBJECT_STREAM_LZW_PREDICTOR_PDF: Document = Document {
+    name: "object-stream-lzw-predictor.pdf",
+    build: build::pdf_object_stream_lzw_predictor,
+};
+
 /// Two A4 pages carrying an encryption dictionary, with a shifted index.
 pub const DAMAGED_ENCRYPTED_PDF: Document = Document {
     name: "damaged-encrypted.pdf",
@@ -1832,6 +1845,8 @@ pub fn writer_documents() -> Vec<Document> {
         OBJECT_STREAM_TRUNCATED_RUN_LENGTH_PDF,
         OBJECT_STREAM_TRUNCATED_FLATE_PDF,
         OBJECT_STREAM_INFLATED_PDF,
+        OBJECT_STREAM_LZW_PDF,
+        OBJECT_STREAM_LZW_PREDICTOR_PDF,
         DAMAGED_ENCRYPTED_PDF,
         DAMAGED_BODY_PDF,
         DAMAGED_INDEX_SYNTAX_PDF,

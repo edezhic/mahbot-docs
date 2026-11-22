@@ -16,6 +16,7 @@
 //! Nothing is committed and nothing is written to disk here: each builder returns the file's
 //! bytes, and the harness writes them where the request names them.
 
+use std::collections::HashMap;
 use std::io::{Cursor, Write as _};
 
 // ── images ────────────────────────────────────────────────────────────────────────────────────
@@ -5166,20 +5167,28 @@ pub fn pdf_object_stream_ascii_hex() -> Vec<u8> {
     )
 }
 
+/// Where a truncated container is cut: `padding` bytes of payload stand after the last body, so a cut
+/// that costs the decoder's own tail does not take the objects with it, and `cut` bytes are taken off
+/// the end of the filter's data.
+struct Truncation {
+    padding: usize,
+    cut: usize,
+}
+
 /// The modern shape whose container stops short of its own end: the filter's data is cut `cut` bytes
 /// from the end, which the reference's decoder reads as far as it goes, so the objects it holds are
 /// found and the file is edited rather than refused.
 fn pdf_object_stream_truncated(
     filter: &str,
     encode: impl Fn(&[u8]) -> Vec<u8>,
-    cut: usize,
+    truncation: Truncation,
 ) -> Vec<u8> {
     pdf_with_object_stream(
         ObjectStreamIndex::Stated,
-        object_stream_payload(0),
+        object_stream_payload(truncation.padding),
         filter,
         encode,
-        cut,
+        truncation.cut,
     )
 }
 
@@ -5187,14 +5196,38 @@ fn pdf_object_stream_truncated(
 /// end marker. The reference decodes the runs it holds and produces a two-page file.
 #[must_use]
 pub fn pdf_object_stream_truncated_run_length() -> Vec<u8> {
-    pdf_object_stream_truncated(" /Filter /RunLengthDecode", run_length, 2)
+    pdf_object_stream_truncated(
+        " /Filter /RunLengthDecode",
+        run_length,
+        Truncation { padding: 0, cut: 2 },
+    )
 }
 
 /// The same file whose Flate data stops four bytes before its own end — the checksum, which neither
 /// side reads — so the container decodes whole and the file is edited.
 #[must_use]
 pub fn pdf_object_stream_truncated_flate() -> Vec<u8> {
-    pdf_object_stream_truncated(" /Filter /FlateDecode", deflate_fixed, 4)
+    pdf_object_stream_truncated(
+        " /Filter /FlateDecode",
+        deflate_fixed,
+        Truncation { padding: 0, cut: 4 },
+    )
+}
+
+/// The same file whose LZW data stops two bytes before its own end. The reference's decoder pads the
+/// block a stream ends inside with zero codes, so a container it decodes only partly is still expanded
+/// — the objects it holds are found — rather than carried as the bytes it states. The padding after
+/// the last body is what the cut costs, so the objects themselves are whole.
+#[must_use]
+pub fn pdf_object_stream_truncated_lzw() -> Vec<u8> {
+    pdf_object_stream_truncated(
+        " /Filter /LZWDecode",
+        lzw,
+        Truncation {
+            padding: 64,
+            cut: 2,
+        },
+    )
 }
 
 /// `data` in the runs a `RunLengthDecode` filter reads: literal runs of at most 128 bytes, then the end
@@ -5216,6 +5249,245 @@ fn ascii_hex(data: &[u8]) -> Vec<u8> {
         hex.extend_from_slice(format!("{byte:02X}").as_bytes());
     }
     hex
+}
+
+/// `data` in the codes an `LZWDecode` filter reads with the format's default `/EarlyChange`: a table
+/// that grows one code early, codes that widen to twelve bits at the most, and an end marker at the
+/// width the last code leaves, so the decoder stops where the data does rather than padding a block.
+#[must_use]
+pub fn lzw(data: &[u8]) -> Vec<u8> {
+    lzw_codes(&lzw_states(data))
+}
+
+/// `data` as the codes an `LZWDecode` filter reads, each with the width the decoder reads it at, so a
+/// fixture can state what its payload exercises rather than only what it decodes to.
+fn lzw_states(data: &[u8]) -> Vec<(u16, u32)> {
+    lzw_states_with(data, 1.0)
+}
+
+/// [`lzw_states`] with `early_change` stated, which moves where the table's width grows.
+fn lzw_states_with(data: &[u8], early_change: f64) -> Vec<(u16, u32)> {
+    let mut table: HashMap<Vec<u8>, u16> = HashMap::new();
+    let mut next = 258_usize;
+    let mut current: Vec<u8> = Vec::new();
+    let mut codes: Vec<u16> = Vec::new();
+    for &byte in data {
+        let mut candidate = current.clone();
+        candidate.push(byte);
+        if candidate.len() == 1 || table.contains_key(&candidate) {
+            current = candidate;
+            continue;
+        }
+        codes.push(statement(&table, &current));
+        // A table at its last entry keeps the codes it states: no fixture here needs a clear code.
+        if next < 4096 {
+            table.insert(
+                candidate,
+                u16::try_from(next).expect("a code below the table's size"),
+            );
+            next += 1;
+        }
+        current = vec![byte];
+    }
+    if !current.is_empty() {
+        codes.push(statement(&table, &current));
+    }
+    codes.push(257);
+    let widths = lzw_widths(codes.len(), early_change);
+    codes.into_iter().zip(widths).collect()
+}
+
+/// The width the reference's decoder reads each of `count` codes at with `early_change` stated: nine
+/// bits, moved by the decoder's own rule for every code it reads past the first, and never past
+/// twelve. The decoder states an entry for every code it reads past the first, so the width of a code
+/// is the one the code before it left — which is what makes an end marker written at the last code's
+/// own width a bit narrow. The rule is the decoder's rather than a second copy of it, so a fixture
+/// cannot state a width this decoder does not read.
+fn lzw_widths(count: usize, early_change: f64) -> Vec<u32> {
+    let mut width = 9;
+    (0..count)
+        .map(|index| {
+            let stated = width;
+            if index > 0 {
+                width = crate::writing::pdf::lzw::grown(258 + index, early_change, width);
+            }
+            stated
+        })
+        .collect()
+}
+
+/// The codes as an `LZWDecode` stream states them: most significant bit first, padded to a whole byte.
+/// A stream that states no end-of-data code is one the decoder pads with zero codes, which is how a
+/// cut container is stated.
+#[must_use]
+pub fn lzw_codes(codes: &[(u16, u32)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut cached = 0_u32;
+    let mut bits = 0_u32;
+    for &(code, width) in codes {
+        cached = cached << width | u32::from(code);
+        bits += width;
+        while bits >= 8 {
+            bits -= 8;
+            out.push(u8::try_from(cached >> bits & 0xFF).unwrap_or_default());
+        }
+    }
+    if bits > 0 {
+        out.push(u8::try_from(cached << (8 - bits) & 0xFF).unwrap_or_default());
+    }
+    out
+}
+
+/// The code `sequence` states: a literal byte is itself, and a longer sequence is its own table entry.
+fn statement(table: &HashMap<Vec<u8>, u16>, sequence: &[u8]) -> u16 {
+    match sequence {
+        [byte] => u16::from(*byte),
+        _ => table[sequence],
+    }
+}
+
+/// The modern shape whose container states `LZWDecode`, whose table grows a code early. The filler
+/// past the last body takes the container past the five hundred and eleventh code, where the width
+/// grows from nine bits to ten, so the file exercises the table's growth rather than only its
+/// literals.
+#[must_use]
+pub fn pdf_object_stream_lzw() -> Vec<u8> {
+    let (mut payload, first, held) = object_stream_payload(0);
+    // A deterministic sequence neither parser reads, long enough that the filter cannot state it as a
+    // handful of table references.
+    let mut state = 0x2545_f491_4f6c_dd1d_u64;
+    payload.extend((0..700).map(|_| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        u8::try_from(state & 0xFF).unwrap_or_default()
+    }));
+    debug_assert!(
+        lzw_states(&payload).iter().any(|&(_, width)| width > 9),
+        "the filler takes the code width past nine bits"
+    );
+    pdf_with_object_stream(
+        ObjectStreamIndex::Stated,
+        (payload, first, held),
+        " /Filter /LZWDecode",
+        lzw,
+        0,
+    )
+}
+
+/// The same file whose container states a `/Predictor` beside the filter. The reference's decoder reads
+/// `/EarlyChange` and nothing else, so it decodes the objects the container holds from the bytes the
+/// filter states; the engine reads it the same way.
+#[must_use]
+pub fn pdf_object_stream_lzw_predictor() -> Vec<u8> {
+    pdf_with_object_stream(
+        ObjectStreamIndex::Stated,
+        object_stream_payload(0),
+        " /Filter /LZWDecode /DecodeParms << /Predictor 12 /Columns 4 >>",
+        lzw,
+        0,
+    )
+}
+
+/// The same file whose container states `/EarlyChange 33554173`, the number the file writes and the
+/// reference reads exactly. A single-precision read rounds it to 33554172, which moves the code width a
+/// code later; the fixture states its widths from the number the file writes, so the container is the
+/// objects it holds.
+#[must_use]
+pub fn pdf_object_stream_lzw_early_change() -> Vec<u8> {
+    pdf_with_object_stream(
+        ObjectStreamIndex::Stated,
+        object_stream_payload(0),
+        " /Filter /LZWDecode /DecodeParms << /EarlyChange 33554173 >>",
+        |data| {
+            let states = lzw_states_with(data, 33_554_173.0);
+            let rounded = lzw_states_with(data, 33_554_172.0);
+            debug_assert!(
+                states
+                    .iter()
+                    .map(|&(_, width)| width)
+                    .ne(rounded.iter().map(|&(_, width)| width)),
+                "a single-precision read of the entry states different widths"
+            );
+            lzw_codes(&states)
+        },
+        0,
+    )
+}
+
+/// The modern shape whose index stream states `filter` and an `/Encrypt` the file holds, with no
+/// `trailer` dictionary of its own and an empty body: the index stream is the only statement of the
+/// catalog and of the encryption.
+fn pdf_index_stream_stating(filter: &str) -> Vec<u8> {
+    let texts = ["Page one text", "Page two text"];
+    let (payload, first, held) = object_stream_payload(0);
+    let mut pdf = b"%PDF-1.5\n".to_vec();
+    let mut offsets = Vec::new();
+    for (position, text) in texts.iter().enumerate() {
+        let data = format!("BT /F1 24 Tf 72 {} Td ({text}) Tj ET", 760 - position * 24);
+        pdf_object(
+            &mut pdf,
+            &mut offsets,
+            format!("<< /Length {} >>\nstream\n{data}\nendstream", data.len()).as_bytes(),
+        );
+    }
+    let container = lzw(&payload);
+    pdf_object(
+        &mut pdf,
+        &mut offsets,
+        &object_stream_body(
+            held,
+            first,
+            " /Filter /LZWDecode",
+            container.len(),
+            &container,
+        ),
+    );
+    // The encryption dictionary takes a number above the objects the container holds, which the file
+    // never writes as objects of its own.
+    let encrypt = offsets.len() + held + 2;
+    write_object(&mut pdf, encrypt, ENCRYPTION_DICTIONARY.as_bytes());
+    let offset = pdf.len();
+    let index = offsets.len() + held + 1;
+    let index_body = format!(
+        "<< /Type /XRef /Size {} /W [1 4 2] /Root 8 0 R /Encrypt {encrypt} 0 R{filter} /Length 0 \
+         >>\nstream\n\nendstream",
+        encrypt + 1
+    );
+    write_object(&mut pdf, index, index_body.as_bytes());
+    pdf.extend_from_slice(format!("startxref\n{offset}\n%%EOF\n").as_bytes());
+    pdf
+}
+
+/// A modern file whose index stream states `/Encrypt` and an `LZWDecode` body that is empty. An empty
+/// stream decodes to the block of zero codes the reference pads it with, so the index stream is
+/// decoded rather than carried and its `/Encrypt` is adopted: the file needs a password.
+#[must_use]
+pub fn pdf_object_stream_empty_lzw_index() -> Vec<u8> {
+    pdf_index_stream_stating(" /Filter /LZWDecode")
+}
+
+/// The same file whose index stream states a filter neither side reads: the body is not decoded, so
+/// the stream is carried as the bytes it states, its `/Encrypt` is never adopted, and the file is the
+/// unencrypted one its body states.
+#[must_use]
+pub fn pdf_object_stream_undecodable_index() -> Vec<u8> {
+    pdf_index_stream_stating(" /Filter /NotAFilter")
+}
+
+/// The modern shape whose container's body is an empty `LZWDecode` stream. An empty stream decodes to
+/// the block of zero codes the reference pads it with, so the container is expanded rather than
+/// carried as the bytes it states: the entries its zero block states are read and none is placed, and
+/// the objects it claims are the walk's own count rather than the file's unread claim.
+#[must_use]
+pub fn pdf_object_stream_empty_lzw() -> Vec<u8> {
+    pdf_with_object_stream(
+        ObjectStreamIndex::Stated,
+        object_stream_payload(0),
+        " /Filter /LZWDecode",
+        |_| Vec::new(),
+        0,
+    )
 }
 
 /// The modern shape whose object stream decodes to far more than the file that holds it: the class

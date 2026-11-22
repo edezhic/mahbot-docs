@@ -93,6 +93,7 @@ mod draw;
 mod font;
 mod form;
 mod graph;
+pub(crate) mod lzw;
 mod page;
 mod picture;
 mod scan;
@@ -3896,8 +3897,10 @@ mod tests {
 
     #[test]
     fn a_container_decoding_to_far_more_than_the_file_holds_is_read() {
-        // The reference decodes a container of any size, so the engine puts no ceiling of its own on
-        // one: an object stream stating far more than the file holds is expanded, not refused.
+        // The reference decodes a container up to the typed array's own limit (§3.9 of `PARSER.md`),
+        // so the engine's ceiling is that wall rather than a share of the file: an object stream
+        // stating far more than the file holds, and far less than the ceiling, is expanded, not
+        // refused.
         let directory = scratch();
         let bytes = build::pdf_object_stream_inflated();
         page::open(&bytes, &directory.path().join("container.pdf"))

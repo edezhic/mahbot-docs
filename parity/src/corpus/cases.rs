@@ -51,14 +51,15 @@ use super::documents::{
     MERGE_B_PDF, MERGE_C_PDF, MISPLACED_FORM_PDF, MULTILINE_FORM_PDF, NO_GEOMETRY_PDF,
     OBJECT_NESTED_PAST_THE_BOUND_PDF, OBJECT_NUMBERED_PAST_A_MILLION_PDF,
     OBJECT_STREAM_ASCII_HEX_PDF, OBJECT_STREAM_DECODING_EIGHTY_MIB_PDF, OBJECT_STREAM_INFLATED_PDF,
-    OBJECT_STREAM_ONE_OFFSET_PDF, OBJECT_STREAM_PDF, OBJECT_STREAM_TRUNCATED_FLATE_PDF,
-    OBJECT_STREAM_TRUNCATED_RUN_LENGTH_PDF, OPTION_FORM_PDF, PAGE_DICTIONARY_INLINE_PDF,
-    PAGE_TREE_DEEP_PDF, PAGE_TREE_KIDS_BY_REFERENCE_PDF, PAGE_TREE_NAMED_TWICE_PDF,
-    PAGE_TREE_NAMES_ITSELF_PDF, PAGE_TREE_ROOT_BY_REFERENCE_PDF, PAGE_TREE_ROOT_WITHOUT_TYPE_PDF,
-    PAGE_UNPARSABLE_PDF, PAIRED_OPTIONS_FORM_PDF, PAIRED_RADIO_FORM_PDF, PICTURE_BMP,
-    PICTURE_BROKEN_PNG, PICTURE_JPEG, PICTURE_LARGE, PICTURE_OVERSIZE, PICTURE_PDF, PICTURE_PIXEL,
-    PICTURE_PNG, PICTURE_STALE_CRC_PNG, PICTURE_TALL, PICTURE_WEBP, PPTX_ASSETS, PPTX_BOXES,
-    PPTX_BROKEN_SLOT, PPTX_LIST_DISAGREES, PPTX_LIST_REORDERED, PPTX_MACRO, PPTX_MISSING_NOTES,
+    OBJECT_STREAM_LZW_PDF, OBJECT_STREAM_LZW_PREDICTOR_PDF, OBJECT_STREAM_ONE_OFFSET_PDF,
+    OBJECT_STREAM_PDF, OBJECT_STREAM_TRUNCATED_FLATE_PDF, OBJECT_STREAM_TRUNCATED_RUN_LENGTH_PDF,
+    OPTION_FORM_PDF, PAGE_DICTIONARY_INLINE_PDF, PAGE_TREE_DEEP_PDF,
+    PAGE_TREE_KIDS_BY_REFERENCE_PDF, PAGE_TREE_NAMED_TWICE_PDF, PAGE_TREE_NAMES_ITSELF_PDF,
+    PAGE_TREE_ROOT_BY_REFERENCE_PDF, PAGE_TREE_ROOT_WITHOUT_TYPE_PDF, PAGE_UNPARSABLE_PDF,
+    PAIRED_OPTIONS_FORM_PDF, PAIRED_RADIO_FORM_PDF, PICTURE_BMP, PICTURE_BROKEN_PNG, PICTURE_JPEG,
+    PICTURE_LARGE, PICTURE_OVERSIZE, PICTURE_PDF, PICTURE_PIXEL, PICTURE_PNG,
+    PICTURE_STALE_CRC_PNG, PICTURE_TALL, PICTURE_WEBP, PPTX_ASSETS, PPTX_BOXES, PPTX_BROKEN_SLOT,
+    PPTX_LIST_DISAGREES, PPTX_LIST_REORDERED, PPTX_MACRO, PPTX_MISSING_NOTES,
     PPTX_NO_CONTENT_TYPES, PPTX_NO_LAYOUT, PPTX_NO_NOTES_MASTER, PPTX_NO_SHAPE_TREE, PPTX_NO_SIZE,
     PPTX_NO_SLIDE_LIST, PPTX_NOTES_NO_BODY, PPTX_NOTES_TWO, PPTX_RUNS, PPTX_SECTIONS, PPTX_SIGNED,
     PPTX_SLIDE_OUTSIDE, PPTX_TABLE, PPTX_TWO_NOTES_MASTERS, PUSHBUTTON_CAPTION_FORM_PDF,
@@ -17160,6 +17161,62 @@ fn pdf_cases() -> Vec<Case> {
             json!({
                 "op": "pdf_rotate",
                 "input": "$in/object-stream-ascii-hex.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 2,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 1,
+                    text: "Page two text",
+                },
+            ],
+        ),
+        // The same shape whose container states `LZWDecode`, whose table grows a code early; the
+        // filler past the last body takes the code width past nine bits, so the table's growth is
+        // exercised rather than only its literals.
+        produced(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("object_stream_lzw"),
+            vec![OBJECT_STREAM_LZW_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/object-stream-lzw.pdf",
+                "degrees": 90,
+                "pages": "all",
+                "output": "$out/rotated.pdf",
+            }),
+            vec!["rotated.pdf"],
+            vec![
+                Effect::PageCount {
+                    output: None,
+                    count: 2,
+                },
+                Effect::PageText {
+                    output: None,
+                    page: 1,
+                    text: "Page two text",
+                },
+            ],
+        ),
+        // The same file whose container states a `/Predictor` the reference never applies — its decoder
+        // reads `/EarlyChange` alone — so the objects it holds are read from the bytes the filter
+        // states.
+        produced(
+            Family::Pdf,
+            "pdf_rotate",
+            Some("object_stream_lzw_predictor"),
+            vec![OBJECT_STREAM_LZW_PREDICTOR_PDF],
+            json!({
+                "op": "pdf_rotate",
+                "input": "$in/object-stream-lzw-predictor.pdf",
                 "degrees": 90,
                 "pages": "all",
                 "output": "$out/rotated.pdf",

@@ -51,11 +51,9 @@
 //! than adds; what stops it is
 //! [`container_decode_max_bytes`](crate::vocabulary::EngineBounds::container_decode_max_bytes),
 //! the most a typed array holds — the same wall the reference's own decoder hits, where it keeps the
-//! container as the bytes it states. The ceiling bounds what the walk *retains* between stages, not
-//! the peak of one stage: every stage but RunLength is built and then measured, so a stage that
-//! expands holds its own output before the ceiling is consulted, and only RunLength — which states
-//! its output's length in each run — is counted before it writes. A container past the ceiling is
-//! carried here too, not refused.
+//! container as the bytes it states. Which filters count their output as they produce it, which build
+//! their whole output first, and what the peak of each can be, is that bound's row in `VOCABULARY.md`.
+//! A container past the ceiling is carried here too, not refused.
 //!
 //! The walk builds arrays and dictionaries from an explicit stack rather than by recursion, so the
 //! nesting it follows costs heap rather than the process's stack. It still stops at
@@ -90,6 +88,7 @@ use flate2::{Decompress, FlushDecompress, Status};
 use lopdf::{Dictionary, Object, ObjectId, Stream, StringFormat};
 
 use super::graph::{self, Document};
+use super::lzw;
 
 use crate::vocabulary::vocabulary;
 use crate::writing::whole;
@@ -1734,8 +1733,8 @@ impl<'a> Scan<'a> {
     /// truncated table changes nothing on either side. Unlike a `trailer` dictionary, an index stream
     /// *replaces* what an earlier statement said, so an entry it leaves out is no longer stated at all.
     ///
-    /// The decode is the reference's own eager one, so its bytes are held once and dropped. A container
-    /// the engine cannot decode — a filter chain it does not read, or one whose bytes pass
+    /// The decoded bytes are held once and dropped, whichever filter states them. A container the
+    /// engine cannot decode — a filter chain it does not read, or one whose bytes pass
     /// `container_decode_max_bytes` — adopts nothing, which is what the reference's constructor does by
     /// throwing. `false` is a dictionary it throws on, and a stream whose index it cannot read is
     /// carried as the bytes it states rather than dropped, which is what the reference does with the
@@ -2051,34 +2050,38 @@ fn decode_name(name: Vec<u8>) -> Vec<u8> {
 }
 
 /// The stream's bytes through its filter chain, or `None` for a chain this engine does not decode.
-/// `FlateDecode`, `ASCIIHexDecode` and `RunLengthDecode` are decoded here, the way the reference's
-/// library decodes them; every other filter is handed to the object model one stage at a time.
+/// `FlateDecode`, `LZWDecode`, `ASCIIHexDecode` and `RunLengthDecode` are decoded here, the way the
+/// reference's library decodes them; every other filter is handed to the object model one stage at a
+/// time.
 ///
 /// `/Filter` and `/DecodeParms` are resolved through the object map, as the reference resolves them,
 /// so a chain stated indirectly is the chain it names. Each stage's output is the next stage's input,
-/// so the cost is the chain's own product rather than the file's bytes: a RunLength stage expands to
-/// at most 64 times its input, and a chain of them multiplies. What bounds it is `max`, the
-/// vocabulary's `container_decode_max_bytes` — the most a typed array holds, the same wall the
-/// reference's decoder hits, where it throws and keeps the container as the bytes it states. It
-/// bounds what the chain retains between stages, not the peak of one stage: every filter but
-/// RunLength builds its output and is measured afterwards, and RunLength counts each run before it
-/// writes it. A chain past it is not decoded here either, so the container is carried rather than the
-/// file refused.
+/// so the cost is the chain's own product rather than the file's bytes. `max` is the ceiling: of the
+/// stages decoded here, one that expands consults it while it produces its bytes — [`lzw::decode`]
+/// caps its own reservation at it — and one past it is abandoned rather than built, so the container
+/// is carried rather than the file refused. A stage that only shrinks, or one the object model
+/// decodes, is measured once it exists.
 fn decoded(stream: &Stream, objects: &BTreeMap<ObjectId, Object>, max: u64) -> Option<Vec<u8>> {
     let filters = filters(stream, objects)?;
-    chain(stream, &filters, max)
+    chain(stream, &filters, objects, max)
 }
 
 /// `filters` applied in order. Each stage's parameters are borrowed from the document rather than
-/// copied, because a `/DecodeParms` value may be nested as deep as the scan builds one; only the one
-/// filter the object model decodes needs a copy of its own.
-fn chain(stream: &Stream, filters: &[(Vec<u8>, Option<&Dictionary>)], max: u64) -> Option<Vec<u8>> {
+/// copied, because a `/DecodeParms` value may be nested as deep as the scan builds one; only the
+/// filters the object model decodes need a copy of their own.
+fn chain(
+    stream: &Stream,
+    filters: &[(Vec<u8>, Option<&Dictionary>)],
+    objects: &BTreeMap<ObjectId, Object>,
+    max: u64,
+) -> Option<Vec<u8>> {
     let mut data = stream.content.clone();
     for (filter, parms) in filters {
         data = match filter.as_slice() {
             b"ASCIIHexDecode" => ascii_hex(&data),
             b"RunLengthDecode" => run_length(&data, max)?,
             b"FlateDecode" => inflate(&data, max)?,
+            b"LZWDecode" => lzw::decode(&data, early_change(*parms, objects), max)?,
             _ => {
                 // One filter at a time, over the bytes the one before left: the dictionary is copied
                 // for the single-filter stream and the content is not.
@@ -2154,6 +2157,30 @@ fn filters<'a>(
             Some(chain)
         }
         _ => None,
+    }
+}
+
+/// `/EarlyChange` as the reference reads it: the number the entry states, resolved through the object
+/// map, and the format's default of one when the entry is absent or is not a number. A whole number is
+/// put in as the double the reference's parser holds for it, and a real at the object model's single
+/// precision, which is `PARSER.md` §6.3's model; where that rounding moves a width crossing, §3.15
+/// states the divergence.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "a whole number past two to the fifty-third is read at the value a double holds for it, \
+              which is the value the reference's own parser holds"
+)]
+fn early_change(parms: Option<&Dictionary>, objects: &BTreeMap<ObjectId, Object>) -> f64 {
+    let Some(stated) = parms
+        .and_then(|parms| parms.get(b"EarlyChange").ok())
+        .map(|value| graph::resolved(objects, value))
+    else {
+        return 1.0;
+    };
+    match stated {
+        Object::Integer(whole) => *whole as f64,
+        Object::Real(fraction) => f64::from(*fraction),
+        _ => 1.0,
     }
 }
 
@@ -3774,6 +3801,88 @@ endobj
         assert_eq!(
             decoded(&stream, &BTreeMap::new(), 8192).map(|bytes| bytes.len()),
             Some(4096)
+        );
+    }
+
+    #[test]
+    fn an_early_change_entry_is_read_through_the_object_map() {
+        // The entry the reference's decoder does read, resolved through the object map as `lookup`
+        // resolves it: a stream encoded with the early change and read with the standard switch is not
+        // the bytes it states.
+        let payload: Vec<u8> = (0..=255_u8).chain(0..=255).collect();
+        let data = crate::test_support::build::lzw(&payload);
+        let stream = |parms: Option<Dictionary>| {
+            let mut dict = Dictionary::new();
+            dict.set("Filter", Object::Name(b"LZWDecode".to_vec()));
+            if let Some(parms) = parms {
+                dict.set("DecodeParms", Object::Dictionary(parms));
+            }
+            Stream::new(dict, data.clone())
+        };
+        let mut objects = BTreeMap::new();
+        objects.insert((9, 0), Object::Integer(1));
+        let mut parms = Dictionary::new();
+        parms.set("EarlyChange", Object::Reference((9, 0)));
+        let read = decoded(&stream(Some(parms)), &objects, Bounds::stated().decode);
+        assert_eq!(read.as_deref(), Some(payload.as_slice()));
+        let mut parms = Dictionary::new();
+        parms.set("EarlyChange", Object::Integer(0));
+        assert_ne!(
+            decoded(
+                &stream(Some(parms)),
+                &BTreeMap::new(),
+                Bounds::stated().decode
+            )
+            .as_deref(),
+            Some(payload.as_slice())
+        );
+    }
+
+    #[test]
+    fn a_container_past_the_ceiling_is_carried_rather_than_refused() {
+        // The file is read and its container kept as the bytes it states, with the objects it claims
+        // reported as the loss they are: a bound on what a container may cost is not a refusal of the
+        // file that holds it.
+        let (document, lost) = super::document(
+            &crate::test_support::build::pdf_object_stream_lzw(),
+            Bounds {
+                decode: 8,
+                ..Bounds::stated()
+            },
+        )
+        .expect("the file is read");
+        assert!(lost.unread > 0, "the container's claim is reported");
+        assert!(
+            !document.objects.contains_key(&(8, 0)),
+            "the objects inside the container are not placed"
+        );
+        let (document, lost) = super::document(
+            &crate::test_support::build::pdf_object_stream_lzw(),
+            Bounds::stated(),
+        )
+        .expect("the file is read");
+        assert_eq!(lost.unread, 0);
+        assert!(
+            document.objects.contains_key(&(8, 0)),
+            "under the ceiling the container is expanded"
+        );
+    }
+
+    #[test]
+    fn a_container_whose_body_decodes_to_a_zero_block_is_expanded_rather_than_carried() {
+        // An empty `LZWDecode` body decodes to the block of zero codes the reference pads a stream
+        // with, so the container is expanded and its entries are read: none parses, nothing is placed,
+        // and the objects it claims are the walk's own count rather than the file's unread claim.
+        let (document, lost) = super::document(
+            &crate::test_support::build::pdf_object_stream_empty_lzw(),
+            Bounds::stated(),
+        )
+        .expect("the file is read");
+        assert_eq!(lost.unread, 0, "the container is not carried unread");
+        assert_eq!(lost.objects, 5, "the objects it states are counted as lost");
+        assert!(
+            !document.objects.contains_key(&(8, 0)),
+            "nothing inside a zero block is placed"
         );
     }
 

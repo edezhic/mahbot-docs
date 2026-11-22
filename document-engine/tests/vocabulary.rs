@@ -682,6 +682,24 @@ const EXEMPTIONS: &[Exemption] = &[
         quantity: "",
         reason: "the six members of DrawingML's `EG_FillProperties` choice group",
     },
+    // ── the reference's LZW decoder ─────────────────────────────────────────────────────────────
+    // The filter's own code space: the literals it starts with and the codes one block of its
+    // decoder holds. Both are format knowledge, and neither is a bound this engine enforces.
+    Exemption {
+        file: "src/writing/pdf/lzw.rs",
+        value: 256.0,
+        count: 1,
+        quantity: "",
+        reason: "the literal codes an LZW table starts with, past which a code names a sequence",
+    },
+    Exemption {
+        file: "src/writing/pdf/lzw.rs",
+        value: 512.0,
+        count: 1,
+        quantity: "",
+        reason: "the codes one block of the reference's decoder holds, which is how many zero codes a \
+         stream that ends inside a block is padded with",
+    },
     // ── the embedded PDF font ────────────────────────────────────────────────────────────────────
     // An sfnt's own record sizes and field offsets: none is a bound the vocabulary states.
     Exemption {

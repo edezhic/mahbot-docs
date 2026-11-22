@@ -1,6 +1,6 @@
 {
   "note": "Recorded from the reference engine by `cargo run --bin record-baseline`. The harness never rewrites this file: recording is a deliberate act.",
-  "recorded_at_unix": 1795301383,
+  "recorded_at_unix": 1795328659,
   "writer": {
     "engine": "reference-writer",
     "build": "aec3235eca456a85ef1baa19cc4becc43d748cde816177f9d168b37eab113fc7",
@@ -370805,6 +370805,180 @@
       }
     },
     "pdf/pdf_rotate/object_stream_ascii_hex": {
+      "status": "produced",
+      "outputs": {
+        "rotated.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                {
+                  "colour": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "position": [
+                    72.0,
+                    760.0
+                  ],
+                  "rotation": 0.0,
+                  "size": 24.0,
+                  "text": "Page one text"
+                }
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                {
+                  "colour": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "position": [
+                    72.0,
+                    736.0
+                  ],
+                  "rotation": 0.0,
+                  "size": 24.0,
+                  "text": "Page two text"
+                }
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_rotate/object_stream_lzw": {
+      "status": "produced",
+      "outputs": {
+        "rotated.pdf": {
+          "attachments": [],
+          "form": {
+            "fields": []
+          },
+          "info": {
+            "author": null,
+            "keywords": null,
+            "subject": null,
+            "title": null
+          },
+          "pages": [
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                {
+                  "colour": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "position": [
+                    72.0,
+                    760.0
+                  ],
+                  "rotation": 0.0,
+                  "size": 24.0,
+                  "text": "Page one text"
+                }
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            {
+              "annots": [],
+              "appearance_text": [],
+              "crop": null,
+              "forms": 0,
+              "images": [],
+              "media": [
+                0.0,
+                0.0,
+                595.28,
+                841.89
+              ],
+              "rotate": 90,
+              "text": [
+                {
+                  "colour": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "position": [
+                    72.0,
+                    736.0
+                  ],
+                  "rotation": 0.0,
+                  "size": 24.0,
+                  "text": "Page two text"
+                }
+              ],
+              "vector": {
+                "count": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pdf/pdf_rotate/object_stream_lzw_predictor": {
       "status": "produced",
       "outputs": {
         "rotated.pdf": {

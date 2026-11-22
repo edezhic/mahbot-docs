@@ -14,7 +14,8 @@ two decisions it takes:
 
 - **matched** — the engine answers the same way, and a corpus case or a crate test witnesses it; where
   the shape changes no answer, the entry says so instead of naming a witness, because none could tell
-  the two apart;
+  the two apart. A matched entry may still state a corner of the shape that differs; those corners
+  are named in the list below;
 - **stated** — the engine answers differently, the reason is given here and beside the operation, and
   where the difference is visible to the harness a case shows it.
 
@@ -35,7 +36,8 @@ not have.
 ## The entries whose answers differ
 
 Every entry says whether this engine answers as the reference does. These are the ones a case or a
-reader can tell apart, each marked **stated** where it appears above, with its reason:
+reader can tell apart, each marked **stated** where it appears above or a corner a matched entry
+states there, with its reason:
 
 - §1.4 — an object header whose numbers the model cannot key: the produced file carries different
   numbers.
@@ -49,6 +51,9 @@ reader can tell apart, each marked **stated** where it appears above, with its r
 - §3.5, §3.10, and the loss counts in §1.5–§1.7 — the loss field: the answer says which objects
   the produced file does not hold as an object, how many a container it could not read states, and
   which references no longer name what the input named.
+- §3.15 — a `/EarlyChange` whose rounding moves a width crossing, so the bytes a container decodes to
+  may differ, and a whole number past `i64` that the model does not read at all; and a stream cut
+  inside the block padding at the ceiling, where which side produces is not settled.
 - §4.3 — a `/Root` whose `/Type` is a reference to the name `/Catalog`: this engine adopts the body's
   catalog where the reference keeps a dictionary it cannot use, and its load faults.
 - §4.4, §5.1 — a catalog or a page tree stated in place: this engine gives it a number, so the
@@ -424,10 +429,14 @@ could not. **Matched**; witnessed by `pdf/pdf_merge/index_stream_absent`,
 **3.9 A filter chain past the decode ceiling.** `decodePDFRawStream` decodes stage by stage into a
 typed array, so a chain of expanding filters multiplies and dies at the array's own limit; the
 container is then carried. The engine stops at `container_decode_max_bytes`, which is that limit, and
-carries the container. **Matched**; measured in `parity/scripts/probe-pdf-bounds.mjs` (a five-stage
-chain decodes to 2.1 GiB and produces; a six-stage one spends thirty seconds and produces too) and
-witnessed by `pdf/pdf_rotate/container_decoding_eighty_mib` for the cost, and by the crate's injected
-bounds for the ceiling itself.
+carries the container; what that ceiling still costs, and the allocation failure it cannot contain, are
+its `VOCABULARY.md` row's statement. **Matched**; measured in
+`parity/scripts/probe-pdf-bounds.mjs` (a five-stage chain decodes to 2.1 GiB and produces; a six-stage
+one spends thirty seconds and produces too) and witnessed by
+`pdf/pdf_rotate/container_decoding_eighty_mib` for the cost, by the crate's injected bounds for the
+ceiling itself, and by
+`...::a_stream_past_the_ceiling_is_stopped_before_its_content_exists` for a stage whose output is
+counted as it is produced.
 
 **3.10 Flate, cut inside a stored block.** `FlateStream`'s uncompressed-block path sets `eof` and
 returns the prefix it read when the bytes run out, so the reference decodes what the file holds and
@@ -459,10 +468,43 @@ data, and drops it when the bytes simply run out. The engine's `ascii_hex` does 
 witnessed by `pdf/pdf_rotate/object_stream_ascii_hex` and
 `...::a_hexadecimal_string_with_an_odd_digit_count_is_padded`.
 
-**3.15 LZW's `/EarlyChange`.** `decodeStream` passes the entry to `LZWStream`. The object model reads
-the same entry. **Matched**; no case and no crate test: no fixture states an LZW container, and both
-sides hand the parameter to the same decoder from the same place, so a fixture would exercise one
-decoder twice rather than compare two answers.
+**3.15 LZW.** `decodeStream` hands this filter to `LZWStream`, a port of pdf.js's, and that decoder is
+the answer shape for shape: it reads `/EarlyChange` and nothing else, so a `/Predictor` the container
+states beside the filter is applied by neither side; a code past the table is the format's one-step
+repeat rather than a fault; a stream that ends without an end-of-data code has the block it ended
+inside padded with zero codes, so the cut is reported as data; the code width is recomputed only where
+the table's size plus `/EarlyChange` is a power of two — one code early for the format's default — and
+never passes twelve bits; and a clear code restates the table from its first entry but keeps the
+lengths the previous one grew, so an entry can state more bytes than the table holds, where the
+reference's fixed array drops the writes past it and states zeros. The engine decodes the filter itself
+(`writing/pdf/lzw.rs`), shape for shape, with `/EarlyChange` resolved through the object map and put
+into the same arithmetic — `0` is the standard width switch and `1`, the format's default, the early
+one. The number is read at the precision §6.3 states: a whole number as the double the reference's
+parser holds for it, a fraction at the model's single precision, and a whole number past `i64` not at
+all — the model keeps it as bytes, so the format's default stands where the value is stated indirectly
+and the object is carried where it is inline. Where that rounding moves a width crossing, the bytes
+the container decodes to may differ from the reference's. No writer states such a value: the entry is
+`0` or `1` in every file that states it. **Matched** within that model; witnessed by
+`pdf/pdf_rotate/object_stream_lzw` (whose filler takes the code width past nine bits, so the
+recorded answer exercises the table's growth), by
+`pdf/pdf_rotate/object_stream_lzw_predictor` (a container stating a `/Predictor`), and by
+`pdf_tolerance.rs::a_container_stating_a_large_early_change_is_produced` for the number. The decoder's
+own shapes, its width rule and byte-exactness are that module's tests.
+
+What differs is the timing: the engine counts this stage's output as it produces it, so a container
+past `container_decode_max_bytes` costs at most the ceiling (the row states each filter's peak).
+**Matched on the file**: the reference's own decoder gives up at the same wall (§3.9) and carries the
+container, and so does the engine, with the loss §3.5 states. A stream cut inside its last block is
+padded, and the padding is counted like any other output, so a stream cut within a block's padding of
+the ceiling is measured against it too. Which side produces a file in that band is not settled: the
+reference's own buffer doubles, and settling it would take four gibibytes in both runtimes, so the
+band — a few hundred bytes just below the ceiling, which no file holds — is a named gap rather than a
+stated answer. Witnessed by
+`...::a_container_past_the_ceiling_is_carried_rather_than_refused` (the file is read, the container kept
+and its claim reported), `...::a_stream_past_the_ceiling_is_stopped_before_its_content_exists` (the
+buffer the caller holds never reserves past the ceiling) and
+`...::a_stream_decoding_to_exactly_the_ceiling_is_decoded_and_one_byte_more_is_not` (the boundary at the
+injected bound).
 
 **3.16 A filter neither side reads.** `decodeStream` throws `UnsupportedEncodingError`, so the
 container is carried; the object model's decoder fails the same way. **Matched**; witnessed by
@@ -918,7 +960,10 @@ caller asked for capping, which the kit does not, so a twenty-digit coordinate i
 reference. The engine keeps a whole number as `i64` and a fraction as `f32`: a whole number past
 `i64` in an object's body carries the object, and a number in an object *header* saturates instead
 (§1.5), because an object's number is one this model can renumber and a coordinate is not. **Stated**:
-a page is laid out in points, so the band exists only for numbers no page uses. No case.
+the coordinate band is a page laid out in points, so it holds only numbers no page uses. The decoding
+band is a stream's `/EarlyChange`, a number read into arithmetic rather than into a coordinate, where
+the reference holds the double, so a fractional entry can move the width a container decodes at
+(§3.15). No case.
 
 **6.4 An object numbered at the format's ceiling.** The reference keys the number as stated and writes
 `4294967295 0 obj` back, with an index section beginning there; the model here keys it as stated too.
