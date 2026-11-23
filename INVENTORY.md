@@ -1,49 +1,60 @@
 # mahbot-docs — document handling, lifted out of the product
 
-This folder holds everything in the MahBot product that deals with documents: the
-JavaScript document kit, the Rust document readers, the Rust↔JavaScript glue, the
-prompts, and reference copies of the shared product files that carry document code. It also
-holds the new `document-engine` crate, the `parity` harness that judges it, and the development
-oracle that records what LibreOffice lays out for the documents the engine writes and compares the
-engine's own PDF pages against PDFium.
+This folder holds everything in the MahBot product that deals with documents: the Rust document
+readers, the Rust↔JavaScript glue, the prompts, and reference copies of the shared product files that
+carry document code. It also holds `document-engine`, the one crate of the root workspace: the engine
+the product will depend on, the gate that judges it, and the development oracle that records what
+LibreOffice lays out for the documents the engine writes and compares the engine's own PDF pages
+against PDFium.
 
 Copied from `/Users/egordezic/Desktop/mahbot` on 2026-11-06. The product repository
 was not modified.
 
-## The packages this folder holds
+## The words this folder uses
 
-Three, of which two are members of the root workspace:
+Three words recur, and they are defined here rather than in each document that uses them:
 
-| Package | What it is | Workspace |
-|---|---|---|
-| `document-engine/` | the crate the product will depend on instead of its own document modules | member |
-| `parity/` | the harness that judges the crate against the product's own behaviour | member |
-| `oracle/` | the development oracle: what LibreOffice lays out for the documents the engine writes, and the engine's PDF pages compared against PDFium | a workspace of its own |
+- **the kit** — the JavaScript document kit that produced the writer's output until it retired. It is
+  gone from this folder; a sentence that names it says what it did or what its numbers were, never
+  that it is alive or that a build drives it.
+- **the product reader** — the product's own reader sources, copied byte for byte under
+  `document-engine/dev/reference_sources/` and compiled into the gate, so the engine is still held to
+  reading as the product does.
+- **the reference** — the behaviour the engine is held to, wherever it is read from: the product's
+  document code under `src/` and the retired kit's writer, whose answers the engine reproduces and
+  which `document-engine/PARSER.md` and `document-engine/VOCABULARY.md` state; and, for the oracle,
+  the outside programs it drives — LibreOffice and PDFium — which are a second opinion rather than
+  the truth. No part of the reference is a dependency of the crate.
 
-The oracle is deliberately outside the root workspace. It drives an outside program, nothing in this
-workspace depends on it, and a resolution of its own leaves the root build, the root lockfile and the
-parity harness's comparison identity untouched by it.
+## The package this folder holds
+
+One: `document-engine`, the crate the product will depend on instead of its own document modules. The
+gate and the development oracle are development-only targets of it — `dev/gate.rs` and
+`dev/oracle_target.rs` — so the folder has one lockfile and one resolution:
+
+| Target | What it is |
+|---|---|
+| `document-engine/dev/gate.rs` | the gate: the engine against what was recorded last time |
+| `document-engine/dev/oracle_target.rs` | the development oracle: what LibreOffice lays out for the documents the engine writes, and the engine's PDF pages compared against PDFium |
 
 ## Layout
 
-### `assets/docgen/` — the JavaScript document kit (source of truth for behaviour)
+### `assets/docgen/` — the retired JavaScript document kit
+
+The JavaScript kit that was the source of truth for the writer's behaviour has retired. Its source,
+bundle, rules, manifest, lockfile and build script are gone; the baseline is now recorded from the
+engine's own writer and reader. Two files remain because the product's own source copy embeds them:
 
 | File | What it is |
 |---|---|
-| `kit.js` | The only hand-written source: 9 418 lines (5 560 of code), 13 actions and 37 sub-operations on top of six npm packages. |
-| `rules.json` | 131 lines of data. Read by both sides: the JS inlines it into the bundle, Rust reads it through `include_str!`. |
-| `package.json` | Manifest pinning six packages: pdf-lib 1.17.1, docx 9.12.0, pptxgenjs 4.0.1, docxtemplater 3.71.0, @pdf-lib/fontkit 1.1.1, pizzip 3.3.0. |
-| `bun.lock` | Dependency lock; part of the provenance hash. |
-| `build.sh` | The only way to rebuild the bundle: bun install + bun build + sha256 header. |
-| `document-kit.js` | Generated bundle: 161 089 lines / 6 177 130 bytes, committed to git, embedded into the binary with `include_bytes!`. |
-| `NotoSans-Regular.ttf` | 569 208 bytes, the PDF font. Also used by the rasterizer as a fallback. A real copy of `document-engine/assets/NotoSans-Regular.ttf`; the harness compares the two by digest, so the kit and the engine draw with one face. |
+| `NotoSans-Regular.ttf` | 569 208 bytes, the PDF font. A real copy of `document-engine/assets/NotoSans-Regular.ttf`; the gate compares the two by digest. It stays because the product's own source copy embeds it here. |
 | `NotoSans-LICENSE.txt` | Font licence. |
 
-### `src/` — the product's Rust side, the reference the crate is compared against
+### `src/` — the product's Rust side, the behaviour the crate is held to
 
 These are the product's own sources, copied verbatim. The reader half is no longer only here: it
-now lives in `document-engine/` as well, and `parity/src/reference_sources/` holds the byte-for-byte
-copies the harness compiles. This directory remains the reference those copies are checked against.
+now lives in `document-engine/` as well, and `document-engine/dev/reference_sources/` holds the byte-for-byte
+copies the gate compiles. This directory remains the original those copies are checked against.
 
 | Path | What it is |
 |---|---|
@@ -52,7 +63,7 @@ copies the harness compiles. This directory remains the reference those copies a
 | `legacy.rs` | Old binary `.doc`/`.xls`/`.ppt` through `office_oxide`. |
 | `pdf_marks.rs` | Annotations, form fields, page labels. |
 | `reader_output.rs` | The output vocabulary of the readers, including "what was not shown". Also used by the writing tool and the read prompt. |
-| `docgen.rs` | Runs bun, the embedded bundle, provenance check, access to `rules.json`, font data. `TEXT_FONT_DATA` is also used by the rasterizer. |
+| `docgen.rs` | The product's own glue: runs bun on the embedded bundle, checks its provenance, reads `rules.json` and holds the font data. The kit retired in this folder, so the file it embeds is gone here; the copy is kept verbatim as contract material and is never compiled. `TEXT_FONT_DATA` is also used by the rasterizer. |
 | `tools/document.rs` | Tool registration, argument schema, validation, request building, file delivery. 7 394 lines, about a third of them tests (44 tests). |
 | `tools/read_document.rs` | The document branch of the shared `read` tool; called from `tools/read.rs` and from the CLI. |
 | `prompt/tool/document.md` | Tool description for the model, 8 036 bytes, 13 substitutions. |
@@ -77,6 +88,8 @@ place. Document code inside them:
 - `src/tools/shell/readonly.rs` — tests that lock down the refusal of `mahbot document create` and `mahbot document read` in read-only mode.
 - `Cargo.toml` — `pdf-extract 0.12`, `hayro 0.7`, `office_oxide =0.1.13`, `quick-xml 0.39` (zip and image are shared).
 - `.gitattributes` — LF for four kit sources and `-text` for the bundle: the provenance hash depends on it.
+  The product's own file, unchanged; the kit it names has retired here, so nothing in this folder is
+  bound by it.
 
 ## Things that are not here on purpose
 
@@ -84,39 +97,54 @@ place. Document code inside them:
   live under `document-engine/assets/docx-create/`, derived JSON data under
   `document-engine/assets/docx-layout/`, and the embedded font is the existing exception; none of
   them is a sample document.
-- No sample document is recorded either, but `oracle/record/` does hold binary PDFs. They are a
+- No sample document is recorded either, but `document-engine/dev/oracle/record/` does hold binary
+  PDFs. They are a
   **captured artefact**: a sample document is an input the writer is judged on, and these are an
   outside producer's output for the writer's own documents, kept so the pages can be rasterised and
   reviewed later. Reading them needs nothing but the workspace, and nothing in the engine's build or
   tests reads them.
 - No settings: the document part has no config key, no migration and no Settings entry.
-- CI does not mention the document kit; the bundle reaches the binary through `include_bytes!`.
+- Nothing in the tree needs a JavaScript runtime, and no build step reads a JavaScript file:
+  the kit that did retired with its bundle, its generator and its lockfile.
 
-## `parity/` — the engine parity harness (new work, not copied from the product)
+## `document-engine/dev/` — the gate and the oracle (new work, not copied from the product)
 
-A separate Rust crate that judges every stage of the document-engine work. It drives the current
-writer (the JavaScript kit, through the product's request-and-result contract) and either the
-product's own reader or the crate's, over a corpus generated in code, compares each run with a
-recorded baseline by a declared canonical model per format, and checks each scenario's declared
-effect. The product's reader sources are byte-for-byte copies under `parity/src/reference_sources/`,
-so nothing in this workspace can rewrite the product's sources and a divergence fails the gate. The
-default engine, `--engine crate`, pairs the crate's own writer and reader; `--engine reference` is
-the recorder — the reference kit's writer and the product's own reader. Detection is recorded and
-compared beside every reading. The gate runs every case in a child process of its own
-(`parity/src/supervisor.rs`), so a case that writes without limit or hangs costs that case, and so
-does one that exhausts memory where the platform reports physical footprint;
-`parity/src/bin/parity-helper.rs` is the harness's own helper child, used only by the harness's
-tests. See `parity/README.md` for the model, the engine boundary, the baseline, the bounds and how
-to run it. Nothing in the product was changed to build it.
+Two development-only targets of the crate, rooted at `dev/gate.rs` and `dev/oracle_target.rs`. They
+are declared in `document-engine/Cargo.toml` between two marker lines, so an ordinary build does not
+compile them and the crate's isolated copy leaves them out; they are never binaries, so `cargo build`
+never reaches them, and their dependencies are dev-dependencies.
+
+The **gate** judges the engine against what was recorded last time. It runs a corpus generated in
+code — 850 writer cases and 92 readings — in a child process of its own per entry, compares each
+transcript with `dev/baseline/baseline.json` by a declared canonical model per format, and checks each
+case's declared effect. It used to judge the engine against the JavaScript kit; the kit retired, so
+"correct" now means "agrees with the record", and a behaviour change is accepted by re-recording and
+reviewing the difference rather than by agreeing with another implementation. That is a deliberate
+trade: the gate detects *change*, not divergence from an outside implementation, and a green gate is
+not a statement of correctness. The product's own reader sources stay as byte-for-byte copies under
+`dev/reference_sources/`, compiled there, and one test replays the recorded readings through them, so
+the engine is still held to reading as the product does.
+
+A case that writes without limit, hangs or exhausts memory costs that case: `dev/supervisor.rs` bounds
+each child (memory footprint where the platform reports it, file size, directory entries, wall time)
+and sweeps a dead owner's root. `dev/helper.rs` is the harness's own helper engine, used only by its
+tests. See `document-engine/dev/README.md` for the model, the engine boundary, the baseline, the
+bounds and how to run it.
+
+The **oracle** is a report, not a gate: it records what LibreOffice lays out for the Office documents
+the engine writes, and compares the engine's drawing of a PDF page against PDFium, reporting every
+other family as not compared with its reason. See `document-engine/dev/oracle/README.md`.
+
+Nothing in the product was changed to build either.
 
 ## `document-engine/` — the document engine crate (new work, not copied from the product)
 
 The crate the product will depend on instead of its own document modules. It owns three things and
 nothing of the tool interface: reading (`detect`, `read`, `render_page`), operations (one
-`execute` call for the thirteen operations, returning the neutral outcome the harness speaks), and
+`execute` call for the thirteen operations, returning the neutral outcome the gate records), and
 the vocabulary (`vocabulary.json` plus the embedded font; a mark the `rules` section states is read
-from there at load time, never copied). The harness depends on it; it depends on nothing in this
-workspace.
+from there at load time, never copied). It depends on nothing in this workspace but itself: the gate
+and the oracle are its own development-only targets.
 
 The reading half has landed: whole-file content-first detection, every family the product reads
 (PDF, Word, Excel, PowerPoint and the legacy binary formats), the pictures, notes and unshown report,
@@ -137,14 +165,15 @@ presentation port (its slide text, the slide, picture and table it writes, and �
 — the deck a created presentation is built from: the content walk, the pinned writer library's own
 serialiser transliterated, the package around it, and the post-pass that declares titles and
 corrects the application properties). A
-created deck's invariant parts are not hand-written: they are captured from the reference's own
-output into `assets/pptx-create/`, mirroring the archive's paths, and written exactly as captured.
-`parity/src/bin/capture-pptx-parts.rs` regenerates them and `parity/tests/pptx_create_parts.rs`
-proves the shipped copies are the reference's bytes. A created Word document is the same shape of
+created deck's invariant parts are not hand-written: they were captured from the kit's own output,
+before it retired, into `assets/pptx-create/`, mirroring the archive's paths, and are written exactly
+as captured. Nothing re-derives them now; `dev/tests/pptx_create_parts.rs` pins the shipped bytes and
+the set the crate's own table names, so a change there is a deliberate replacement of a frozen
+expectation. A created Word document is the same shape of
 port, one library deeper: `docx/create/` walks the content list and serialises each block, and
 `docx/layout/` is the pinned library's layout pass — the measurer over the width tables shipped as
 data, the line breaker, the paginator and the passes that settle a table of contents' page numbers
-and a page-count token — so the numbers a created document shows are the reference's own for the
+and a page-count token — so the numbers a created document shows are the pinned library's own for the
 shapes a created document reaches, which `docx/layout/disposition.rs` states one module at a time.
 
 For a PDF, `src/writing/pdf/` is the object model the page actions build on (`lopdf`, which the
@@ -205,34 +234,34 @@ action's refusals and its notes, a page-render refusal and the panic fallback �
 unreached with its reason.
 
 The document builders live in the crate's `test_support`, the one home shared by the crate's tests
-and the harness. `tests/standalone.rs` builds and tests the crate in a temporary copy with no
+and the gate. `tests/standalone.rs` builds and tests the crate in a temporary copy with no
 product sources present. `document-engine/VOCABULARY.md` states the vocabulary's boundary, who
 enforces each bound, and the restatement scan's reviewed lists and blind spots, and
-`document-engine/PARSER.md` enumerates the reference's parser's tolerance, one shape per entry, with
-what each side does about it.
+`document-engine/PARSER.md` enumerates the retired kit's PDF library's parser tolerance, one shape
+per entry, with what each side does about it.
 
 `assets/docgen/NotoSans-Regular.ttf` is a real copy of `document-engine/assets/NotoSans-Regular.ttf`
-(the harness compares their digests), so the kit, the reference reader and the crate draw with one
-face; the harness copies its sources rather than linking them, so nothing in this workspace can
-rewrite the product's. The four kit sources are unchanged, so the committed bundle's provenance
-hash still holds.
+(the gate compares their digests). It stays because the product's own source copy, `src/docgen.rs`,
+embeds it at that path and that copy may not be edited; the kit's sources, bundle, rules, manifest,
+lockfile and build script are gone, so the provenance hash that covered them no longer applies. The
+gate copies the product's reader sources rather than linking them, so nothing in this workspace can
+rewrite the product's.
 
 The crate's own asset directory holds four things: the face; `pptx-create/` — the parts a created
-deck does not vary in, captured from the reference's own output and written exactly as captured;
-`docx-create/` — the same for a created Word document, plus the fragments its footnotes, numbering and
-content-types parts are built around; and `docx-layout/` — the pinned `docx` library's width,
-supplementary, Arabic and East Asian face tables, its character-class ranges, the layout constants the
-port reads, its module list, the probe scripts its exclusions rest on, and its licence, derived by
-`bun parity/scripts/derive-docx-layout-data.mjs`. Their line endings differ part by part, so the root
-`.gitattributes` pins the two captured-part directories with rules scoped to those directories alone
-rather than a blanket setting, which would rewrite the committed bundle and break the provenance
-hash. Two licences ship beside the data they cover: `pptxgenjs-LICENSE.txt` for the deck's captured
-parts (the output of `pptxgenjs` 4.0.1, which ships under the MIT licence), and
-`docx-layout/LICENSE` for the `docx` 9.12.0 tables — and for the Word parts captured in
-`docx-create/`, which the same library writes. `docx-create/` holds no licence file of its own: it is
-regenerated wholesale by `parity/src/bin/capture-docx-parts.rs`, and `docx-layout/README.md` is where
-the pointer to the licence that covers it lives. The `docx` tables' provenance and unresolved licence
-question are that README's too.
+deck does not vary in, captured from the kit's own output before it retired and written exactly as
+captured; `docx-create/` — the same for a created Word document, plus the fragments its
+footnotes, numbering and content-types parts are built around; and `docx-layout/` — the pinned
+`docx` library's width, supplementary, Arabic and East Asian face tables, its character-class ranges,
+the layout constants the port reads, its module list, the probe scripts its exclusions rest on, and
+its licence. These bytes are frozen expectations now: nothing re-derives them, so a change to either
+captured-part directory or to the layout data is a deliberate replacement. Their line endings differ
+part by part, so the root `.gitattributes` pins the two captured-part directories with rules scoped
+to those directories alone rather than a blanket setting. Two licences ship beside the data they
+cover: `pptxgenjs-LICENSE.txt` for the deck's captured parts (the output of `pptxgenjs` 4.0.1, which
+ships under the MIT licence), and `docx-layout/LICENSE` for the `docx` 9.12.0 tables — and for the
+Word parts captured in `docx-create/`, which the same library writes. `docx-create/` holds no licence
+file of its own, and `docx-layout/README.md` is where the pointer to the licence that covers it
+lives. The `docx` tables' provenance and unresolved licence question are that README's too.
 
 The width data's provenance, exactly as established: the pinned package says its Arabic and
 supplementary width tables were generated from the proprietary application's own PDFs, and that its
@@ -243,10 +272,10 @@ unresolved and is the owner's decision; it is not re-litigated here. Regeneratin
 freely licensed fonts was considered and rejected, because it moves every measured width, page
 number and contents entry a created document shows.
 
-## `oracle/` — the development oracle (new work, not copied from the product)
+## `document-engine/dev/oracle/` — the development oracle (new work, not copied from the product)
 
-The harness above judges **files**. It cannot say what a page of a document this system produces
-looks like, and the engine has no page renderer for Word, PowerPoint or Excel. This package has two
+The gate above judges **files**. It cannot say what a page of a document this system produces
+looks like, and the engine has no page renderer for Word, PowerPoint or Excel. This target has two
 explicit, development-only parts:
 
 - the **record** — what LibreOffice lays out for every Office document the engine writes, captured
@@ -257,13 +286,16 @@ explicit, development-only parts:
 The comparison judges the one page the engine can draw today. The Office families become comparable
 when the engine can draw them; the comparison's page record is shaped to take them. It proves the
 drawing of the engine's own output, not the Office families, and it is not a check on arbitrary user
-PDFs. `oracle/compare/README.md` states the whole contract.
+PDFs. `dev/oracle/compare/README.md` states the whole contract.
 
-`oracle` keeps its own resolution and its own `Cargo.lock`; the root build, the root lockfile and the
-parity identity are untouched by it, and `document-engine` does not depend on it, not even as a
-development dependency. Its corpus is declared in `src/corpus.rs` and generated in code — six
+It was a package of its own with its own resolution; it is a development-only test target of the
+crate now, so it shares the one lockfile and reads the engine's identity from the crate's own
+`crate_identity` module when its comparison runs. It is a **report, not a gate**: a divergence is
+reviewed by a person, not by an exit code, and where the outside program is absent the mode says so
+and passes. Its corpus is
+declared in `dev/oracle/src/corpus.rs` and generated in code — six
 documents and seven operations over the three Office families — and its record lives under
-`oracle/record/`: per document, the PDF the reference produced and `document.json`, the canonical
+`dev/oracle/record/`: per document, the PDF the reference produced and `document.json`, the canonical
 description of its pages; once for the whole record, `identity.json` (the reference's version and
 build, the invocation, the pinned locale and paper, and the font set with the digest of every face a
 page drew a glyph in) and `fonts.conf`, the font configuration the reference was given.
@@ -278,11 +310,11 @@ Four properties are worth stating here because they are what makes the record us
   blank pages and drawn faces — and `fonts.conf` must be the configuration the identity digests and
   must name the directories the identity states. A replaced artefact, or an entry edited by hand, is
   refused rather than trusted by a later rasteriser.
-- **It is reproduced, not asserted.** `oracle --record` surveys twice and refuses to write anything
+- **It is reproduced, not asserted.** The `record` mode surveys twice and refuses to write anything
   unless the second run reproduces the first's pages under the record's canonical equality, then
   reads the written record back and compares it with what it wrote, failing the run when the record
   does not describe itself or reads back as something else;
-  `oracle` verifies the committed record against the reference on the machine and refuses when the
+  the `verify` mode checks the committed record against the reference on the machine and refuses when the
   version, build, locale, paper, tolerance, font set or the tool's own version is not the one
   recorded. Every conversion's input is digested before and after, so a reference that rewrote the
   document it was given fails the run rather than being trusted.
@@ -293,19 +325,19 @@ Four properties are worth stating here because they are what makes the record us
 
 ### The comparison
 
-`oracle/compare/` holds the comparison's committed data: `rasteriser.json` (the PDFium release, the
-platform, the library and archive digests and PDFium's licence notice), `calibration.json` (the
-metric, the per-class thresholds, the measurement each was chosen from, and the library digest they
-were measured with), `decisions.json` (what a recorded divergence was decided to be, or nothing) and
-`pdfium/` (the licence notices). `evidence/` is generated by a run, replaced rather than accumulated,
-and ignored by version control.
+`document-engine/dev/oracle/compare/` holds the comparison's committed data: `rasteriser.json` (the
+PDFium release, the platform, the library and archive digests and PDFium's licence notice),
+`calibration.json` (the metric, the per-class thresholds, the measurement each was chosen from, and
+the library digest they were measured with), `decisions.json` (what a recorded divergence was decided
+to be, or nothing) and `pdfium/` (the licence notices). `evidence/` is generated by a run, replaced
+rather than accumulated, and ignored by version control.
 
-The fixed set is five PDFs the engine produces, declared in `src/compare/cases.rs` and generated in
-code: a dense text page, a picture page, a two-page picture document, a 300-point square page and a
-page carrying a square annotation. No sample PDF is committed. The outside tool is PDFium, fetched
-once into `~/.cache/page-oracle/pdfium/` and driven through a minimal binding in a child process, one
-per document, so an abort costs one document rather than the run; a run against another library
-digest refuses. White background and annotations are matched; the visible area and rotation are
+The fixed set is five PDFs the engine produces, declared in `dev/oracle/src/compare/cases.rs` and
+generated in code: a dense text page, a picture page, a two-page picture document, a 300-point square
+page and a page carrying a square annotation. No sample PDF is committed. The outside tool is PDFium,
+fetched once into `~/.cache/page-oracle/pdfium/` and driven through a minimal binding in a child
+process, one per document, so an abort costs one document rather than the run; a run against another
+library digest refuses. White background and annotations are matched; the visible area and rotation are
 applied by each library's own page model, and the fixed set carries no cropped or rotated page, so
 those two are stated rather than exercised. Form widgets cannot be matched by the minimal binding and
 a page carrying one states the difference and suppresses the pixel comparison.
@@ -318,16 +350,17 @@ not be driven, or it answered in a shape the comparison does not know. The contr
 invocation. Each divergence has a stable key (family, document, page, kind), which the divergence
 itself states, evidence in the stated directory, and an optional recorded decision; a decision whose
 key no longer occurs is stale and fails the run. The comparison's identity is its own — the engine
-build under the harness's rule (whose component digests include hayro), the PDFium release and
-library digest, the calibration and the decisions — and it changes neither the record's identity nor
-the parity baseline.
+build under the crate's identity rule, the PDFium release and library digest, the calibration and the
+decisions — and it changes neither the record's identity nor the baseline.
 
-`oracle` never runs as part of the root workspace's build or test run: it is invoked explicitly, and
-its own `cargo test` needs no network, no LibreOffice and no PDFium. Four of its tests touch what the
+The oracle never runs as part of an ordinary `cargo test`: its six modes (`verify`, `record`,
+`compare`, `measure`, `canonical_pdf`, `pdfium_child`) are `#[ignore]`d and invoked explicitly, and
+its own tests need no network, no LibreOffice and no PDFium. Four of its tests touch what the
 machine has — one asks the reference for its version, two read a system face and one the reference's
 own bundled Carlito — and each passes when it is absent; the comparison's controls, calibration
 consistency, digest check, stale-decision check and determinism all run through the engine's own
-renderer. See `oracle/README.md`, `oracle/record/README.md` and `oracle/compare/README.md`.
+renderer. See `document-engine/dev/oracle/README.md`, `document-engine/dev/oracle/record/README.md`
+and `document-engine/dev/oracle/compare/README.md`.
 
 ## Two traps when moving this code
 

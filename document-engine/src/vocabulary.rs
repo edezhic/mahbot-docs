@@ -8,13 +8,14 @@
 //!
 //! The file has eight sections:
 //!
-//! - `rules`: the shared writer/reader rules — a copy of the producing kit's `rules.json`, value
-//!   for value. It is kept as data: the typed views below read it, so the shape of an external
-//!   file is not restated here.
+//! - `rules`: the shared writer/reader rules — the one home of the input rules and of the marks
+//!   both sides print. It is kept as data: the typed views below read it, so the shape of a rule is
+//!   not restated in code.
 //! - `reading`: the bounds of the reading surface — those a reading enforces and those a caller's
 //!   tool layer applies above it.
 //! - `limits`: the reader and producer caps (container, XML, chart, form, edit-work and
-//!   multi-file bounds), each the reference's own number.
+//!   multi-file bounds), each the number the retired reference held; three of them are frozen
+//!   because nothing independent states them any more.
 //! - `engine`: the bounds the engine states for itself, where the reference states none.
 //! - `create`: the layout a created PDF lays its content out with, and the fragments its Word-only
 //!   refusal is composed from. The heading sizes are one per level of `rules.heading_levels`, which
@@ -225,7 +226,8 @@ impl Family {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Vocabulary {
-    /// The shared writer/reader rules, exactly as the producing kit states them.
+    /// The shared writer/reader rules: the one home of the input rules and of the marks both sides
+    /// print.
     pub rules: Value,
     /// The bounds of the reading surface.
     pub reading: ReadingLimits,
@@ -368,11 +370,20 @@ pub struct Limits {
     /// The deepest form-field parent chain a PDF reading resolves.
     pub pdf_field_depth_max: usize,
     /// The most fields a form-fill refusal's catalogue lists.
+    ///
+    /// Frozen, not derived: its only independent source was the producing kit's source text, which
+    /// retired with the kit. The value is the one the kit held, and nothing in this workspace can
+    /// re-derive it any more.
     pub pdf_catalogue_max: usize,
     /// The most characters a form-fill refusal's catalogue prints.
+    ///
+    /// Frozen with [`Self::pdf_catalogue_max`], for the same reason.
     pub pdf_catalogue_chars_max: usize,
     /// The most part text one edit call may rewrite, in UTF-16 code units — the unit the kit's own
-    /// `EDIT_WORK_MAX` is compared against.
+    /// `EDIT_WORK_MAX` was compared against.
+    ///
+    /// Frozen with [`Self::pdf_catalogue_max`], for the same reason: the kit's constant was the only
+    /// independent statement of it.
     pub edit_work_max_code_units: u64,
     /// The most inputs one merge may name.
     pub merge_inputs_max: usize,
@@ -389,10 +400,10 @@ pub struct EngineBounds {
     /// The most `<w:p>` elements one Word part may hold open at once before a walk over it refuses:
     /// the body, or a header, footer or footnote a text edit searches.
     ///
-    /// The kit has no such bound: its walk re-serialises each level, so the cost grows with the
-    /// nesting (measured: 0.55 s at a thousand levels, 47 s at five thousand). The cap is therefore
-    /// deliberately conservative, set where the reference's own walk is still under a second, so the
-    /// crate answers in bounded time on a document the kit would spend minutes on.
+    /// The producing kit had no such bound: its walk re-serialised each level, so the cost grew
+    /// with the nesting (measured: 0.55 s at a thousand levels, 47 s at five thousand). The cap is
+    /// therefore deliberately conservative, set where that walk was still under a second, so the
+    /// crate answers in bounded time on a document the kit would have spent minutes on.
     pub paragraph_nesting_max: usize,
     /// The deepest section nesting a template's parser follows before it refuses. A real sample
     /// nests a handful of levels; the bound keeps a crafted one from making the parse and the
@@ -428,9 +439,8 @@ pub struct EngineBounds {
 }
 
 /// The layout a created PDF lays its content out with, and the fragments its Word-only refusal is
-/// composed from. The sizes are the reference's own, one per level of `rules.heading_levels` — the
-/// list of levels stays there, because the rules are a value-for-value copy of the reference's own
-/// file, so this section names sizes rather than restating which levels exist.
+/// composed from. The sizes are one per level of `rules.heading_levels` — the list of levels stays
+/// there, so this section names sizes rather than restating which levels exist.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreateLayout {
@@ -598,12 +608,11 @@ pub(crate) fn format_template(template: &str, values: &[(&str, &str)]) -> String
 
 // ── the typed views of `rules` ──────────────────────────────────────────────────────────────────
 //
-// The rules section is the kit's file, kept as data. These views are the reader's and the
-// operation's access to the parts of it they print or validate, so a rule is read from its one
-// home rather than restated in code. A missing key is a defect in the embedded data, never caller
-// input.
+// The rules section is kept as data. These views are the reader's and the operation's access to the
+// parts of it they print or validate, so a rule is read from its one home rather than restated in
+// code. A missing key is a defect in the embedded data, never caller input.
 
-/// The shared rules, exactly as the producing kit states them.
+/// The shared rules: the one home of the input rules and of the marks both sides print.
 #[must_use]
 pub fn rules() -> &'static Value {
     &vocabulary().rules
@@ -691,8 +700,8 @@ pub struct PdfMetadataField {
     pub date: bool,
 }
 
-/// One mark a Word reading prints, as the pattern the kit and this crate both accept and an
-/// example of its rendering.
+/// One mark a Word reading prints, as the pattern this crate matches and an example of its
+/// rendering.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DocxMark {
@@ -1057,8 +1066,7 @@ pub fn pdf_metadata_fields() -> &'static [PdfMetadataField] {
 ///
 /// # Panics
 ///
-/// The embedded rules do not state them, or a pattern is not a regular expression the kit and this
-/// crate both accept.
+/// The embedded rules do not state them, or a pattern is not a valid regular expression.
 #[must_use]
 pub fn docx_marks() -> &'static [DocxMark] {
     static MARKS: OnceLock<Vec<DocxMark>> = OnceLock::new();
@@ -1067,7 +1075,7 @@ pub fn docx_marks() -> &'static [DocxMark] {
             .expect("the rules must state the marks a Word reading prints");
         for mark in &marks {
             regex::Regex::new(&mark.pattern)
-                .expect("a docx mark's pattern must be a regex the kit and this crate both accept");
+                .expect("a docx mark's pattern must be a valid regular expression");
         }
         marks
     })

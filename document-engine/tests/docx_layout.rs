@@ -3,7 +3,7 @@
 //!
 //! Most tests lay out parts the independent fixture builder (`test_support::docx_fixture`) makes, and
 //! one holds that builder to the writer: the parts it builds are the parts `create` writes. The
-//! recorded `docx/create` cases judge the writer against the reference, in the parity crate.
+//! recorded `docx/create` cases judge the writer against the record, in the gate.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read as _;

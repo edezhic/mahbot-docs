@@ -2,7 +2,7 @@
 //! Nothing in this module asks the engine under test for a document.
 //!
 //! Each builder is the smallest package the reference reader accepts *and* the kit's surgical edits
-//! can rewrite, so a case's difference is the operation's and never a malformed input's. The reader
+//! could rewrite, so a case's difference is the operation's and never a malformed input's. The reader
 //! finds a package's family from its one indispensable part and reaches headers, footnotes, sheets
 //! and styles through the relationship lists; the kit rewrites one part at a time and refuses a
 //! part its relationship list does not name. Every package therefore declares every part it holds
@@ -4254,7 +4254,7 @@ pub fn pptx_runs() -> Vec<u8> {
 /// another: a part DrawingML does not produce, and the one a rewrite's second range can start past
 /// what its first left. The outer run's fill is long, so formatting it shortens the part.
 ///
-/// No parity case can carry this deck: the reference's own answer has an unclosed `<a:p>`, which no
+/// No gate case can carry this deck: the reference's own answer has an unclosed `<a:p>`, which no
 /// package model can read. The test that witnesses the operation's bytes instead is
 /// `writing::pptx`'s `a_part_whose_runs_nest_is_formatted_where_the_reference_formats_it`.
 #[must_use]

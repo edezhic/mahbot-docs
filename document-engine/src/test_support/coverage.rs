@@ -2507,7 +2507,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         marks: &["edit_docx_nested"],
     },
     Unreached {
-        reason: "a value a request names that breaks a formatting rule the corpus's own values satisfy; the port reads each rule from the same rules.json entry the vocabulary states, and a case per refused value would add one case per bound",
+        reason: "a value a request names that breaks a formatting rule the corpus's own values satisfy; the port reads each rule from the same vocabulary entry, and a case per refused value would add one case per bound",
         marks: &[
             "edit_absent_value",
             "edit_border_boolean",
@@ -2640,7 +2640,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         ],
     },
     Unreached {
-        reason: "an environmental failure a generated case cannot force: a call over the work budget, or a destination that refuses the write. Both belong to the edit seam, which charges the walks that take a part into hand; a create request charges nothing at all, because its parts are built as strings rather than read. The probes — one paragraph of 200,000 characters, then one of 2,000,000 — are produced in a tenth of a second each, so a part of the budget's 4 GiB is 21,474 such paragraphs away; the reference could not build one either, because each of its parts is one string and bun refuses a string of 2 GiB with `Out of memory`, and the harness could neither read past its 64 MiB output bound nor canonicalise one",
+        reason: "an environmental failure a generated case cannot force: a call over the work budget, or a destination that refuses the write. Both belong to the edit seam, which charges the walks that take a part into hand; a create request charges nothing at all, because its parts are built as strings rather than read. The probes — one paragraph of 200,000 characters, then one of 2,000,000 — are produced in a tenth of a second each, so a part of the budget's 4 GiB is 21,474 such paragraphs away; the producing kit could not build one either, because each of its parts is one string, and the harness could neither read past its 64 MiB output bound nor canonicalise one",
         marks: &["edit_work_over_budget", "edit_write_failed"],
     },
     Unreached {
@@ -2663,7 +2663,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         marks: &["edit_worksheet_order"],
     },
     Unreached {
-        reason: "the reference kit reads the input path before it checks it, so a request with no \"input\" fails there with the runtime's own error instead of this sentence",
+        reason: "the retired kit read the input path before it checked it, so such a request failed there with the runtime's own error instead of this sentence, and no recorded run reached it",
         marks: &["edit_input_missing"],
     },
     Unreached {
@@ -2702,7 +2702,7 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
         ],
     },
     Unreached {
-        reason: "the reference kit reads an input's bytes before it parses them, and the harness materialises every input a case names, so no recorded run met a file it could not read",
+        reason: "the retired kit read an input's bytes before it parsed them, and the harness materialises every input a case names, so no recorded run met a file it could not read",
         marks: &["pdf_page_unreadable_file"],
     },
     Unreached {

@@ -29,16 +29,21 @@
 //!   embedded font the producing half draws with — one file, embedded at build time, read from
 //!   there rather than restated in code.
 //!
+//! This documentation calls the behaviour the crate was built to match **the reference**; the
+//! workspace's `INVENTORY.md` defines the word. For this crate it is the product's own readers for
+//! the reading half and the retired JavaScript document kit's writer for the producing half. Neither
+//! is a dependency. The kit has retired, so its behaviour survives as this crate's port of it and as
+//! the gate's record; where the two disagree, the crate says so and says why.
+//!
 //! Three of the writer's own limits are stated rather than implied. A created PDF has no page bound:
-//! the reference's `create` has none, and the shared cap bounds the pages a *request* may name, not
+//! the retired kit's `create` had none, and the shared cap bounds the pages a *request* may name, not
 //! the pages a document may hold, so a content list of any length is produced — the crate's own test
-//! asks for ten thousand and one pages, a size the harness's model will not judge. A table row that
-//! states a `length` instead of holding cells is refused past a thousand columns, because the
-//! reference draws one column per whole step below the length and never returns from a larger one.
-//! And a PNG whose image data is short is refused where the reference embeds the partial samples its
-//! decoder inflates; that divergence is a user's to reach through the tool layer, which checks a
-//! picture's extension and not its bytes, and `writing::pdf` states it beside the rest of that half's
-//! notes.
+//! asks for ten thousand and one pages, a size the gate's model will not judge. A table row that
+//! states a `length` instead of holding cells is refused past a thousand columns, because the kit
+//! drew one column per whole step below the length and never returned from a larger one. And a PNG
+//! whose image data is short is refused where the kit embedded the partial samples its decoder
+//! inflated; that divergence is a user's to reach through the tool layer, which checks a picture's
+//! extension and not its bytes, and `writing::pdf` states it beside the rest of that half's notes.
 //!
 //! What the crate deliberately does not own is the tool interface: the model-facing description,
 //! the argument schema, the answer rendered around a result and its phrasing, registration, the
@@ -75,7 +80,7 @@
 //! one. Scheduling, wall-clock limits and how many readings run at once are the caller's business.
 //!
 //! `test_support` is the one home of the generated corpus documents the crate's own tests and
-//! the parity harness both read; it is not part of the engine's behaviour, and it is compiled only
+//! the gate both read; it is not part of the engine's behaviour, and it is compiled only
 //! for a test or for a consumer that asks for the `test-support` feature. The operation statement's
 //! queries (`operation::answer` for one pair, `operation::accepted_pairs` for every pair the engine
 //! accepts) are compiled the same way: the product never asks, because it calls the engine and reads
@@ -102,6 +107,6 @@ mod writing;
 #[cfg(test)]
 mod testing;
 
-/// The generated corpus documents, shared by the crate's tests and the parity harness.
+/// The generated corpus documents, shared by the crate's tests and the gate.
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;

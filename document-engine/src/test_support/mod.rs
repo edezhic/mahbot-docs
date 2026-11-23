@@ -1,4 +1,4 @@
-//! The generated corpus documents: one home for every input the crate's tests and the parity
+//! The generated corpus documents: one home for every input the crate's tests and the gate's
 //! harness read.
 //!
 //! No sample document is committed: each builder returns the bytes of one document, assembled in code

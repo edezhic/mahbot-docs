@@ -3,18 +3,20 @@
 `vocabulary.json` is the one statement of everything the engine enforces and prints. It is
 embedded at build time (`include_str!`) and read through `src/vocabulary.rs`; the font beside it,
 `assets/NotoSans-Regular.ttf`, is embedded the same way and is the face the producing half draws
-with. `assets/docgen/NotoSans-Regular.ttf` is the producing kit's own copy of the same bytes; each
-copy carries its licence beside it (`NotoSans-LICENSE.txt`).
+with. `assets/docgen/NotoSans-Regular.ttf` is the product's own copy of the same bytes: it stays
+because the product's source copy, `src/docgen.rs`, embeds it at that path and that copy may not be
+edited. The gate compares the two by digest, so the product and the engine still draw with one face.
+Each copy carries its licence beside it (`NotoSans-LICENSE.txt`).
 
 ## The sections
 
 | Section | What it states |
 |---|---|
-| `rules` | The shared writer/reader rules — a copy of `assets/docgen/rules.json`, value for value, the data the JavaScript kit inlines at build time. It is kept as data, not restated as a typed graph: the code that reads a rule adds the view it needs. |
+| `rules` | The shared writer/reader rules — the one home of that data now that the producing kit has retired. It is kept as data, not restated as a typed graph: the code that reads a rule adds the view it needs. |
 | `reading` | The bounds and constants of the reading surface: the prefix a caller peeks, the input size a caller caps, the pictures a caller delivers and the text a caller spills, the page-text floor, the crop-box slack, the raster envelope (target, quality, scale ceiling) and the raster decode envelope applied to an embedded image. |
-| `limits` | The reader and producer caps: the ZIP entry, XML depth, Word table/style/field/link, Excel range-probe, chart, number-format, PDF mark/field/catalogue, edit-work and multi-file bounds. Every entry is the reference's own number, read from its sources. |
+| `limits` | The reader and producer caps: the ZIP entry, XML depth, Word table/style/field/link, Excel range-probe, chart, number-format, PDF mark/field/catalogue, edit-work and multi-file bounds. Every entry is the number its source stated, and twenty-two are still read from that source: the product's reader sources, the product's tool-layer constants, or the shared rules. **Three lost their only independent source when the producing kit retired** — `pdf_catalogue_max`, `pdf_catalogue_chars_max` and `edit_work_max_code_units` were read from the kit's own source text. Their values survive as data and nothing re-derives them; `dev/contract.rs` holds them as a frozen table and `dev/tests/engine_contract.rs` compares them against this file, so changing either side is a reviewed diff rather than an invisible move. |
 | `engine` | The bounds the engine states for itself, where the reference states none: the paragraph-nesting cap that keeps a Word edit's cost bounded on a deeply nested body, the template-nesting cap that keeps a fill's section walk off the stack, the depth of the object graph the PDF body scan builds, the bytes one look at what comes next may inspect, the bytes one PDF container may decode to, and the most columns a table row may state as a length without holding cells. Nothing here is the reference's number, so nothing here is pinned by the contract test. |
-| `create` | The layout a created PDF lays its content out with, and the fragments its Word-only refusal is composed from. `heading_size_points` states one point size per level of `rules.heading_levels`, and the list of levels stays in `rules`, which is a value-for-value copy of the reference's file; a crate-side test holds the two to each other and holds the refusal sentence to the levels list, so neither can drift. `word_only_features` holds the words a block, a footnote, a running header and a running footer are named by; they are not marks — the sentence they are interpolated into is — but the restatement scan reads them too, so a fragment spelled in code fails it. |
+| `create` | The layout a created PDF lays its content out with, and the fragments its Word-only refusal is composed from. `heading_size_points` states one point size per level of `rules.heading_levels`, and the list of levels stays in `rules`, its one home; a crate-side test holds the refusal sentence to it, so neither can drift. `word_only_features` holds the words a block, a footnote, a running header and a running footer are named by; they are not marks — the sentence they are interpolated into is — but the restatement scan reads them too, so a fragment spelled in code fails it. |
 | `marks` | The fixed words, labels, templates and note fragments a reading or an operation prints, by key, each with the producers that print it. `{name}` placeholders are replaced with `Marks::format`. A mark the `rules` section already states (a Word tracked-change or chart label, a peripheral part's kind, a PDF form word) is not repeated here: `src/vocabulary.rs` reads it from `rules` under its key. A note with no values ("the workbook declares no sheets") is a fixed sentence and lives here; one that interpolates values is composed at the reporting site from this section's fragments and marks. |
 | `derived_marks` | The `rules` sections whose values are printed marks (Word marks and their chart labels, slide labels, PDF form words and field kinds, metadata keys, and peripheral parts), each naming the producers that print them today. The Word marks and peripheral parts are printed by both halves — a reading labels them and a Word edit names them in a refusal — and so are the presentation marks and slide labels, which a presentation edit names in a refusal and prints for a slide it could not read. The PDF form words and field kinds and the metadata keys are the reading’s alone; a chart’s labels live in `docx_marks`, so both halves print them. They live in `rules` because the kit needs them as request vocabulary; this section says they are marks too. |
 | `enforced` | Who enforces each entry of `reading`, `limits` and `engine`: `reading`, `writing` or `caller`. An entry may name more than one, because one number can be enforced in more than one place. `rules` stands for the whole rules section, which is request vocabulary rather than a bound. |
@@ -118,8 +120,8 @@ The `enforced` map is the reading of every bound that matters to a caller:
   no corpus case can judge them: the object-graph depth, the decode ceiling and the look allowance
   are the engine's own bounds, the stated-column bound and the three request caps are usage refusals
   a caller can fix, and each is read from the vocabulary and pinned by the crate's own tests;
-- `rules` is enforced by the writing half (the kit refuses out-of-range arguments) and by a caller
-  (the tool validates before it builds a request).
+- `rules` is enforced by the writing half, which reads the same entries the retired kit did, and by a
+  caller (the tool validates before it builds a request).
 
 ### The PDF bounds, and what justifies each
 
@@ -134,14 +136,17 @@ so they are stated with the request caps rather than here. A reading that would 
 square of the file's length is not bounded but remembered instead: the recovery scan's record of the
 tail (`PARSER.md` §3.4) is what keeps a file of never-ending streams to one pass over it.
 
-The probe that measures the reference is `parity/scripts/probe-pdf-bounds.mjs`: it drives the
-committed kit through the same request-and-result contract the harness uses, and prints the table
-below.
+The measurements below were taken by `parity/scripts/probe-pdf-bounds.mjs`, which drove the committed kit
+through the same request-and-result contract the gate uses. **That probe retired with the kit, so the
+table can no longer be re-derived here**: the values stand as the measurements they were, and the
+argument beside each one is what a reader can still check. The same is true of every "measured, the
+reference …" sentence in this file and in `PARSER.md` — the observation is recorded, and the instrument
+that made it is gone.
 
 | bound | value | why it cannot refuse a file the reference reads |
 |---|---|---|
 | `engine.object_depth_max` | 30 000 | Past it the scan keeps an object as the bytes it states — never refusing the file — so the bound costs nothing a reader can see. The reference's own parser gives up in the same place: measured, a page dictionary holding a value nested 20 000 arrays deep is parsed and its page turned, one nested 30 000 is kept as the bytes it states, page and all, and the point between them is the runtime's own stack rather than a number — 27 000 parsed in one run and threw in another. The bound sits above the deepest depth measured to parse, so nothing the reference parses is carried here. A bound low enough for the language's own clone and drop to survive it was rejected on that evidence: it would carry a page the reference turns. So the depth is not kept away from the language's recursion by this number — the walks are, and `writing/pdf/graph.rs` states that rule. |
-| `engine.container_decode_max_bytes` | 4 294 967 296 | A stream's filter chain applies stage by stage, so a chain of expanding filters multiplies rather than adds: a `RunLengthDecode` stage states up to sixty-four times its input, so five of them over two bytes state 2.1 GiB and a sixth states 135 GiB. The ceiling is the most a typed array holds, which is where the reference's own decoder throws — measured, a five-stage chain decodes to 2.1 GiB in seconds, and a six-stage one, which would decode to 135 GiB, spends tens of seconds and produces too, its decoder having given up at that wall; the probe prints the times each run measures. The filters that expand — `FlateDecode`, `LZWDecode` and `RunLengthDecode` — count their output while they produce it, so a stage past the ceiling is abandoned rather than built, and its buffer can reserve up to twice the ceiling before it stops, a worst case of how the buffer doubles rather than a measurement (`LZWDecode` caps its reservation at the ceiling). `ASCIIHexDecode` builds its whole output too, but only shrinks its data, so its peak is no larger than the stage before it. `ASCII85Decode`, through the object model, builds its whole output and is measured afterwards, and a `z` states four bytes, so one stage of it can build four times the bytes it was given before the ceiling is consulted. What the ceiling does not do: it is 4 GiB, past what a small host holds, so a container at the ceiling is still an allocation failure there, and an allocation failure is not a panic the engine contains; and a chain's next stage holds that output while it builds its own, so a container at the ceiling can cost twice it. A container past it is not decoded here either, so it is carried rather than the file refused. A container in the corpus never reaches the ceiling; the bound's own witnesses are the crate's tests, which inject it (`writing/pdf/lzw.rs` and `writing/pdf/scan.rs`). The ceiling is held as a `u64` because it is past what a 32-bit `usize` states. |
+| `engine.container_decode_max_bytes` | 4 294 967 296 | A stream's filter chain applies stage by stage, so a chain of expanding filters multiplies rather than adds: a `RunLengthDecode` stage states up to sixty-four times its input, so five of them over two bytes state 2.1 GiB and a sixth states 135 GiB. The ceiling is the most a typed array holds, which is where the reference's own decoder throws — measured, a five-stage chain decodes to 2.1 GiB in seconds, and a six-stage one, which would decode to 135 GiB, spends tens of seconds and produces too, its decoder having given up at that wall; the probe that measured it printed the times each run took. The filters that expand — `FlateDecode`, `LZWDecode` and `RunLengthDecode` — count their output while they produce it, so a stage past the ceiling is abandoned rather than built, and its buffer can reserve up to twice the ceiling before it stops, a worst case of how the buffer doubles rather than a measurement (`LZWDecode` caps its reservation at the ceiling). `ASCIIHexDecode` builds its whole output too, but only shrinks its data, so its peak is no larger than the stage before it. `ASCII85Decode`, through the object model, builds its whole output and is measured afterwards, and a `z` states four bytes, so one stage of it can build four times the bytes it was given before the ceiling is consulted. What the ceiling does not do: it is 4 GiB, past what a small host holds, so a container at the ceiling is still an allocation failure there, and an allocation failure is not a panic the engine contains; and a chain's next stage holds that output while it builds its own, so a container at the ceiling can cost twice it. A container past it is not decoded here either, so it is carried rather than the file refused. A container in the corpus never reaches the ceiling; the bound's own witnesses are the crate's tests, which inject it (`writing/pdf/lzw.rs` and `writing/pdf/scan.rs`). The ceiling is held as a `u64` because it is past what a 32-bit `usize` states. |
 | `engine.scan_look_bytes_max` | 512 | A look at what comes next inspects at most this many bytes of its own, so a body built of long comment or digit runs costs at most 4 096 byte-reads per byte of the file, and every other shape costs the file's own length except a container whose entries all name one offset, which costs the entries the file states (`PARSER.md` §3.18) — a stream's recovery scan included, which reads to the file's end and is remembered rather than bounded: a recovery that finds its marker ends the stream where the walk resumes past it, and the first one that reaches the end without balancing records the tail, so every later one inside it reads nothing and is answered by two lookups, except one that begins inside a recorded keyword, which reads the tail once itself (`PARSER.md` §3.4). An exhausted look is not a refusal — it answers "not here" and the walk steps one byte on, which is what the reference does — so the bound costs no file, and no body walk has a budget of its own to refuse one with. Measured: with the look bound lowered to sixteen bytes, every corpus file still reads; 512 is thirty-two times that. |
 
 A separate rule, not a bound, is that no value a file states is ever cloned or dropped with the
@@ -150,8 +155,8 @@ that recursed over a file-stated value would abort the process rather than answe
 `writing/pdf/graph.rs` is its one home: it states the rule, the helpers that keep it, and what guards
 it and what cannot. The field tree's cycle stop is the one walk that ends on a shape rather than a
 depth: measured, the reference dies with `Maximum call stack size exceeded` on a field whose kid list
-or parent link returns to itself (the probe rows "a form whose field kid list returns to its own
-container" and "a form whose field parent link returns to itself"), where the engine ends the cycle and
+or parent link returns to itself (the retired probe's rows "a form whose field kid list returns to
+its own container" and "a form whose field parent link returns to itself"), where the engine ends the cycle and
 answers (`PARSER.md` §5.17).
 
 Two bounds the engine used to keep are gone, each because the reference reads and edits the same file
@@ -198,7 +203,7 @@ mark.
 The two ledgers in `src/test_support/coverage.rs` are the corpus's own account of that: every mark
 a reading prints is witnessed by a recorded reading or recorded unproducible with its reason, and
 every mark only the writing half prints is witnessed by a recorded case's answer or recorded
-unreached with its reason. `parity/tests/coverage.rs` checks both against the recorded baseline, in
+unreached with its reason. `dev/tests/coverage.rs` checks both against the recorded baseline, in
 both directions — a mark recorded as not produced must not be one a recorded answer prints — so a
 mark added without a witness is a failing test rather than an invisible gap.
 
@@ -207,15 +212,17 @@ mark added without a witness is a failing test rather than an invisible gap.
 - **Product prose.** The model-facing description, the argument schema, the answer rendered around
   a result and its phrasing belong to the caller, not the engine. What the engine prints itself —
   a refusal's reason, a note, a loss — comes from this file, so a caller renders those sentences as
-  they stand rather than rewording them. `rules` carries a few product-facing strings because it is
-  the kit's file; they are not the engine's business.
+  they stand rather than rewording them. `rules` carries a few product-facing strings because it was
+  the kit's file and is now the one home of that data; they are not the engine's business. The tool's
+  field names are the caller's too: this crate may not name the product's sources, so the schema's own
+  tests are what witness them, and no test here reads them.
 - **A sentence the reading composes.** A note that interpolates values ("slide 3 could not be
   read") is composed at the reporting site from this file's fragments and marks, not stated whole.
   A note with no values is a fixed sentence and is in `marks`, so a restatement of it in code fails
   the scan.
 - **A sentence the product composes from a reading.** The no-text sentence, the spilled-text note
   and the sentence about pictures left out are chosen by the product from what a reading returned,
-  so they are product prose even though the reference reader's file states some of them.
+  so they are product prose even though the product reader's file states some of them.
 - **Error descriptions and class tokens.** A `RenderError` variant's sentence and the
   `usage`/`internal` class are the engine's typed contract, which a caller may word itself; they
   are not the reading's printed marks.
@@ -307,7 +314,7 @@ What it cannot see, and why that is recorded rather than fixed:
   the purpose, so the scan cannot tell a specification constant from a bound written over it;
 - an escape other than `\n`, `\t`, `\r`, `\0`, `\\`, `\"`, `\'` or `\u{…}`: it is left as written,
   so a mark spelled with `\xNN` is invisible;
-- any other crate, the JavaScript kit and the product's own sources;
+- any other crate and the product's own sources;
 - a synonym in a quantity: an exemption states what its number counts, and the rule that a number
   coinciding with a bound must count something else decides "the same quantity" by matching words of
   the bound's key inside that phrase. A phrase that says "extent" where the key says `length` passes
@@ -319,8 +326,10 @@ What it cannot see, and why that is recorded rather than fixed:
 ## Standing alone
 
 `tests/standalone.rs` builds and runs the crate's own tests in a temporary copy that holds only the
-crate's files — no product sources, no harness, no workspace — so "the crate stands alone" is a
-build, not a textual claim. `tests/vocabulary.rs` adds the textual half: no code path, manifest or
-`include!` path names a product source, the harness crate or a runtime, while prose may name the
-harness; `tests/common` names the forbidden references once.
+crate's files — no product sources, no development-only target, no workspace — so "the crate stands
+alone" is a build, not a textual claim. The copy drops the delimited block of development-only
+targets from the manifest, because their sources are not copied: that is the one stated exception to
+"the crate builds and tests with nothing but its own files". `tests/vocabulary.rs` adds the textual
+half: no code path, manifest or `include!` path names a product source, the development-only tree or
+a runtime, while prose may name them; `tests/common` names the forbidden references once.
 

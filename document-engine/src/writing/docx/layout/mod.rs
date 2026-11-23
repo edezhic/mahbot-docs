@@ -22,7 +22,7 @@
 //! tests close it from the outside: `document-engine/tests/docx_layout.rs` lays out parts from the
 //! independent builder in `document-engine/src/test_support/docx_fixture.rs` and the writer's own
 //! documents, `document-engine/tests/docx_layout_modules.rs` holds the table to the module list, and
-//! the recorded `docx/create` cases in the parity crate judge the writer against the reference.
+//! the recorded `docx/create` cases in the gate judge the writer against the record.
 //!
 //! # The outcome no recorded case reaches
 //!

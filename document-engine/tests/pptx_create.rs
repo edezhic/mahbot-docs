@@ -7,7 +7,7 @@
 //! the edit path is lenient, and a deck that compares equal to the reference's is not byte-identical
 //! to it (the timestamps differ, the media part names differ, and the XML formatting may differ), so
 //! an edit path that is byte-sensitive can fail on a deck that is perfectly valid. Which side is at
-//! fault is decided in the parity crate, where the reference is: the deck is compared first, and only
+//! fault is decided in the gate, where the record is: the deck is compared first, and only
 //! a deck that compares equal is fed to the editor.
 
 use document_engine::operation::{Destination, Request, execute};

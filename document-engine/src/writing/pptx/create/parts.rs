@@ -9,11 +9,11 @@
 //! depends on the content list or on the slide size. (`ppt/presentation.xml` itself is not one of
 //! them: it states the deck's slides and its size, and [`presentation`] writes it.) They are
 //! captured verbatim from the reference's own output and stored under `assets/pptx-create/`,
-//! mirroring the archive's own paths, rather than hand-written here; the parity harness's
-//! `capture-pptx-parts` command regenerates them, and a test there proves the shipped copies are
-//! still the reference's bytes. Each is written exactly as captured, because they do not share one
-//! line ending: one layout part is LF-only, the theme part carries no newline at all, two
-//! relationship parts are mixed, and the rest are CRLF.
+//! mirroring the archive's own paths, rather than hand-written here. These bytes were the kit's
+//! output, captured before it retired; nothing can re-derive them, so a change to a shipped part is
+//! a deliberate replacement of a frozen expectation rather than a re-capture. Each is written
+//! exactly as captured, because they do not share one line ending: one layout part is LF-only, the
+//! theme part carries no newline at all, two relationship parts are mixed, and the rest are CRLF.
 //!
 //! The core properties part is deliberately *not* captured: it carries the moment the deck was
 //! made, so two reference runs a second apart differ in it. [`core`] writes it from the clock.

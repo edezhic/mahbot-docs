@@ -3,8 +3,8 @@
 //! The pinned library's bundle is not a repository artifact, so the module list it names is committed
 //! as data beside the width data and this test walks it against the table in both directions: every
 //! module the list holds has a row, and every row names a module the list holds. The other direction
-//! — every module in the package appearing in the list — is checked by the derivation command itself
-//! (`bun parity/scripts/derive-docx-layout-data.mjs`), which is the only thing that has the package.
+//! — every module in the package appearing in the list — was checked by the derivation command, which
+//! retired with the kit; the list is a frozen expectation now, so nothing re-derives it.
 //!
 //! What the rows say is not machine-checkable, and this test does not pretend otherwise. What it
 //! does check is decided by each row's own status and probe rather than by the words of its note: a

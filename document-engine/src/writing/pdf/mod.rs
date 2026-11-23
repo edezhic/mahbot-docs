@@ -1939,7 +1939,7 @@ mod tests {
         // bytes it states, and the walk keeps the pages it does hold: the reference's own parser gives
         // up in the same place and produces the same file. The shape is not a corpus case, because the
         // harness's canonical model parses the value the page carries and would recurse over it; this
-        // test and `parity/scripts/probe-pdf-bounds.mjs` are its witness.
+        // test is its witness, and the probe that measured the reference's answer retired with the kit.
         let directory = scratch();
         let document = crate::test_support::documents::PAGE_PAST_THE_DEPTH_PDF;
         let path = fixture(directory.path(), document.name, (document.build)());

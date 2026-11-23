@@ -8,6 +8,12 @@
 //! inside the copy, and asserts both that the build passes and that neither `src/` nor `tests/`
 //! names the product's sources.
 //!
+//! The copy leaves out `dev/` — the crate's development-only targets, the gate and the oracle — and
+//! removes their delimited block from the copied manifest, because a target whose path is absent is
+//! a broken manifest rather than a smaller crate, and their dependencies would be built for no
+//! target. That is the one exception to "the crate builds and tests with nothing but its own files",
+//! and it is what lets those targets spawn processes while nothing in `src/` or `tests/` may.
+//!
 //! The copy lies outside the tree, so the root's declarations do not reach it: a synthetic
 //! `[workspace.package]` states the tree's declared minimum (which cargo hands this crate as
 //! `CARGO_PKG_RUST_VERSION`), and the nested build runs with the same `cargo` — and so the same
@@ -68,6 +74,9 @@ fn the_crate_builds_and_tests_with_no_product_sources_present() {
     let source = common::root();
     let version = env!("CARGO_PKG_RUST_VERSION");
     let mut manifest = std::fs::read_to_string(source.join("Cargo.toml")).expect("the manifest");
+    // The copy holds no `dev/` tree, so the development-only target block would name a target
+    // whose path is missing; the ordinary targets and dependencies stay exactly as they are.
+    manifest = common::without_development_only(&manifest);
     manifest.push_str(&format!(
         "\n[workspace]\nresolver = \"2\"\n\n[workspace.package]\nrust-version = \"{version}\"\n"
     ));

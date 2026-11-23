@@ -1,6 +1,5 @@
 .DS_Store
 Thumbs.db
-node_modules/
 target/
 .idea/
 .vscode/
@@ -8,4 +7,7 @@ target/
 
 # The comparison report and its evidence are generated on every run, replaced rather than
 # accumulated, and never committed.
-/oracle/compare/evidence/
+/document-engine/dev/oracle/compare/evidence/
+
+# A recording interrupted between writing the sibling file and renaming it over the baseline.
+/document-engine/dev/baseline/*.tmp

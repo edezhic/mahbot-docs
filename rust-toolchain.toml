@@ -13,7 +13,7 @@
 #
 # The components are the ones the checks need: `rustfmt` and `clippy`. The lint bar is
 # `cargo clippy --workspace --all-targets` — the plain invocation compiles no test code. The gate's
-# own invocations are in `parity/README.md`.
+# own invocations are in `document-engine/dev/README.md`.
 #
 # This governs `cargo` invocations made inside the tree. It is outranked by an explicit override —
 # the `RUSTUP_TOOLCHAIN` environment variable, `rustup override set` for the directory, or a nearer

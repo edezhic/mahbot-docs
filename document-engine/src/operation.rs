@@ -473,7 +473,7 @@ pub enum Answer {
 ///
 /// Compiled for a test or for a consumer that asks for `test-support`: the product never asks the
 /// engine what it carries out — it calls [`execute`] and reads the answer — so this is the seam the
-/// parity harness and the crate's own tests check the statement through.
+/// gate and the crate's own tests check the statement through.
 #[cfg(any(test, feature = "test-support"))]
 #[must_use]
 pub fn answer(operation: &str, family: Family) -> Answer {

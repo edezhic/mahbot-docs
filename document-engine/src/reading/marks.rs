@@ -22,9 +22,9 @@
 use crate::reading::output::{Unshown, UnshownKind, lines_of, mark, note, text_lines};
 use crate::support::decode_html_entities;
 use crate::support::one_line;
-use hayro::hayro_syntax::Pdf;
-use hayro::hayro_syntax::object::dict::Dict;
-use hayro::hayro_syntax::object::{Array, DateTime, Name, Object, String as PdfString};
+use hayro_current::hayro_syntax::Pdf;
+use hayro_current::hayro_syntax::object::dict::Dict;
+use hayro_current::hayro_syntax::object::{Array, DateTime, Name, Object, String as PdfString};
 use std::collections::{HashMap, HashSet};
 
 /// Maximum annotations reported for one document, so a file whose `/Annots` are a cycle cannot

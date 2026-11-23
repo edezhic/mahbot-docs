@@ -32,16 +32,42 @@ pub fn rust_files(directory: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// Strings that name the product's own sources or a runtime the engine must not reach for.
+/// Strings that name the product's own sources, the development-only tree, or a runtime the engine
+/// must not reach for.
 pub const FORBIDDEN_REFERENCES: &[&str] = &[
     "../../src/",
     "product-touchpoints",
     "assets/docgen",
-    "document_parity",
+    "dev/",
     "mahbot::",
     "path = \"..",
     "std::process::Command",
 ];
+
+/// The manifest's development-only block — the gate's and the oracle's dependencies and their test
+/// targets — removed.
+///
+/// The isolated copy has no `dev/` tree, so a `[[test]]` target pointing into it would declare a
+/// target whose path does not exist, and the gate's and oracle's dependencies would be resolved and
+/// built for no target. The two marker lines bound the block exactly, so the copy keeps the crate's
+/// own dependencies and targets and states nothing about the development-only ones.
+pub fn without_development_only(manifest: &str) -> String {
+    const START: &str = "# --- development-only";
+    const END: &str = "# --- end development-only";
+    let mut kept = String::new();
+    let mut skipping = false;
+    for line in manifest.lines() {
+        if line.starts_with(START) {
+            skipping = true;
+        } else if line.starts_with(END) {
+            skipping = false;
+        } else if !skipping {
+            kept.push_str(line);
+            kept.push('\n');
+        }
+    }
+    kept
+}
 
 /// Which kind of file a reference scan reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

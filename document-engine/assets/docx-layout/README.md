@@ -1,16 +1,19 @@
 # `docx` layout data
 
-The layout tables of the npm package `docx` **9.12.0** — the version `assets/docgen/package.json`
-pins — derived from its `dist/layout.mjs` bundle for the Rust layout port to read as data. The data
-is not hand-written: to change it, re-derive it. The probes beside it are hand-written scripts that
-report what a created document reaches.
+The layout tables of the npm package `docx` **9.12.0** — the version the retired kit pinned —
+derived from its `dist/layout.mjs` bundle for the Rust layout port to read as data. The derivation
+script retired with the kit, so the data is now a frozen expectation: a change to it is a deliberate
+replacement, not a re-derivation. The probes beside it are hand-written scripts that report what a
+created document reaches.
 
-## Derivation
+## Derivation (retired)
 
-    bun parity/scripts/derive-docx-layout-data.mjs
+The derivation command was removed with the kit. The rest of this section records how the data was
+produced; nothing runs it now.
 
 The script takes the package from `$PARITY_DOCX` when it is set (a path to the package directory),
-else `~/.bun/install/cache/docx@9.12.0@@@1`, else `node_modules/docx` under the repository, and
+else the retired runtime's package cache for `docx@9.12.0`, else `node_modules/docx` under the
+repository, and
 stops with the paths it tried when none of them holds `dist/layout.mjs`. It copies the bundle to a
 temporary file, appends the `export { … }` statement the module-scope tables need, imports it, and
 writes each file with `JSON.stringify(…, null, 2)` and a trailing newline. Every binding, every
@@ -118,14 +121,14 @@ Read by `document-engine/tests/docx_layout_modules.rs`, which walks it against t
 ### `probes/`
 
 Scripts that report what a created document reaches, each named by the disposition table rows whose
-gap it backs; run one as `bun document-engine/assets/docx-layout/probes/<name>.mjs`. They are
-documentation: the layout reads none of them, so they are not part of the data's identity.
+gap it backs. They are hand-written documentation, not part of a run, and the layout reads none of
+them, so they are not part of the data's identity.
 
 ## Licence
 
 `LICENSE` is the package's own licence, copied verbatim. It covers the parts captured in
-`../docx-create/` too: the same library writes them, and `parity/src/bin/capture-docx-parts.rs`
-regenerates that directory from the reference's output, so it carries no licence file of its own.
+`../docx-create/` too: the same library writes them, and that directory was captured from the
+reference's output before the kit retired, so it carries no licence file of its own.
 
 The package's licence does not settle the data's provenance. The package states that its Arabic and
 supplementary width tables were generated from the proprietary application's own PDFs, and that its

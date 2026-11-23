@@ -10,10 +10,12 @@
 //! The walk is iterative, with an explicit stack: a page tree nested thousands of levels deep must
 //! be an answer, not a stack overflow.
 
-use hayro::hayro_syntax::Pdf;
-use hayro::hayro_syntax::object::dict::Dict;
-use hayro::hayro_syntax::object::{Array, MaybeRef, Name, ObjRef, Object, ObjectIdentifier};
-use hayro::hayro_syntax::page::Page;
+use hayro_current::hayro_syntax::Pdf;
+use hayro_current::hayro_syntax::object::dict::Dict;
+use hayro_current::hayro_syntax::object::{
+    Array, MaybeRef, Name, ObjRef, Object, ObjectIdentifier,
+};
+use hayro_current::hayro_syntax::page::Page;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// One page the tree names, and what the structure reader made of it.

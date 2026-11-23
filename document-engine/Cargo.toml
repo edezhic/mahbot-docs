@@ -8,13 +8,13 @@ description = "The MahBot document engine: read documents, produce and edit them
 
 [features]
 # The generated corpus builders. Off for a normal build: the crate's own tests enable it through
-# the self dev-dependency below, and the parity harness enables it as a consumer.
+# the self dev-dependency below, and the development gate's corpus reads the same builders.
 test-support = []
 
 [dependencies]
 # The PDF writer embeds a subset of the bundled NotoSans. The sfnt parser and subsetter live in
 # `src/writing/pdf/font.rs` rather than behind a font crate. `skrifa`/`read-fonts` are already
-# resolved through hayro and already recorded in the comparison's codec list, so naming one would
+# resolved through hayro and already recorded in the gate's codec list, so naming one would
 # change neither the lockfile nor the recorded identity; it would tie this manifest's exact pin to
 # whatever version hayro resolves, to replace the reading of one trusted asset the crate ships — the
 # cmap, the composite glyphs and the metrics — beside subset assembly, checksums and the PDF-side
@@ -26,11 +26,15 @@ test-support = []
 # its page-tree walk keeps its own stack and its object reader has a nesting bound, so the structure
 # reader answers a document nested past either instead of taking the process down. What that does not
 # cover — the text pass's own recursion into a drawn form, and memory — is stated in `src/lib.rs`.
-hayro = "=0.9.0"
+#
+# Named `hayro_current` rather than `hayro`: the development gate compiles the product's reader
+# sources byte for byte and they are written against the product's own pin (`hayro 0.7.1`), and one
+# package cannot name two versions of one crate by one name.
+hayro_current = { package = "hayro", version = "=0.9.0" }
 # The PDF writing half compresses the streams it adds: the subset font program, an image's samples
-# and the content that draws them. The product's own kit compresses the same streams.
+# and the content that draws them. The retired kit compressed the same streams.
 flate2 = "=1.1.10"
-# The width tables write `=` for the width of a character's NFD base, and the reference reads it
+# The width tables write `=` for the width of a character's NFD base, and the kit read it
 # through `String.prototype.normalize("NFD")`; this crate's measurer does the same decomposition
 # with ICU's normaliser. ICU is the same algorithm under the same data, and it is already resolved
 # in the lockfile through the link parser's `idna` tree; the obvious alternative,
@@ -47,7 +51,7 @@ pdf-extract = { version = "=0.12.1", default-features = false }
 quick-xml = { version = "=0.39.4", default-features = false }
 regex = "1.13"
 serde = { version = "1.0", features = ["derive"] }
-# A request's values are read in the order the caller wrote them: the reference iterates
+# A request's values are read in the order the caller wrote them: the kit iterated
 # `Object.entries(req.values)`, and that order decides which fault a two-fault fill reports and the
 # order of the characters its answer lists.
 serde_json = { version = "1.0", features = ["preserve_order"] }
@@ -67,3 +71,27 @@ zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
 document-engine = { path = ".", features = ["test-support"] }
 # Tests write into a fresh directory that removes itself, even when an assertion fails.
 tempfile = "3"
+
+# --- development-only dependencies and targets: not part of an ordinary build, and excluded from
+# --- the isolated copy
+# The gate's and the oracle's own dependencies. The product reader copies are written against the
+# product's own hayro pin, which the crate deliberately does not share, so the gate names it here.
+anyhow = "1.0"
+hayro = "=0.7.1"
+hayro-cmap = "=0.1.1"
+# The supervisor kills a timed-out case's whole process group, not just the direct child, and the
+# supervision tests send the gate signals.
+libc = "0.2"
+# The oracle's comparison loads the outside rasteriser at run time: PDFium ships as a library with
+# no command-line tool, so the binding that drives it is resolved by name when a comparison runs and
+# never linked.
+libloading = "0.8"
+tokio = { version = "1.50", default-features = false, features = ["fs", "macros", "process", "rt-multi-thread", "sync", "time"] }
+
+[[test]]
+name = "gate"
+path = "dev/gate.rs"
+[[test]]
+name = "oracle"
+path = "dev/oracle_target.rs"
+# --- end development-only dependencies and targets

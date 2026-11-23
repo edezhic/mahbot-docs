@@ -3,11 +3,11 @@
 //! # The pinned library and its version
 //!
 //! The reference's layout is the `docx/layout` entry point of the npm package `docx`, at **9.12.0** —
-//! the version `assets/docgen/package.json` pins and `bun.lock` resolves. An upgrade of that library
-//! is a separate deliberate change: it re-derives the width data ([`super::text`]), the layout
-//! constants ([`super::constants`]) and the module list (`assets/docx-layout/modules.json`), because
-//! all three are read from the package rather than restated. Nothing about a dependency bump may
-//! change them silently.
+//! the version the retired kit pinned and locked. An upgrade of that library would be a separate
+//! deliberate change: it would re-derive the width data ([`super::text`]), the layout constants
+//! ([`super::constants`]) and the module list (`assets/docx-layout/modules.json`), because all three
+//! are read from the package rather than restated. Nothing re-derives them now, so a change to any of
+//! them is a deliberate replacement rather than an invisible move.
 //!
 //! # The table
 //!
@@ -17,15 +17,14 @@
 //! cannot reach it at all. A `Ported` row states no note and names no probe, because there is no gap
 //! for either to describe; every other row states the behaviour of a created document that cannot
 //! reach the module and names the probe the statement rests on. The probe scripts are committed under
-//! `document-engine/assets/docx-layout/probes/` and each runs as
-//! `bun document-engine/assets/docx-layout/probes/<name>.mjs`, printing one JSON line.
+//! `document-engine/assets/docx-layout/probes/`; they are hand-written documentation, not part of a
+//! run, and each prints one JSON line.
 //!
 //! The table's coverage is checked in two directions. `assets/docx-layout/modules.json` is the
-//! committed module list, derived from the package by
-//! `bun parity/scripts/derive-docx-layout-data.mjs`, which refuses to write a list that omits a
-//! source module it found. `document-engine/tests/docx_layout_modules.rs` walks that list against
-//! this table in the isolated copy, where the package does not exist, and holds every row that is
-//! not a full port to a probe the crate ships — and every shipped probe to a row.
+//! committed, frozen module list, derived from the package before the kit retired.
+//! `document-engine/tests/docx_layout_modules.rs` walks that list against this table in the isolated
+//! copy, where the package does not exist, and holds every row that is not a full port to a probe the
+//! crate ships — and every shipped probe to a row.
 //!
 //! # What the table does not claim
 //!

@@ -1,4 +1,18 @@
-# The reference's parser, tolerance by tolerance
+# The retired kit's parser, tolerance by tolerance
+
+Throughout this document **the reference** means the parser the retired document kit read PDFs with:
+**pdf-lib 1.17.1**, the JavaScript PDF library. (`../INVENTORY.md` defines the word for the folder;
+this document narrows it to that parser.) The kit has retired, so the library is no longer in this
+workspace; what it did is still this document's subject, because the engine's writing half ports its
+parser and its tolerance is the specification the port is held to. Every "the probe", "the probe's
+rows" and `parity/scripts/probe-pdf-bounds.mjs` below names an instrument that retired with the kit:
+the observations stand as recorded measurements, and none of them can be re-derived here.
+
+The two-sided comparison of damaged shapes retired with the kit too: `parity/tests/pdf_damaged_shapes.rs`
+drove each shape through both writers and compared what each side wrote, which the gate's canonical
+model cannot see. The crate's own answer to each shape is still witnessed by
+`tests/pdf_tolerance.rs`, named beside the shape below; where a shape's reference-side answer was only
+ever observed by that comparison, the entry says so instead of naming a witness.
 
 The reference reads a PDF with pdf-lib 1.17.1. `PDFParser.parseDocument` walks the body from the
 header, `PDFObjectParser` reads one object's syntax, `PDFObjectStreamParser` and
@@ -17,7 +31,7 @@ two decisions it takes:
   the two apart. A matched entry may still state a corner of the shape that differs; those corners
   are named in the list below;
 - **stated** — the engine answers differently, the reason is given here and beside the operation, and
-  where the difference is visible to the harness a case shows it.
+  where the difference is visible to the gate a case shows it.
 
 A shape that is not named here — or in the closing section, which names the shapes that are not entries
 — is one nobody has read the reference's parser for; the files above are where to look. An entry is
@@ -152,9 +166,8 @@ both of a pair's runs by the double each states, so two generations it keeps apa
 one are one (`...::two_generations_that_round_to_one_double_are_one_object`). **Matched**;
 witnessed by `...::a_run_of_digits_longer_than_a_u64_saturates_rather_than_failing` and
 `...::two_numbers_past_a_u64_that_the_reference_keys_apart_are_two_objects` (the runs of 2^64 and 2^65
-are two doubles, so both bodies are kept), and by
-`pdf_tolerance.rs::two_numbers_past_the_model_that_the_reference_keys_apart_are_both_kept` and
-`pdf_damaged_shapes.rs::two_numbers_the_reference_keys_apart_are_kept_by_both_sides`. A container's
+are two doubles, so both bodies are kept) and by
+`pdf_tolerance.rs::two_numbers_past_the_model_that_the_reference_keys_apart_are_both_kept`. A container's
 entries are keyed the same way — `...::a_containers_entries_are_keyed_by_the_double_their_digits_state`,
 `pdf_tolerance.rs::a_container_naming_two_numbers_the_reference_keys_apart_keeps_both` and
 `...::a_container_naming_one_number_in_two_digit_runs_loses_one`.
@@ -166,9 +179,8 @@ gives and the earlier one is gone from its output — measured, a rotate of a fi
 file does not hold in the loss field of §3.5 rather than answering as though it had kept everything;
 witnessed by `...::two_numbers_longer_than_a_u64_are_reported_as_the_object_they_lose` and,
 for the body the walk carried rather than parsed,
-`...::a_number_past_a_u64_stated_twice_with_a_carried_body_loses_the_object_before_it`,
-`pdf_tolerance.rs::a_carried_body_that_replaces_a_number_is_reported` and
-`pdf_damaged_shapes.rs::a_carried_body_replacing_a_number_is_written_by_both_sides`. Each header that
+`...::a_number_past_a_u64_stated_twice_with_a_carried_body_loses_the_object_before_it` and
+`pdf_tolerance.rs::a_carried_body_that_replaces_a_number_is_reported`. Each header that
 states a different number replaces the object before it, so `A, B, A` loses two — pinned by
 `...::a_number_stated_again_after_another_loses_the_object_between_them` — while the *same* number
 twice is a redefinition and loses nothing — however its digits are spelled, which
@@ -193,8 +205,7 @@ the one the document holds. `Scan::assign` does the same. **Matched**; witnessed
 states one entry per number, so two bodies at one number in different generations are two objects the
 index cannot both name. The last one written is the one it names and the other is unreachable, so the
 answer reports it in the loss field of §3.5 —
-`pdf_tolerance.rs::two_generations_of_one_number_are_reported_as_the_body_the_index_cannot_name`
-and `pdf_damaged_shapes.rs::two_generations_of_one_number_are_reported_by_the_crate`.
+`pdf_tolerance.rs::two_generations_of_one_number_are_reported_as_the_body_the_index_cannot_name`.
 
 **1.7 Object `0 0`.** `parseDocument` deletes it after the walk, because nothing can reference it.
 `scan::document` removes it too, and reports nothing: it is the free list's head rather than an object,
@@ -207,9 +218,8 @@ the file stated it and writes an index that names neither it nor the object afte
 number zero at a generation *past* what the model keys — §1.4's marker generation included — is held
 like any such number and given a number of this document's own, so nothing is lost there.
 **Stated** on the first shape; witnessed by
-`pdf_tolerance.rs::an_object_at_number_zero_is_left_out_and_reported`,
-`pdf_damaged_shapes.rs::an_object_at_number_zero_is_dropped_by_the_crate_and_kept_by_the_reference` and —
-for the generation past the model, where both sides keep the object and only its number differs —
+`pdf_tolerance.rs::an_object_at_number_zero_is_left_out_and_reported` and — for the generation past
+the model, where both sides keep the object and only its number differs —
 `pdf_tolerance.rs::an_object_at_number_zero_at_the_marker_generation_is_renumbered`. No case for the
 first shape: the reference's produced file carries an object the model ignores, so the answer differs
 only in the crate's loss field.
@@ -250,10 +260,9 @@ an object stream, and its own file does not parse with hayro; this engine renumb
 reports the reference with `pdf_page_references_lost` — the references of the same keyword reading
 above, so a carried body that only looks like it holds a reference can be reported as one. **Stated**:
 a reader can tell the two files apart, and the produced file says what it could not carry. Witnessed by
-`pdf_tolerance.rs::a_reference_inside_a_carried_body_is_reported_when_its_object_moves`,
+`pdf_tolerance.rs::a_reference_inside_a_carried_body_is_reported_when_its_object_moves` and
 `...::a_carried_body_at_the_reserved_number_reports_no_broken_reference` — a body the produced file
-does not state has no reference to break — and
-`pdf_damaged_shapes.rs::a_carried_body_reference_is_reported_by_the_crate_and_kept_by_the_reference`;
+does not state has no reference to break;
 `coverage.rs` records the mark unreached, because a corpus case would compare the crate's note against
 the reference's silence. `pdf_merge` and `pdf_split` report no reference at all: each builds a document
 of its own and numbers every object it copies from one, so what a reference inside a copied carried body
@@ -267,14 +276,15 @@ neither answer says anything about it. The objects such a call does not carry ar
 `PDFInvalidObject`; the writer copies them out uncompressed. The walk keeps them the same way and
 `serialise` writes them verbatim. **Matched**; witnessed by `pdf/pdf_rotate/body_unparsable` (the
 turn, so a no-op copy cannot pass), `pdf/pdf_merge/body_unparsable`, `pdf/pdf_rotate/page_unparsable`
-and `pdf/pdf_merge/page_unparsable` (the unparsable object *is* the page, which the walk passes over),
-and by `parity/tests/pdf_damaged_shapes.rs`, which compares the bytes themselves because the recorded
-model cannot see them.
+and `pdf/pdf_merge/page_unparsable` (the unparsable object *is* the page, which the walk passes over).
+The two-sided comparison that read the carried bytes themselves, because the recorded model cannot
+see them, retired with the kit.
 
 **2.2 A dictionary that closes on a key with no value.** `parseDict` reads a key and then a value; a
 `>>` where the value belongs throws, so the object is carried. The walk stops the same way and carries
-it. **Matched**; witnessed by `...::a_dictionary_whose_last_key_states_no_value_is_not_read` and the
-second property in `pdf_damaged_shapes.rs`.
+it. **Matched**; witnessed by `...::a_dictionary_whose_last_key_states_no_value_is_not_read`. The
+second property of that comparison — that both sides carry the same bytes — was observed only there
+and retired with the kit.
 
 **2.3 A body with no `endobj` at all.** `tryToParseInvalidIndirectObject` scans to the end of the file
 and throws `PDFInvalidObjectParsingError`, which fails the whole load. The walk refuses the file the
@@ -286,7 +296,7 @@ nested 30 000 is kept as the bytes it states — and past that it carries the ob
 to `object_depth_max` (30 000) and carries past it. **Stated**: in the band between the two the engine
 parses a value the reference keeps as bytes, so a page the reference loses in that band is turned
 here. No case: the canonical model parses the carried value itself and aborts, so the band's witness
-is `parity/scripts/probe-pdf-bounds.mjs` (three rows) and the crate's own deep-nesting tests.
+was `parity/scripts/probe-pdf-bounds.mjs` (three rows) and the crate's own deep-nesting tests.
 
 **2.5 An unbalanced string or an unterminated array.** `parseString` throws on an unbalanced
 parenthesis and `parseArray` runs into the end of the file, so the object is carried. The walk's
@@ -431,7 +441,7 @@ typed array, so a chain of expanding filters multiplies and dies at the array's 
 container is then carried. The engine stops at `container_decode_max_bytes`, which is that limit, and
 carries the container; what that ceiling still costs, and the allocation failure it cannot contain, are
 its `VOCABULARY.md` row's statement. **Matched**; measured in
-`parity/scripts/probe-pdf-bounds.mjs` (a five-stage chain decodes to 2.1 GiB and produces; a six-stage
+`parity/scripts/probe-pdf-bounds.mjs` (a five-stage chain decoded to 2.1 GiB and produces; a six-stage
 one spends thirty seconds and produces too) and witnessed by
 `pdf/pdf_rotate/container_decoding_eighty_mib` for the cost, by the crate's injected bounds for the
 ceiling itself, and by
@@ -520,7 +530,6 @@ the object is read once per entry. The walk reads it the same way and holds itse
 it, because what the expansion costs is the entries the file states on both sides — a budget of the
 engine's would refuse this very file. **Matched**; witnessed by
 `pdf/pdf_rotate/object_stream_one_offset` (the page turned, nothing lost),
-`pdf_damaged_shapes.rs::a_container_whose_entries_state_one_offset_is_produced_by_both_sides`,
 `pdf_tolerance.rs::a_container_whose_entries_state_one_offset_is_read`, and the probe row
 "a container whose 32 entries state one offset" (measured: the reference produces in a fraction of a
 second).
@@ -655,8 +664,7 @@ the same step by hand — a `/Parent` link as one read of the object map, a `/Fi
 sentence.
 **Matched**; witnessed by `pdf/pdf_rotate/page_tree_kids_by_reference` and
 `pdf/pdf_rotate/page_tree_root_by_reference` (declined on both sides),
-`pdf_tolerance.rs::a_page_tree_entry_stated_as_a_reference_to_a_reference_is_refused`,
-`pdf_damaged_shapes.rs::a_chained_page_tree_entry_is_refused_by_both_sides`, and the probe row
+`pdf_tolerance.rs::a_page_tree_entry_stated_as_a_reference_to_a_reference_is_refused`, and the probe row
 "a /Kids stated as a reference to a reference".
 
 **5.12 A box entry stated as a reference to a reference.** `PDFPageLeaf.MediaBox` reads its entry with
@@ -664,8 +672,7 @@ a `lookup` that is not a `lookupMaybe`, so a reference that names a reference is
 the library's own type check faults inside the operation. The engine takes the same one step and faults
 the same way: an internal failure, not a refusal. **Matched**; witnessed by
 `pdf/pdf_resize/media_box_by_reference` (declined on both sides as a third-party failure),
-`pdf_tolerance.rs::a_box_entry_stated_as_a_reference_to_a_reference_faults`,
-`pdf_damaged_shapes.rs::a_chained_box_entry_faults_on_both_sides`, and the probe row
+`pdf_tolerance.rs::a_box_entry_stated_as_a_reference_to_a_reference_faults`, and the probe row
 "a /MediaBox stated as a reference to a reference". The box is read only by the operations that need
 it: a turn does not read `/MediaBox`, so a chained box under `pdf_rotate` is produced by both sides.
 `/CropBox`, `/Rotate`, `/Annots` and `/Parent` are `lookupMaybe`/`lookup` reads of the same one step —
@@ -683,9 +690,8 @@ for a null the entry states, so the page shows its media box; `/MediaBox` is rea
 `lookup`, which answers nothing for a null and throws, so such a page faults. The engine's `area`
 answers both the same way: an absent entry, a value that names nothing and a null are `None`, and the
 media box's caller faults on `None`. **Matched**; witnessed by
-`pdf_tolerance.rs::a_null_crop_box_falls_back_to_the_media_box`,
-`pdf_damaged_shapes.rs::a_null_crop_box_falls_back_to_the_media_box_on_both_sides` (both sides crop to
-the same box) and the probe row "a page whose /CropBox is null: the crop falls back to the media box".
+`pdf_tolerance.rs::a_null_crop_box_falls_back_to_the_media_box` and the probe row "a page whose
+/CropBox is null: the crop falls back to the media box".
 No case: the two produced files spell the box they wrote in their own ways, and the crate's and the
 reference's differ outside what a recorded entry compares.
 
@@ -696,10 +702,8 @@ is not the page tree's alone: `PDFCatalog.lookupMaybe('/AcroForm', PDFDict)` and
 stated as a reference to a reference" and "an /AcroForm stated as a reference to a reference". The
 engine reads both through the same one step, so `pdf_text` and `pdf_form_fill` fault with an internal
 failure rather than following the chain. **Matched**; witnessed by
-`pdf_tolerance.rs::a_page_whose_resources_name_a_reference_faults`,
-`pdf_tolerance.rs::a_form_reached_through_a_chained_reference_faults` and
-`pdf_damaged_shapes.rs::a_chained_acroform_reference_faults_on_both_sides` and
-`pdf_damaged_shapes.rs::a_chained_resources_reference_faults_on_both_sides`. No case: the reference's
+`pdf_tolerance.rs::a_page_whose_resources_name_a_reference_faults` and
+`pdf_tolerance.rs::a_form_reached_through_a_chained_reference_faults`. No case: the reference's
 answer is a fault inside its library rather than a produced file.
 
 **5.16 The field tree, read one step at a time.** `PDFAcroForm.getFields` builds every field before
@@ -727,13 +731,10 @@ array as the fault the widget read raises. **Matched**; witnessed by
 `...::a_kid_that_is_not_a_dictionary_is_the_widget_reads_fault`,
 `...::a_field_whose_kids_is_no_array_is_the_widget_reads_fault`,
 `...::a_signature_reads_its_kids_only_to_flatten`,
-`...::a_fields_dictionary_in_place_and_a_field_with_no_parent_are_still_read` and, on both sides,
-`pdf_damaged_shapes.rs::a_form_whose_list_is_stated_through_a_reference_is_filled_by_both_sides`,
-`...::a_kid_stated_in_place_is_no_field_on_either_side`,
-`...::a_kid_that_is_not_a_dictionary_faults_on_both_sides`,
-`...::a_kids_entry_that_is_not_an_array_faults_on_both_sides` and
-`...::a_field_with_no_widgets_writes_no_appearance_on_either_side`. No case: the model reads the same
-fields of the two produced files, and a fault inside the reference's library has no file to compare.
+`...::a_fields_dictionary_in_place_and_a_field_with_no_parent_are_still_read`.
+**No witness now**: the two-sided comparison that observed this retired with the kit. No case: the
+model reads the same fields of the two produced files, and a fault inside the reference's library has
+no file to compare.
 Three entries of the two produced files differ where no reader of the canonical model looks: where a
 field, a widget or a `/Fields` element is a dictionary stated in place, the entry that names it is
 written as the reference the engine registered; where a `/Fields` or `/Kids` entry states a
@@ -762,9 +763,9 @@ whose flags are a huge real" and "a choice field whose flags are a whole number 
 inside it is **stated**: the reference reads the decimal as a double, while this model holds a real
 as a 32-bit float, so a `/Ff` real past what the float states exactly can land on another bit.
 Measured, `4294967295.5` is `-1` (a combo box, produced) there and the float rounds it to 2^32, whose
-low 32 bits are zero (a list box, refused) here. Witnessed by
-`pdf_damaged_shapes.rs::a_flags_real_past_the_float_is_read_differently_by_the_two_sides` and the
-probe row "a choice field whose flags are a real past the float". A whole number has no such band up
+low 32 bits are zero (a list box, refused) here. **No witness now**: the two-sided comparison that
+observed this retired with the kit. The probe row "a choice field whose flags are a real past the
+float" records the measurement. A whole number has no such band up
 to `i64`: it is exact in both models up to 2^53, and from there the engine reads the double the
 digits state, which is the number the reference reads; past `i64` the object is carried (§6.3), so a
 `/Fields` entry that is such a field is the fault the typed read raises and a kid is skipped.
@@ -785,9 +786,8 @@ below; witnessed by `form::tests::a_field_that_states_no_type_is_the_references_
 `...::a_signature_never_reads_its_flags`,
 `...::a_field_of_a_type_the_reference_knows_no_field_of_is_not_a_field`,
 `...::a_name_stated_as_a_reference_that_names_nothing_is_no_name`,
-`...::a_flags_entry_that_names_nothing_is_no_flags` and, on both sides,
-`pdf_damaged_shapes.rs::a_clean_field_whose_flags_are_a_reference_is_no_fault_on_either_side`,
-`...::a_flags_entry_that_names_nothing_is_no_fault_on_either_side`. Measured,
+`...::a_flags_entry_that_names_nothing_is_no_flags`. **No witness now**: the two-sided comparison
+that observed this retired with the kit. Measured,
 the probe rows "a signature whose `/Ff` is a reference to a reference" and "a clean text field whose
 `/Ff` is a reference" produce, and "a filled text field whose `/Ff` is a reference" faults. No case: the
 answer is a fault inside the reference's library.
@@ -796,9 +796,9 @@ answer is a fault inside the reference's library.
 reference: measured, a six-character value set on a text field stating `/MaxLen 3.5` faults with
 `maxLength=3.5` in the sentence, and one stating `/MaxLen 3.0` faults with `maxLength=3`. The engine
 reads the entry as a whole number, so a real is no bound here and the value is written where the
-reference faults. **Stated**: a permissive divergence, witnessed by
-`pdf_damaged_shapes.rs::a_real_max_length_bounds_the_reference_and_not_the_crate` and the probe rows
-"a text field whose /MaxLen is a real" and "a text field whose /MaxLen is a fraction". No case: the
+reference faults. **Stated**: a permissive divergence. **No witness now**: the two-sided comparison
+that observed this retired with the kit; the probe rows "a text field whose /MaxLen is a real" and "a
+text field whose /MaxLen is a fraction" are the measurements that remain. No case: the
 reference's answer is a fault inside its library rather than a produced file.
 
 `createPDFAcroField` reads what a field inherits by ascending its `/Parent` chain, and the reference
@@ -819,12 +819,11 @@ whose appearance it updates — which is every field of a kind a fill can take. 
 `...::a_parent_link_that_names_a_reference_is_the_references_fault`,
 `...::a_fields_entry_that_names_a_reference_is_the_references_fault`,
 `...::a_field_name_that_names_a_reference_is_the_references_fault`,
-`...::a_parent_stated_in_place_is_followed_for_the_entries_a_field_inherits` and, on both sides,
-`pdf_damaged_shapes.rs::a_field_read_past_a_null_entry_is_filled_by_both_sides`,
-`...::a_parent_stated_in_place_is_filled_by_both_sides`. Measured, a form whose
-text field holds a `/Parent` that names nothing faults whatever the request asks for, and one whose
-*signature* field holds it faults where the request reaches that field or the catalogue is built. No
-case: the answer is a fault inside the reference's library.
+`...::a_parent_stated_in_place_is_followed_for_the_entries_a_field_inherits`.
+**No witness now**: the two-sided comparison that observed this retired with the kit. Measured, a form
+whose text field holds a `/Parent` that names nothing faults whatever the request asks for, and one
+whose *signature* field holds it faults where the request reaches that field or the catalogue is built.
+No case: the answer is a fault inside the reference's library.
 
 An option list's `Sort` bit is read by the *later* reader: `isSorted` is `hasFlag(Sort)`, which is
 `getFlags` and so `getParent`. A flag the field states itself, or a parent a reference names, sorts the
@@ -848,8 +847,8 @@ The widget list is the one place the fault is deferred rather than raised while 
 `updateFieldAppearances` reads it after the values are applied, so a malformed kid beside a request that
 names no field is the usage refusal that lists the form's fields on both sides, not a fault. The engine
 records the fact and raises it there. Measured, the probe row "a bad widget kid beside a request naming
-no field". **Matched**; witnessed by
-`pdf_damaged_shapes.rs::a_bad_widget_kid_does_not_turn_a_missing_field_into_a_fault`.
+no field". **Matched**. **No witness now**: the two-sided comparison that observed this retired with
+the kit.
 
 A kid whose `/T` is a stated `null` is a widget, not a field: `PDFDict.has` answers false for a null,
 so the container test finds no field of it and the typed widget read lists it. Measured, the
@@ -903,13 +902,13 @@ as a 32-bit float where the reference holds a double, and reading `/MaxLen` only
 - a `/Ff` real past what a 32-bit float states exactly: the reference reads the decimal as a double
   and converts that, so `4294967295.5` is `-1` — a combo box, which produces — where this model's
   float rounds it to 2^32, whose low 32 bits are zero (a list box, which refuses). Measured, the probe
-  row "a choice field whose flags are a real past the float"; witnessed by
-  `pdf_damaged_shapes.rs::a_flags_real_past_the_float_is_read_differently_by_the_two_sides`.
+  row "a choice field whose flags are a real past the float". **No witness now**: the two-sided
+  comparison that observed this retired with the kit.
 - a `/MaxLen` stated as a real: the reference reads it as a number and faults a value longer than it,
   printing the real in the sentence, where this engine reads only a whole number and writes the
   value. Measured, the probe rows "a text field whose /MaxLen is a real" and "a text field whose
-  /MaxLen is a fraction"; witnessed by
-  `pdf_damaged_shapes.rs::a_real_max_length_bounds_the_reference_and_not_the_crate`.
+  /MaxLen is a fraction". **No witness now**: the two-sided comparison that observed this retired
+  with the kit.
 
 The second and third are the same eagerness: a form the reference answers and this engine faults on.
 No case for any of the five: a case compares answers that differ.
@@ -935,8 +934,6 @@ holds none, and the request is the usage refusal that names the empty catalogue,
 walk can leave yields the fields it reaches. **Stated**: a permissive divergence, and the stop is a
 bound of this engine's own — the measured reference failure on the same shape is what justifies it,
 as that failure is also what rules out a depth bound in §5.16. Witnessed by
-`pdf_damaged_shapes.rs::a_field_kids_cycle_faults_only_on_the_reference` and
-`...::a_field_parent_cycle_faults_only_on_the_reference`,
 `pdf_tolerance.rs::a_field_kids_cycle_ends_where_the_reference_dies` and
 `...::a_field_parent_cycle_ends_where_the_reference_dies`, and
 `form::tests::a_field_tree_is_walked_past_the_readings_bound_and_stops_at_a_cycle` and

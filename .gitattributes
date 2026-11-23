@@ -1,16 +1,16 @@
 # A created deck's and a created Word document's captured parts are stored and written exactly as the
-# reference produced them, and their line endings differ part by part, so each must keep its own bytes
-# (the crate's `writing/pptx/create/parts.rs` and `writing/docx/create/parts.rs` record the measured
-# mix). Each rule is scoped to its own directory alone — a blanket setting would also rewrite
-# `assets/docgen/document-kit.js`, whose digest is part of the reference writer's identity.
+# retired kit produced them, and their line endings differ part by part, so each must keep its own
+# bytes (the crate's `writing/pptx/create/parts.rs` and `writing/docx/create/parts.rs` record the
+# measured mix). Each rule is scoped to its own directory alone: a blanket setting would also rewrite
+# the product's font copy under `assets/docgen/`, whose digest the gate compares.
 /document-engine/assets/pptx-create/** -text
 /document-engine/assets/docx-create/** -text
 
 # The oracle's kept PDFs are the outside reference's own output, stored and written exactly as it
 # produced them: a line-ending conversion would change the digest that says a second run reproduces
 # the file, and the pages a reviewer reads.
-/oracle/record/documents/**/produced.pdf -text
+/document-engine/dev/oracle/record/documents/**/produced.pdf -text
 
 # The oracle's font configuration is compared byte for byte against the one this machine's font set
 # makes, so a line-ending conversion would break the comparison.
-/oracle/record/fonts.conf -text
+/document-engine/dev/oracle/record/fonts.conf -text

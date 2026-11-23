@@ -1,16 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["document-engine", "parity"]
-# The product-touchpoint copies are reference material, not packages of this workspace. The
-# development oracle is a package of its own, with its own resolution: it drives an outside program
-# and nothing here depends on it, so the root build, this lockfile and the parity harness's
-# comparison identity are untouched by it.
-exclude = ["product-touchpoints", "oracle"]
+members = ["document-engine"]
+# The product-touchpoint copies are reference material, not packages of this workspace.
+exclude = ["product-touchpoints"]
 
 [workspace.package]
 # The declared minimum, inherited by the members. It is not the pin: a minimum forbids an older
 # compiler and permits a newer one, and the pin is `rust-toolchain.toml`. The engine's minimum is
-# also the product's once the product depends on it. The oracle is a workspace of its own and
-# states the same version again; the product-touchpoint copy keeps the product's own declaration
-# and is deliberately not rewritten.
+# also the product's once the product depends on it. The product-touchpoint copy keeps the product's
+# own declaration and is deliberately not rewritten.
 rust-version = "1.99.1"

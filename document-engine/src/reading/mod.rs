@@ -87,17 +87,17 @@ pub(crate) mod page_tree;
 
 use crate::reading::output::{Unshown, UnshownKind, mark, note};
 use crate::reading::page_tree::PageEntry;
-use hayro::hayro_interpret::InterpreterSettings;
-use hayro::hayro_syntax::content::TypedIter;
-use hayro::hayro_syntax::content::ops::TypedInstruction;
-use hayro::hayro_syntax::object::dict::Dict;
-use hayro::hayro_syntax::object::stream::{ImageColorSpace, ImageDecodeParams, Stream};
-use hayro::hayro_syntax::object::{Array, Name, Object, ObjectIdentifier, Rect};
-use hayro::hayro_syntax::page::Page;
-use hayro::hayro_syntax::{DecryptionError, LoadPdfError, Pdf};
-use hayro::vello_cpu::color::palette::css::WHITE;
-use hayro::vello_cpu::peniko::ImageAlphaType;
-use hayro::{PixmapSettings, RenderCache, RenderSettings};
+use hayro_current::hayro_interpret::InterpreterSettings;
+use hayro_current::hayro_syntax::content::TypedIter;
+use hayro_current::hayro_syntax::content::ops::TypedInstruction;
+use hayro_current::hayro_syntax::object::dict::Dict;
+use hayro_current::hayro_syntax::object::stream::{ImageColorSpace, ImageDecodeParams, Stream};
+use hayro_current::hayro_syntax::object::{Array, Name, Object, ObjectIdentifier, Rect};
+use hayro_current::hayro_syntax::page::Page;
+use hayro_current::hayro_syntax::{DecryptionError, LoadPdfError, Pdf};
+use hayro_current::vello_cpu::color::palette::css::WHITE;
+use hayro_current::vello_cpu::peniko::ImageAlphaType;
+use hayro_current::{PixmapSettings, RenderCache, RenderSettings};
 use image::codecs::jpeg::JpegEncoder;
 use image::{RgbImage, RgbaImage};
 use pdf_extract::{
@@ -410,7 +410,7 @@ fn render_page_image(page: &Page<'_>, long_side: f32, max_scale: f32) -> Option<
     // stays finite.
     let (width, height) = page.render_dimensions();
     let scale = (long_side / width.max(height)).min(max_scale);
-    let pixmap = hayro::render(
+    let pixmap = hayro_current::render(
         page,
         &RenderCache::new(),
         &InterpreterSettings::default(),

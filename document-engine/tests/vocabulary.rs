@@ -2206,7 +2206,7 @@ fn the_stand_alone_scan_catches_a_planted_reference() {
         "a planted path must be caught: {planted:?}"
     );
     let prose = common::forbidden_references(
-        r#"let message = "assets/docgen/rules.json states the bound";"#,
+        r#"let message = "vocabulary.json states the bound";"#,
         common::Scan::Source,
     );
     assert!(
@@ -2218,6 +2218,10 @@ fn the_stand_alone_scan_catches_a_planted_reference() {
 #[test]
 fn the_crate_stands_alone() {
     let manifest = std::fs::read_to_string(root().join("Cargo.toml")).expect("the manifest");
+    // The development-only target block names `dev/`, which the crate's ordinary sources and tests
+    // must never reach into; the block is the one place the name belongs, so it is removed before
+    // the scan.
+    let manifest = common::without_development_only(&manifest);
     for forbidden in common::FORBIDDEN_REFERENCES {
         assert!(
             !manifest.contains(forbidden),
