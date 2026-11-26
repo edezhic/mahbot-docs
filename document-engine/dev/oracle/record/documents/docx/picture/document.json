@@ -51,9 +51,26 @@
           "TimesNewRomanPSMT"
         ],
         "lines": [
-          "Above the picture.",
-          "",
-          "Below the picture."
+          {
+            "text": "Above the picture.",
+            "x_pt": 72.1,
+            "y_pt": 80.901,
+            "size_pt": 10.0
+          },
+          {
+            "text": "Below the picture.",
+            "x_pt": 72.1,
+            "y_pt": 150.451,
+            "size_pt": 10.0
+          }
+        ],
+        "pictures": [
+          {
+            "x_pt": 72.0,
+            "y_pt": 83.501,
+            "width_pt": 72.0,
+            "height_pt": 48.0
+          }
         ]
       }
     ]

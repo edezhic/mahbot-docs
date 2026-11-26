@@ -235,6 +235,11 @@ pub struct Vocabulary {
     pub limits: Limits,
     /// The bounds the engine states for itself, where the reference states none.
     pub engine: EngineBounds,
+    /// The page renderer's bounds.
+    pub render: RenderBounds,
+    /// The rendering half's own page: the canvas it draws a document that states none on, and the
+    /// paper sizes a page setup names. A created PDF states its own page in `create`.
+    pub page: PageCanvas,
     /// The layout a created PDF lays its content out with, and the fragments its Word-only refusal
     /// is composed from.
     pub create: CreateLayout,
@@ -254,13 +259,15 @@ pub enum Producer {
     Reading,
     /// The producing operations.
     Writing,
+    /// The page renderer: a document drawn as its pages.
+    Rendering,
     /// A caller's tool layer, above the engine.
     Caller,
 }
 
 impl Producer {
     /// Every side, in a fixed order.
-    pub const ALL: [Self; 3] = [Self::Reading, Self::Writing, Self::Caller];
+    pub const ALL: [Self; 4] = [Self::Reading, Self::Writing, Self::Rendering, Self::Caller];
 }
 
 /// Which side enforces each bound, by entry name. A bound enforced in more than one place names
@@ -417,11 +424,14 @@ pub struct EngineBounds {
     /// and the paths that touch a value a file states have a case on the harness's two-mebibyte stack.
     /// `VOCABULARY.md` records the measurements that fix this number and the one below.
     pub object_depth_max: usize,
-    /// The most a container's bytes may decode to. A stream's filter chain applies stage by stage, so a
-    /// chain of expanding filters multiplies rather than adding, and a few hundred bytes can state
-    /// gigabytes. The ceiling is the most a typed array holds, which is where the reference's own
-    /// decoder throws and keeps the container as the bytes it states; past it the container is not
-    /// decoded here either, so nothing is refused and nothing is invented.
+    /// The most a PDF stream's bytes may decode to. A stream's filter chain applies stage by stage,
+    /// so a chain of expanding filters multiplies rather than adding, and a few hundred bytes can
+    /// state gigabytes. The ceiling is the most a typed array holds, which is where the reference's
+    /// own decoder throws and keeps the container as the bytes it states; past it the container is
+    /// not decoded here either, so nothing is refused and nothing is invented. It bounds the PDF
+    /// stream chain only: a package's expansion is the renderer's own bound
+    /// ([`RenderBounds::package_bytes_max`](crate::vocabulary::RenderBounds::package_bytes_max)),
+    /// sized for one rendering rather than for the container ceiling.
     pub container_decode_max_bytes: u64,
     /// The bytes one look at what comes next may inspect, so a body built of long comment or digit
     /// runs costs at most that many reads per byte of its own. Far more than an object header with
@@ -438,6 +448,108 @@ pub struct EngineBounds {
     pub stated_columns_max: usize,
 }
 
+/// The page renderer's bounds.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RenderBounds {
+    /// The most pages one call may produce: 1000, a thousand pages at the stated long side being
+    /// more pictures than one answer is useful to carry. A document stating more pages than this —
+    /// a PDF's page tree, a presentation's slides — is refused; a workbook naming more sheets than
+    /// this, or a layout computing more pages, is drawn up to the bound and the rest named.
+    pub pages_max: usize,
+    /// The largest width or height, in points, a page may state: 14 400, which is 200 inches — nearly
+    /// twelve times the long side of the largest paper the vocabulary states (1 224 points), far past
+    /// any paper, and small enough that a page's own geometry cannot overflow. A larger one is
+    /// refused rather than allocated.
+    pub page_pt_max: f64,
+    /// The most things one page may be asked to draw: 131 072, the most a page's own items can be
+    /// before one document's layout is worth more than the page it describes. Past it the rest are
+    /// named as not drawn.
+    pub items_max_per_page: usize,
+    /// The most names one report line lists: 8. A workbook naming a hundred thousand sheets would
+    /// otherwise print every sheet it did not draw, and one hiding as many ranges would print every
+    /// range, so such a line names the first few and says how many it left out. Only names are
+    /// capped — a sheet, a range of hidden positions; a line carrying the words of content that was
+    /// not drawn lists them all.
+    pub report_names_max: usize,
+    /// The most bytes of page pictures one render may hold: 256 MiB, the point past which one
+    /// answer's pictures are more than a caller can use and a modest machine is at risk. The count
+    /// is what a page really holds at its peak — its own raster at the stated long side, plus the
+    /// bytes of the pictures it embeds, a PNG's four bytes a sample held three times while the
+    /// picture is produced. So a page whose pictures would not fit gives the largest of them up, each
+    /// named as not drawn, and a page the budget cannot hold at all keeps its text and its
+    /// description and names its picture. A render is never stopped by exhausting memory.
+    pub picture_bytes_max: u64,
+    /// The most bytes of picture parts one render may read, before any of them is decoded: 256 MiB.
+    /// A document that references one picture many times would otherwise hold a copy of its bytes
+    /// per reference, so the bytes are charged as the part is read and a reference past the bound
+    /// is a picture the page names as not drawn. It is a different count from
+    /// [`picture_bytes_max`](Self::picture_bytes_max) — source bytes here, decoded samples there —
+    /// and both are memory one rendering really holds.
+    pub picture_part_bytes_max: u64,
+    /// The most bytes a package's parts together may expand to before it is refused: 256 MiB. A
+    /// rendering holds a whole package at once, so this is the bound for one such document on a
+    /// modest machine — far above any document a user carries, and below what a host holds, so the
+    /// refusal is reached before the process is at risk. It is the renderer's own bound, not the
+    /// container ceiling the PDF stream decoder states, which is past what a small host holds.
+    pub package_bytes_max: u64,
+    /// The most elements one part may hold: 1 000 000. A part is read into a tree before it is
+    /// drawn, and a tree's node is far larger than the element that states it, so a part made of
+    /// nothing but empty elements would expand a few hundred kilobytes into gigabytes. A part past
+    /// the bound is refused with its own sentence rather than read; a document a reader was written
+    /// for states far fewer elements than this.
+    pub part_elements_max: usize,
+    /// The most tab stops a paragraph may state, and the most tabs one paragraph may hold: 64. A
+    /// right-aligned tab measures everything that follows it against those stops, so an unbounded
+    /// count is quadratic work a few kilobytes of input can ask for; a document states a handful.
+    pub tabs_max: usize,
+    /// How far apart two text baselines may be and still belong to one visual line, in points: 4,
+    /// the most a superscript marker or a bullet stands above the text it belongs to. The record's
+    /// extractor groups its lines by this same value, so the two sides agree on what a line is.
+    pub line_band_pt: f64,
+    /// How wide a gap between two runs must be, in points, before the report joins them with a
+    /// space: 1, the narrowest gap a document leaves between two words it states separately. The
+    /// record's extractor applies the same value, so a line reads the same on both sides.
+    pub line_gap_pt: f64,
+    /// The smallest box, in points, that counts as a picture: 1, below which a box is a mask or a
+    /// rule rather than something a reader sees. The record's extractor applies the same value.
+    pub min_picture_pt: f64,
+}
+
+/// The page a document that states none is drawn on, and the paper sizes a page setup names.
+///
+/// The rendering half's canvas: a rendered page of a document stating no page setup is drawn on
+/// this page, and nothing in the writing half reads it. A created PDF states its own page in the
+/// `create` section, so a change to one canvas cannot move the other. A spreadsheet's column width
+/// and row height are stated in twips, the sub-point unit a worksheet's own lengths are counted in;
+/// a page is drawn in points.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PageCanvas {
+    /// The page's width, in points: A4's 595.28.
+    pub width_pt: f64,
+    /// Its height: A4's 841.89.
+    pub height_pt: f64,
+    /// The room it leaves on every side, in points: 72, one inch.
+    pub margin_pt: f64,
+    /// Where a section that states no header distance stands its header from the page's top edge,
+    /// in points: 35.4, the layout library's own `sectionMarginDefaults` — not the top margin, so a
+    /// section stating no margins does not draw its header over its body.
+    pub header_pt: f64,
+    /// Where it stands its footer from the page's bottom edge, in points: the same 35.4.
+    pub footer_pt: f64,
+    /// The width of a spreadsheet column that states none, in twips: 960, forty-eight points.
+    pub column_width_twips: f64,
+    /// The height of a spreadsheet row that states none, in twips: 300, fifteen points.
+    pub row_height_twips: f64,
+    /// The `paperSize` codes that name A4, this page's own size: 9 and 10. A code listed here is
+    /// answered by [`width_pt`](Self::width_pt) rather than by a second statement of it.
+    pub a4_codes: Vec<u32>,
+    /// The other paper sizes a `pageSetup`'s `paperSize` code names, as its code, width and height
+    /// in points: the ISO and ANSI sizes a spreadsheet is usually printed on.
+    pub sizes: Vec<(u32, f64, f64)>,
+}
+
 /// The layout a created PDF lays its content out with, and the fragments its Word-only refusal is
 /// composed from. The sizes are one per level of `rules.heading_levels` — the list of levels stays
 /// there, so this section names sizes rather than restating which levels exist.
@@ -446,6 +558,12 @@ pub struct EngineBounds {
 pub struct CreateLayout {
     /// The point size of a heading, indexed by its level: `heading_size_points[level - 1]`.
     pub heading_size_points: Vec<f64>,
+    /// The width of the page a created PDF lays its content out on, in points: A4's 595.28. Stated
+    /// here rather than read from the page a renderer draws on, so a change to the rendering canvas
+    /// cannot move a produced document: the two coincide today and are two decisions.
+    pub pdf_page_width_pt: f64,
+    /// Its height: A4's 841.89, stated apart from the rendering canvas for the same reason.
+    pub pdf_page_height_pt: f64,
     /// The words a Word-only block, footnote, header or footer is named by in the refusal a
     /// document of another family answers with. They are not marks: the sentence is one mark, and
     /// these are the fragments it interpolates.

@@ -136,31 +136,146 @@
           "TimesNewRomanPSMT"
         ],
         "lines": [
-          "Quarterly report",
-          "",
-          "Page 1 of 2",
-          "",
-          "Quarterly report",
-          "Every page in this record is the writer's own output, laid out by the outside reference. This paragraph is long",
-          "enough that the reference has to break it across several lines, which is what makes a page boundary worth",
-          "recording at all. The words after it are ordinary prose.",
-          "Revenue by region",
-          "● North",
-          "● South",
-          "● East",
-          "● West",
-          "The same regions, in the order the report reads them:",
-          "1. North",
-          "2. South",
-          "3. East",
-          "4. West",
-          "Detail",
-          "Region Revenue Growth",
-          "North 1 200 4%",
-          "South 980 2%",
-          "East 1 540 7%",
-          "",
-          "The full breakdown is published."
+          {
+            "text": "Quarterly report",
+            "x_pt": 72.1,
+            "y_pt": 44.301,
+            "size_pt": 10.0
+          },
+          {
+            "text": "Quarterly report",
+            "x_pt": 72.1,
+            "y_pt": 86.251,
+            "size_pt": 16.0
+          },
+          {
+            "text": "Every page in this record is the writer's own output, laid out by the outside reference. This paragraph is long",
+            "x_pt": 72.1,
+            "y_pt": 99.301,
+            "size_pt": 10.0
+          },
+          {
+            "text": "enough that the reference has to break it across several lines, which is what makes a page boundary worth",
+            "x_pt": 72.1,
+            "y_pt": 110.851,
+            "size_pt": 10.0
+          },
+          {
+            "text": "recording at all. The words after it are ordinary prose.",
+            "x_pt": 72.1,
+            "y_pt": 122.401,
+            "size_pt": 10.0
+          },
+          {
+            "text": "Revenue by region",
+            "x_pt": 72.1,
+            "y_pt": 136.651,
+            "size_pt": 13.0
+          },
+          {
+            "text": "● North",
+            "x_pt": 90.1,
+            "y_pt": 148.901,
+            "size_pt": 10.0
+          },
+          {
+            "text": "● South",
+            "x_pt": 90.1,
+            "y_pt": 160.451,
+            "size_pt": 10.0
+          },
+          {
+            "text": "● East",
+            "x_pt": 90.1,
+            "y_pt": 172.001,
+            "size_pt": 10.0
+          },
+          {
+            "text": "● West",
+            "x_pt": 90.1,
+            "y_pt": 183.551,
+            "size_pt": 10.0
+          },
+          {
+            "text": "The same regions, in the order the report reads them:",
+            "x_pt": 72.1,
+            "y_pt": 195.101,
+            "size_pt": 10.0
+          },
+          {
+            "text": "1. North",
+            "x_pt": 72.1,
+            "y_pt": 206.651,
+            "size_pt": 10.0
+          },
+          {
+            "text": "2. South",
+            "x_pt": 72.1,
+            "y_pt": 218.201,
+            "size_pt": 10.0
+          },
+          {
+            "text": "3. East",
+            "x_pt": 72.1,
+            "y_pt": 229.751,
+            "size_pt": 10.0
+          },
+          {
+            "text": "4. West",
+            "x_pt": 72.1,
+            "y_pt": 241.301,
+            "size_pt": 10.0
+          },
+          {
+            "text": "Detail",
+            "x_pt": 72.1,
+            "y_pt": 254.651,
+            "size_pt": 12.0
+          },
+          {
+            "text": "Region Revenue Growth",
+            "x_pt": 77.75,
+            "y_pt": 267.151,
+            "size_pt": 10.0
+          },
+          {
+            "text": "North 1 200 4%",
+            "x_pt": 77.75,
+            "y_pt": 279.201,
+            "size_pt": 10.0
+          },
+          {
+            "text": "South 980 2%",
+            "x_pt": 77.75,
+            "y_pt": 291.251,
+            "size_pt": 10.0
+          },
+          {
+            "text": "East 1 540 7%",
+            "x_pt": 77.75,
+            "y_pt": 303.301,
+            "size_pt": 10.0
+          },
+          {
+            "text": "The full breakdown is published.",
+            "x_pt": 72.1,
+            "y_pt": 445.351,
+            "size_pt": 10.0
+          },
+          {
+            "text": "Page 1 of 2",
+            "x_pt": 72.1,
+            "y_pt": 803.851,
+            "size_pt": 10.0
+          }
+        ],
+        "pictures": [
+          {
+            "x_pt": 72.0,
+            "y_pt": 306.401,
+            "width_pt": 240.0,
+            "height_pt": 120.0
+          }
         ]
       },
       {
@@ -171,20 +286,62 @@
           "TimesNewRomanPSMT"
         ],
         "lines": [
-          "Quarterly report",
-          "",
-          "Page 2 of 2",
-          "",
-          "Appendix",
-          "Quarterly report........................................................................................................................................................ 1",
-          "Revenue by region...............................................................................................................................................1",
-          "Detail...............................................................................................................................................................1",
-          "Appendix.............................................................................................................................................................. 2",
-          "",
-          "A paragraph carrying a footnote.1",
-          "",
-          "1The footnote's own text, on the page the reference gives it."
-        ]
+          {
+            "text": "Quarterly report",
+            "x_pt": 72.1,
+            "y_pt": 44.301,
+            "size_pt": 10.0
+          },
+          {
+            "text": "Appendix",
+            "x_pt": 72.1,
+            "y_pt": 83.601,
+            "size_pt": 13.0
+          },
+          {
+            "text": "Quarterly report........................................................................................................................................................ 1",
+            "x_pt": 72.1,
+            "y_pt": 95.851,
+            "size_pt": 10.0
+          },
+          {
+            "text": "Revenue by region...............................................................................................................................................1",
+            "x_pt": 83.1,
+            "y_pt": 107.401,
+            "size_pt": 10.0
+          },
+          {
+            "text": "Detail...............................................................................................................................................................1",
+            "x_pt": 94.1,
+            "y_pt": 118.951,
+            "size_pt": 10.0
+          },
+          {
+            "text": "Appendix.............................................................................................................................................................. 2",
+            "x_pt": 83.1,
+            "y_pt": 130.501,
+            "size_pt": 10.0
+          },
+          {
+            "text": "A paragraph carrying a footnote.1",
+            "x_pt": 72.1,
+            "y_pt": 153.601,
+            "size_pt": 10.0
+          },
+          {
+            "text": "1The footnote's own text, on the page the reference gives it.",
+            "x_pt": 72.1,
+            "y_pt": 767.251,
+            "size_pt": 10.0
+          },
+          {
+            "text": "Page 2 of 2",
+            "x_pt": 72.1,
+            "y_pt": 803.851,
+            "size_pt": 10.0
+          }
+        ],
+        "pictures": []
       }
     ]
   },

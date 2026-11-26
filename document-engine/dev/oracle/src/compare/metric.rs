@@ -20,7 +20,7 @@ use crate::oracle::compare::cases::Class;
 use crate::oracle::compare::render::{
     Dimensions, Drawn, Picture, SideDocument, SidePage, SideState,
 };
-use crate::oracle::compare::words::named;
+use crate::oracle::compare::words::{named, named_readable};
 use crate::oracle::pdfium;
 
 /// The committed calibration: the metric's numbers, the per-class thresholds, and the measurement
@@ -40,6 +40,64 @@ pub struct Calibration {
     pub classes: BTreeMap<String, ClassCalibration>,
     /// The controls' own numbers.
     pub controls: ControlNumbers,
+    /// How far the Office comparison lets a page, a line or a picture move and still be the same
+    /// one. It shares this file with the pixel metric because it is the same kind of number: a
+    /// committed tolerance a reviewer can argue with.
+    pub office: OfficeTolerances,
+}
+
+/// The Office comparison's tolerances, in points.
+#[derive(Clone, Debug, Deserialize)]
+pub struct OfficeTolerances {
+    /// How far a page's width or height may differ from the record's and still be the same page. It
+    /// is the comparison's own number, so it is not the record's `re_record_tolerance_pt`: that one
+    /// judges whether two surveys of the same document agree.
+    pub page_size_pt: f64,
+    /// How far a line's start may sit from where the record puts it and still be that line.
+    pub line_position_tolerance_pt: f64,
+    /// How far a line's size may differ and still be that line.
+    pub line_size_tolerance_pt: f64,
+    /// How far a picture's top-left corner may sit from the recorded one.
+    pub picture_position_tolerance_pt: f64,
+    /// How far a picture's width or height may differ from the recorded box.
+    pub picture_size_tolerance_pt: f64,
+    /// Faces that draw a symbol rather than a document's text — a bullet, a check box. They are
+    /// not counted when a page's faces are compared: the engine draws the symbol in the text face
+    /// it carries, and a substitution is not a difference.
+    #[serde(default)]
+    pub symbol_faces: Vec<String>,
+}
+
+impl OfficeTolerances {
+    /// Check that every tolerance is a usable distance.
+    ///
+    /// # Errors
+    ///
+    /// A tolerance is not finite, is negative, or is zero where a zero tolerance would make an
+    /// exact-equality comparison out of a floating-point one.
+    pub fn validate(&self) -> Result<(), String> {
+        let named = [
+            ("page_size_pt", self.page_size_pt),
+            (
+                "line_position_tolerance_pt",
+                self.line_position_tolerance_pt,
+            ),
+            ("line_size_tolerance_pt", self.line_size_tolerance_pt),
+            (
+                "picture_position_tolerance_pt",
+                self.picture_position_tolerance_pt,
+            ),
+            ("picture_size_tolerance_pt", self.picture_size_tolerance_pt),
+        ];
+        for (name, value) in named {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(format!(
+                    "the calibration's office tolerance {name} is {value}, not a usable distance"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// The metric's numbers.
@@ -115,8 +173,8 @@ impl Calibration {
     /// # Errors
     ///
     /// A shape this tool does not know, a non-positive size or scale, a class missing, a threshold
-    /// outside `(0, 1)`, a measurement with no blocks, an unusable ink cut or rounding boundary, or a
-    /// scale that would clamp the fixed set's largest page.
+    /// outside `(0, 1)`, a measurement with no blocks, an unusable ink cut or rounding boundary, a
+    /// scale that would clamp the fixed set's largest page, or no usable office tolerances.
     pub fn validate(&self) -> Result<(), String> {
         if self.schema != 1 {
             return Err(format!("the calibration's shape is {}, not 1", self.schema));
@@ -153,6 +211,7 @@ impl Calibration {
         if self.controls.element_moved_px == 0 {
             return Err("the calibration's moved control moves nothing".to_string());
         }
+        self.office.validate()?;
         for class in Class::ALL {
             let entry = self.classes.get(class.as_str()).ok_or_else(|| {
                 format!(
@@ -247,10 +306,16 @@ pub struct PageOutcome {
     /// The outside tool's pixel dimensions, when it drew.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outside: Option<Dimensions>,
-    /// The outside tool's visible-area size in points. The engine exposes no page box for a PDF, so
-    /// this is context, never a compared quantity.
+    /// The outside tool's visible-area size in points. `render_page` answers no page box for a PDF,
+    /// so for a PDF page this is context, never a compared quantity; for an Office page it is the
+    /// recorded size the engine's own page geometry is compared with.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outside_points: Option<(f64, f64)>,
+    /// The engine's own page size in points, when the half that compared the page states one:
+    /// `render::render` answers every family's page box, while `render_page` answers pixels, so a
+    /// PDF page compared by the pixel half carries `None` here.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub engine_points: Option<(f64, f64)>,
     /// The pixel signal, when it was computed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pixels: Option<PixelOutcome>,
@@ -271,6 +336,16 @@ pub struct PixelOutcome {
     pub threshold: String,
 }
 
+/// What one key's divergences were: how many, and what the comparison could show each of them to
+/// be. A decision states one cause and one count, and both must match.
+#[derive(Clone, Debug, Default)]
+pub struct Occurrences {
+    /// How many divergences the key had.
+    pub count: u32,
+    /// The distinct causes the comparison found among them.
+    pub causes: BTreeSet<&'static str>,
+}
+
 /// A divergence: a difference in a compared quantity, with the quantity named.
 #[derive(Clone, Debug, Serialize)]
 pub struct Divergence {
@@ -280,9 +355,15 @@ pub struct Divergence {
     pub page: Option<u32>,
     /// Which compared quantity caught it.
     pub kind: DivergenceKind,
+    /// What within that quantity: a line or a picture that is missing, moved or extra. Empty when
+    /// the quantity is the whole story. It is part of the key, so a decision that accepts a page's
+    /// text moving does not also accept a line going missing from it.
+    pub sub: String,
     /// Which side the mechanical evidence points at. A decision refines it; it never declares a
     /// category impossible.
     pub attribution: Attribution,
+    /// What the comparison itself can show this divergence to be, which a decision must accept.
+    pub cause: Cause,
     /// What the two sides showed.
     pub detail: String,
 }
@@ -290,7 +371,7 @@ pub struct Divergence {
 impl Divergence {
     /// A divergence, before [`compare_document`] states its key: a page comparison does not know the
     /// document's family or name.
-    fn new(
+    pub(crate) fn new(
         page: Option<u32>,
         kind: DivergenceKind,
         attribution: Attribution,
@@ -300,22 +381,60 @@ impl Divergence {
             key: String::new(),
             page,
             kind,
+            sub: String::new(),
             attribution,
+            cause: Cause::Unexplained,
             detail,
+        }
+    }
+
+    /// The same divergence, with the cause the comparison can show it to be.
+    pub(crate) fn because(mut self, cause: Cause) -> Self {
+        self.cause = cause;
+        self
+    }
+
+    /// A divergence of a named sub-quantity: a line missing from a page, a picture moved.
+    pub(crate) fn about(
+        page: Option<u32>,
+        kind: DivergenceKind,
+        sub: &str,
+        attribution: Attribution,
+        detail: String,
+    ) -> Self {
+        Self {
+            sub: sub.to_string(),
+            ..Self::new(page, kind, attribution, detail)
         }
     }
 }
 
-/// The stable key a decision attaches to: family, the document's own name, page, kind. The family is
-/// stated rather than inferred from the id; the name is the id with its `family/` prefix removed, so
-/// a document keeps its whole name and the family is not repeated.
-fn key(family: Family, document: &str, page: Option<u32>, kind: DivergenceKind) -> String {
+/// The stable key a decision attaches to: family, the document's own name, page, kind and, when
+/// there is one, the sub-quantity within the kind. The family is stated rather than inferred from
+/// the id; the name is the id with its `family/` prefix removed, so a document keeps its whole name
+/// and the family is not repeated.
+///
+/// The sub-quantity is what keeps a decision's teeth: a decision that accepts a page's text sitting
+/// where the outside reference put it says nothing about a line going missing from that page, which
+/// is a different key and so an undecided divergence.
+pub(crate) fn key(
+    family: Family,
+    document: &str,
+    page: Option<u32>,
+    kind: DivergenceKind,
+    sub: &str,
+) -> String {
     let name = document
         .strip_prefix(family.as_str())
         .and_then(|rest| rest.strip_prefix('/'))
         .unwrap_or(document);
     let page = page.map_or_else(|| "document".to_string(), |page| page.to_string());
-    format!("{}/{name}/{page}/{}", family.as_str(), kind.as_str())
+    let sub = if sub.is_empty() {
+        String::new()
+    } else {
+        format!("/{sub}")
+    };
+    format!("{}/{name}/{page}/{}{sub}", family.as_str(), kind.as_str())
 }
 
 named! {
@@ -329,6 +448,46 @@ named! {
         Pixels => "pixels",
         /// The engine could not draw a page the outside tool drew.
         EngineFailed => "engine-failed",
+        /// An Office page's size in points differs beyond the tolerance. Only a family whose
+        /// renderer states its page geometry can be compared this way.
+        PageSize => "page-size",
+        /// An Office page's text differs: a recorded line is missing from the engine's page, the
+        /// engine draws a line the record does not hold, or a line moved beyond the tolerance.
+        Text => "text",
+        /// An Office page's pictures differ: a recorded picture has no counterpart at the recorded
+        /// box, or the engine draws a picture the record does not hold.
+        Picture => "picture",
+        /// An Office page drew text on one side and none on the other. Whether a page drew text at
+        /// all is the only face question compared: the engine substitutes its own face, so identity
+        /// is not compared.
+        Faces => "faces",
+    }
+}
+
+named_readable! {
+    /// What the comparison itself can show a divergence to be.
+    ///
+    /// A recorded decision states the cause it accepts, and a run refuses it unless every
+    /// divergence at its key has that cause — so a page-level decision cannot absorb a change
+    /// nobody looked at. A cause the comparison cannot show is [`Cause::Unexplained`], which a
+    /// decision may state only by saying, in its reason, that a person reviewed it as such.
+    Cause {
+        /// The page holds the record's own words in the record's own order, so every text
+        /// divergence on it is a placement, a size or a line break.
+        WordsAgree => "words-agree",
+        /// The same, once a run of dots counts as one dot: a dot leader filled with a different
+        /// number of dots.
+        DotsDiffer => "dots-differ",
+        /// A recorded picture stands at the recorded box on another position of the page.
+        PictureMoved => "picture-moved",
+        /// The engine printed the page on the vocabulary's stated default paper, which a workbook
+        /// that states no page setup asks for.
+        DefaultPaper => "default-paper",
+        /// The page holds every word the record does in the record's order, and the word it does
+        /// not hold is one the engine names as a formula the workbook states no value for.
+        FormulaValue => "formula-value",
+        /// The comparison can show nothing about it, so a decision must say a person looked.
+        Unexplained => "unexplained",
     }
 }
 
@@ -391,6 +550,9 @@ named! {
     MechanismKind {
         /// The outside tool did not draw a page the engine drew, or drew it as pure background.
         OutsideFailed => "outside-failed",
+        /// The engine refused to render a document the record covers: the outside opinion exists
+        /// and the engine could not produce one of its own.
+        EngineRefused => "engine-refused",
     }
 }
 
@@ -423,13 +585,14 @@ pub struct DocumentOutcome {
 }
 
 impl DocumentOutcome {
-    /// Every divergence key this run produced, for the decisions check.
-    #[must_use]
-    pub fn keys(&self) -> BTreeSet<String> {
-        self.divergences
-            .iter()
-            .map(|divergence| divergence.key.clone())
-            .collect()
+    /// Add this document's divergence keys to `out`, each with how many divergences it has, for the
+    /// decisions check.
+    pub fn counts(&self, out: &mut BTreeMap<String, Occurrences>) {
+        for divergence in &self.divergences {
+            let entry = out.entry(divergence.key.clone()).or_default();
+            entry.count += 1;
+            entry.causes.insert(divergence.cause.as_str());
+        }
     }
 
     /// Replace the run's machine paths — its temporary root, the library and the helper — and the
@@ -495,7 +658,13 @@ pub fn compare_document(
         calibration,
     );
     for divergence in &mut outcome.divergences {
-        divergence.key = key(family, document, divergence.page, divergence.kind);
+        divergence.key = key(
+            family,
+            document,
+            divergence.page,
+            divergence.kind,
+            &divergence.sub,
+        );
     }
     outcome
 }
@@ -713,6 +882,7 @@ fn unanswered(
             engine: engine.and_then(|page| page.drawn.dimensions()),
             outside: outside.and_then(|page| page.drawn.dimensions()),
             outside_points: outside.and_then(|page| page.points),
+            engine_points: None,
             pixels: None,
             outcome: PageState::NotCompared,
         },
@@ -747,6 +917,7 @@ fn compare_page(
             engine: engine_page.drawn.dimensions(),
             outside: outside_page.drawn.dimensions(),
             outside_points: outside_page.points,
+            engine_points: None,
             pixels: None,
             outcome: PageState::Pass,
         },

@@ -3,31 +3,33 @@
 Two explicit, development-only views of what an outside source shows for the documents the engine's
 writer produces:
 
-- the **record**: what LibreOffice lays out for every Office document the engine writes, so the
-  shape exists before any page renderer does;
-- the **comparison**: the engine's own PDF pages against PDFium, an independent rasteriser, with
-  every other family reported as not compared.
+- the **record**: what LibreOffice lays out for every Office document the engine writes;
+- the **comparison**: the engine's own Office pages against that record, on content, and its PDF
+  pages against PDFium, an independent rasteriser, on pixels.
 
-The gate judges **files**. It cannot say what a page of a document this system produces
-looks like, and the engine has no page renderer for Word, PowerPoint or Excel. The record captures
-that shape first, from the **outside reference** — LibreOffice, driven headless — and the engine is
-brought into line with it afterwards. The comparison judges the one page the engine can draw today,
-a page of a PDF; the Office families become comparable when the engine can draw them.
-`compare/README.md` states the comparison's whole contract: what is compared, what is not, the
-rasteriser, the thresholds, the controls, the report and its decisions.
+The gate judges **files**. It cannot say what a page of a document this system produces looks like.
+The record captures that shape from the **outside reference** — LibreOffice, driven headless — and
+the comparison judges the engine's own renderer against it, family by family. All four families are
+compared: Word, PowerPoint and Excel pages page by page against the committed record, and a PDF
+against PDFium. Only the PDF half needs outside software at compare time; the Office half reads the
+record and the engine's renderer and runs on every machine. `compare/README.md` states the
+comparison's whole contract: what is compared, what is not, the rasteriser, the tolerances and
+thresholds, the controls, the report and its decisions.
 
 The JavaScript document kit has retired, so here the reference is the **outside programs**:
-LibreOffice for the record, PDFium for the comparison (`../../../INVENTORY.md` defines the word).
-They are a **second opinion, not the truth**. LibreOffice rounds line heights to whole twips, so its
-page boundaries can differ from what Word would show; PDFium and the engine round a page's edges
-differently. What is recorded and what is compared is what they show. Both are used for development
-only and never reach the product: the oracle is a test target, its dependencies are dev-dependencies,
-nothing here is part of what the crate ships, and no product file changes.
+LibreOffice for the record, PDFium for the PDF half of the comparison (`../../../INVENTORY.md`
+defines the word). They are a **second opinion, not the truth**. LibreOffice rounds line heights to
+whole twips, so its page boundaries can differ from what Word would show; PDFium and the engine round
+a page's edges differently; the faces differ, so the Office pages are compared on where their content
+sits rather than on how it looks. What is recorded and what is compared is what they show. Both are
+used for development only and never reach the product: the oracle is a test target, its dependencies
+are dev-dependencies, nothing here is part of what the crate ships, and no product file changes.
 
 This is a **report, not a gate**. It disagrees visibly, and a disagreement is reviewed by a person,
 not by an exit code. After the kit retired it is the only external opinion the tree has left: the
-comparison of the engine's own drawing of a PDF page against PDFium — plus a record of the Office
-pages, which nothing compares against yet, because the engine cannot draw them.
+record of what LibreOffice lays out for the Office documents the engine writes, and the comparison of
+the engine's own pages against it — plus, for a PDF, the engine's drawing against PDFium. The
+baseline is what "unchanged" means; the record is the outside opinion.
 
 The oracle is a development-only target of the crate: `dev/oracle_target.rs` is its test target, its
 committed data sits beside its sources, and the programs it once shipped as binaries and as an
@@ -46,7 +48,8 @@ DOCUMENT_ENGINE_RECORD=1 cargo test -p document-engine --test oracle -- --ignore
 cargo test -p document-engine --test oracle -- --ignored --exact verify -- --root <dir>
                                           # use <dir> instead of dev/oracle/record
 cargo test -p document-engine --test oracle -- --ignored --exact compare
-                                          # compare the engine's PDF pages against PDFium
+                                          # compare the engine's Office pages against the record and
+                                          # its PDF pages against PDFium
 cargo test -p document-engine --test oracle -- --ignored --exact measure
                                           # print the numbers a re-calibration is written from
 cargo test -p document-engine --test oracle -- --ignored --exact canonical_pdf -- \
@@ -55,9 +58,11 @@ cargo test -p document-engine --test oracle
                                           # the oracle's own tests: no LibreOffice, no PDFium
 ```
 
-`verify` and `compare` need their outside program; where a machine has none, they print one sentence
-naming what is missing and pass, so `cargo test -p document-engine` never requires LibreOffice or
-PDFium. `record` and `measure` are the two that must have it, and both are explicit. `record` also
+`verify` needs LibreOffice and `measure` needs PDFium; where a machine has none, they print one
+sentence naming what is missing and pass, so `cargo test -p document-engine` never requires either.
+`compare` needs only the committed record: its Office half compares every Office family on this
+machine, and its PDF half is reported as not compared, with the reason, when PDFium is absent.
+`record` and `measure` are the two that rewrite something, and both are explicit; `record` also
 refuses without `DOCUMENT_ENGINE_RECORD=1`: `--ignored` alone reaches every hidden mode, and a
 routine `cargo test -- --ignored` must not rewrite the committed record. `--exact` is required
 beside it: a bare `--ignored` runs every mode in turn, and each exits the process, which ends the
@@ -70,12 +75,13 @@ is a profile of `(deny file-read* (subpath …))` lines passed to `sandbox-exec`
 the sentence above and exits `0`. Denying only the bundle is not enough on a machine whose `PATH`
 launcher survives: a launcher that is found and cannot run is a refusal, not an absence.
 
-`compare` needs PDFium fetched once into `~/.cache/page-oracle/pdfium/`; `--library <file>` names a
-copy elsewhere. `compare/fetch-pdfium.sh` fetches and verifies the recorded archive and library
-digests. It never runs as part of a build or a test, and a machine without it reports the comparison
-as not run rather than passing it silently. The comparison is a report, not a gate: a divergence
-does not fail it, and only a failed mechanism does. `compare/README.md` states the exit contract,
-the fixed set, the thresholds and the evidence.
+`compare` needs PDFium fetched once into `~/.cache/page-oracle/pdfium/` for its PDF half; `--library
+<file>` names a copy elsewhere. `compare/fetch-pdfium.sh` fetches and verifies the recorded archive
+and library digests. It never runs as part of a build or a test, and a machine without it reports the
+PDF half as not run rather than passing it silently — the Office half still compares. The comparison
+is a report, not a gate: a divergence does not fail it, and only a failed mechanism does.
+`compare/README.md` states the exit contract, the fixed set, the tolerances, the coverage and the
+evidence.
 
 `--record` surveys the corpus **twice**, in one temporary area with a directory per survey and a
 profile of its own for each, and refuses to write anything unless the second run reproduces the
@@ -102,12 +108,13 @@ ceiling has passed — a run that reaches it fails rather than reporting a parti
 The oracle's own tests need no network, no LibreOffice and no PDFium: every test builds its subject in
 code, except the ones that read the committed record — to prove it is whole, to bind it to the
 engine's current output, and to state a font configuration that is a real one. The comparison's
-controls, calibration consistency, digest check, stale-decision check and determinism all run
-through the engine's own renderer. Four other tests read what this machine happens to have — one
-asks a LibreOffice installation for its version, two read a system face and one the reference's own
-bundled Carlito — and each passes whether or not it is there, because the installation test asserts
-the sentence a run without one gives. The reference is otherwise exercised only by the explicit
-modes above, which is why the verification cannot be bypassed by a build that does not see it.
+controls, calibration consistency, digest check, stale-decision check, Office comparison and
+determinism all run through the engine's own renderer. Four other tests read what this machine
+happens to have — one asks a LibreOffice installation for its version, two read a system face and one
+the reference's own bundled Carlito — and each passes whether or not it is there, because the
+installation test asserts the sentence a run without one gives. The reference is otherwise exercised
+only by the explicit modes above, which is why the verification cannot be bypassed by a build that
+does not see it.
 
 ## The corpus
 
@@ -127,15 +134,20 @@ sample document is committed anywhere, and the one picture they embed is a PNG t
 text box, comment or tracked change; a Word page with no ink except through two page breaks; a
 created Word document that names a font; an Excel date, time or currency *type*; an Excel page setup;
 a hidden PowerPoint slide or a slide transition). Those are gaps in what the record can say, not
-silent omissions.
+silent omissions. The comparison states them a second time, feature by feature, in its coverage table
+(`src/compare/office.rs`, printed in every report): each feature names the document that exercises it
+or the reason no recorded document can, and the legacy formats are a named exception — the engine
+reads `.doc`, `.xls` and `.ppt` with their structure lost, and rendering them is a separate body of
+work.
 
 ## The record
 
 ```
 record/
-  identity.json                  the tool that wrote it, the reference, the invocation, the pinned
-                                 locale and paper, the font set and the digest of every face a page
-                                 drew in
+  identity.json                  the tool that wrote it, the page reading's source digest (the walk
+                                 and the page it walks) and the line band it grouped by, the
+                                 reference, the invocation, the pinned locale and paper, the font
+                                 set and the digest of every face a page drew in
   fonts.conf                     the font configuration the reference was given, byte for byte
   README.md                      how to read an entry
   documents/<family>/<name>/
@@ -159,12 +171,14 @@ object graph with the reference's own stamps and its font encoding excluded. Wha
 why, is stated in `src/canonical.rs`; `produced.pdf` itself is kept because the pages must be
 rasterisable later, and rasters are not part of the record.
 
-Page sizes are compared to within the tolerance `identity.json` states — `0.5 pt` per side, an order
-of magnitude above the reference's own rounding unit (a twentieth of a point for Writer and Calc, a
-hundredth of a millimetre for Impress) and far below a line of text. A run whose tolerance differs
-from the recorded one refuses, and so does a run by another version of the tool: `recorded_by` states
-what wrote the record, and a version bump re-records deliberately rather than leaving that field
-describing a run that no longer exists.
+Two surveys of the same document agree when their page sizes are within the tolerance `identity.json`
+states as `re_record_tolerance_pt` — `0.5 pt` per side, an order of magnitude above the reference's
+own rounding unit (a twentieth of a point for Writer and Calc, a hundredth of a millimetre for
+Impress) and far below a line of text. A run whose tolerance differs from the recorded one refuses,
+and so does a run by another version of the tool: `recorded_by` states what wrote the record, and a
+version bump re-records deliberately rather than leaving that field describing a run that no longer
+exists. The comparison's own page-size tolerance is a different number with its own home:
+`office.page_size_pt` in `compare/calibration.json`.
 
 ### Blank pages
 

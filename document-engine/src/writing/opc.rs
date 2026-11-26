@@ -123,7 +123,7 @@ pub(super) fn without_relationship(rels: &str, id: &str) -> String {
 /// A relationship target resolved against the part that owns it, the way the reader's own resolver
 /// does: an absolute target drops its leading slash, a relative one appends to `base`, and `..`
 /// segments are folded away.
-pub(super) fn resolve_part(base: &str, target: &str) -> String {
+pub(crate) fn resolve_part(base: &str, target: &str) -> String {
     let path = target
         .strip_prefix('/')
         .map_or_else(|| format!("{base}{target}"), str::to_string);
@@ -141,7 +141,7 @@ pub(super) fn resolve_part(base: &str, target: &str) -> String {
 }
 
 /// The `.rels` part that belongs to `part`, by the OPC convention all three families follow.
-pub(super) fn rels_part_for(part: &str) -> String {
+pub(crate) fn rels_part_for(part: &str) -> String {
     part.rfind('/').map_or_else(
         || format!("_rels/{part}.rels"),
         |cut| {
@@ -155,7 +155,7 @@ pub(super) fn rels_part_for(part: &str) -> String {
 }
 
 /// The directory a part's own relationships resolve their targets against.
-pub(super) fn part_directory(part: &str) -> &str {
+pub(crate) fn part_directory(part: &str) -> &str {
     part.rfind('/')
         .map_or("", |cut| &part[..cut.saturating_add(1)])
 }

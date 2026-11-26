@@ -55,12 +55,26 @@
           "TimesNewRomanPSMT"
         ],
         "lines": [
-          "Quarterly report",
-          "",
-          "Page 1 of 3",
-          "",
-          "Before the page that carries only the header and the footer."
-        ]
+          {
+            "text": "Quarterly report",
+            "x_pt": 72.1,
+            "y_pt": 44.301,
+            "size_pt": 10.0
+          },
+          {
+            "text": "Before the page that carries only the header and the footer.",
+            "x_pt": 72.1,
+            "y_pt": 80.901,
+            "size_pt": 10.0
+          },
+          {
+            "text": "Page 1 of 3",
+            "x_pt": 72.1,
+            "y_pt": 803.851,
+            "size_pt": 10.0
+          }
+        ],
+        "pictures": []
       },
       {
         "page": 2,
@@ -70,10 +84,20 @@
           "TimesNewRomanPSMT"
         ],
         "lines": [
-          "Quarterly report",
-          "",
-          "Page 2 of 3"
-        ]
+          {
+            "text": "Quarterly report",
+            "x_pt": 72.1,
+            "y_pt": 44.301,
+            "size_pt": 10.0
+          },
+          {
+            "text": "Page 2 of 3",
+            "x_pt": 72.1,
+            "y_pt": 803.851,
+            "size_pt": 10.0
+          }
+        ],
+        "pictures": []
       },
       {
         "page": 3,
@@ -83,12 +107,26 @@
           "TimesNewRomanPSMT"
         ],
         "lines": [
-          "Quarterly report",
-          "",
-          "Page 3 of 3",
-          "",
-          "After it."
-        ]
+          {
+            "text": "Quarterly report",
+            "x_pt": 72.1,
+            "y_pt": 44.301,
+            "size_pt": 10.0
+          },
+          {
+            "text": "After it.",
+            "x_pt": 72.1,
+            "y_pt": 80.901,
+            "size_pt": 10.0
+          },
+          {
+            "text": "Page 3 of 3",
+            "x_pt": 72.1,
+            "y_pt": 803.851,
+            "size_pt": 10.0
+          }
+        ],
+        "pictures": []
       }
     ]
   },

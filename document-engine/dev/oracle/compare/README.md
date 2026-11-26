@@ -1,25 +1,106 @@
 # The page comparison
 
-The engine's own PDF pages against **PDFium**, an independent rasteriser. It is a report, not a
-gate: a divergence is printed and recorded with evidence, and it does not fail the run. The run
-fails only when the mechanism failed — nothing was compared, a control did not fire, a recorded
-decision no longer attaches, the outside tool produced nothing, the outside tool could not be
-driven, or it answered in a shape this comparison does not know. An invocation that cannot mean
-anything refuses before it judges a page.
+Two halves, because the two sides can be read two ways.
 
-The other three families are reported as **not compared**, with the reason: the engine has no page
-renderer for Word, PowerPoint or Excel. Those renderers are the work this comparison exists to guide.
+- **Office** (Word, PowerPoint, Excel): the engine's own pages against the **committed record** — the
+  pages the outside reference laid out for the same documents. Compared on content: page count, page
+  size, every line's text, position and size, every picture's box, and whether a page drew text.
+  Pixels are not compared. It reads the record and the engine's renderer, so it needs no
+  outside software at compare time and runs on every machine.
+- **PDF**: the engine's own pages against **PDFium**, an independent rasteriser. Compared on the
+  drawing: page count, pixel dimensions and the drawn page.
+
+It is a report, not a gate: a divergence is printed and recorded with evidence, and it does not fail
+the run. The run fails only when the mechanism failed — nothing was compared, a control did not fire,
+a recorded decision no longer attaches, the outside tool produced nothing, the outside tool could not
+be driven, it answered in a shape this comparison does not know, or a document the record covers
+could not be rendered. An invocation that cannot mean anything refuses before it judges a page.
+
+The Office half always runs. A machine without PDFium prints the PDF half as `pdf: not compared —
+<reason>` and still compares the Office pages.
 
 ## What it proves, and what it does not
 
-Both sides read the same file, so the text and the faces are the same input by construction. What
-this comparison proves is the **drawing**: that the engine renders the pages the file holds, at the
-right size, and puts the same marks on them as an independent implementation.
+The Office half compares two independent descriptions of the same document: the engine's renderer and
+the outside reference's layout. It proves that the engine places the same content, at the same size
+and in the same place, draws the same pictures and covers the same pages. It does not prove that the
+pages look alike — the faces differ, the pixels are not compared, and the reference is a second
+opinion rather than the truth.
 
-It proves nothing about the Office families, and it is not a check on arbitrary user PDFs. The PDFs
-judged are the engine's own output; a PDF the engine did not write is not its business here.
+The PDF half reads one file with two renderers, so the text and the faces are the same input by
+construction. What it proves is the **drawing**: that the engine renders the pages the file holds, at
+the right size, and puts the same marks on them as an independent implementation.
 
-## Compared, per page
+Neither half is a check on arbitrary user documents. The documents judged are the engine's own
+output; a file the engine did not write is not its business here.
+
+## Compared per Office page
+
+| Quantity | How |
+|---|---|
+| page count | the engine's pages against the record's, for the document |
+| page size | each page's width and height in points, within `office.page_size_pt` |
+| line text, position and size | each recorded line against an engine line whose words are the same words in the same order — a run of whitespace counts as one space, and a word glued to its neighbour is a different line — and whose start is within `office.line_position_tolerance_pt` and size within `office.line_size_tolerance_pt`. A line drawn at another size is a `resized` divergence, apart from one drawn at another place. Matching is one-to-one, greedy by nearest position, so two identical lines on a page are never counted twice. An empty line is not compared |
+| pictures drawn | every picture's box, matched one-to-one within `office.picture_position_tolerance_pt` and `office.picture_size_tolerance_pt` |
+| faces used | whether a page drew text at all, not counting the faces in `office.symbol_faces` (a bullet or a check box is a symbol, and the engine draws it in the text face it carries) |
+
+A recorded line the engine does not draw is a `text` divergence of the sub-quantity `missing`; a
+line the engine draws where the record does not hold one is `extra`; and a line drawn somewhere else
+is one `moved` divergence saying where each side put it. A picture with no counterpart is a
+`picture` divergence of the same sub-quantities, and a page whose size differs, or which drew text on
+one side and none on the other, is a `page-size` or `faces` divergence. A page whose compared
+quantities all agree is a pass. The sub-quantity is part of the divergence's key, so a decision that
+accepts lines moving on a page does not also accept a line going missing from it.
+
+The tolerances are in `calibration.json` under `office`, beside the pixel metric, and a calibration
+that states none is refused:
+
+```json
+"office": {
+  "page_size_pt": 1.0,
+  "line_position_tolerance_pt": 2.0,
+  "line_size_tolerance_pt": 0.5,
+  "picture_position_tolerance_pt": 2.0,
+  "picture_size_tolerance_pt": 2.0,
+  "symbol_faces": ["OpenSymbol", "Symbol", "Wingdings", "Wingdings 2", "Wingdings 3", "Webdings"]
+}
+```
+
+They are stated in points because the record states a page in points. Two points is above the
+reference's own line-placement noise on these documents and far below a line of text; the committed
+values were reviewed against the first run's divergences, not chosen to make them pass.
+
+## Not compared for Office, and stated in the report
+
+- **Face identity.** The engine draws with the one face the crate carries; the record states the face
+  the outside reference used. Only whether a page drew text is compared — symbol faces
+  excepted, because a bullet's own face is a substitution, not a difference — so a page drawn in one
+  text face on each side passes whatever the faces are called, and so does a page whose text is
+  bold on one side and drawn by stroking the one face on the other.
+- **Glyph shapes.** The faces differ, so the same characters have different outlines.
+- **Pixel appearance.** The Office pages are compared on content, not on pixels.
+- **The distance between two words.** A line's words are compared as words, so a glued or a dropped
+  word is a difference; how far apart the words stand inside the line is not compared.
+- **Hidden slides, notes pages, animations.** The export draws a slide's final state and no notes
+  page, and a created deck marks nothing hidden and animates nothing; there is nothing recorded to
+  compare against.
+
+## What the record exercises
+
+Every report carries a **coverage** section: one row per feature, naming the corpus document whose
+recorded pages exercise it, or the reason no recorded document can. `src/compare/office.rs` is that
+table's one home, and a row that names no document and states no reason — or names a document the
+corpus does not declare — is refused before a page is judged.
+
+The features with no recorded document are the gaps in what the writer can produce, not silent
+omissions: a workbook's stated column widths, row heights and page setup (a created workbook states
+none), a slide master placeholder (a created deck places its text in frames of its own), charts,
+diagrams and OLE objects (the writer emits none), equations (the writer emits none), and floating or
+rotated pictures (the writer places a picture inline and never rotates one). **Legacy `.doc`, `.xls`
+and `.ppt` are a named exception**: the engine reads them only, with their structure lost, and
+rendering them is a separate body of work.
+
+## Compared per PDF page
 
 | Quantity | How |
 |---|---|
@@ -31,20 +112,25 @@ judged are the engine's own output; a PDF the engine did not write is not its bu
 
 - **Text.** One extractor on one file gives the same answer on both sides by construction; a
   difference would be an extractor difference, not a drawing defect.
-- **Faces.** The engine reports no faces for a PDF page, so there is nothing to compare against. It
-  does draw the embedded faces; it does not name them.
-- **The page's size in points.** The engine exposes no page box for a PDF. A size in points would
-  have to be re-derived by the comparison itself, which would make the comparison agree with its own
-  assumption. A family that can report its page geometry compares it; this one cannot, and says so.
+- **Faces.** `render_page` answers pixels, not the faces that drew them, so the PDF half has
+  nothing to compare a face against. The engine does draw the embedded faces; it does not name them
+  for this half.
+- **The page's size in points.** `render_page` answers pixels, not a page box, so the PDF half has
+  no size to compare: re-deriving one here would make the comparison agree with its own assumption.
+  The render half does answer each PDF page's size in points (`render::render`), and the Office half
+  compares the sizes it reports; this half judges the drawing, and says what it leaves out.
 
-Each becomes a compared quantity the day a family can observe it. The report's shape is built to
-take them.
+The Office half compares what the PDF half cannot: it reads a page's size in points from both
+sides, and it compares the lines' text, position and size, the pictures' boxes and whether a page
+drew text at all. Text is compared there because the two sides are two independent descriptions of
+the same document rather than one file read twice.
 
 ## The fixed set
 
-Five documents, declared in `../src/compare/cases.rs` and generated in code — no sample PDF is
+Five PDFs, declared in `../src/compare/cases.rs` and generated in code — no sample PDF is
 committed. The set is named, not "every PDF a gate case produces": the comparison's runtime must
-not move with a corpus it does not own.
+not move with a corpus it does not own. The Office half needs no fixed set of its own: it compares
+the oracle's corpus (`../src/corpus.rs`), the same six documents the record covers.
 
 | Document | What it covers |
 |---|---|
@@ -163,9 +249,10 @@ the report is assembled, so a failed run reports the same bytes from any tempora
 replaced on the next one rather than accumulating, is ignored by version control and never
 committed. It is bounded: each side is scaled to a 480-pixel long side and the total is checked
 against a 32 MiB ceiling. A failed write removes the directory it created, so a half-written run does
-not wedge the next one. A page divergence gets both page images side by side — the engine's page on
-the left, the outside tool's on the right; a document-level divergence gets a text file naming what
-differed.
+not wedge the next one. A PDF page divergence gets both page images side by side — the engine's page
+on the left, the outside tool's on the right; a document-level divergence, and an Office page
+divergence, get a text file naming what differed, because an Office page has no pixels on either
+side to show.
 
 The comparison has its own identity, in the report: the engine build under the harness's own rule
 (the same computation the crate's `crate_identity` uses, whose component digests include hayro's resolved
@@ -175,17 +262,66 @@ neither that record nor the gate's baseline.
 
 ## Decisions
 
-A divergence states a stable key — family, document, page, kind, with `document` where a whole
-document differs — in the report and in the printed line, so a recorded decision attaches to the
-same divergence across runs without anyone reconstructing it. A decision says `engine-defect`,
-`writer-defect`, `outside-quirk` or `out-of-scope` with a reason. The `writer-defect` category is
+A divergence states a stable key — family, document, page, kind and, for a text or picture
+divergence, what within it: `missing`, `moved` or `extra` — in the report and in the printed line, so
+a recorded decision attaches to the same divergence across runs without anyone reconstructing it. A
+decision says `engine-defect`, `writer-defect`, `outside-quirk` or `out-of-scope` with a reason, and
+states **how many** divergences its key had when it was reviewed. The `writer-defect` category is
 reachable here: a construct the writer emits can be tolerated by the engine and rejected by the
 outside tool.
 
-A decision whose key no longer occurs is **stale and fails the run**. A divergence with no decision
-is still reported. A decision never turns a mechanism failure into a pass. A changed decisions file
-is not a refusal: its digest changes the report's identity, and every decision is then checked
-against the keys this run produced.
+A decision also states the **cause** the comparison showed the divergence to be, and the run must
+show the same cause. The causes are the comparison's own, not the reviewer's: `words-agree` (the page
+holds the record's own words in the record's own order, so every text divergence on it is a
+placement, a size or a break), `dots-differ` (the same, once a run of dots and the space around it is
+set aside), `picture-moved` (a recorded picture stands at the recorded box elsewhere on the page),
+`default-paper` (the engine printed the page on the vocabulary's stated default paper),
+`formula-value` (the page holds every word the record does, and the one it lacks is a formula value
+the workbook does not state), and `unexplained`.
+
+A decision whose key no longer occurs, whose key now occurs a different number of times, or whose
+key now shows another cause, is **stale and fails the run**: the page it was reviewed on is not the
+page this run holds, so one more missing line, a line that changed its words, a line that changed its
+size, or a page that moved to another paper has to be reviewed rather than absorbed. A decision
+stating `unexplained` says, in its reason, that a person reviewed a divergence the comparison could
+not attribute. A divergence with no decision is still reported. A decision never turns a mechanism
+failure into a pass. A changed decisions file is not a refusal: its digest changes the report's
+identity, and every decision is then checked against what this run produced.
+
+The committed decisions are the ones the Office run needs, each reviewed against the divergences it
+attaches to:
+
+- **`xlsx/workbook/<page>/page-size`** — `out-of-scope`, cause `default-paper`, one per page. A
+  created workbook states no page setup, so each side prints it on its own default paper: the record
+  is Letter, the paper the outside suite's pinned `en-US` locale gives a document that states none,
+  and the engine draws A4, the vocabulary's stated default.
+- **`xlsx/workbook/<page>/text/moved`** — `out-of-scope`, cause `words-agree`. The workbook states
+  no column widths, row heights or margins, so each side lays its cells out on its own defaults; the
+  words and their order agree, and only where they sit differs.
+- **`xlsx/workbook/2/text/missing`** and **`/moved`** — `out-of-scope`, cause `formula-value`. A
+  formula without a cached value, which the engine does not evaluate and names as a formula gap, so
+  the suite's `3,720.00` is missing by design and every other word on the page agrees.
+- **`docx/<document>/<page>/text/moved`** and **`pptx/deck/<page>/text/moved`** — `out-of-scope`,
+  cause `words-agree`. The document names a face the engine does not carry, so its pages are drawn
+  in the engine's own face: that face is wider and its line height is taller, so a line sits lower
+  than the suite's. The words, their order and their sizes agree. This is the substitution the
+  renderer states and this comparison accepts, not a metric borrowed from another face.
+- **`docx/report/1/text/missing`** and **`/extra`** — `out-of-scope`, cause `words-agree`. The same
+  substitution's other effect: the wider face breaks one recorded line into two engine lines, so a
+  recorded line is the engine's two and an engine line is the record's one.
+- **`docx/report/2/text/missing`**, **`/extra`** and **`/moved`** — `out-of-scope`, cause
+  `dots-differ`. A contents entry's dot leader is filled with as many dots as the face allows: the
+  engine's wider face fits fewer, and the two extractors space the page number differently, so the
+  entry's characters differ and it sits at a different x. The words themselves agree.
+- **`docx/<document>/<page>/picture/missing`** and **`/extra`** — `out-of-scope`, cause
+  `picture-moved`. A picture stands on a line whose baseline moves with the substituted face's line
+  height, so its box sits a few points lower than the record's; its size agrees. A moved picture is
+  reported as one missing and one extra.
+
+Every divergence the run reports today attaches to one of those twenty decisions. A divergence a
+later run reports without one — or one more of a kind than a decision states, or one the comparison
+now shows to be another cause — stays reported rather than passing: a decision attaches to a
+divergence a reviewer has judged, and a divergence without one is what the next review reads.
 
 ## Running it
 
@@ -203,14 +339,16 @@ binary, which the comparison spawns once per document. `--helper <file>` names a
 caller's own instead, run as it is.
 
 The oracle's own tests need neither PDFium nor LibreOffice: the controls, the calibration's
-consistency, the digest check and the stale-decision check all run without either. The comparison
-itself is invoked deliberately, and where a machine has no rasteriser it prints one sentence naming
-what is missing and passes — the comparison is a report, and an ordinary `cargo test` run must not
-require PDFium.
+consistency, the digest check, the stale-decision check and the whole Office half run without
+either. The comparison itself is invoked deliberately; the Office half runs on any machine, and a
+machine with no rasteriser prints the PDF half as `pdf: not compared — <reason>` and still passes
+when the Office pages were compared — the comparison is a report, and an ordinary `cargo test` run
+must not require PDFium.
 
-The exit code is the verdict: `0` when something was compared and the mechanism held, and when the
-rasteriser is simply absent from the machine; `1` when the
-mechanism failed — nothing compared, a control that did not fire, a stale decision, the outside tool
+The exit code is the verdict: `0` when something was compared and the mechanism held, including a
+run whose PDF half was skipped because the rasteriser is absent; `1` when the
+mechanism failed — nothing compared, a control that did not fire, a stale decision, a document the
+record covers that the engine refused to render, the outside tool
 produced nothing, the outside tool drew pure background where the engine drew ink, the outside tool
 could not be driven at all (a library the caller named, or a helper it named, that is not there), or
 it answered in a shape this comparison does not know; `2` when the invocation cannot mean anything —

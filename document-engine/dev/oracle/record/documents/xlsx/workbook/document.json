@@ -149,14 +149,50 @@
           "Carlito"
         ],
         "lines": [
-          "Kind",
-          "text hello an inline string",
-          "number 42 a whole number",
-          "boolean TRUE a boolean",
-          "amount 1,234.50 the edit step gives it a money format",
-          "share 18.5% the edit step gives it a percentage format",
-          "date 02/01/26 the edit step gives it a date format"
-        ]
+          {
+            "text": "Kind",
+            "x_pt": 54.822,
+            "y_pt": 80.816,
+            "size_pt": 10.998
+          },
+          {
+            "text": "text hello an inline string",
+            "x_pt": 54.822,
+            "y_pt": 94.592,
+            "size_pt": 10.998
+          },
+          {
+            "text": "number 42 a whole number",
+            "x_pt": 54.822,
+            "y_pt": 108.369,
+            "size_pt": 10.998
+          },
+          {
+            "text": "boolean TRUE a boolean",
+            "x_pt": 54.822,
+            "y_pt": 122.145,
+            "size_pt": 10.998
+          },
+          {
+            "text": "amount 1,234.50 the edit step gives it a money format",
+            "x_pt": 54.822,
+            "y_pt": 135.921,
+            "size_pt": 10.998
+          },
+          {
+            "text": "share 18.5% the edit step gives it a percentage format",
+            "x_pt": 54.822,
+            "y_pt": 149.698,
+            "size_pt": 10.998
+          },
+          {
+            "text": "date 02/01/26 the edit step gives it a date format",
+            "x_pt": 54.822,
+            "y_pt": 163.474,
+            "size_pt": 10.998
+          }
+        ],
+        "pictures": []
       },
       {
         "page": 2,
@@ -166,12 +202,38 @@
           "Carlito"
         ],
         "lines": [
-          "Region Revenue",
-          "North 1200",
-          "South 980",
-          "East 1540",
-          "3,720.00"
-        ]
+          {
+            "text": "Region Revenue",
+            "x_pt": 54.822,
+            "y_pt": 80.816,
+            "size_pt": 10.998
+          },
+          {
+            "text": "North 1200",
+            "x_pt": 54.822,
+            "y_pt": 94.592,
+            "size_pt": 10.998
+          },
+          {
+            "text": "South 980",
+            "x_pt": 54.822,
+            "y_pt": 108.369,
+            "size_pt": 10.998
+          },
+          {
+            "text": "East 1540",
+            "x_pt": 54.822,
+            "y_pt": 122.145,
+            "size_pt": 10.998
+          },
+          {
+            "text": "3,720.00",
+            "x_pt": 108.227,
+            "y_pt": 135.921,
+            "size_pt": 10.998
+          }
+        ],
+        "pictures": []
       },
       {
         "page": 3,
@@ -181,8 +243,14 @@
           "Carlito"
         ],
         "lines": [
-          "A third sheet, so the workbook's pages are decided by more than one sheet's content."
-        ]
+          {
+            "text": "A third sheet, so the workbook's pages are decided by more than one sheet's content.",
+            "x_pt": 54.822,
+            "y_pt": 80.816,
+            "size_pt": 10.998
+          }
+        ],
+        "pictures": []
       }
     ]
   },

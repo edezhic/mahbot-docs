@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 use super::draw;
-use super::font::Face;
+use super::font::{self, Face};
 use super::page;
 use super::{Produced, editable, page_indices};
 use crate::operation::{Failure, Request};
@@ -140,7 +140,7 @@ pub(super) fn run(request: &Request, produced: &mut Produced) -> Result<(), Fail
             past.insert(index + 1);
         }
 
-        let key = draw::add_resource(&mut document, id, "Font", font, draw::FONT_BASE)?;
+        let key = draw::add_resource(&mut document, id, "Font", font, font::NAME)?;
         let text_state = text_alpha
             .map(|state| draw::add_resource(&mut document, id, "ExtGState", state, "GS"))
             .transpose()?;

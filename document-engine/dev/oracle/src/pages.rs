@@ -1,13 +1,15 @@
 //! The canonical description of one produced PDF's pages: how many there are, how big each is, what
-//! text each shows, which faces each drew a glyph in, and whether each carries any ink.
+//! text each shows and where, which pictures each draws and where, which faces each drew a glyph in,
+//! and whether each carries any ink.
 //!
 //! This is what equality of a record is judged on and what a reviewer reads without running
 //! anything. It is derived from the produced PDF alone, so a record made on a machine that no
 //! longer has the reference stays readable.
 //!
-//! The whole document's text is read once, and a document whose text cannot be aligned with its
-//! pages is refused rather than recorded: a page whose lines came from another page's text would
-//! read as a document that reflowed when only the reading was wrong.
+//! A page's lines and pictures come from [`crate::oracle::positions`], one walk of that page's own
+//! content streams: a page whose text cannot be read is refused rather than recorded, but a page is
+//! never refused for disagreeing with an outside extractor, because there is none — the walk is the
+//! record's only reading of a page.
 //!
 //! A page inherits the attributes it does not state: the paper and the resources are taken from the
 //! nearest ancestor `/Pages` node that states them, which is how a producer that states the paper
@@ -38,10 +40,10 @@ pub struct Described {
 ///
 /// # Errors
 ///
-/// The bytes are not a PDF, a page cannot be read, the PDF holds no page at all — a document the
-/// reference laid out into nothing is a failure of the run, never a document quietly left out — or
-/// the reader panicked on the file. The text is read for the whole document in one pass and must
-/// have one string per page, so a page's lines can never be another page's.
+/// The bytes are not a PDF, a page cannot be read, its content streams cannot be decoded, or the PDF
+/// holds no page at all — a document the reference laid out into nothing is a failure of the run,
+/// never a document quietly left out. Each page's lines and pictures are read from that page alone,
+/// so a page's text can never be another page's.
 pub fn describe(bytes: &[u8]) -> Result<Described, String> {
     crate::oracle::contained(|| described(bytes))
 }
@@ -57,22 +59,12 @@ fn described(bytes: &[u8]) -> Result<Described, String> {
                                 quietly left out";
         return Err(nothing_laid_out.to_string());
     }
-    let text = pdf_extract::extract_text_from_mem_by_pages(bytes)
-        .map_err(|error| format!("the produced PDF's text cannot be read: {error}"))?;
-    if text.len() != pages.len() {
-        return Err(format!(
-            "the produced PDF holds {} pages and its text was extracted for {}: the record must \
-             not mis-align page text",
-            pages.len(),
-            text.len()
-        ));
-    }
     let mut described = Described {
         pages: Vec::with_capacity(pages.len()),
         blank: Vec::new(),
     };
-    for ((number, id), text) in pages.iter().zip(text) {
-        let (record, ink) = page(&document, *number, *id, &text)?;
+    for (number, id) in &pages {
+        let (record, ink) = page(&document, *number, *id)?;
         if !ink {
             described.blank.push(*number);
         }
@@ -82,15 +74,12 @@ fn described(bytes: &[u8]) -> Result<Described, String> {
 }
 
 /// One page's record, and whether it carries any ink.
-fn page(
-    document: &Document,
-    number: u32,
-    id: ObjectId,
-    text: &str,
-) -> Result<(PageRecord, bool), String> {
+fn page(document: &Document, number: u32, id: ObjectId) -> Result<(PageRecord, bool), String> {
     let (width_pt, height_pt) =
         size(document, id).map_err(|error| format!("page {number}: {error}"))?;
     let drawn = crate::oracle::ink::drawn(document, id)
+        .map_err(|error| format!("page {number}: {error}"))?;
+    let positions = crate::oracle::positions::positions(document, id)
         .map_err(|error| format!("page {number}: {error}"))?;
     Ok((
         PageRecord {
@@ -98,7 +87,8 @@ fn page(
             width_pt,
             height_pt,
             faces: drawn.faces,
-            lines: lines(text),
+            lines: positions.lines,
+            pictures: positions.pictures,
         },
         drawn.ink,
     ))
@@ -171,27 +161,8 @@ fn inherited<'a>(
     ))
 }
 
-/// A page's text, line by line, as the record keeps it.
-///
-/// A line's trailing whitespace is removed, and so are the empty lines at either end: the
-/// extractor separates a page's text from the next with them. An empty line between two lines is
-/// kept, because it is the paragraph gap the page shows.
-fn lines(text: &str) -> Vec<String> {
-    let mut lines: Vec<String> = text
-        .split('\n')
-        .map(|line| line.trim_end().to_string())
-        .collect();
-    while lines.first().is_some_and(String::is_empty) {
-        lines.remove(0);
-    }
-    while lines.last().is_some_and(String::is_empty) {
-        lines.pop();
-    }
-    lines
-}
-
 /// A page measurement as the record states it: three decimals of a point.
-fn round_pt(value: f64) -> f64 {
+pub(crate) fn round_pt(value: f64) -> f64 {
     (value * 1000.0).round() / 1000.0
 }
 
@@ -404,10 +375,20 @@ mod tests {
         assert_pt(pages[0].width_pt, 595.304);
         assert_pt(pages[0].height_pt, 841.89);
         assert_eq!(pages[0].faces, vec!["LiberationSerif".to_string()]);
-        assert_eq!(pages[0].lines, vec!["Hi".to_string()]);
+        assert_eq!(
+            pages[0].lines,
+            vec![crate::oracle::record::LineRecord {
+                text: "Hi".to_string(),
+                x_pt: 10.0,
+                y_pt: 831.89,
+                size_pt: 12.0,
+            }]
+        );
+        assert!(pages[0].pictures.is_empty());
         assert_eq!(pages[1].page, 2);
         assert!(pages[1].faces.is_empty());
         assert!(pages[1].lines.is_empty());
+        assert!(pages[1].pictures.is_empty());
     }
 
     #[test]
@@ -453,26 +434,5 @@ mod tests {
     #[test]
     fn bytes_that_are_not_a_pdf_are_an_error() {
         assert!(describe(b"not a PDF at all").is_err());
-    }
-
-    #[test]
-    fn the_extractors_own_separators_are_dropped() {
-        assert_eq!(lines("\n\nfirst page\n\n"), vec!["first page".to_string()]);
-    }
-
-    #[test]
-    fn an_interior_empty_line_is_kept() {
-        assert_eq!(
-            lines("a\n\nb"),
-            vec!["a".to_string(), String::new(), "b".to_string()]
-        );
-    }
-
-    #[test]
-    fn trailing_whitespace_is_removed() {
-        assert_eq!(
-            lines("a  \r\nb\t\n"),
-            vec!["a".to_string(), "b".to_string()]
-        );
     }
 }

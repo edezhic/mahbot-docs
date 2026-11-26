@@ -19,12 +19,14 @@ use crate::oracle::compare::decisions::Decision;
 use crate::oracle::compare::metric::{
     Calibration, Control, DivergenceKind, DocumentOutcome, PageState,
 };
+use crate::oracle::compare::office::Feature;
 use crate::oracle::compare::render::{Drawn, SideDocument};
 use crate::oracle::compare::{Error, Rendered, metric};
 use crate::oracle::pdfium::{Rasteriser, bare};
 
-/// The report's shape version.
-pub const SCHEMA: u32 = 1;
+/// The report's shape version. Three states, for every divergence, the cause the comparison showed
+/// it to be — the quantity a recorded decision now has to accept.
+pub const SCHEMA: u32 = 3;
 
 /// The longest side an evidence image keeps. The comparison itself is at 1000 pixels; evidence is
 /// for a human to see what diverged, not to re-measure it.
@@ -103,12 +105,18 @@ pub struct Quantity {
 /// What the comparison covers.
 #[derive(Clone, Debug, Serialize)]
 pub struct Scope {
-    /// The compared quantities.
+    /// The PDF quantities compared.
     pub compared: Vec<Quantity>,
-    /// The quantities deliberately not compared, with the reason.
+    /// The PDF quantities deliberately not compared, with the reason.
     pub not_compared: Vec<Quantity>,
-    /// What the comparison does not prove.
+    /// The Office quantities compared.
+    pub office_compared: Vec<Quantity>,
+    /// The Office quantities deliberately not compared, with the reason.
+    pub office_not_compared: Vec<Quantity>,
+    /// What the PDF comparison does not prove.
     pub does_not_prove: String,
+    /// What the Office comparison does not prove.
+    pub office_does_not_prove: String,
 }
 
 impl Scope {
@@ -119,21 +127,40 @@ impl Scope {
         not_compared: &[(&str, &str)],
         does_not_prove: &str,
     ) -> Self {
-        let quantities = |statements: &[(&str, &str)]| {
-            statements
-                .iter()
-                .map(|(quantity, detail)| Quantity {
-                    quantity: (*quantity).to_string(),
-                    detail: (*detail).to_string(),
-                })
-                .collect()
-        };
         Self {
             compared: quantities(compared),
             not_compared: quantities(not_compared),
+            office_compared: Vec::new(),
+            office_not_compared: Vec::new(),
             does_not_prove: does_not_prove.to_string(),
+            office_does_not_prove: String::new(),
         }
     }
+
+    /// Add the Office half's statements.
+    #[must_use]
+    pub fn with_office(
+        mut self,
+        compared: &[(&str, &str)],
+        not_compared: &[(&str, &str)],
+        does_not_prove: &str,
+    ) -> Self {
+        self.office_compared = quantities(compared);
+        self.office_not_compared = quantities(not_compared);
+        self.office_does_not_prove = does_not_prove.to_string();
+        self
+    }
+}
+
+/// One list of statements as the report's quantities.
+fn quantities(statements: &[(&str, &str)]) -> Vec<Quantity> {
+    statements
+        .iter()
+        .map(|(quantity, detail)| Quantity {
+            quantity: (*quantity).to_string(),
+            detail: (*detail).to_string(),
+        })
+        .collect()
 }
 
 /// One family's part of the report.
@@ -175,11 +202,12 @@ pub struct Summary {
     pub documents: usize,
     /// How many pages the report holds.
     pub pages: usize,
-    /// How many pages both sides drew.
+    /// How many pages both sides answered for.
     pub compared: usize,
-    /// How many pages had their pixels compared.
+    /// How many pages had their pixels compared. Only the PDF half compares pixels.
     pub pixel_pages: usize,
-    /// How many pages the outside tool holds.
+    /// How many pages the outside side holds: the rasteriser's for a PDF, the record's for an
+    /// Office document.
     pub outside_pages: usize,
     /// How many divergences.
     pub divergences: usize,
@@ -206,9 +234,11 @@ pub struct Report {
     pub identity: Identity,
     /// What is compared and what is not.
     pub scope: Scope,
+    /// What the record exercises, feature by feature: the corpus document, or why none can.
+    pub coverage: Vec<Feature>,
     /// Every family, in the engine's fixed order.
     pub families: Vec<FamilyReport>,
-    /// The controls, which ran on every invocation.
+    /// The controls, which ran on every invocation that had a rasteriser.
     pub controls: Vec<Control>,
     /// The decisions this run used and the ones that went stale.
     pub decisions: DecisionsReport,
@@ -236,17 +266,31 @@ impl Report {
                 .filter(|outcome| outcome.family == family)
                 .cloned()
                 .collect();
-            // PDF is the family this comparison draws today. A future family is compared the moment
-            // it has an outcome, so a document cannot vanish because its family is not PDF.
-            let compared = family == Family::Pdf || !documents.is_empty();
+            // A family is compared the moment it has an outcome, so a document cannot vanish
+            // because its family is not PDF. One without an outcome is not compared because the
+            // record covers none of its documents, or because this run did not reach it — never
+            // because the engine cannot draw it.
+            let compared = !documents.is_empty();
             let reason = if compared {
                 String::new()
             } else {
                 match family {
-                    Family::Docx => "the engine has no page renderer for Word documents",
-                    Family::Xlsx => "the engine has no page renderer for Excel workbooks",
-                    Family::Pptx => "the engine has no page renderer for PowerPoint presentations",
-                    Family::Pdf => unreachable!(),
+                    Family::Docx => {
+                        "the record covers no Word document, so there is no outside opinion to \
+                         compare the engine's pages against"
+                    }
+                    Family::Xlsx => {
+                        "the record covers no Excel workbook, so there is no outside opinion to \
+                         compare the engine's pages against"
+                    }
+                    Family::Pptx => {
+                        "the record covers no PowerPoint presentation, so there is no outside \
+                         opinion to compare the engine's pages against"
+                    }
+                    Family::Pdf => {
+                        "the PDF comparison did not run: its outside rasteriser is absent on this \
+                         machine"
+                    }
                 }
                 .to_string()
             };
@@ -261,6 +305,8 @@ impl Report {
             schema: SCHEMA,
             identity,
             scope,
+            coverage: crate::oracle::compare::office::coverage()
+                .expect("the coverage table names only documents the corpus declares"),
             families,
             controls,
             decisions: DecisionsReport { used, stale },
@@ -269,6 +315,22 @@ impl Report {
         };
         report.summary = report.count();
         report
+    }
+
+    /// State that a family was not compared, with the reason this run has for it.
+    ///
+    /// It is what a run without the outside rasteriser says about the PDF half: the reason is the
+    /// absence's own sentence, not a fixed one.
+    pub fn not_compared(&mut self, family: Family, reason: &str) {
+        if let Some(report) = self
+            .families
+            .iter_mut()
+            .find(|report| report.family == family)
+        {
+            report.compared = false;
+            report.reason = reason.to_string();
+        }
+        self.summary = self.count();
     }
 
     /// The run's counts.
@@ -329,7 +391,7 @@ fn pages(count: Option<u32>) -> String {
     count.map_or_else(|| "-".to_string(), metric::pages)
 }
 
-/// Whether any PDF page was compared. The scope lines describe the PDF comparison, so another
+/// Whether any PDF page was compared. The PDF scope lines describe the PDF comparison, so another
 /// family's outcome must not make them appear.
 fn pdf_compared(report: &Report) -> bool {
     report
@@ -341,23 +403,38 @@ fn pdf_compared(report: &Report) -> bool {
         .any(|page| page.outcome.is_compared())
 }
 
+/// Whether any Office page was compared. The Office scope lines are printed only when one was.
+fn office_compared(report: &Report) -> bool {
+    report
+        .families
+        .iter()
+        .filter(|family| family.family != Family::Pdf)
+        .flat_map(|family| &family.documents)
+        .flat_map(|document| &document.pages)
+        .any(|page| page.outcome.is_compared())
+}
+
 /// Print the report, deterministically.
 pub fn print(report: &Report, out: &mut dyn Write) {
-    let _ = writeln!(
-        out,
-        "controls: {}",
-        report
-            .controls
-            .iter()
-            .map(|control| format!(
-                "{} {} ({})",
-                control.name,
-                if control.fired { "PASS" } else { "FAIL" },
-                control.quantity.map_or("all", DivergenceKind::as_str)
-            ))
-            .collect::<Vec<_>>()
-            .join("; ")
-    );
+    if report.controls.is_empty() {
+        let _ = writeln!(out, "controls: none ran — the PDF half did not run");
+    } else {
+        let _ = writeln!(
+            out,
+            "controls: {}",
+            report
+                .controls
+                .iter()
+                .map(|control| format!(
+                    "{} {} ({})",
+                    control.name,
+                    if control.fired { "PASS" } else { "FAIL" },
+                    control.quantity.map_or("all", DivergenceKind::as_str)
+                ))
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+    }
     for control in report.controls.iter().filter(|control| !control.fired) {
         let _ = writeln!(out, "  control {} FAILED: {}", control.name, control.detail);
     }
@@ -463,12 +540,56 @@ pub fn print(report: &Report, out: &mut dyn Write) {
                 .collect::<Vec<_>>()
                 .join(", ")
         );
+        let _ = writeln!(
+            out,
+            "what the PDF comparison does not prove: {}",
+            report.scope.does_not_prove
+        );
     }
-    let _ = writeln!(
-        out,
-        "what this does not prove: {}",
-        report.scope.does_not_prove
-    );
+    if office_compared(report) {
+        let _ = writeln!(
+            out,
+            "office compared: {}",
+            report
+                .scope
+                .office_compared
+                .iter()
+                .map(|quantity| quantity.quantity.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let _ = writeln!(
+            out,
+            "office not compared: {}",
+            report
+                .scope
+                .office_not_compared
+                .iter()
+                .map(|quantity| quantity.quantity.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let _ = writeln!(
+            out,
+            "what the office comparison does not prove: {}",
+            report.scope.office_does_not_prove
+        );
+    }
+    if !report.coverage.is_empty() {
+        let _ = writeln!(out, "coverage:");
+        for row in &report.coverage {
+            let _ = match (&row.document, &row.reason) {
+                (Some(document), Some(reason)) => {
+                    writeln!(out, "  {}: {document} — {reason}", row.feature)
+                }
+                (Some(document), None) => writeln!(out, "  {}: {document}", row.feature),
+                (None, Some(reason)) => {
+                    writeln!(out, "  {}: not exercised — {reason}", row.feature)
+                }
+                (None, None) => writeln!(out, "  {}: not exercised", row.feature),
+            };
+        }
+    }
     let _ = writeln!(
         out,
         "decisions: {} used, {} stale",
@@ -628,9 +749,21 @@ fn write_evidence(
         for document in &family.documents {
             for divergence in &document.divergences {
                 let key = &divergence.key;
-                let name = match divergence.page {
-                    Some(page) => format!("page-{page}-{}.png", divergence.kind.as_str()),
-                    None => format!("document-{}.txt", divergence.kind.as_str()),
+                // A page divergence whose page neither side drew a picture of is an Office page:
+                // there are no pixels to show, so the finding is written out as text.
+                let engine_page = engine
+                    .get(document.document.as_str())
+                    .copied()
+                    .and_then(|side| divergence.page.and_then(|page| page_picture(side, page)));
+                let outside_page = outside
+                    .get(document.document.as_str())
+                    .copied()
+                    .and_then(|side| divergence.page.and_then(|page| page_picture(side, page)));
+                let drawn = engine_page.is_some() || outside_page.is_some();
+                let name = match (divergence.page, drawn) {
+                    (Some(page), true) => format!("page-{page}-{}.png", divergence.kind.as_str()),
+                    (Some(page), false) => format!("page-{page}-{}.txt", divergence.kind.as_str()),
+                    (None, _) => format!("document-{}.txt", divergence.kind.as_str()),
                 };
                 let relative = Path::new(&document.document).join(&name);
                 let path = directory.join(&relative);
@@ -638,25 +771,10 @@ fn write_evidence(
                     std::fs::create_dir_all(parent)
                         .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
                 }
-                let bytes = match divergence.page {
-                    Some(page) => {
-                        let engine_page = engine
-                            .get(document.document.as_str())
-                            .copied()
-                            .and_then(|side| page_picture(side, page));
-                        let outside_page = outside
-                            .get(document.document.as_str())
-                            .copied()
-                            .and_then(|side| page_picture(side, page));
-                        side_by_side(engine_page, outside_page, &path)?
-                    }
-                    None => {
-                        let text = format!("{key}\n\n{}\n", divergence.detail);
-                        let length = text.len() as u64;
-                        std::fs::write(&path, text)
-                            .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
-                        length
-                    }
+                let bytes = if drawn {
+                    side_by_side(engine_page, outside_page, &path)?
+                } else {
+                    write_text(&path, key, &divergence.detail)?
                 };
                 written += bytes;
                 if written > ceiling {
@@ -682,6 +800,15 @@ fn write_evidence(
 /// One page's picture on one side.
 fn page_picture(document: &SideDocument, page: u32) -> Option<&Drawn> {
     document.page(page).map(|side| &side.drawn)
+}
+
+/// Write a finding out as text, answering the bytes written.
+fn write_text(path: &Path, key: &str, detail: &str) -> Result<u64, String> {
+    let text = format!("{key}\n\n{detail}\n");
+    let length = text.len() as u64;
+    std::fs::write(path, text)
+        .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+    Ok(length)
 }
 
 /// Write both sides side by side, each scaled to [`EVIDENCE_LONG_SIDE_PX`], and answer the bytes
@@ -765,8 +892,8 @@ mod tests {
     use crate::oracle::TempArea;
     use crate::oracle::compare::cases::Class;
     use crate::oracle::compare::metric::{
-        Attribution, Calibration, Divergence, DivergenceKind, MechanismFailure, MechanismKind,
-        PageOutcome, PixelOutcome,
+        Attribution, Calibration, Cause, Divergence, DivergenceKind, MechanismFailure,
+        MechanismKind, PageOutcome, PixelOutcome,
     };
     use crate::oracle::compare::render::{Dimensions, Drawn, SidePage, SideState};
     use document_engine::vocabulary::Family;
@@ -818,6 +945,7 @@ mod tests {
                     height: 100,
                 }),
                 outside_points: None,
+                engine_points: None,
                 pixels: Some(PixelOutcome {
                     changed_blocks: 10,
                     total_blocks: 100,
@@ -830,7 +958,9 @@ mod tests {
                 key: "pdf/text/1/pixels".to_string(),
                 page: Some(1),
                 kind: DivergenceKind::Pixels,
+                sub: String::new(),
                 attribution: Attribution::Undetermined,
+                cause: Cause::Unexplained,
                 detail: "a difference".to_string(),
             }],
             stated: Vec::new(),

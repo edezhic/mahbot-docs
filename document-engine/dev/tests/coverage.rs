@@ -8,8 +8,8 @@ use crate::transcript::{CaseTranscript, ReadingTranscript};
 use document_engine::test_support::coverage::{
     UNPRODUCIBLE, WITNESSES, WRITING_UNREACHED, WRITING_WITNESSES,
 };
+use document_engine::test_support::marks::sentence;
 use document_engine::vocabulary::{Producer, vocabulary};
-use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The recorded baseline.
@@ -161,11 +161,6 @@ fn answered_lines(transcript: &CaseTranscript) -> Vec<&str> {
     lines
 }
 
-/// The shortest literal text a mark needs for its sentence to be recognisable: a value word such as
-/// `row` or `JPEG` names a value rather than a sentence, and a pattern over it would match
-/// anything.
-const RECOGNISABLE: usize = 16;
-
 /// The marks [`sentence`] cannot recognise, so the reverse check below does not see them: each
 /// names a value or a label a composed sentence carries rather than a sentence of its own. Listing
 /// them keeps the blind spot stated instead of silent — a new mark this short must be added here.
@@ -183,34 +178,13 @@ const UNRECOGNISABLE: &[&str] = &[
     "surface_object_value",
 ];
 
-/// A mark's sentence as a pattern covering one whole answer line, with each `{placeholder}`
-/// standing for any non-empty text, or `None` when the mark's own words are too short to recognise.
+/// Every mark only the writing half prints: the shared ones (a Word mark, a chart label) are
+/// witnessed by the reading ledger, which reads the very same vocabulary entries.
 ///
-/// A mark that is a fragment composed into a longer sentence cannot be checked this way, and
+/// A mark that is a fragment composed into a longer sentence cannot be checked by [`sentence`], and
 /// matching it anywhere inside a line would not help: the vocabulary is one namespace of fragments,
 /// so `could not be read` occurs inside the chart sentence that has its own mark. A fragment's
 /// ledger entry therefore rests on review, and its composed sentence's own witness.
-fn sentence(text: &str) -> Option<Regex> {
-    let mut pattern = String::from("^");
-    let mut literal = 0;
-    let mut rest = text;
-    while let Some(start) = rest.find('{') {
-        let (before, after) = rest.split_at(start);
-        pattern.push_str(&regex::escape(before));
-        literal += before.len();
-        let end = after.find('}')?;
-        pattern.push_str(".+?");
-        rest = &after[end + 1..];
-    }
-    pattern.push_str(&regex::escape(rest));
-    literal += rest.len();
-    pattern.push('$');
-    (literal >= RECOGNISABLE)
-        .then(|| Regex::new(&pattern).expect("a mark's own words must build a pattern"))
-}
-
-/// Every mark only the writing half prints: the shared ones (a Word mark, a chart label) are
-/// witnessed by the reading ledger, which reads the very same vocabulary entries.
 fn writing_marks() -> BTreeSet<&'static str> {
     let marks = &vocabulary().marks;
     marks

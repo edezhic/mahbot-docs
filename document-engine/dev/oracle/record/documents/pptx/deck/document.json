@@ -100,14 +100,38 @@
           "OpenSymbol"
         ],
         "lines": [
-          "Quarterly review",
-          "",
-          "Three workstreams this quarter.",
-          "",
-          "• engine",
-          "• oracle",
-          "• renderer"
-        ]
+          {
+            "text": "Quarterly review",
+            "x_pt": 45.496,
+            "y_pt": 78.378,
+            "size_pt": 28.006
+          },
+          {
+            "text": "Three workstreams this quarter.",
+            "x_pt": 45.496,
+            "y_pt": 179.206,
+            "size_pt": 15.987
+          },
+          {
+            "text": "• engine",
+            "x_pt": 45.496,
+            "y_pt": 289.587,
+            "size_pt": 15.987
+          },
+          {
+            "text": "• oracle",
+            "x_pt": 45.496,
+            "y_pt": 308.778,
+            "size_pt": 15.987
+          },
+          {
+            "text": "• renderer",
+            "x_pt": 45.496,
+            "y_pt": 327.969,
+            "size_pt": 15.987
+          }
+        ],
+        "pictures": []
       },
       {
         "page": 2,
@@ -118,13 +142,38 @@
           "Carlito-Bold"
         ],
         "lines": [
-          "Revenue by region",
-          "",
-          "Region Revenue",
-          "",
-          "North 1 200",
-          "",
-          "South 980"
+          {
+            "text": "Revenue by region",
+            "x_pt": 45.496,
+            "y_pt": 78.378,
+            "size_pt": 28.006
+          },
+          {
+            "text": "Region Revenue",
+            "x_pt": 45.609,
+            "y_pt": 142.413,
+            "size_pt": 14.003
+          },
+          {
+            "text": "North 1 200",
+            "x_pt": 45.609,
+            "y_pt": 166.45,
+            "size_pt": 14.003
+          },
+          {
+            "text": "South 980",
+            "x_pt": 45.609,
+            "y_pt": 190.488,
+            "size_pt": 14.003
+          }
+        ],
+        "pictures": [
+          {
+            "x_pt": 38.409,
+            "y_pt": 283.181,
+            "width_pt": 319.975,
+            "height_pt": 159.959
+          }
         ]
       },
       {
@@ -136,10 +185,20 @@
           "Carlito-Bold"
         ],
         "lines": [
-          "What comes next",
-          "",
-          "A renderer of our own, judged against this record."
-        ]
+          {
+            "text": "What comes next",
+            "x_pt": 45.496,
+            "y_pt": 78.378,
+            "size_pt": 28.006
+          },
+          {
+            "text": "A renderer of our own, judged against this record.",
+            "x_pt": 45.496,
+            "y_pt": 179.206,
+            "size_pt": 15.987
+          }
+        ],
+        "pictures": []
       }
     ]
   },

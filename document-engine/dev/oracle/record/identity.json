@@ -1,7 +1,10 @@
 {
-  "schema": 4,
+  "schema": 8,
   "recorded_by": "page-oracle 0.1.0",
-  "page_text_extractor": "pdf-extract 0.12.1",
+  "page_text_extractor": "page-oracle positions 1 (1226fad831272734)",
+  "line_band_pt": 4.0,
+  "line_gap_pt": 1.0,
+  "min_picture_pt": 1.0,
   "reference": {
     "program": "LibreOffice",
     "version": "26.8.2.2",
@@ -29,7 +32,7 @@
     "height_pt": 792.0,
     "observed_from": "xlsx/workbook"
   },
-  "page_size_tolerance_pt": 0.5,
+  "re_record_tolerance_pt": 0.5,
   "fonts": {
     "config_digest": "sha256-95bc7dee7b90a9d241e2c670aa9e987903ccabe312b19b795a2d4ce9417206f4",
     "directories": [

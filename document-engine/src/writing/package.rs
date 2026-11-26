@@ -6,9 +6,13 @@
 //! parts it does not name.
 //!
 //! A folder entry is not a part: neither the format nor a reader looks one up by name, and the
-//! editor's part list skips it. An entry is read whole and unbounded: the producing kit has no
-//! per-entry bound of its own, so a writer that refused one would answer a call the product carries
-//! out.
+//! editor's part list skips it. The producing path reads an entry whole and unbounded: the kit has
+//! no per-entry bound of its own, so a writer that refused one would answer a call the product
+//! carries out. A path that only draws the package reads it within the reading half's own per-entry
+//! bound and the renderer's own bound on the bytes its picture parts may hold
+//! ([`read_package_within`]), so neither one entry nor their sum can expand past a stated bound —
+//! and the renderer's bound is its own, sized for one rendering, not the PDF decoder's container
+//! ceiling, which sits past what a small host holds.
 
 use std::collections::HashSet;
 use std::io::{Cursor, Read, Write};
@@ -23,6 +27,11 @@ use crate::vocabulary::{Family, vocabulary};
 pub(super) const CONTENT_TYPES: &str = "[Content_Types].xml";
 
 /// Read every part of `bytes` in archive order.
+///
+/// The loop stands beside [`read_package_within`] rather than calling it with no bounds: this is the
+/// producing path, whose message is the archive library's own and reaches a user, while the bounded
+/// read answers the renderer's own sentence instead. The two read an archive the same way — the same
+/// order, the same folder entries skipped — on purpose, and a change to one belongs in the other.
 ///
 /// # Errors
 ///
@@ -42,6 +51,91 @@ pub(crate) fn read_package(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, Strin
         entry
             .read_to_end(&mut content)
             .map_err(|error| error.to_string())?;
+        parts.push((name, content));
+    }
+    Ok(parts)
+}
+
+/// Why a package could not be read: the archive itself, or one of the two bounds. Only
+/// [`read_package_within`] answers a bound; [`read_package`] passes none and answers the archive's
+/// own message, so a bound is never met where no sentence states one.
+#[derive(Debug)]
+pub(crate) enum PackageError {
+    /// The archive cannot be opened or an entry cannot be read. The container library's own message
+    /// is the unbounded read's, which states it directly; a caller that draws the package has its
+    /// own sentence and does not restate the library's.
+    Unreadable,
+    /// One part expands past the bytes one part may hold, and the bound it reached.
+    Part {
+        /// The part's name in the archive.
+        name: String,
+        /// The bound the part reached.
+        max: u64,
+    },
+    /// The parts together expand past the bytes one package may hold, and the bound they reached.
+    Whole {
+        /// The bound the parts together reached.
+        max: u64,
+    },
+}
+
+/// Read every part of `bytes` in archive order, refusing an entry whose content reaches past
+/// `entry_max` bytes and a package whose parts together reach past `total_max`. A renderer passes
+/// the reading half's own per-entry bound and its own bound on what one render may hold, so the
+/// package it draws is bounded by the same per-entry rule the reading applies and by a bound sized
+/// to the work it does.
+///
+/// # Errors
+///
+/// The archive cannot be opened or an entry cannot be read ([`PackageError::Unreadable`]), or an
+/// entry or the package together states or delivers more than its bound ([`PackageError::Part`],
+/// [`PackageError::Whole`], carrying the part's name and the bytes it reached). A bound is not a
+/// corrupt file, so the two are never the same answer.
+pub(crate) fn read_package_within(
+    bytes: &[u8],
+    entry_max: Option<u64>,
+    total_max: Option<u64>,
+) -> Result<Vec<(String, Vec<u8>)>, PackageError> {
+    let mut archive =
+        zip::ZipArchive::new(Cursor::new(bytes)).map_err(|_| PackageError::Unreadable)?;
+    let mut parts = Vec::with_capacity(archive.len());
+    let mut total = 0_u64;
+    for index in 0..archive.len() {
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|_| PackageError::Unreadable)?;
+        if entry.is_dir() {
+            continue;
+        }
+        let name = entry.name().to_string();
+        let mut content = Vec::new();
+        match entry_max {
+            Some(max) if entry.size() > max => {
+                return Err(PackageError::Part { name, max });
+            }
+            Some(max) => {
+                // The read is bounded too: a header may understate what the stream delivers.
+                entry
+                    .by_ref()
+                    .take(max.saturating_add(1))
+                    .read_to_end(&mut content)
+                    .map_err(|_| PackageError::Unreadable)?;
+                if u64::try_from(content.len()).unwrap_or(u64::MAX) > max {
+                    return Err(PackageError::Part { name, max });
+                }
+            }
+            None => {
+                entry
+                    .read_to_end(&mut content)
+                    .map_err(|_| PackageError::Unreadable)?;
+            }
+        }
+        total = total.saturating_add(u64::try_from(content.len()).unwrap_or(u64::MAX));
+        if let Some(max) = total_max
+            && total > max
+        {
+            return Err(PackageError::Whole { max });
+        }
         parts.push((name, content));
     }
     Ok(parts)
@@ -245,6 +339,32 @@ mod tests {
         assert_eq!(
             package_family(&[("[Content_Types].xml".to_string(), Vec::new())]),
             None
+        );
+    }
+
+    #[test]
+    fn a_package_past_a_bound_names_the_bound_and_the_part() {
+        // The two refusals a rendering can reach, with numbers small enough to test: one part past
+        // the per-part bound, and parts together past the package's own. A bound is not a corrupt
+        // archive, so each states which it is and what reached it.
+        let package = build::docx_basic();
+        match read_package_within(&package, Some(8), Some(u64::MAX)) {
+            Err(PackageError::Part { name, max }) => {
+                assert!(!name.is_empty(), "the refusal names the part");
+                assert_eq!(max, 8, "the refusal states the bound it reached");
+            }
+            other => panic!("a part past its bound is refused as one: {other:?}"),
+        }
+        match read_package_within(&package, Some(u64::MAX), Some(16)) {
+            Err(PackageError::Whole { max }) => assert_eq!(max, 16),
+            other => panic!("a package past its bound is refused as one: {other:?}"),
+        }
+        assert!(
+            matches!(
+                read_package_within(b"not a zip", None, None),
+                Err(PackageError::Unreadable)
+            ),
+            "an archive that does not open is unreadable, not past a bound"
         );
     }
 

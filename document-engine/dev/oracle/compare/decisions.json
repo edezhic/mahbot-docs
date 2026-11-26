@@ -1,4 +1,145 @@
 {
   "schema": 1,
-  "decisions": []
+  "decisions": [
+    {
+      "key": "docx/report/1/text/moved",
+      "count": 17,
+      "cause": "words-agree",
+      "category": "out-of-scope",
+      "reason": "The engine draws with the one face the crate carries, and that face is wider and taller than the outside suite's, so a line breaks earlier, sits lower and the lines after it move with it. The words, their order and their size agree; where they sit on the page does not, and neither side is wrong about a document that states no face of its own. Accepted as the substitution's own divergence rather than chased by borrowing the other face's metrics."
+    },
+    {
+      "key": "docx/report/1/text/missing",
+      "count": 3,
+      "cause": "words-agree",
+      "category": "out-of-scope",
+      "reason": "The engine's wider face breaks this paragraph into more lines than the outside suite's, so a recorded line is the engine's two and an engine line is the record's one. The characters and their order agree; the break does not, for the same face substitution as the page's other text."
+    },
+    {
+      "key": "docx/report/1/text/extra",
+      "count": 3,
+      "cause": "words-agree",
+      "category": "out-of-scope",
+      "reason": "The engine's wider face breaks this paragraph into more lines than the outside suite's, so a recorded line is the engine's two and an engine line is the record's one. The characters and their order agree; the break does not, for the same face substitution as the page's other text."
+    },
+    {
+      "key": "docx/report/1/picture/missing",
+      "count": 1,
+      "cause": "picture-moved",
+      "category": "out-of-scope",
+      "reason": "The picture stands where its line reaches, and the line moved because the engine's face is taller than the outside suite's: the box is the same size, its top a few points lower. A moved picture is reported as one missing and one extra, both here."
+    },
+    {
+      "key": "docx/report/1/picture/extra",
+      "count": 1,
+      "cause": "picture-moved",
+      "category": "out-of-scope",
+      "reason": "The picture stands where its line reaches, and the line moved because the engine's face is taller than the outside suite's: the box is the same size, its top a few points lower. A moved picture is reported as one missing and one extra, both here."
+    },
+    {
+      "key": "docx/report/2/text/moved",
+      "count": 1,
+      "cause": "dots-differ",
+      "category": "out-of-scope",
+      "reason": "A contents entry's dot leader is filled with as many dots as the face's own full stop allows: the engine's wider face fits fewer, so the entry's characters differ from the record's and the entry sits at a different x. The page number and the title agree; the dots do not. The footnote's mark is one line more: the engine separates the mark from the word it belongs to, so the line reads \"footnote. 1\" where the record glues the two, and the same words stand on both."
+    },
+    {
+      "key": "docx/report/2/text/missing",
+      "count": 5,
+      "cause": "dots-differ",
+      "category": "out-of-scope",
+      "reason": "A contents entry's dot leader is filled with as many dots as the face's own full stop allows: the engine's wider face fits fewer, so the entry's characters differ from the record's and the entry sits at a different x. The page number and the title agree; the dots do not. The footnote's mark is one line more: the engine separates the mark from the word it belongs to, so the line reads \"footnote. 1\" where the record glues the two, and the same words stand on both."
+    },
+    {
+      "key": "docx/report/2/text/extra",
+      "count": 5,
+      "cause": "dots-differ",
+      "category": "out-of-scope",
+      "reason": "A contents entry's dot leader is filled with as many dots as the face's own full stop allows: the engine's wider face fits fewer, so the entry's characters differ from the record's and the entry sits at a different x. The page number and the title agree; the dots do not. The footnote's mark is one line more: the engine separates the mark from the word it belongs to, so the line reads \"footnote. 1\" where the record glues the two, and the same words stand on both."
+    },
+    {
+      "key": "docx/picture/1/text/moved",
+      "count": 1,
+      "cause": "words-agree",
+      "category": "out-of-scope",
+      "reason": "The engine draws with the one face the crate carries, and that face is wider and taller than the outside suite's, so a line breaks earlier, sits lower and the lines after it move with it. The words, their order and their size agree; where they sit on the page does not, and neither side is wrong about a document that states no face of its own. Accepted as the substitution's own divergence rather than chased by borrowing the other face's metrics."
+    },
+    {
+      "key": "docx/picture/1/picture/missing",
+      "count": 1,
+      "cause": "picture-moved",
+      "category": "out-of-scope",
+      "reason": "The picture stands where its line reaches, and the line moved because the engine's face is taller than the outside suite's: the box is the same size, its top a few points lower. A moved picture is reported as one missing and one extra, both here."
+    },
+    {
+      "key": "docx/picture/1/picture/extra",
+      "count": 1,
+      "cause": "picture-moved",
+      "category": "out-of-scope",
+      "reason": "The picture stands where its line reaches, and the line moved because the engine's face is taller than the outside suite's: the box is the same size, its top a few points lower. A moved picture is reported as one missing and one extra, both here."
+    },
+    {
+      "key": "pptx/deck/1/text/moved",
+      "count": 2,
+      "cause": "words-agree",
+      "category": "out-of-scope",
+      "reason": "The engine draws with the one face the crate carries, and that face is wider and taller than the outside suite's, so a line breaks earlier, sits lower and the lines after it move with it. The words, their order and their size agree; where they sit on the page does not, and neither side is wrong about a document that states no face of its own. Accepted as the substitution's own divergence rather than chased by borrowing the other face's metrics."
+    },
+    {
+      "key": "pptx/deck/2/text/moved",
+      "count": 2,
+      "cause": "words-agree",
+      "category": "out-of-scope",
+      "reason": "The engine draws with the one face the crate carries, and that face is wider and taller than the outside suite's, so a line breaks earlier, sits lower and the lines after it move with it. The words, their order and their size agree; where they sit on the page does not, and neither side is wrong about a document that states no face of its own. Accepted as the substitution's own divergence rather than chased by borrowing the other face's metrics."
+    },
+    {
+      "key": "xlsx/workbook/1/page-size",
+      "count": 1,
+      "cause": "default-paper",
+      "category": "out-of-scope",
+      "reason": "The workbook states no page setup, so each side prints it on its own default paper: the record's pages are Letter (612 by 792 pt), the paper the outside suite's pinned en-US locale gives a document that states none, and the engine's are A4 (595.28 by 841.89 pt), the vocabulary's stated default. Neither side is wrong about a paper the document never states."
+    },
+    {
+      "key": "xlsx/workbook/2/page-size",
+      "count": 1,
+      "cause": "default-paper",
+      "category": "out-of-scope",
+      "reason": "The workbook states no page setup, so each side prints it on its own default paper: the record's pages are Letter (612 by 792 pt), the paper the outside suite's pinned en-US locale gives a document that states none, and the engine's are A4 (595.28 by 841.89 pt), the vocabulary's stated default. Neither side is wrong about a paper the document never states."
+    },
+    {
+      "key": "xlsx/workbook/3/page-size",
+      "count": 1,
+      "cause": "default-paper",
+      "category": "out-of-scope",
+      "reason": "The workbook states no page setup, so each side prints it on its own default paper: the record's pages are Letter (612 by 792 pt), the paper the outside suite's pinned en-US locale gives a document that states none, and the engine's are A4 (595.28 by 841.89 pt), the vocabulary's stated default. Neither side is wrong about a paper the document never states."
+    },
+    {
+      "key": "xlsx/workbook/1/text/moved",
+      "count": 7,
+      "cause": "words-agree",
+      "category": "out-of-scope",
+      "reason": "The workbook states no column widths, no row heights and no margins, so each side lays its cells out on its own defaults: the record's text starts at 54.822 pt on a 13.776 pt row pitch, the outside suite's defaults for a workbook that states none, and the engine's starts at 79.2 pt on a 15 pt pitch, the vocabulary's stated defaults. Every word agrees, the date cell included: both sides draw the stated dd/mm/yy, so only where each line sits differs."
+    },
+    {
+      "key": "xlsx/workbook/2/text/moved",
+      "count": 4,
+      "cause": "formula-value",
+      "category": "out-of-scope",
+      "reason": "The workbook states no column widths, no row heights and no margins, so each side lays its cells out on its own defaults: the record's text starts at 54.822 pt on a 13.776 pt row pitch, the outside suite's defaults for a workbook that states none, and the engine's starts at 79.2 pt on a 15 pt pitch, the vocabulary's stated defaults. Every word the engine draws agrees with the record's; the one it does not draw is the formula value the missing decision below accounts for."
+    },
+    {
+      "key": "xlsx/workbook/2/text/missing",
+      "count": 1,
+      "cause": "formula-value",
+      "category": "out-of-scope",
+      "reason": "The cell states a formula and no cached value, so the engine draws nothing for it and names it as a formula value not drawn; the outside suite computed 3,720.00 and printed it. The engine does not evaluate formulas: what the workbook states is what is drawn."
+    },
+    {
+      "key": "xlsx/workbook/3/text/moved",
+      "count": 1,
+      "cause": "words-agree",
+      "category": "out-of-scope",
+      "reason": "The workbook states no column widths, no row heights and no margins, so each side lays its cells out on its own defaults: the record's text starts at 54.822 pt on a 13.776 pt row pitch, the outside suite's defaults for a workbook that states none, and the engine's starts at 79.2 pt on a 15 pt pitch, the vocabulary's stated defaults. The words and their order agree; only where they sit differs."
+    }
+  ]
 }

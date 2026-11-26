@@ -11,7 +11,7 @@
 //! A chart part that carries only references to its attached table (no caches) says per series that
 //! its values are in that table, and a part that cannot be read says so: neither is passed off as a
 //! chart with no content, and both keep their place in the package's report
-//! ([`crate::reading::output::Unshown`]). The modern extended parts (`chartEx`) have a schema of
+//! ([`crate::unshown::Unshown`]). The modern extended parts (`chartEx`) have a schema of
 //! their own — `cx:` rather than `c:` — which this reading does not parse, so they are that same
 //! case.
 //!
@@ -25,7 +25,7 @@
 //! - **A value is shown the way the reading shows a spreadsheet cell**: a cached
 //!   point keeps the format its cache states, through the same formatter
 //!   ([`numfmt`]), and a number under a format that cannot be reproduced is shown
-//!   as stored, under the same stored-value mark ([`mark`](crate::reading::output::mark)
+//!   as stored, under the same stored-value mark ([`mark`](crate::support::mark)
 //!   `number_stored_mark`), never invented.
 //! - **Bounded rather than document-decided**: the walk keeps at most
 //!   [`max_series`] series and [`max_points`] points of each list — the rest is
@@ -44,7 +44,8 @@ use super::{
     Relationship, ZipEntry, append_entity, attr, is_chart_part, numfmt, read_zip_entry, rel_id,
     resolve_part, scan_elements,
 };
-use crate::reading::output::{chart_excess, chart_header, chart_series, chart_size, mark, note};
+use crate::reading::output::{chart_excess, chart_header, chart_series, chart_size, note};
+use crate::support::mark;
 use crate::support::one_line;
 use quick_xml::Reader;
 use quick_xml::events::{BytesRef, BytesStart, Event};

@@ -28,7 +28,7 @@ pub(super) const DEFAULT_IMAGE_WIDTH: f64 = 400.0;
 
 /// A picture the request embeds: its bytes, the kind its name claims, and the pixel size the frame
 /// header states.
-pub(super) struct Picture {
+pub(crate) struct Picture {
     /// The file's own base name, as a refusal or a resource names it.
     pub(super) name: String,
     pub(super) kind: &'static str,
@@ -43,6 +43,23 @@ pub(super) struct Picture {
 pub(super) struct Pixels {
     pub(super) width: f64,
     pub(super) height: f64,
+}
+
+impl Picture {
+    /// The width the picture's own header states, in pixels.
+    pub(crate) fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// The height the picture's own header states, in pixels.
+    pub(crate) fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// The kind its name claims.
+    pub(crate) fn kind(&self) -> &'static str {
+        self.kind
+    }
 }
 
 /// An image's bytes, checked against the kind its name claims: every writer embeds them as that
@@ -110,6 +127,33 @@ pub(super) fn read_create_image(value: Option<&Value>) -> Result<Picture, Failur
         return Err(Failure::engine());
     }
     read_image(value)
+}
+
+/// A picture a package embeds, by its part's bytes and the kind its part name claims. A part whose
+/// bytes are not a whole image of that kind is `None`: the renderer names it as not drawn rather
+/// than embedding bytes no reader can open.
+pub(crate) fn package_picture(name: String, kind: &'static str, bytes: Vec<u8>) -> Option<Picture> {
+    let size = match kind {
+        "png" => png_size(&bytes),
+        "webp" => webp_size(&bytes),
+        _ => jpeg_size(&bytes),
+    }?;
+    if size.0 == 0 || size.1 == 0 {
+        return None;
+    }
+    let (kind, content_type) = match kind {
+        "png" => ("png", "image/png"),
+        "webp" => ("webp", "image/webp"),
+        _ => ("jpg", "image/jpeg"),
+    };
+    Some(Picture {
+        name,
+        kind,
+        content_type,
+        bytes,
+        width: size.0,
+        height: size.1,
+    })
 }
 
 /// A 32-bit word's four bytes, the unit the image formats' own offsets are counted in.

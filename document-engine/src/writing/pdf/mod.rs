@@ -89,13 +89,13 @@ use crate::operation::{Failure, Outcome, Request};
 use crate::vocabulary::{self, vocabulary};
 
 mod create;
-mod draw;
-mod font;
+pub(crate) mod draw;
+pub(crate) mod font;
 mod form;
-mod graph;
+pub(crate) mod graph;
 pub(crate) mod lzw;
-mod page;
-mod picture;
+pub(crate) mod page;
+pub(crate) mod picture;
 mod scan;
 mod serialise;
 mod text;

@@ -34,7 +34,7 @@ use std::fmt::Write as _;
 use serde_json::Value;
 
 use super::draw;
-use super::font::{Face, Subset};
+use super::font::{self, Face, Subset};
 use super::graph::Document;
 use super::page;
 use super::{Produced, interpolated, js_round};
@@ -165,8 +165,8 @@ fn picture_only(request: &Request) -> Result<(&[Value], bool), Failure> {
 
 /// One page per picture, fitted whole into the text column and centred.
 fn layout_pictures(content: &[Value]) -> Result<Layout, Failure> {
-    let width = page::A4[0] - 2.0 * draw::MARGIN;
-    let height = page::A4[1] - 2.0 * draw::MARGIN;
+    let width = page::a4()[0] - 2.0 * draw::MARGIN;
+    let height = page::a4()[1] - 2.0 * draw::MARGIN;
     let mut layout = Layout::new(Mode::Pictures);
     for block in content {
         let picture = read_picture(block)?;
@@ -195,8 +195,8 @@ fn layout_pictures(content: &[Value]) -> Result<Layout, Failure> {
         layout.pictures.push(picture);
         layout.pages.push(vec![Mark::Picture {
             picture: index,
-            x: (page::A4[0] - drawn.0) / 2.0,
-            y: (page::A4[1] - drawn.1) / 2.0,
+            x: (page::a4()[0] - drawn.0) / 2.0,
+            y: (page::a4()[1] - drawn.1) / 2.0,
             width: drawn.0,
             height: drawn.1,
         }]);
@@ -224,9 +224,9 @@ fn layout_content(content: &[Value]) -> Result<Layout, Failure> {
     layout.pages.push(Vec::new());
     let mut walk = Walk {
         face: Face::bundled(),
-        width: page::A4[0] - 2.0 * draw::MARGIN,
+        width: page::a4()[0] - 2.0 * draw::MARGIN,
         layout,
-        y: page::A4[1] - draw::MARGIN,
+        y: page::a4()[1] - draw::MARGIN,
     };
     for block in content {
         match block.get("type").and_then(Value::as_str) {
@@ -255,7 +255,7 @@ impl Walk {
     /// Start a page and put the column's top back.
     fn fresh(&mut self) {
         self.layout.pages.push(Vec::new());
-        self.y = page::A4[1] - draw::MARGIN;
+        self.y = page::a4()[1] - draw::MARGIN;
     }
 
     /// The page being filled.
@@ -420,7 +420,7 @@ impl Walk {
         // The block's sides are points; a picture that names none is fitted whole into the column.
         let box_size = Pixels {
             width: DEFAULT_IMAGE_WIDTH,
-            height: js_round((page::A4[1] - 2.0 * draw::MARGIN) / PX_TO_POINTS),
+            height: js_round((page::a4()[1] - 2.0 * draw::MARGIN) / PX_TO_POINTS),
         };
         let size = image_size(
             natural,
@@ -571,7 +571,7 @@ fn render(mut document: Document, layout: &Layout) -> Result<Vec<u8>, Failure> {
             &picture.name,
         )?);
     }
-    let width = page::A4[0] - 2.0 * draw::MARGIN;
+    let width = page::a4()[0] - 2.0 * draw::MARGIN;
     for marks in &layout.pages {
         let id = page::blank_page(&mut document);
         page::add_page(&mut document, id)?;
@@ -585,7 +585,7 @@ fn render(mut document: Document, layout: &Layout) -> Result<Vec<u8>, Failure> {
         {
             Some(font) => Some((
                 font,
-                draw::add_resource(&mut document, id, "Font", font.id, draw::FONT_BASE)?,
+                draw::add_resource(&mut document, id, "Font", font.id, font::NAME)?,
             )),
             None => None,
         };

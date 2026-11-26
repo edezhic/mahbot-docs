@@ -58,15 +58,22 @@
           "TimesNewRomanPSMT"
         ],
         "lines": [
-          "Before the empty page."
-        ]
+          {
+            "text": "Before the empty page.",
+            "x_pt": 72.1,
+            "y_pt": 80.901,
+            "size_pt": 10.0
+          }
+        ],
+        "pictures": []
       },
       {
         "page": 2,
         "width_pt": 595.304,
         "height_pt": 841.89,
         "faces": [],
-        "lines": []
+        "lines": [],
+        "pictures": []
       },
       {
         "page": 3,
@@ -76,8 +83,14 @@
           "TimesNewRomanPSMT"
         ],
         "lines": [
-          "After the empty page."
-        ]
+          {
+            "text": "After the empty page.",
+            "x_pt": 72.1,
+            "y_pt": 80.901,
+            "size_pt": 10.0
+          }
+        ],
+        "pictures": []
       }
     ]
   },

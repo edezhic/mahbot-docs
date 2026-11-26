@@ -32,7 +32,8 @@ use super::{
     read_relationships, read_zip_entry, related_part, relationship_targets, relationships,
     rels_part_of, resolve_part, scan_elements, unopened_parts, unreadable, write_media_parts,
 };
-use crate::reading::output::{labeled_block, lines_of, mark, note, text_lines};
+use crate::reading::output::{labeled_block, lines_of, note, text_lines};
+use crate::support::mark;
 use crate::support::{one_line, truncate};
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};

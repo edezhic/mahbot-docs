@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 /// The shape version of the record, so a change to it is deliberate rather than silent.
-pub const SCHEMA: u32 = 4;
+pub const SCHEMA: u32 = 8;
 
 /// Everything the record states once for the whole corpus.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -43,8 +43,18 @@ pub struct Identity {
     /// The tool that recorded it, with its version. A run by another version refuses rather than
     /// leaving this stating a version that no longer wrote anything.
     pub recorded_by: String,
-    /// The crate that read the produced PDF's text, with its resolved version.
+    /// The reading of a produced PDF's text and positions, as the record names it. A run by another
+    /// reading refuses rather than judging the pages with one the record does not state.
     pub page_text_extractor: String,
+    /// How far apart two baselines the reading groups into one line may be, in points. The record's
+    /// lines were grouped with it, so a different value makes the record mean something else.
+    pub line_band_pt: f64,
+    /// How wide a gap between two runs the reading joins with a space, in points. The record's lines
+    /// were joined with it, so a different value makes the record mean something else.
+    pub line_gap_pt: f64,
+    /// The smallest box the reading records as a picture, in points. The record's pictures were
+    /// filtered with it, so a different value makes the record mean something else.
+    pub min_picture_pt: f64,
     /// The outside reference: the program, the version and build it answered with, and where it is
     /// installed.
     pub reference: ReferenceIdentity,
@@ -55,8 +65,10 @@ pub struct Identity {
     pub locale: String,
     /// The paper a document that states no page setup is printed on.
     pub paper: Paper,
-    /// How far a page's size may move and still be the same page.
-    pub page_size_tolerance_pt: f64,
+    /// How far a page's size may move between two surveys of the same document and still be the same
+    /// page. It is the recorder's own number, which is why it is not the comparison's page-size
+    /// tolerance: that one lives in `calibration.json` and judges the engine against the record.
+    pub re_record_tolerance_pt: f64,
     /// The font set the reference was given.
     pub fonts: FontIdentity,
 }
@@ -224,8 +236,38 @@ pub struct PageRecord {
     /// resources hold but no text operator reaches is not listed: a page that draws nothing lists
     /// none, however many faces it could have drawn in.
     pub faces: Vec<String>,
-    /// Its text, line by line.
-    pub lines: Vec<String>,
+    /// Its text, line by line, each with where it sits and how big it is, sorted from the top of the
+    /// page down and from the left across.
+    pub lines: Vec<LineRecord>,
+    /// Every picture drawn on it, sorted from the top of the page down and from the left across.
+    pub pictures: Vec<PictureRecord>,
+}
+
+/// One line of text a page shows.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LineRecord {
+    /// The line's text, with the reference's own spacing and kerning dropped and a space put back
+    /// between two runs that are visibly apart.
+    pub text: String,
+    /// The distance from the page's left edge to the start of the line, in points.
+    pub x_pt: f64,
+    /// The distance from the page's top edge to the line's baseline, in points.
+    pub y_pt: f64,
+    /// The line's size, in points.
+    pub size_pt: f64,
+}
+
+/// One picture a page draws.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PictureRecord {
+    /// The distance from the page's left edge to its left side, in points.
+    pub x_pt: f64,
+    /// The distance from the page's top edge to its top side, in points.
+    pub y_pt: f64,
+    /// Its width, in points.
+    pub width_pt: f64,
+    /// Its height, in points.
+    pub height_pt: f64,
 }
 
 /// The faces a document names, and the faces its pages drew a glyph in.
@@ -414,7 +456,13 @@ fn page_differences(
         ));
     }
     if recorded.lines != observed.lines {
-        out.push(format!("page {}'s text has changed", observed.page));
+        out.push(format!(
+            "page {}'s text or its position has changed",
+            observed.page
+        ));
+    }
+    if recorded.pictures != observed.pictures {
+        out.push(format!("page {}'s pictures have changed", observed.page));
     }
     out
 }
@@ -470,14 +518,22 @@ pub fn used_faces(pages: &[PageRecord]) -> Vec<String> {
 pub(crate) struct Ambient {
     /// The tool that recorded it, with its version.
     pub recorded_by: String,
-    /// The crate that read the produced PDF's text, with its resolved version.
+    /// The reading of a produced PDF's text and positions, as the record names it. A run by another
+    /// reading refuses rather than judging the pages with one the record does not state.
     pub page_text_extractor: String,
+    /// How far apart two baselines the reading groups into one line may be, in points.
+    pub line_band_pt: f64,
+    /// How wide a gap between two runs the reading joins with a space, in points.
+    pub line_gap_pt: f64,
+    /// The smallest box the reading records as a picture, in points.
+    pub min_picture_pt: f64,
     /// How the reference was invoked.
     pub invocation: Invocation,
     /// The locale it was pinned to.
     pub locale: String,
-    /// How far a page's size may move and still be the same page.
-    pub page_size_tolerance_pt: f64,
+    /// How far a page's size may move between two surveys of the same document and still be the same
+    /// page.
+    pub re_record_tolerance_pt: f64,
 }
 
 impl Identity {
@@ -487,9 +543,12 @@ impl Identity {
         Ambient {
             recorded_by: self.recorded_by.clone(),
             page_text_extractor: self.page_text_extractor.clone(),
+            line_band_pt: self.line_band_pt,
+            line_gap_pt: self.line_gap_pt,
+            min_picture_pt: self.min_picture_pt,
             invocation: self.invocation.clone(),
             locale: self.locale.clone(),
-            page_size_tolerance_pt: self.page_size_tolerance_pt,
+            re_record_tolerance_pt: self.re_record_tolerance_pt,
         }
     }
 
@@ -514,6 +573,22 @@ impl Identity {
                 current.page_text_extractor, self.page_text_extractor
             ));
         }
+        for (recorded, current, what) in [
+            (self.line_gap_pt, current.line_gap_pt, "line gap"),
+            (self.min_picture_pt, current.min_picture_pt, "picture floor"),
+        ] {
+            if (recorded - current).abs() > f64::EPSILON {
+                out.push(format!(
+                    "the {what} is {current} pt and the record states {recorded} pt"
+                ));
+            }
+        }
+        if (self.line_band_pt - current.line_band_pt).abs() > f64::EPSILON {
+            out.push(format!(
+                "the line band is {} points and the record states {}",
+                current.line_band_pt, self.line_band_pt
+            ));
+        }
         if self.invocation != current.invocation {
             out.push("the invocation has changed".to_string());
         }
@@ -523,10 +598,10 @@ impl Identity {
                 current.locale, self.locale
             ));
         }
-        if (self.page_size_tolerance_pt - current.page_size_tolerance_pt).abs() > f64::EPSILON {
+        if (self.re_record_tolerance_pt - current.re_record_tolerance_pt).abs() > f64::EPSILON {
             out.push(format!(
-                "the page-size tolerance is {} points and the record states {}",
-                current.page_size_tolerance_pt, self.page_size_tolerance_pt
+                "the re-record tolerance is {} points and the record states {}",
+                current.re_record_tolerance_pt, self.re_record_tolerance_pt
             ));
         }
         out
@@ -537,8 +612,8 @@ impl Identity {
     #[must_use]
     pub(crate) fn document_differences(&self, current: &Self) -> Vec<String> {
         let mut out = Vec::new();
-        if (self.paper.width_pt - current.paper.width_pt).abs() > self.page_size_tolerance_pt
-            || (self.paper.height_pt - current.paper.height_pt).abs() > self.page_size_tolerance_pt
+        if (self.paper.width_pt - current.paper.width_pt).abs() > self.re_record_tolerance_pt
+            || (self.paper.height_pt - current.paper.height_pt).abs() > self.re_record_tolerance_pt
         {
             out.push(format!(
                 "the default paper is {} by {} points and the record states {} by {}",

@@ -7,8 +7,10 @@ how the record is produced and what the machinery is; this file says how to read
 judged on, and the workspace commits none: every corpus input is synthesised in code. What is here is
 an output an outside producer was judged on, kept so the pages can be rasterised and reviewed later.
 Nothing in the engine's build or tests reads it; the oracle's own tests read it to prove it is whole.
-The comparison does not read this record: it judges the engine's own PDF output against PDFium
-(`../compare/README.md`), and a recorded Office page is not compared there.
+The comparison reads this record twice: the Office half judges the engine's own rendered pages
+against the pages recorded here — page count, page size, every line's text, position and size, every
+picture's box and whether a page drew text — and the PDF half judges the engine's own PDF
+output against PDFium (`../compare/README.md`).
 
 Reading an entry needs nothing but this directory: no LibreOffice, no network, no build. Reading it
 also checks it: the kept PDF must be the one its entry describes — the same object graph, and the
@@ -31,9 +33,17 @@ identity states. `../README.md` shows the tree.
   and `produced.digest` the digest of the kept file's object graph with the reference's own stamps
   and its font encoding left out (see `../src/canonical.rs` for exactly what, and why).
 - `pages.pages` is every page the reference laid the document out into, each with its size in
-  points, its text line by line, and the faces it drew a glyph in. `pages.blank` names every page
-  that carries no ink, with the reason it is empty. A page that draws nothing lists no face, and a
-  page whose only ink is a running header or footer is not blank.
+  points, its lines and its pictures, and the faces it drew a glyph in. Every line states its text,
+  its `x_pt` and `y_pt` and its `size_pt`: `x_pt` is the distance from the page's left edge to the
+  line's start, `y_pt` the distance from its top edge to the line's baseline, and `size_pt` the size
+  the line is drawn at. Every picture states its box the same way: `x_pt` from the left edge to its
+  left side, `y_pt` from the top edge to its top side, and `width_pt` and `height_pt` its sides.
+  Lines and pictures are in visual order — from the top of the page down, and from the left across —
+  so a running header comes first and a footer last, whatever order the content streams draw them
+  in. A run on another baseline is another line, which is why a superscript marker stands beside the
+  line it marks. `pages.blank` names every page that carries no ink, with the reason it is empty. A
+  page that draws nothing lists no face and no line, and a page whose only ink is a running header
+  or footer is not blank.
 - `faces.named` is what the document itself asks for, and where it says so. `faces.default` is the
   family the pages were actually drawn in when the document names nothing at all — a created Word
   document names nothing, so this is what the reference laid it out in: its own default when the
@@ -71,6 +81,12 @@ its own, and the faces themselves stay with their own distributions under their 
 `identity.json` names each face, the file it came from and that file's digest, so the same faces can
 be identified without being shipped, and a verification refuses when a face is not the one recorded —
 a newer release of a substitute face would silently move every line break.
+
+`identity.json` also names the reading that grouped the recorded lines and the band it grouped them
+by — the reading's own source digest and `line_band_pt`. The digest covers both sources that decide a
+recorded coordinate: `../src/positions.rs`, the walk, then `../src/pages.rs`, the page box and content
+streams it walks. A change to either changes what the recorded lines mean, so verification refuses
+the record until it is re-recorded.
 
 ## Re-recording
 

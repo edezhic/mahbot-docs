@@ -119,20 +119,6 @@ pub fn codec_versions() -> String {
     codec_versions_of(lock())
 }
 
-/// The version of the crate that reads a produced PDF's text, as a record states it.
-#[allow(
-    dead_code,
-    reason = "the oracle's record names it; the gate's identity does not"
-)]
-pub fn page_text_extractor() -> String {
-    let resolved = resolved_versions(lock(), "pdf-extract");
-    if resolved.is_empty() {
-        "pdf-extract (unresolved)".to_string()
-    } else {
-        format!("pdf-extract {}", resolved.join(", "))
-    }
-}
-
 /// [`codec_versions`] over a lockfile's text. Every resolved copy is named, because the lock can
 /// hold more than one version of a crate and a change to any of them is a change to what may run. A
 /// codec the text does not resolve is left out rather than failing the run: the identity degrades to

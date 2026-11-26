@@ -10,8 +10,10 @@ JavaScript document kit: a green run meant "agrees with another implementation".
 so a green run now means "agrees with the record" — the gate detects *change*, not divergence from an
 outside implementation, and a green gate is not a statement of correctness. A behaviour change is
 accepted by re-recording the baseline and reviewing the difference, which is the only way the record
-moves. The outside opinion that remains is the oracle's comparison of the engine's drawing of a PDF
-page (`dev/oracle/`), and the record of the Office pages, which nothing yet compares against.
+moves. The outside opinion that remains is the oracle's comparison (`dev/oracle/`): the engine's
+Office pages against the pages LibreOffice laid out for the same documents, and the engine's PDF
+pages against PDFium. The baseline says what "unchanged" means; the oracle says what the outside
+programs show.
 
 The product's own reader sources stay here as byte-for-byte copies under `dev/reference_sources/`,
 compiled in; one test replays every recorded reading through them, so the engine is still held to
@@ -56,10 +58,11 @@ The root workspace holds one member: `document-engine`, the engine crate the har
 development-only target of. `cargo test -p document-engine` runs the crate's own suite (including its
 vocabulary restatement scan) and this harness; the harness is the `gate` target. The development
 oracle is the crate's other development-only target, `dev/oracle_target.rs`: it records what
-LibreOffice lays out for the documents the engine writes, and it compares the engine's own PDF pages
-against PDFium, reporting the other families as not compared
-(`dev/oracle/compare/README.md`). It is a report, not a gate, and it needs no outside program for an
-ordinary run.
+LibreOffice lays out for the documents the engine writes, and it compares the engine's own pages
+against two outside opinions — the Office pages against that committed record, on content, and the
+PDF pages against PDFium, on pixels (`dev/oracle/compare/README.md`). The Office half needs no
+outside program at compare time, so an ordinary run compares all four families; only the PDF half is
+skipped, with a stated reason, on a machine without PDFium. It is a report, not a gate.
 
 The harness needs no external runtime: it drives the crate's own writer and reader, and the
 product's reader sources compiled in. A full pass — 850 cases and 92 readings — is bounded by the run

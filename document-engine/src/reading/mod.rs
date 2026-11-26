@@ -85,8 +85,10 @@ pub(crate) mod ooxml;
 pub(crate) mod output;
 pub(crate) mod page_tree;
 
-use crate::reading::output::{Unshown, UnshownKind, mark, note};
+use crate::reading::output::note;
 use crate::reading::page_tree::PageEntry;
+use crate::support::mark;
+use crate::unshown::{Unshown, UnshownKind};
 use hayro_current::hayro_interpret::InterpreterSettings;
 use hayro_current::hayro_syntax::content::TypedIter;
 use hayro_current::hayro_syntax::content::ops::TypedInstruction;
@@ -221,15 +223,15 @@ impl std::fmt::Display for RenderError {
         let marks = &crate::vocabulary::vocabulary().marks;
         match self {
             Self::Io => f.write_str(marks.get("render_unreadable")),
-            Self::NotPdf => f.write_str(marks.get("render_not_pdf")),
+            Self::NotPdf => f.write_str(marks.get("picture_not_pdf")),
             Self::PasswordProtected => f.write_str(marks.get("render_password_protected")),
             Self::NoSuchPage { pages } => {
-                f.write_str(&marks.format("render_no_such_page", &[("pages", &pages.to_string())]))
+                f.write_str(&marks.format("picture_no_such_page", &[("pages", &pages.to_string())]))
             }
-            Self::NoPixels => f.write_str(marks.get("render_no_pixels")),
-            Self::RenderFailed => f.write_str(marks.get("render_failed")),
+            Self::NoPixels => f.write_str(marks.get("picture_no_pixels")),
+            Self::RenderFailed => f.write_str(marks.get("picture_failed")),
             Self::Internal => f.write_str(crate::contained::engine_failed()),
-            Self::InvalidSize => f.write_str(marks.get("render_invalid_size")),
+            Self::InvalidSize => f.write_str(marks.get("picture_invalid_size")),
         }
     }
 }
@@ -302,7 +304,7 @@ fn reason(key: &str) -> String {
 
 /// The whole file's bytes. A directory, a FIFO or a device is not a document: refusing it here
 /// keeps a caller from blocking on a stream that has no end.
-fn read_whole(path: &Path) -> std::io::Result<Vec<u8>> {
+pub(crate) fn read_whole(path: &Path) -> std::io::Result<Vec<u8>> {
     let metadata = std::fs::metadata(path)?;
     if !metadata.is_file() {
         return Err(std::io::Error::new(
@@ -404,8 +406,15 @@ fn render_one(page: &Page<'_>, long_side: f32, max_scale: f32) -> Result<Picture
 
 /// One page's pixels as an RGBA image: its visible area on white, scaled so its long side is
 /// `long_side` and never enlarged past `max_scale`.
+///
+/// The render half draws its own pages with this same function, so one rasteriser serves the reading
+/// and the renderer and a page of a document renders the same way either half asks for it.
 #[must_use]
-fn render_page_image(page: &Page<'_>, long_side: f32, max_scale: f32) -> Option<RgbaImage> {
+pub(crate) fn render_page_image(
+    page: &Page<'_>,
+    long_side: f32,
+    max_scale: f32,
+) -> Option<RgbaImage> {
     // `render_dimensions` clamps zero-area pages, so the long side is at least one and the scale
     // stays finite.
     let (width, height) = page.render_dimensions();
@@ -435,6 +444,11 @@ fn render_page_image(page: &Page<'_>, long_side: f32, max_scale: f32) -> Option<
 /// The result of converting one document: the readers' own answer, before it is named and its
 /// pictures are digested for the caller.
 #[derive(Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one variant carries the reading's whole answer and the others are its refusal; a \
+              caller reads it once, so boxing its parts would only allocate per page"
+)]
 pub(crate) enum DocOutcome {
     /// Text was extracted. `text` may be empty when the document has no text layer; `images` are
     /// files written into `out_dir`; `notes` are non-fatal, already user-facing; `unshown` is the
@@ -1085,7 +1099,7 @@ fn page_ranges(pages: &[usize]) -> String {
 /// Embedded images left out of the conversion, by cause: a format this pipeline does not
 /// convert, one whose image could not be read or written, and one over the shared raster
 /// envelope. Content of a kind a reading never shows — a video, a drawing — is counted for
-/// [`crate::reading::output::Unshown`] instead.
+/// [`crate::unshown::Unshown`] instead.
 #[derive(Default, Clone, Copy)]
 pub(crate) struct SkippedImages {
     /// Format, colour space or bit depth this module does not convert.
@@ -1358,9 +1372,10 @@ fn embedded_image_jpeg(stream: &Stream<'_>) -> Result<Vec<u8>, SkipReason> {
         .ok_or(SkipReason::Unsupported)?;
     // A declared size an image decoder could not allocate is a header bomb rather than a big
     // image, checked before the passthrough below.
-    if width > crate::support::raster_decode_max_dimension_px()
-        || height > crate::support::raster_decode_max_dimension_px()
-    {
+    let largest = crate::vocabulary::vocabulary()
+        .reading
+        .raster_decode_max_dimension_px;
+    if width > largest || height > largest {
         return Err(SkipReason::Oversized);
     }
     // Checked before the colour space and bit depth: a JPEG whose dictionary misnames either is
@@ -1397,7 +1412,11 @@ fn embedded_image_jpeg(stream: &Stream<'_>) -> Result<Vec<u8>, SkipReason> {
         * u64::from(colour.components())
         * u64::from(bits_per_component)
         / 8;
-    if declared_samples > crate::support::raster_decode_max_alloc_bytes() {
+    if declared_samples
+        > crate::vocabulary::vocabulary()
+            .reading
+            .raster_decode_max_alloc_bytes
+    {
         return Err(SkipReason::Oversized);
     }
     let decoded = stream

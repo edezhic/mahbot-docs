@@ -36,6 +36,7 @@
 //!   (`#.#####` shows 1 as `1.`).
 
 use std::cmp::Ordering;
+use std::fmt::Write as _;
 
 /// Excel's own limit: a longer code is not a format the application could store.
 fn max_format_length() -> usize {
@@ -198,6 +199,96 @@ pub(crate) fn display(value: f64, id: u32, code: Option<&str>, date1904: bool) -
         return None;
     }
     Some(rendered.to_owned())
+}
+
+/// The same value, spelled the way the format code itself spells it: a date section's own order,
+/// separators and run lengths, so `dd/mm/yy` is `02/01/26` and `yyyy-mm-dd` is `2026-01-02`.
+///
+/// [`display`] keeps the reading's one civil spelling, which the reading's own output is frozen to.
+/// A page draws what the document states, so the renderer asks for this spelling instead; the two
+/// share this module's tokenizer and its date rules and differ only in how a date is written.
+///
+/// `None` when the section is not a date, or names something this spelling does not write — a
+/// month's name, an am/pm marker, an elapsed unit — so the caller falls back to [`display`].
+#[must_use]
+pub(crate) fn display_stated(
+    value: f64,
+    id: u32,
+    code: Option<&str>,
+    date1904: bool,
+) -> Option<String> {
+    if !value.is_finite() || !(0.0..=VALUE_LIMIT).contains(&value) {
+        return None;
+    }
+    let format = match code {
+        Some("") => return None,
+        Some(code) => code,
+        None => builtin(id)?,
+    };
+    if format.len() > max_format_length() {
+        return None;
+    }
+    let sections = split_sections(format)?;
+    let Selection { body, .. } = select_section(&sections, value)?;
+    let tokens = tokenize(body);
+    if !is_date(&tokens) {
+        return None;
+    }
+    let places = fractional_second_places(&tokens);
+    if places > max_sub_second_digits() {
+        return None;
+    }
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "a value bounded by VALUE_LIMIT has a day count that fits i64"
+    )]
+    let mut days = value.trunc() as i64;
+    let (mut seconds, _) = split_seconds(value.fract() * 86_400.0, places);
+    if seconds >= 86_400 {
+        seconds -= 86_400;
+        days += 1;
+    }
+    let (year, month, day) = civil_date(days, date1904)?;
+    let hour = seconds / 3_600;
+    let minute = (seconds % 3_600) / 60;
+    let second = seconds % 60;
+    let mut out = String::new();
+    for (index, token) in tokens.iter().enumerate() {
+        match token {
+            Tok::Date(Unit::Year, run) if *run >= 3 => {
+                let _ = write!(out, "{year:04}");
+            }
+            Tok::Date(Unit::Year, run) => push_unit(&mut out, year % 100, *run),
+            Tok::Date(Unit::Month, run) if minute_role(&tokens, index) => {
+                push_unit(&mut out, minute, *run);
+            }
+            // A month's own name is not a spelling this writer states.
+            Tok::Date(Unit::Month, run) if *run >= 3 => return None,
+            Tok::Date(Unit::Month, run) => push_unit(&mut out, i64::from(month), *run),
+            Tok::Date(Unit::Day, run) => push_unit(&mut out, i64::from(day), *run),
+            Tok::Date(Unit::Hour, run) => push_unit(&mut out, hour, *run),
+            Tok::Date(Unit::Minute, run) => push_unit(&mut out, minute, *run),
+            Tok::Date(Unit::Second, run) => push_unit(&mut out, second, *run),
+            Tok::Date(Unit::AmPm, _) | Tok::Elapsed(_) => return None,
+            // The format's own literal text, in the order it stands.
+            Tok::Raw(character) | Tok::Lit(character) => out.push(*character),
+            Tok::Slash => out.push('/'),
+            Tok::Dot => out.push('.'),
+            Tok::Comma => out.push(','),
+            _ => {}
+        }
+    }
+    let out = out.trim();
+    (!out.is_empty()).then(|| out.to_owned())
+}
+
+/// One date unit at the width its run states: a run of two pads to two digits, a run of one does not.
+fn push_unit(out: &mut String, value: i64, run: usize) {
+    if run >= 2 {
+        let _ = write!(out, "{value:02}");
+    } else {
+        let _ = write!(out, "{value}");
+    }
 }
 
 /// Split on top-level `;`; `None` beyond four sections. A `;` inside `"..."`, escaped
@@ -489,7 +580,9 @@ enum Tok {
     Star,
     /// `E+`/`E-`/`e+`/`e-`.
     ExpSign(char),
-    Date(Unit),
+    /// A date unit and the length of the run that states it (`yy` is a run of two), so a page can
+    /// spell the unit at the width the document states.
+    Date(Unit, usize),
     /// An elapsed `[h]`/`[m]`/`[s]`.
     Elapsed(Unit),
 }
@@ -568,11 +661,11 @@ fn tokenize(section: &str) -> Vec<Tok> {
             's' | 'S' => push_date_run(&chars, &mut index, Unit::Second, &mut tokens),
             'm' | 'M' => push_date_run(&chars, &mut index, Unit::Month, &mut tokens),
             'a' | 'A' if starts_with_ignore_ascii_case(&chars, index, "am/pm") => {
-                tokens.push(Tok::Date(Unit::AmPm));
+                tokens.push(Tok::Date(Unit::AmPm, 5));
                 index += 5;
             }
             'a' | 'A' if starts_with_ignore_ascii_case(&chars, index, "a/p") => {
-                tokens.push(Tok::Date(Unit::AmPm));
+                tokens.push(Tok::Date(Unit::AmPm, 3));
                 index += 3;
             }
             'e' | 'E' if matches!(chars.get(index + 1), Some('+' | '-')) => {
@@ -590,11 +683,12 @@ fn tokenize(section: &str) -> Vec<Tok> {
 
 fn push_date_run(chars: &[char], index: &mut usize, unit: Unit, tokens: &mut Vec<Tok>) {
     let letter = chars[*index].to_ascii_lowercase();
-    tokens.push(Tok::Date(unit));
+    let start = *index;
     *index += 1;
     while *index < chars.len() && chars[*index].to_ascii_lowercase() == letter {
         *index += 1;
     }
+    tokens.push(Tok::Date(unit, *index - start));
 }
 
 fn starts_with_ignore_ascii_case(chars: &[char], at: usize, needle: &str) -> bool {
@@ -634,7 +728,7 @@ fn currency_symbol(inner: &str) -> &str {
 fn is_date(tokens: &[Tok]) -> bool {
     tokens
         .iter()
-        .any(|tok| matches!(tok, Tok::Date(_) | Tok::Elapsed(_)))
+        .any(|tok| matches!(tok, Tok::Date(..) | Tok::Elapsed(_)))
 }
 
 /// And whether a minute-role `m`, a day, a month or a year is present — the shape the
@@ -659,20 +753,20 @@ fn date_shape(tokens: &[Tok]) -> DateShape {
     let mut shape = DateShape::default();
     for (index, tok) in tokens.iter().enumerate() {
         match tok {
-            Tok::Date(Unit::Month) if minute_role(tokens, index) => {
+            Tok::Date(Unit::Month, _) if minute_role(tokens, index) => {
                 shape.has_time = true;
                 shape.minute = true;
             }
-            Tok::Date(Unit::Year | Unit::Month | Unit::Day) => shape.has_date = true,
-            Tok::Date(Unit::Hour) => {
+            Tok::Date(Unit::Year | Unit::Month | Unit::Day, _) => shape.has_date = true,
+            Tok::Date(Unit::Hour, _) => {
                 shape.has_time = true;
                 shape.hour = true;
             }
-            Tok::Date(Unit::Second) => {
+            Tok::Date(Unit::Second, _) => {
                 shape.has_time = true;
                 shape.second = true;
             }
-            Tok::Date(Unit::AmPm) => shape.has_time = true,
+            Tok::Date(Unit::AmPm, _) => shape.has_time = true,
             Tok::Elapsed(Unit::Hour) => {
                 shape.has_time = true;
                 shape.hour = true;
@@ -696,18 +790,18 @@ fn date_shape(tokens: &[Tok]) -> DateShape {
 
 /// It follows an hour, or precedes a second, else it is a month.
 fn minute_role(tokens: &[Tok], index: usize) -> bool {
-    let is_date_token = |tok: &&Tok| matches!(tok, Tok::Date(_) | Tok::Elapsed(_));
+    let is_date_token = |tok: &&Tok| matches!(tok, Tok::Date(..) | Tok::Elapsed(_));
     let preceding = tokens[..index].iter().rev().find(is_date_token);
     if matches!(
         preceding,
-        Some(Tok::Date(Unit::Hour) | Tok::Elapsed(Unit::Hour))
+        Some(Tok::Date(Unit::Hour, _) | Tok::Elapsed(Unit::Hour))
     ) {
         return true;
     }
     let following = tokens[index + 1..].iter().find(is_date_token);
     matches!(
         following,
-        Some(Tok::Date(Unit::Second) | Tok::Elapsed(Unit::Second))
+        Some(Tok::Date(Unit::Second, _) | Tok::Elapsed(Unit::Second))
     )
 }
 
@@ -809,9 +903,9 @@ fn fractional_second_places(tokens: &[Tok]) -> usize {
     match tokens[..dot]
         .iter()
         .rev()
-        .find(|tok| matches!(tok, Tok::Date(_) | Tok::Elapsed(_)))
+        .find(|tok| matches!(tok, Tok::Date(..) | Tok::Elapsed(_)))
     {
-        Some(Tok::Date(Unit::Second) | Tok::Elapsed(Unit::Second)) => places,
+        Some(Tok::Date(Unit::Second, _) | Tok::Elapsed(Unit::Second)) => places,
         _ => 0,
     }
 }

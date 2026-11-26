@@ -1,11 +1,21 @@
 //! The `MahBot` document engine: read documents, produce and edit them, and the vocabulary both
 //! halves share.
 //!
-//! Three things cross this crate's surface as engine behaviour:
+//! Four things cross this crate's surface as engine behaviour:
 //!
 //! - [`reading`]: deciding what a file is (content first, over the whole file), reading it, and
 //!   rendering one page of a PDF to a picture. A caller needs all three and none of them makes it
 //!   know formats.
+//! - [`render`]: one call turns a document of any family into its pages. Each page carries its own
+//!   size in points and, unless the page could not be produced, a picture of it at one stated long
+//!   side, together with the lines, pictures and faces the renderer placed — the description the
+//!   outside comparison reads. A document that cannot be read is refused with a class; a document
+//!   that reads but holds something the renderer cannot draw still renders, and the gap is named on
+//!   the page that could not draw it or in the document's own report, in the reading half's own
+//!   shape — a part no page draws being the document's loss, and a line stating what *was* drawn
+//!   being a note rather than either report. The renderer is native and deterministic: it draws
+//!   with the face the crate carries and consults no outside program. The legacy binary formats are
+//!   read but not rendered; that exclusion is a stated gap, not an omission.
 //! - [`operation`]: one call carries out one of the thirteen operations and answers with the
 //!   outcome and the files it wrote. The request is the operation's name, its values as data, and
 //!   the caller's destination; the engine appends the extension, derives the names when one call
@@ -24,10 +34,10 @@
 //!   workbook and presentation edits, the five PDF page actions, the three PDF drawing actions, all
 //!   four families of `create`, and all three OOXML families of `fill_template` — and the dispatch
 //!   reads that statement and nothing else.
-//! - [`vocabulary`]: every reading bound the engine enforces, every mark it prints, who enforces
-//!   and who prints each one, the enumerations it shares between reading and producing, and the
-//!   embedded font the producing half draws with — one file, embedded at build time, read from
-//!   there rather than restated in code.
+//! - [`vocabulary`]: every reading and rendering bound the engine enforces, every mark it prints,
+//!   who enforces and who prints each one, the enumerations it shares between reading and
+//!   producing, and the embedded font the producing half draws with — one file, embedded at build
+//!   time, read from there rather than restated in code.
 //!
 //! This documentation calls the behaviour the crate was built to match **the reference**; the
 //! workspace's `INVENTORY.md` defines the word. For this crate it is the product's own readers for
@@ -99,7 +109,9 @@ mod contained;
 mod detect;
 pub mod operation;
 pub mod reading;
+pub mod render;
 mod support;
+mod unshown;
 pub mod vocabulary;
 mod writing;
 

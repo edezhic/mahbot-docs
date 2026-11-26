@@ -81,5 +81,20 @@
   },
   "controls": {
     "element_moved_px": 24
+  },
+  "office": {
+    "page_size_pt": 1.0,
+    "line_position_tolerance_pt": 2.0,
+    "line_size_tolerance_pt": 0.5,
+    "picture_position_tolerance_pt": 2.0,
+    "picture_size_tolerance_pt": 2.0,
+    "symbol_faces": [
+      "OpenSymbol",
+      "Symbol",
+      "Wingdings",
+      "Wingdings 2",
+      "Wingdings 3",
+      "Webdings"
+    ]
   }
 }

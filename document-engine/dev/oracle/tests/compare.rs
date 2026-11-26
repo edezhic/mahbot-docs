@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use document_engine::vocabulary::Family;
 
@@ -16,7 +16,8 @@ use crate::oracle::chain::Assets;
 use crate::oracle::compare::cases::{ASSETS, CASES, Class};
 use crate::oracle::compare::decisions::{Category, Decision, Decisions};
 use crate::oracle::compare::metric::{
-    Attribution, Calibration, DivergenceKind, compare_document, controls,
+    Attribution, Calibration, Cause, DivergenceKind, Occurrences, PageState, compare_document,
+    controls,
 };
 use crate::oracle::compare::render::{Drawn, SideDocument, SideState, render_engine};
 use crate::oracle::compare::report::Identity;
@@ -45,11 +46,13 @@ fn prepared(decisions: Decisions) -> Prepared {
     );
     Prepared {
         record,
-        library: PathBuf::new(),
-        helper: crate::oracle::pdfium::Helper::ThisBinary,
+        // The tests drive the pipeline with a renderer of their own: `run`, the one path that locates
+        // a library and a helper, is reached only where `prepare` refuses.
+        outside: None,
         calibration,
         decisions,
         identity,
+        pdf_absence: None,
     }
 }
 
@@ -83,7 +86,20 @@ fn the_committed_records_are_consistent() {
         let key = decision.key.as_str();
         let mut parts = key.split('/');
         let family = parts.next().unwrap_or_default();
-        let kind = parts.next_back().unwrap_or_default();
+        // A key ends in a page, a kind and, for a text or picture divergence, what within it.
+        let mut tail = parts.next_back().unwrap_or_default();
+        let sub = if matches!(tail, "missing" | "moved" | "extra") {
+            let sub = tail;
+            tail = parts.next_back().unwrap_or_default();
+            Some(sub)
+        } else {
+            None
+        };
+        assert!(
+            sub.is_none() || matches!(tail, "text" | "picture"),
+            "{key}: only a text or picture divergence states what within it"
+        );
+        let kind = tail;
         let page = parts.next_back().unwrap_or_default();
         let name = parts.collect::<Vec<_>>().join("/");
         assert!(
@@ -209,16 +225,44 @@ fn a_stale_decision_is_reported_and_a_live_one_is_used() {
         schema: 1,
         decisions: vec![Decision {
             key: "pdf/text/1/pixels".to_string(),
+            count: 1,
+            cause: Cause::Unexplained,
             category: Category::OutsideQuirk,
             reason: "a decision for this test".to_string(),
         }],
     };
-    let (used, stale) = decisions.check(&BTreeSet::new());
+    let (used, stale) = decisions.check(&BTreeMap::new());
     assert!(used.is_empty());
     assert_eq!(stale, ["pdf/text/1/pixels"]);
-    let (used, stale) = decisions.check(&BTreeSet::from(["pdf/text/1/pixels".to_string()]));
+    let (used, stale) = decisions.check(&BTreeMap::from([(
+        "pdf/text/1/pixels".to_string(),
+        occurrences(1, Cause::Unexplained),
+    )]));
     assert_eq!(used.len(), 1);
     assert!(stale.is_empty());
+    // The same key with a different number of divergences is a page the reviewer did not see.
+    let (used, stale) = decisions.check(&BTreeMap::from([(
+        "pdf/text/1/pixels".to_string(),
+        occurrences(2, Cause::Unexplained),
+    )]));
+    assert!(used.is_empty());
+    assert_eq!(stale.len(), 1, "{stale:?}");
+    // The same key with the same count and another cause is another finding: the decision accepts
+    // a placement difference and the run now shows the words themselves changed.
+    let (used, stale) = decisions.check(&BTreeMap::from([(
+        "pdf/text/1/pixels".to_string(),
+        occurrences(1, Cause::WordsAgree),
+    )]));
+    assert!(used.is_empty());
+    assert_eq!(stale.len(), 1, "{stale:?}");
+    assert!(stale[0].contains("words-agree"), "{stale:?}");
+}
+
+/// One key's divergences, all of them of one cause.
+fn occurrences(count: u32, cause: Cause) -> Occurrences {
+    let mut causes = std::collections::BTreeSet::new();
+    causes.insert(cause.as_str());
+    Occurrences { count, causes }
 }
 
 #[test]
@@ -384,6 +428,8 @@ fn run_comparison(area: &TempArea, outside: Outside) -> (String, Vec<(String, Ve
         decisions: if outside == Outside::Diverge {
             vec![Decision {
                 key: format!("{}/1/dimension", CASES[0].id),
+                count: 1,
+                cause: Cause::Unexplained,
                 category: Category::EngineDefect,
                 reason: "a decision this test records".to_string(),
             }]
@@ -600,4 +646,434 @@ fn a_second_run_gives_the_same_report_and_evidence() {
             );
         }
     }
+}
+
+// ── the Office half: the engine's renderer against the committed record ─────────────────────────
+
+/// The Office tolerances the committed calibration states.
+fn tolerances() -> crate::oracle::compare::metric::OfficeTolerances {
+    calibration().office.clone()
+}
+
+/// One corpus document, by id.
+fn corpus_document(id: &str) -> &'static crate::oracle::corpus::Document {
+    crate::oracle::corpus::documents()
+        .iter()
+        .find(|document| document.id == id)
+        .expect("a corpus document the record covers")
+}
+
+/// The committed record entry for one corpus document.
+fn entry(id: &str) -> crate::oracle::record::DocumentRecord {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("dev/oracle/record/documents")
+        .join(id)
+        .join("document.json");
+    serde_json::from_str(&std::fs::read_to_string(&path).expect("the committed record entry"))
+        .expect("a record entry this tool can read")
+}
+
+/// Build and render one corpus document with the engine's own writer and renderer.
+fn rendered(id: &str) -> document_engine::render::Rendered {
+    let area = TempArea::new("compare-office").unwrap();
+    let assets = Assets::write(&area.path().join("assets"), crate::oracle::corpus::ASSETS).unwrap();
+    let document = corpus_document(id);
+    let built = crate::oracle::engine::build(document, area.path(), &assets).unwrap();
+    document_engine::render::render(&built.path, document.name())
+}
+
+/// Compare one corpus document with an entry a test may have changed.
+fn compare_with(
+    id: &str,
+    entry: Option<&crate::oracle::record::DocumentRecord>,
+) -> crate::oracle::compare::metric::DocumentOutcome {
+    crate::oracle::compare::office::compare_entry(
+        corpus_document(id),
+        entry,
+        &rendered(id),
+        &tolerances(),
+    )
+}
+
+/// Every divergence of one kind.
+fn kinds(
+    outcome: &crate::oracle::compare::metric::DocumentOutcome,
+    kind: DivergenceKind,
+) -> Vec<&crate::oracle::compare::metric::Divergence> {
+    outcome
+        .divergences
+        .iter()
+        .filter(|divergence| divergence.kind == kind)
+        .collect()
+}
+
+/// The committed entry with the engine's own pages in place of the outside suite's: both sides then
+/// state the same thing, so a test of the comparison's mechanism does not depend on the engine
+/// matching the outside suite's face metrics.
+fn own_entry(id: &str) -> crate::oracle::record::DocumentRecord {
+    use crate::oracle::record::{LineRecord, PageRecord, PictureRecord};
+    let mut entry = entry(id);
+    let document_engine::render::Rendered::Pages { pages, .. } = rendered(id) else {
+        panic!("{id} renders");
+    };
+    entry.pages.pages = pages
+        .into_iter()
+        .map(|page| PageRecord {
+            page: u32::try_from(page.number).expect("a page number"),
+            width_pt: page.width_pt,
+            height_pt: page.height_pt,
+            faces: page.faces,
+            lines: page
+                .lines
+                .into_iter()
+                .map(|line| LineRecord {
+                    text: line.text,
+                    x_pt: line.x_pt,
+                    y_pt: line.y_pt,
+                    size_pt: line.size_pt,
+                })
+                .collect(),
+            pictures: page
+                .pictures
+                .into_iter()
+                .map(|picture| PictureRecord {
+                    x_pt: picture.x_pt,
+                    y_pt: picture.y_pt,
+                    width_pt: picture.width_pt,
+                    height_pt: picture.height_pt,
+                })
+                .collect(),
+        })
+        .collect();
+    entry
+}
+
+#[test]
+fn an_office_document_the_record_agrees_with_compares_cleanly() {
+    let entry = own_entry("docx/picture");
+    let outcome = compare_with("docx/picture", Some(&entry));
+    assert_eq!(outcome.document, "docx/picture");
+    assert_eq!(outcome.family, Family::Docx);
+    assert_eq!(outcome.engine_pages, Some(1));
+    assert_eq!(outcome.outside_pages, Some(1));
+    assert_eq!(outcome.pages.len(), 1);
+    assert_eq!(outcome.pages[0].outcome, PageState::Pass);
+    assert!(outcome.divergences.is_empty(), "{:?}", outcome.divergences);
+    assert!(outcome.mechanism_failures.is_empty());
+    assert!(outcome.not_compared.is_empty());
+}
+
+#[test]
+fn a_recorded_line_the_record_no_longer_holds_is_a_text_divergence() {
+    let mut entry = entry("docx/picture");
+    entry.pages.pages[0]
+        .lines
+        .retain(|line| line.text != "Below the picture.");
+    let outcome = compare_with("docx/picture", Some(&entry));
+    let texts = kinds(&outcome, DivergenceKind::Text);
+    assert_eq!(texts.len(), 1, "{:?}", outcome.divergences);
+    assert!(
+        texts[0].detail.contains("Below the picture."),
+        "{}",
+        texts[0].detail
+    );
+    assert_eq!(texts[0].page, Some(1));
+    assert_eq!(texts[0].key, "docx/picture/1/text/extra");
+    assert_eq!(outcome.pages[0].outcome, PageState::Divergence);
+}
+
+#[test]
+fn a_recorded_line_that_moved_beyond_the_tolerance_is_a_text_divergence() {
+    let mut entry = entry("docx/picture");
+    let line = entry.pages.pages[0]
+        .lines
+        .iter_mut()
+        .find(|line| line.text == "Below the picture.")
+        .expect("the record holds the line");
+    line.y_pt += 40.0;
+    let outcome = compare_with("docx/picture", Some(&entry));
+    let texts = kinds(&outcome, DivergenceKind::Text);
+    assert_eq!(texts.len(), 1, "{:?}", outcome.divergences);
+    assert!(
+        texts[0].detail.contains("Below the picture."),
+        "{}",
+        texts[0].detail
+    );
+    assert!(
+        texts[0].detail.contains("the engine draws it at"),
+        "a moved line says where each side put it: {}",
+        texts[0].detail
+    );
+}
+
+#[test]
+fn a_recorded_picture_the_record_no_longer_holds_is_a_picture_divergence() {
+    let mut entry = entry("docx/picture");
+    entry.pages.pages[0].pictures.clear();
+    let outcome = compare_with("docx/picture", Some(&entry));
+    let pictures = kinds(&outcome, DivergenceKind::Picture);
+    assert_eq!(pictures.len(), 1, "{:?}", outcome.divergences);
+    assert!(
+        pictures[0].detail.contains("the engine draws a picture"),
+        "{}",
+        pictures[0].detail
+    );
+    assert_eq!(pictures[0].key, "docx/picture/1/picture/extra");
+}
+
+#[test]
+fn a_recorded_page_size_beyond_the_tolerance_is_a_page_size_divergence() {
+    let mut entry = entry("docx/picture");
+    entry.pages.pages[0].width_pt += 10.0;
+    let outcome = compare_with("docx/picture", Some(&entry));
+    let sizes = kinds(&outcome, DivergenceKind::PageSize);
+    assert_eq!(sizes.len(), 1, "{:?}", outcome.divergences);
+    assert!(sizes[0].detail.contains("605.304"), "{}", sizes[0].detail);
+    assert!(sizes[0].detail.contains("595.300"), "{}", sizes[0].detail);
+    assert_eq!(sizes[0].key, "docx/picture/1/page-size");
+}
+
+#[test]
+fn a_recorded_page_size_within_the_tolerance_is_not_a_divergence() {
+    let mut entry = own_entry("docx/picture");
+    entry.pages.pages[0].width_pt += tolerances().page_size_pt / 2.0;
+    let outcome = compare_with("docx/picture", Some(&entry));
+    assert!(outcome.divergences.is_empty(), "{:?}", outcome.divergences);
+}
+
+#[test]
+fn a_corpus_document_the_record_does_not_cover_is_not_compared() {
+    let outcome = compare_with("docx/picture", None);
+    assert!(outcome.divergences.is_empty(), "{:?}", outcome.divergences);
+    assert_eq!(outcome.not_compared.len(), 1);
+    assert!(outcome.not_compared[0].page.is_none());
+    assert!(
+        outcome.not_compared[0]
+            .reason
+            .contains("no entry for docx/picture"),
+        "{}",
+        outcome.not_compared[0].reason
+    );
+    assert_eq!(outcome.engine_pages, Some(1));
+}
+
+#[test]
+fn an_engine_that_refuses_a_recorded_document_fails_the_mechanism() {
+    let entry = entry("docx/picture");
+    let refused = document_engine::render::Rendered::Refused(document_engine::operation::Failure {
+        class: "internal".to_string(),
+        reason: "the engine says no".to_string(),
+    });
+    let outcome = crate::oracle::compare::office::compare_entry(
+        corpus_document("docx/picture"),
+        Some(&entry),
+        &refused,
+        &tolerances(),
+    );
+    assert_eq!(outcome.mechanism_failures.len(), 1);
+    assert_eq!(
+        outcome.mechanism_failures[0].kind,
+        crate::oracle::compare::metric::MechanismKind::EngineRefused
+    );
+    assert!(
+        outcome.mechanism_failures[0]
+            .detail
+            .contains("docx/picture")
+    );
+}
+
+#[test]
+fn the_coverage_table_names_documents_the_corpus_declares_and_reasons_where_it_cannot() {
+    let known: BTreeSet<&str> = crate::oracle::corpus::documents()
+        .iter()
+        .map(|document| document.id)
+        .collect();
+    let rows = crate::oracle::compare::office::coverage().unwrap();
+    assert_eq!(rows.len(), crate::oracle::compare::office::COVERAGE.len());
+    for row in &rows {
+        match (&row.document, &row.reason) {
+            (Some(document), None) => assert!(known.contains(document), "{}", row.feature),
+            (None, Some(reason)) => assert!(!reason.trim().is_empty(), "{}", row.feature),
+            (None, None) => panic!("{} states neither a document nor a reason", row.feature),
+            (Some(_), Some(_)) => panic!("{} states both a document and a reason", row.feature),
+        }
+    }
+    // The legacy formats are a named exception, not a silent omission.
+    let legacy = rows
+        .iter()
+        .find(|row| row.feature.starts_with("legacy"))
+        .expect("the legacy formats are in the table");
+    assert!(legacy.document.is_none());
+    assert!(
+        legacy
+            .reason
+            .is_some_and(|reason| reason.contains("separate body of work")),
+        "{:?}",
+        legacy.reason
+    );
+}
+
+#[test]
+fn the_coverage_table_refuses_a_row_that_states_a_document_and_a_reason() {
+    let refused = crate::oracle::compare::office::checked(&[(
+        "a feature stated twice",
+        Some("docx/report"),
+        Some("a reason for the same feature"),
+    )]);
+    let error = refused.expect_err("a row stating both is refused");
+    assert!(error.contains("a feature stated twice"), "{error}");
+}
+
+#[test]
+fn the_report_names_the_office_quantities_and_no_longer_denies_a_renderer() {
+    let entry = entry("docx/picture");
+    let outcome = compare_with("docx/picture", Some(&entry));
+    let report = crate::oracle::compare::report::Report::new(
+        prepared(Decisions {
+            schema: 1,
+            decisions: Vec::new(),
+        })
+        .identity,
+        crate::oracle::compare::report::Scope::new(&[], &[], "").with_office(
+            crate::oracle::compare::OFFICE_SCOPE,
+            crate::oracle::compare::OFFICE_NOT_COMPARED,
+            crate::oracle::compare::OFFICE_DOES_NOT_PROVE,
+        ),
+        Vec::new(),
+        vec![outcome],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut out = Vec::new();
+    crate::oracle::compare::report::print(&report, &mut out);
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains(
+            "office compared: page count, page size, line text, position and size, pictures \
+             drawn, faces used"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("office not compared: face identity, glyph shapes, pixel appearance"),
+        "{text}"
+    );
+    assert!(text.contains("coverage:"), "{text}");
+    assert!(text.contains("Word headings: docx/report"), "{text}");
+    assert!(!text.contains("no page renderer"), "{text}");
+    assert!(!text.contains("has no page renderer"), "{text}");
+}
+
+#[test]
+fn a_family_the_record_covers_with_no_outcome_says_so_about_the_record() {
+    let report = crate::oracle::compare::report::Report::new(
+        prepared(Decisions {
+            schema: 1,
+            decisions: Vec::new(),
+        })
+        .identity,
+        crate::oracle::compare::report::Scope::new(&[], &[], ""),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut out = Vec::new();
+    crate::oracle::compare::report::print(&report, &mut out);
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains(
+            "docx: not compared — the record covers no Word document, so there is no outside \
+             opinion to compare the engine's pages against"
+        ),
+        "{text}"
+    );
+    assert!(!text.contains("no page renderer"), "{text}");
+}
+
+#[test]
+fn the_office_half_runs_without_the_rasteriser_and_the_pdf_half_says_why() {
+    let area = TempArea::new("compare-no-rasteriser").unwrap();
+    let mut prepared = prepared(Decisions {
+        schema: 1,
+        decisions: Vec::new(),
+    });
+    prepared.pdf_absence = Some("there is no PDFium on this machine".to_string());
+    let mut options = Options::new();
+    options.evidence = area.path().join("evidence");
+    let mut out = Vec::new();
+    let summary = match compare(&options, &prepared, &mut out, |_, _, _| {
+        panic!("the PDF half must not render a page without a rasteriser")
+    }) {
+        Ok(Ran::Compared(summary)) => summary,
+        other => {
+            panic!("a run without a rasteriser must still compare the office pages: {other:?}")
+        }
+    };
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("pdf: not compared — there is no PDFium on this machine"),
+        "{text}"
+    );
+    assert!(text.contains("office compared: page count"), "{text}");
+    assert!(summary.compared > 0, "{summary:?}");
+    assert!(!summary.failed, "{summary:?}");
+    assert_eq!(summary.pixel_pages, 0);
+}
+
+#[test]
+fn a_record_grouped_by_another_line_band_is_refused_before_a_page_is_judged() {
+    // The record's lines were grouped by the band the identity states. Judging with another band
+    // would report the grouping difference as a drawing defect, so the Office half refuses.
+    let area = TempArea::new("compare-ambient").unwrap();
+    let root = area.path().join("record");
+    std::fs::create_dir_all(&root).unwrap();
+    let committed = crate::oracle::run::record_root();
+    std::fs::copy(committed.join("fonts.conf"), root.join("fonts.conf")).unwrap();
+    let identity: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(committed.join("identity.json")).unwrap()).unwrap();
+    let mut identity = identity;
+    identity["line_band_pt"] = serde_json::json!(identity["line_band_pt"].as_f64().unwrap() + 1.0);
+    std::fs::write(
+        root.join("identity.json"),
+        serde_json::to_vec_pretty(&identity).unwrap(),
+    )
+    .unwrap();
+    match crate::oracle::compare::office::run(&tolerances(), &root) {
+        Err(Error::Refused(reason)) => assert!(
+            reason.contains("the line band is"),
+            "the refusal names the band: {reason}"
+        ),
+        other => panic!("a record grouped by another band must be refused: {other:?}"),
+    }
+}
+
+#[test]
+fn a_recorded_page_the_engine_does_not_hold_is_a_page_count_divergence() {
+    let mut entry = entry("docx/picture");
+    let mut extra = entry.pages.pages[0].clone();
+    extra.page = 2;
+    extra.lines.clear();
+    extra.pictures.clear();
+    extra.faces.clear();
+    entry.pages.pages.push(extra);
+    let outcome = compare_with("docx/picture", Some(&entry));
+    let counts = kinds(&outcome, DivergenceKind::PageCount);
+    assert_eq!(counts.len(), 1, "{:?}", outcome.divergences);
+    assert!(counts[0].page.is_none());
+    assert_eq!(counts[0].key, "docx/picture/document/page-count");
+    assert!(
+        counts[0].detail.contains("the engine holds 1 page"),
+        "{}",
+        counts[0].detail
+    );
+    assert_eq!(outcome.not_compared.len(), 1);
+    assert_eq!(outcome.not_compared[0].page, Some(2));
+    assert!(
+        outcome.not_compared[0]
+            .reason
+            .contains("the engine holds no such page"),
+        "{}",
+        outcome.not_compared[0].reason
+    );
 }

@@ -123,13 +123,17 @@ fn base(picture: &Picture) -> Vec<(&'static str, Object)> {
 /// The picture as a PDF image XObject: a JPEG is carried through as DCTDecode, a PNG's samples are
 /// decoded and written as raw samples (with an SMask when the picture has alpha). Every dictionary here
 /// is one the engine builds, so its entries are stated once, in the order the reference states them.
-pub(super) fn embed(
+pub(crate) fn embed(
     document: &mut Document,
     picture: &Picture,
     name: &str,
 ) -> Result<lopdf::ObjectId, Failure> {
     let mut entries = base(picture);
     if picture.kind == "png" {
+        // A PNG is decoded to its samples, so this is the one kind whose bytes a call allocates.
+        // The size it states is the caller's own picture, and a caller's picture is embedded as it
+        // is: the render half bounds what it will draw, and a producing call is not refused over
+        // one it used to embed.
         let repaired = rechecksummed(&picture.bytes);
         let bytes = repaired.as_deref().unwrap_or(&picture.bytes);
         let decoded = image::load_from_memory_with_format(bytes, image::ImageFormat::Png).map_err(

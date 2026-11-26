@@ -112,8 +112,8 @@ pub(crate) fn luminance(pixel: &[u8]) -> f64 {
 pub struct SidePage {
     /// Its number, counted from one.
     pub page: u32,
-    /// The outside tool's visible-area size in points. The engine exposes no page box for a PDF, so
-    /// this is context, never a compared quantity.
+    /// The outside tool's visible-area size in points. `render_page` answers no page box for a PDF,
+    /// so the PDF half has nothing to compare it with: this is context, never a compared quantity.
     pub points: Option<(f64, f64)>,
     /// What the side drew.
     pub drawn: Drawn,

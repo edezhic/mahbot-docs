@@ -170,8 +170,13 @@ pub(super) fn frame_rect(frame: &Frame, x: f64, y: f64, width: f64, height: f64)
 /// The entries a page may inherit from the page tree.
 const INHERITABLE: [&[u8]; 4] = [b"Resources", b"MediaBox", b"CropBox", b"Rotate"];
 
-/// A4 in points: the size the reference's library gives a page it makes.
-pub(super) const A4: [f64; 2] = [595.28, 841.89];
+/// A4 in points: the page a created PDF is laid out on, stated in the vocabulary's create section.
+/// It is the same paper the renderer's canvas states, and it is read from its own entry: a created
+/// document does not move when the rendering canvas does.
+pub(super) fn a4() -> [f64; 2] {
+    let create = &crate::vocabulary::vocabulary().create;
+    [create.pdf_page_width_pt, create.pdf_page_height_pt]
+}
 
 /// Where each node's `/Parent` path first states an inheritable entry, per entry: filled as pages
 /// ask, so a path named from many pages is walked once per document and inherited entry.
@@ -487,7 +492,7 @@ fn kids_of<'a>(document: &'a lopdf::Document, node: &'a Dictionary) -> Option<&'
 
 /// A document with a catalog, an empty page tree and nothing else: what a merge and a split build
 /// into. Its description is applied by [`fresh_metadata`].
-pub(super) fn fresh() -> Document {
+pub(crate) fn fresh() -> Document {
     let mut document = Document::with_version("1.7");
     let pages = document.add_object(Dictionary::from_iter([
         ("Type".to_string(), Object::Name(b"Pages".to_vec())),
@@ -531,7 +536,7 @@ fn pages_id(document: &mut Document) -> Result<ObjectId, Failure> {
 /// `/Parent` is not a page a reader can reach. The tree states its `/Kids` itself in a document this
 /// engine builds, and may name it in one it opened — a page-less file whose blank page an in-place
 /// action adds.
-pub(super) fn add_page(document: &mut Document, page: ObjectId) -> Result<(), Failure> {
+pub(crate) fn add_page(document: &mut Document, page: ObjectId) -> Result<(), Failure> {
     let internal = || Failure::engine();
     let pages = pages_id(document)?;
     let node = graph::dictionary_mut(document, page).ok_or_else(internal)?;
@@ -1394,7 +1399,7 @@ fn utf16_be(text: &str) -> Vec<u8> {
 /// in the hundreds of millions; the reference states a cross-reference stream, and the comparison
 /// normalises the index away, so a table and a stream are one document. [`serialise`] states the
 /// layout and why it is the object model's own.
-pub(super) fn save(mut document: Document, has_pages: bool) -> Result<Vec<u8>, Failure> {
+pub(crate) fn save(mut document: Document, has_pages: bool) -> Result<Vec<u8>, Failure> {
     // A page tree the catalog states in place is read by both sides, but a file that writes it back
     // that way is one no reader can follow — and that is what the reference produces from such a file.
     // The tree is adopted as an object here, so the produced file is a document a reader can open; the
@@ -1414,12 +1419,18 @@ pub(super) fn save(mut document: Document, has_pages: bool) -> Result<Vec<u8>, F
 
 /// A blank A4 page, with an empty resource dictionary and no content.
 pub(super) fn blank_page(document: &mut Document) -> ObjectId {
+    let [width, height] = a4();
+    blank_page_sized(document, width, height)
+}
+
+/// A blank page of the stated size in points, with an empty resource dictionary and no content.
+pub(crate) fn blank_page_sized(document: &mut Document, width: f64, height: f64) -> ObjectId {
     document.add_object(Dictionary::from_iter([
         ("Type".to_string(), Object::Name(b"Page".to_vec())),
         (
             "MediaBox".to_string(),
             Object::Array(
-                [0.0, 0.0, A4[0], A4[1]]
+                [0.0, 0.0, width, height]
                     .into_iter()
                     .map(object_number)
                     .collect(),

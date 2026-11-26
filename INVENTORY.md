@@ -4,8 +4,8 @@ This folder holds everything in the MahBot product that deals with documents: th
 readers, the Rust↔JavaScript glue, the prompts, and reference copies of the shared product files that
 carry document code. It also holds `document-engine`, the one crate of the root workspace: the engine
 the product will depend on, the gate that judges it, and the development oracle that records what
-LibreOffice lays out for the documents the engine writes and compares the engine's own PDF pages
-against PDFium.
+LibreOffice lays out for the documents the engine writes and compares the engine's Office pages
+against that record, and its PDF pages against PDFium.
 
 Copied from `/Users/egordezic/Desktop/mahbot` on 2026-11-06. The product repository
 was not modified.
@@ -35,7 +35,7 @@ gate and the development oracle are development-only targets of it — `dev/gate
 | Target | What it is |
 |---|---|
 | `document-engine/dev/gate.rs` | the gate: the engine against what was recorded last time |
-| `document-engine/dev/oracle_target.rs` | the development oracle: what LibreOffice lays out for the documents the engine writes, and the engine's PDF pages compared against PDFium |
+| `document-engine/dev/oracle_target.rs` | the development oracle: what LibreOffice lays out for the documents the engine writes, the engine's Office pages compared against that record on content, and the engine's PDF pages compared against PDFium |
 
 ## Layout
 
@@ -53,8 +53,9 @@ engine's own writer and reader. Two files remain because the product's own sourc
 ### `src/` — the product's Rust side, the behaviour the crate is held to
 
 These are the product's own sources, copied verbatim. The reader half is no longer only here: it
-now lives in `document-engine/` as well, and `document-engine/dev/reference_sources/` holds the byte-for-byte
-copies the gate compiles. This directory remains the original those copies are checked against.
+now lives in `document-engine/` as well, and `document-engine/dev/reference_sources/` holds the
+byte-for-byte copies the gate compiles. This directory remains the original those copies are checked
+against.
 
 | Path | What it is |
 |---|---|
@@ -98,11 +99,10 @@ place. Document code inside them:
   `document-engine/assets/docx-layout/`, and the embedded font is the existing exception; none of
   them is a sample document.
 - No sample document is recorded either, but `document-engine/dev/oracle/record/` does hold binary
-  PDFs. They are a
-  **captured artefact**: a sample document is an input the writer is judged on, and these are an
-  outside producer's output for the writer's own documents, kept so the pages can be rasterised and
-  reviewed later. Reading them needs nothing but the workspace, and nothing in the engine's build or
-  tests reads them.
+  PDFs. They are a **captured artefact**: a sample document is an input the writer is judged on, and
+  these are an outside producer's output for the writer's own documents, kept so the pages can be
+  rasterised and reviewed later. Reading them needs nothing but the workspace, and nothing in the
+  engine's build or tests reads them.
 - No settings: the document part has no config key, no migration and no Settings entry.
 - Nothing in the tree needs a JavaScript runtime, and no build step reads a JavaScript file:
   the kit that did retired with its bundle, its generator and its lockfile.
@@ -132,25 +132,61 @@ tests. See `document-engine/dev/README.md` for the model, the engine boundary, t
 bounds and how to run it.
 
 The **oracle** is a report, not a gate: it records what LibreOffice lays out for the Office documents
-the engine writes, and compares the engine's drawing of a PDF page against PDFium, reporting every
-other family as not compared with its reason. See `document-engine/dev/oracle/README.md`.
+the engine writes, and compares the engine's pages against two outside opinions — the Office pages
+against that record, on content (page count, page size, every line's text, position and size, the
+pictures drawn and whether a page drew text), and the engine's PDF pages against PDFium, on
+pixels. A family or a document it cannot compare is reported as not compared, with its reason. See
+`document-engine/dev/oracle/README.md`.
 
 Nothing in the product was changed to build either.
 
 ## `document-engine/` — the document engine crate (new work, not copied from the product)
 
-The crate the product will depend on instead of its own document modules. It owns three things and
-nothing of the tool interface: reading (`detect`, `read`, `render_page`), operations (one
-`execute` call for the thirteen operations, returning the neutral outcome the gate records), and
-the vocabulary (`vocabulary.json` plus the embedded font; a mark the `rules` section states is read
-from there at load time, never copied). It depends on nothing in this workspace but itself: the gate
-and the oracle are its own development-only targets.
+The crate the product will depend on instead of its own document modules. It owns four things and
+nothing of the tool interface: reading (`detect`, `read`, `render_page`), rendering (one `render`
+call turning any of the four families into its pages, each with its size in points and a picture,
+plus the description and the named gaps), operations (one `execute` call for the thirteen
+operations, returning the neutral outcome the gate records), and the vocabulary (`vocabulary.json`
+plus the embedded font; a mark the `rules` section states is read from there at load time, never
+copied). It depends on nothing in this workspace but itself: the gate and the oracle are its own
+development-only targets.
 
 The reading half has landed: whole-file content-first detection, every family the product reads
 (PDF, Word, Excel, PowerPoint and the legacy binary formats), the pictures, notes and unshown report,
 and the flags that tell a document with no text layer from one that could not be read. It applies
 no input-size bound and clamps no page size or scale a caller asked for; it never overwrites the
 file it reads.
+
+The rendering half has landed beside it: `src/render/` lays a Word document, a workbook and a
+presentation out as their pages with their own geometry, and a PDF keeps the pages it already has.
+The page is built in points, drawn with the face the crate carries and rasterised by the same
+renderer the reading uses; it never consults a host font or an outside program, so the same document
+draws the same picture on any machine. Text is laid out in that same face, never in a table
+describing another one, so a run is placed where the glyphs that are drawn put it; a bullet or a mark
+the face has no glyph for is drawn as the shape it names, and a character outside the face's
+repertoire is named through the answer's unsupported-character channel — a page of the engine's own
+output shows no placeholder box.
+
+The report of what was not drawn obeys one rule, stated once in `src/render/mod.rs`.
+
+A value cut by the page's own edge is named once: by the column line the workbook arm prints on the
+page it falls on for a value in a column the sheet states wider than the printable area, and by the
+finishing pass for any other run that lands outside the page, which subtracts the runs the arm's own
+line already named. A page that could not be produced is named rather than passed off as empty, and
+the report also names a slide the deck hides or its list does not name, a sheet the workbook hides or
+holds no readable part for, and a PDF page the structure reader declined.
+
+A line that states what a page *drew* where the document stated it differently — a run at a smaller
+size, a page's own margins, a placeholder drawn where its kind puts it, a slide size one axis of which
+the deck left out, a paper code this renderer does not know, a section's columns, an anchor resolved to
+the text's own place — is a note rather than a loss, and joins the answer's `notes` instead of either
+report: the report of what was not drawn holds losses only, and its name is its contract.
+
+The legacy binary formats are read but not rendered; that exclusion is a stated gap. The page,
+picture, item and picture-byte bounds, the names one report line lists, the elements a part may hold,
+the tabs a paragraph may state, and the canvas a document stating no page is drawn on, are in
+`vocabulary.json`; the renderer enforces them rather than restating them, and a created PDF states
+its own page there so neither canvas can move the other.
 
 The writing half is landing one (operation, family) pair at a time. For a package, `src/writing/`
 opens it, changes the parts an edit names and writes it back, carrying every part the edit does not
@@ -275,18 +311,20 @@ number and contents entry a created document shows.
 ## `document-engine/dev/oracle/` — the development oracle (new work, not copied from the product)
 
 The gate above judges **files**. It cannot say what a page of a document this system produces
-looks like, and the engine has no page renderer for Word, PowerPoint or Excel. This target has two
-explicit, development-only parts:
+looks like. This target has two explicit, development-only parts:
 
 - the **record** — what LibreOffice lays out for every Office document the engine writes, captured
-  first so the shape exists before any page renderer does;
-- the **comparison** — the engine's own PDF pages against **PDFium**, an independent rasteriser, with
-  every other family reported as not compared, with the reason.
+  as the outside opinion the engine's own renderer is judged against;
+- the **comparison** — the engine's own Office pages against that record, on content, and its PDF
+  pages against **PDFium**, an independent rasteriser, on pixels.
 
-The comparison judges the one page the engine can draw today. The Office families become comparable
-when the engine can draw them; the comparison's page record is shaped to take them. It proves the
-drawing of the engine's own output, not the Office families, and it is not a check on arbitrary user
-PDFs. `dev/oracle/compare/README.md` states the whole contract.
+Both halves compare the engine's own renderer, and every family is compared: page count, page size,
+lines, pictures and whether a page drew text for Word, PowerPoint and Excel, and page count, pixel
+dimensions and the drawn page for a PDF. The Office half needs no outside software at compare time —
+it reads the committed record and the engine — so only the PDF half is skipped, with a stated reason,
+on a machine without PDFium. It is not a check on arbitrary user PDFs. `dev/oracle/compare/README.md`
+states the whole contract, including the coverage table that names what the record exercises and what
+it cannot.
 
 It was a package of its own with its own resolution; it is a development-only test target of the
 crate now, so it shares the one lockfile and reads the engine's identity from the crate's own
@@ -327,10 +365,10 @@ Four properties are worth stating here because they are what makes the record us
 
 `document-engine/dev/oracle/compare/` holds the comparison's committed data: `rasteriser.json` (the
 PDFium release, the platform, the library and archive digests and PDFium's licence notice),
-`calibration.json` (the metric, the per-class thresholds, the measurement each was chosen from, and
-the library digest they were measured with), `decisions.json` (what a recorded divergence was decided
-to be, or nothing) and `pdfium/` (the licence notices). `evidence/` is generated by a run, replaced
-rather than accumulated, and ignored by version control.
+`calibration.json` (the metric, the per-class thresholds, the measurement each was chosen from, the
+library digest they were measured with, and the Office tolerances), `decisions.json` (what a recorded
+divergence was decided to be, or nothing) and `pdfium/` (the licence notices). `evidence/` is
+generated by a run, replaced rather than accumulated, and ignored by version control.
 
 The fixed set is five PDFs the engine produces, declared in `dev/oracle/src/compare/cases.rs` and
 generated in code: a dense text page, a picture page, a two-page picture document, a 300-point square
@@ -342,14 +380,25 @@ applied by each library's own page model, and the fixed set carries no cropped o
 those two are stated rather than exercised. Form widgets cannot be matched by the minimal binding and
 a page carrying one states the difference and suppresses the pixel comparison.
 
-The comparison reports the page count, the page's pixel dimensions and the drawn page, and states
-that text, faces and the size in points are not compared, with the reason. It is a report, not a
-gate: a divergence never fails it; the run fails only when the mechanism did — nothing compared, a
-control did not fire, a stale decision, the outside tool produced nothing, the outside tool could
-not be driven, or it answered in a shape the comparison does not know. The controls run on every
-invocation. Each divergence has a stable key (family, document, page, kind), which the divergence
-itself states, evidence in the stated directory, and an optional recorded decision; a decision whose
-key no longer occurs is stale and fails the run. The comparison's identity is its own — the engine
+The Office half needs no fixed set of its own: it compares the record's six documents against the
+engine's renderer, page by page — page count, each page's size in points, every line's text, position
+and size, every picture's box, and whether a page drew text — and states that face identity, glyph
+shapes, pixel appearance, word spacing, hidden slides, notes pages and animations are not compared,
+with the reason. It runs whether or not PDFium is present, and a run without it prints
+`pdf: not compared — <reason>` and still compares the Office pages. Every report also carries a
+coverage section naming, for each promised feature, the corpus document that exercises it or the
+reason no recorded document can; the legacy `.doc`, `.xls` and `.ppt` formats are a named exception
+there, read-only with their structure lost.
+
+The PDF half reports the page count, the page's pixel dimensions and the drawn page, and states that
+text, faces and the size in points are not compared, with the reason. The comparison is a report, not
+a gate: a divergence never fails it; the run fails only when the mechanism did — nothing compared, a
+control did not fire, a stale decision, a document the record covers that the engine refused to
+render, the outside tool produced nothing, the outside tool could not be driven, or it answered in a
+shape the comparison does not know. The controls run on every invocation that had a rasteriser. Each
+divergence has a stable key (family, document, page, kind), which the divergence itself states,
+evidence in the stated directory, and an optional recorded decision; a decision whose key no longer
+occurs is stale and fails the run. The comparison's identity is its own — the engine
 build under the crate's identity rule, the PDFium release and library digest, the calibration and the
 decisions — and it changes neither the record's identity nor the baseline.
 
@@ -358,9 +407,9 @@ The oracle never runs as part of an ordinary `cargo test`: its six modes (`verif
 its own tests need no network, no LibreOffice and no PDFium. Four of its tests touch what the
 machine has — one asks the reference for its version, two read a system face and one the reference's
 own bundled Carlito — and each passes when it is absent; the comparison's controls, calibration
-consistency, digest check, stale-decision check and determinism all run through the engine's own
-renderer. See `document-engine/dev/oracle/README.md`, `document-engine/dev/oracle/record/README.md`
-and `document-engine/dev/oracle/compare/README.md`.
+consistency, digest check, stale-decision check, Office comparison and determinism all run through
+the engine's own renderer. See `document-engine/dev/oracle/README.md`,
+`document-engine/dev/oracle/record/README.md` and `document-engine/dev/oracle/compare/README.md`.
 
 ## Two traps when moving this code
 

@@ -33,7 +33,7 @@ use crate::oracle::record::{
     Record, ReferenceIdentity, Source, Visibility, numbers, used_faces,
 };
 use crate::oracle::reference::{Converter, Reference};
-use crate::oracle::{Format, LOCALE, PAGE_SIZE_TOLERANCE_PT, TempArea, pages, reference};
+use crate::oracle::{Format, LOCALE, RE_RECORD_TOLERANCE_PT, TempArea, pages, reference};
 
 /// The record's root: `dev/oracle/record`, beside the oracle's own sources. The crate's manifest
 /// directory is the crate's root now that the oracle is a target of it, so the path carries the
@@ -175,7 +175,7 @@ pub fn verify(root: &Path, out: &mut dyn Write) -> Result<Summary, String> {
             }
             Some(recorded) => {
                 let differences =
-                    recorded.differences(current, record.identity.page_size_tolerance_pt);
+                    recorded.differences(current, record.identity.re_record_tolerance_pt);
                 if differences.is_empty() {
                     let _ = writeln!(out, "PASS {id} — {}", describe(current));
                 } else {
@@ -225,7 +225,7 @@ pub fn record(root: &Path, out: &mut dyn Write) -> Result<Summary, String> {
     // A document the second run could not lay out is the document's own verdict, exactly as in
     // `verify`, not a refusal: nothing is written either way.
     let (mut differences, second_failed) =
-        reproduced(&first, &second, identity.page_size_tolerance_pt);
+        reproduced(&first, &second, identity.re_record_tolerance_pt);
     if !second_failed.is_empty() {
         for (id, reason) in &second_failed {
             failed_line(out, id, reason);
@@ -482,11 +482,19 @@ fn recorded_by() -> String {
     crate::oracle::RECORDED_BY.to_string()
 }
 
-/// The identity parts that do not depend on any document.
-fn ambient() -> Ambient {
+/// The identity parts that do not depend on any document: what this machine's engine and oracle
+/// state, which a run compares the record's own against before judging a page.
+pub(crate) fn ambient() -> Ambient {
     Ambient {
         recorded_by: recorded_by(),
-        page_text_extractor: crate::codecs::page_text_extractor(),
+        page_text_extractor: crate::oracle::page_text_extractor(),
+        line_band_pt: document_engine::vocabulary::vocabulary()
+            .render
+            .line_band_pt,
+        line_gap_pt: document_engine::vocabulary::vocabulary().render.line_gap_pt,
+        min_picture_pt: document_engine::vocabulary::vocabulary()
+            .render
+            .min_picture_pt,
         invocation: Invocation {
             arguments: reference::ARGUMENTS
                 .iter()
@@ -498,7 +506,7 @@ fn ambient() -> Ambient {
                 .collect(),
         },
         locale: LOCALE.to_string(),
-        page_size_tolerance_pt: PAGE_SIZE_TOLERANCE_PT,
+        re_record_tolerance_pt: RE_RECORD_TOLERANCE_PT,
     }
 }
 
@@ -518,6 +526,9 @@ fn identity(
         schema: crate::oracle::record::SCHEMA,
         recorded_by: ambient.recorded_by,
         page_text_extractor: ambient.page_text_extractor,
+        line_band_pt: ambient.line_band_pt,
+        line_gap_pt: ambient.line_gap_pt,
+        min_picture_pt: ambient.min_picture_pt,
         reference: ReferenceIdentity {
             program: reference.program.clone(),
             version: reference.version.clone(),
@@ -528,7 +539,7 @@ fn identity(
         invocation: ambient.invocation,
         locale: ambient.locale,
         paper: paper(&laid),
-        page_size_tolerance_pt: ambient.page_size_tolerance_pt,
+        re_record_tolerance_pt: ambient.re_record_tolerance_pt,
         fonts: FontIdentity {
             config_digest: set.config_digest.clone(),
             directories: set
@@ -715,7 +726,7 @@ fn describe(document: &DocumentRecord) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oracle::record::{FaceReport, PageRecord, Pages};
+    use crate::oracle::record::{FaceReport, LineRecord, PageRecord, Pages};
     use std::collections::BTreeMap;
 
     /// A document record with one page of the stated text, which no kept file stands behind.
@@ -740,7 +751,13 @@ mod tests {
                     width_pt: 595.0,
                     height_pt: 842.0,
                     faces: Vec::new(),
-                    lines: vec![text.to_string()],
+                    lines: vec![LineRecord {
+                        text: text.to_string(),
+                        x_pt: 72.0,
+                        y_pt: 100.0,
+                        size_pt: 10.0,
+                    }],
+                    pictures: Vec::new(),
                 }],
             },
             faces: FaceReport {
@@ -766,7 +783,14 @@ mod tests {
             identity: complete.then(|| Identity {
                 schema: crate::oracle::record::SCHEMA,
                 recorded_by: "page-oracle 0.1.0".to_string(),
-                page_text_extractor: "pdf-extract 0.12.1".to_string(),
+                page_text_extractor: crate::oracle::page_text_extractor(),
+                line_band_pt: document_engine::vocabulary::vocabulary()
+                    .render
+                    .line_band_pt,
+                line_gap_pt: document_engine::vocabulary::vocabulary().render.line_gap_pt,
+                min_picture_pt: document_engine::vocabulary::vocabulary()
+                    .render
+                    .min_picture_pt,
                 reference: ReferenceIdentity {
                     program: "LibreOffice".to_string(),
                     version: "26.8.2.2".to_string(),
@@ -784,7 +808,7 @@ mod tests {
                     height_pt: 792.0,
                     observed_from: corpus::WORKBOOK.id.to_string(),
                 },
-                page_size_tolerance_pt: PAGE_SIZE_TOLERANCE_PT,
+                re_record_tolerance_pt: RE_RECORD_TOLERANCE_PT,
                 fonts: FontIdentity {
                     config_digest: "sha256-config".to_string(),
                     directories: Vec::new(),
@@ -811,7 +835,7 @@ mod tests {
     fn a_second_survey_that_reproduces_the_first_has_no_differences() {
         let first = survey(vec![("docx/report", laid("docx/report", "text"))]);
         let second = survey(vec![("docx/report", laid("docx/report", "text"))]);
-        let (differences, failed) = reproduced(&first, &second, PAGE_SIZE_TOLERANCE_PT);
+        let (differences, failed) = reproduced(&first, &second, RE_RECORD_TOLERANCE_PT);
         assert!(differences.is_empty(), "{differences:?}");
         assert!(failed.is_empty(), "{failed:?}");
     }
@@ -820,8 +844,11 @@ mod tests {
     fn a_second_survey_whose_page_moved_is_a_refusal() {
         let first = survey(vec![("docx/report", laid("docx/report", "text"))]);
         let second = survey(vec![("docx/report", laid("docx/report", "other text"))]);
-        let (differences, failed) = reproduced(&first, &second, PAGE_SIZE_TOLERANCE_PT);
-        assert_eq!(differences, ["docx/report: page 1's text has changed"]);
+        let (differences, failed) = reproduced(&first, &second, RE_RECORD_TOLERANCE_PT);
+        assert_eq!(
+            differences,
+            ["docx/report: page 1's text or its position has changed"]
+        );
         assert!(failed.is_empty(), "{failed:?}");
     }
 
@@ -838,7 +865,7 @@ mod tests {
                 Outcome::Failed("the reference produced no document".to_string()),
             ),
         ]);
-        let (differences, failed) = reproduced(&first, &second, PAGE_SIZE_TOLERANCE_PT);
+        let (differences, failed) = reproduced(&first, &second, RE_RECORD_TOLERANCE_PT);
         assert!(differences.is_empty(), "{differences:?}");
         assert_eq!(failed.len(), 1);
         assert_eq!(failed[0].0, "docx/picture");
@@ -849,7 +876,7 @@ mod tests {
     fn a_document_the_second_survey_has_no_verdict_for_is_a_verdict() {
         let first = survey(vec![("docx/report", laid("docx/report", "text"))]);
         let second = survey(vec![("docx/other", laid("docx/other", "text"))]);
-        let (differences, failed) = reproduced(&first, &second, PAGE_SIZE_TOLERANCE_PT);
+        let (differences, failed) = reproduced(&first, &second, RE_RECORD_TOLERANCE_PT);
         assert!(differences.is_empty(), "{differences:?}");
         assert_eq!(failed.len(), 1);
         assert_eq!(failed[0].0, "docx/report");
@@ -904,7 +931,12 @@ mod tests {
         let documents = [document("docx/report", "text")];
         let written_documents: Vec<&DocumentRecord> = documents.iter().collect();
         let mut changed = document("docx/report", "other text");
-        changed.pages.pages[0].lines = vec!["other text".to_string()];
+        changed.pages.pages[0].lines = vec![LineRecord {
+            text: "other text".to_string(),
+            x_pt: 72.0,
+            y_pt: 100.0,
+            size_pt: 10.0,
+        }];
         let written = Record {
             identity: identity.clone(),
             documents: [(changed.id.clone(), changed)].into_iter().collect(),

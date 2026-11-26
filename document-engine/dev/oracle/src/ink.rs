@@ -58,16 +58,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use lopdf::content::{Content, Operation};
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
+use crate::oracle::FORM_DEPTH;
 use crate::oracle::pages::{dereference, dictionary, is_form, name, stream};
 
 /// How much of a page a fill must cover to be the reference's background rather than the document's
 /// ink: 99 per cent of its area.
 const BACKGROUND_FRACTION: f64 = 0.99;
-
-/// How deep a form `XObject` may be nested. A form that reaches itself, directly or through another
-/// form, is a cycle rather than a page, and a page nested deeper than this is refused rather than
-/// guessed at.
-const FORM_DEPTH: usize = 8;
 
 /// A form resolver: the content stream a `/XObject` name stands for, or `Ok(None)` for an image,
 /// which counts as ink.
@@ -90,7 +86,7 @@ pub struct Drawn {
 /// # Errors
 ///
 /// The page's content, its size or its resources cannot be read, its content stream cannot be
-/// decoded, or its form `XObject`s are nested deeper than `FORM_DEPTH`.
+/// decoded, or its form `XObject`s are nested deeper than [`FORM_DEPTH`].
 pub fn drawn(document: &Document, page: ObjectId) -> Result<Drawn, String> {
     let content = document
         .get_page_content(page)

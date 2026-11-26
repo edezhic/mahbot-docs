@@ -1234,6 +1234,44 @@ pub fn docx_with_all_media() -> Vec<u8> {
     )
 }
 
+/// A Word document stating a video it links to rather than embeds, beside a picture: the link names a
+/// file outside the package, so nothing counts it and the page that states it names it.
+#[must_use]
+pub fn docx_linked_video() -> Vec<u8> {
+    let body = format!(
+        concat!(
+            r#"<w:p><w:r><w:t>Media beside the text</w:t></w:r></w:p>"#,
+            "{}",
+            r#"<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">"#,
+            r#"<wp:extent cx="38100" cy="19050"/><wp:docPr id="2" name="Video 1"/>"#,
+            r#"<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/video">"#,
+            r#"<a:videoFile r:link="rId7"/>"#,
+            r#"</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"#,
+        ),
+        DOCX_PICTURE_PARAGRAPH,
+    );
+    let rels = format!(
+        concat!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+            r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#,
+            "{}",
+            r#"<Relationship Id="rId7" "#,
+            r#"Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/video" "#,
+            r#"Target="file:///clip.mp4" TargetMode="External"/>"#,
+            "</Relationships>",
+        ),
+        docx_rel("rId6", "image", "media/image1.png"),
+    );
+    let types = docx_content_types(&[("png", "image/png")], &[]);
+    docx_package_around(
+        &body,
+        DOCX_NAMESPACES,
+        &rels,
+        &types,
+        &[("word/media/image1.png", &png())],
+    )
+}
+
 /// A Word document with eight distinct pictures, more than the caller's attachment cap: the
 /// reading itself returns every one of them.
 #[must_use]
@@ -9722,6 +9760,58 @@ pub fn docx_broken() -> Vec<u8> {
     )
 }
 
+/// A Word document whose paragraph is justified: this renderer draws it left-aligned and says so.
+#[must_use]
+pub fn docx_justified() -> Vec<u8> {
+    docx_fill_body(
+        r#"<w:p><w:pPr><w:jc w:val="both"/></w:pPr><w:r><w:t>Justified text</w:t></w:r></w:p>"#,
+    )
+}
+
+/// A Word document stating a run taller than any page: the size is drawn at the page's height and
+/// named rather than drawn off the page.
+#[must_use]
+pub fn docx_giant_font() -> Vec<u8> {
+    docx_fill_body(r#"<w:p><w:r><w:rPr><w:sz w:val="2000000"/></w:rPr><w:t>Tall</w:t></w:r></w:p>"#)
+}
+
+/// A Word document stating more tabs in one paragraph than a paragraph may hold: the rest are not
+/// drawn, and the page says so.
+#[must_use]
+pub fn docx_many_tabs() -> Vec<u8> {
+    let mut tabs = String::new();
+    for _ in 0..80 {
+        tabs.push_str("<w:tab/>");
+    }
+    docx_fill_body(&format!(r#"<w:p><w:r>{tabs}<w:t>End</w:t></w:r></w:p>"#))
+}
+
+/// A workbook stating a margin wider than any page: the page's own margins are drawn, and the
+/// answer says so.
+#[must_use]
+pub fn xlsx_absurd_margins() -> Vec<u8> {
+    let workbook = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" "#,
+        r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+        r#"<sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+    );
+    let workbook_rels = xlsx_rels(&[("rId1", "worksheet", "worksheets/sheet1.xml")]);
+    let content_types = xlsx_content_types(&[("/xl/worksheets/sheet1.xml", XLSX_WORKSHEET_TYPE)]);
+    let sheet = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#,
+        r#"<pageMargins left="1e308" right="1e308" top="0.7" bottom="0.7"/>"#,
+        r#"<sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData></worksheet>"#,
+    );
+    xlsx_package_around(
+        workbook,
+        &workbook_rels,
+        &content_types,
+        &[("xl/worksheets/sheet1.xml", sheet.as_bytes())],
+    )
+}
+
 /// A document whose root states no `<w:body>` at all: nothing to append a paragraph to and nothing
 /// to place a block after.
 #[must_use]
@@ -11120,6 +11210,441 @@ pub fn xlsx_fill_template_type() -> Vec<u8> {
         &xlsx_fill_a1("{a}"),
         &content_types,
         &[],
+    )
+}
+
+// ── the renderer's own documents ────────────────────────────────────────────────────────────
+//
+// The six below exist for the rendering half's own tests: each states a shape a render reports — a
+// loss, a header or footer kind the section references none for, or a note about the page's own size
+// — that no recorded reading corpus document carries. Five more are built beside their own family's
+// builders (`docx_justified`, `docx_giant_font`, `docx_many_tabs`, `docx_linked_video`,
+// `xlsx_absurd_margins`). All eleven are declared in `documents::render_documents()` rather than in
+// the reader's list, so no recorded reading moves.
+
+/// The namespace bindings a spreadsheet drawing part is written with: the anchor's own, the
+/// DrawingML one its shapes draw in, the chart one its chart frames name, and the relationship one
+/// its blips name.
+const XLSX_DRAWING_NAMESPACES: &str = concat!(
+    r#"xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" "#,
+    r#"xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" "#,
+    r#"xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" "#,
+    r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#,
+);
+
+/// An empty worksheet: the part each sheet of a workbook naming more sheets than a render draws
+/// states, so the bound is reached by the sheet count alone.
+const XLSX_EMPTY_SHEET: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+    r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>"#,
+);
+
+/// The embedded object's own frame: an `xdr:sp` whose first shape id is the `shapeId` the worksheet's
+/// `<oleObject>` names, its fill the object's EMF preview. The census counts the object from its
+/// part, so this frame is not a picture of its own.
+const XLSX_OBJECT_FRAME: &str = concat!(
+    r#"<xdr:sp><xdr:nvSpPr><xdr:cNvPr id="1025" name="Object 1"/><xdr:cNvSpPr/></xdr:nvSpPr>"#,
+    r#"<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1270000" cy="635000"/></a:xfrm>"#,
+    r#"<a:blipFill><a:blip r:embed="rId1"/></a:blipFill></xdr:spPr></xdr:sp>"#,
+);
+
+/// One `xdr:twoCellAnchor`: the box its `from` and `to` name in columns 1 to 3, the extent it states
+/// beside them, and the shape that sits in it.
+fn xlsx_anchor(from_row: u32, to_row: u32, shape: &str) -> String {
+    format!(
+        concat!(
+            r#"<xdr:twoCellAnchor>"#,
+            r#"<xdr:from><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff>"#,
+            r#"<xdr:row>{from}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"#,
+            r#"<xdr:to><xdr:col>3</xdr:col><xdr:colOff>0</xdr:colOff>"#,
+            r#"<xdr:row>{to}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>"#,
+            r#"<xdr:ext cx="1270000" cy="635000"/>{shape}<xdr:clientData/>"#,
+            r#"</xdr:twoCellAnchor>"#,
+        ),
+        from = from_row,
+        to = to_row,
+        shape = shape,
+    )
+}
+
+/// A chart frame whose `<c:chart>` names the relationship `rel`: a chart the drawing states.
+fn xlsx_chart_frame(id: u32, rel: &str) -> String {
+    format!(
+        concat!(
+            r#"<xdr:graphicFrame><xdr:nvGraphicFramePr>"#,
+            r#"<xdr:cNvPr id="{id}" name="Chart {id}"/><xdr:cNvGraphicFramePr/>"#,
+            r#"</xdr:nvGraphicFramePr>"#,
+            r#"<xdr:xfrm><a:off x="0" y="0"/><a:ext cx="1270000" cy="635000"/></xdr:xfrm>"#,
+            r#"<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">"#,
+            r#"<c:chart r:id="{rel}"/></a:graphicData></a:graphic></xdr:graphicFrame>"#,
+        ),
+        id = id,
+        rel = rel,
+    )
+}
+
+/// A SmartArt frame whose `<dgm:relIds>` names the relationship `rel`: the diagram's data part.
+fn xlsx_diagram_frame(id: u32, rel: &str) -> String {
+    format!(
+        concat!(
+            r#"<xdr:graphicFrame><xdr:nvGraphicFramePr>"#,
+            r#"<xdr:cNvPr id="{id}" name="Diagram {id}"/><xdr:cNvGraphicFramePr/>"#,
+            r#"</xdr:nvGraphicFramePr>"#,
+            r#"<xdr:xfrm><a:off x="0" y="0"/><a:ext cx="1270000" cy="635000"/></xdr:xfrm>"#,
+            r#"<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/diagram">"#,
+            r#"<dgm:relIds xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" "#,
+            r#"r:dm="{rel}"/></a:graphicData></a:graphic></xdr:graphicFrame>"#,
+        ),
+        id = id,
+        rel = rel,
+    )
+}
+
+/// The `xdr:pic` an anchor draws the media part its relationship `rel` names in.
+fn xlsx_anchor_picture(id: u32, name: &str, rel: &str) -> String {
+    format!(
+        concat!(
+            r#"<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="{id}" name="{name}"/>"#,
+            r#"<xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>"#,
+            r#"<xdr:blipFill><a:blip r:embed="{rel}"/><a:stretch><a:fillRect/></a:stretch>"#,
+            r#"</xdr:blipFill>"#,
+            r#"<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1270000" cy="635000"/></a:xfrm>"#,
+            r#"<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>"#,
+        ),
+        id = id,
+        name = name,
+        rel = rel,
+    )
+}
+
+/// A workbook whose one sheet draws what a render cannot: an embedded object's own frame beside its
+/// preview, a vector drawing, a vector part the package lacks, a raster part the package lacks and a
+/// raster part it holds but no decoder can read — and holds a chart part no drawing names.
+///
+/// The object's part and the one EMF the drawing itself names are losses of the document, counted
+/// once from the parts; the frames naming a part the package does not hold, and the rasters it cannot
+/// embed, are the page's. The preview the object frame holds is the object, so it is not counted as a
+/// second drawing.
+#[must_use]
+pub fn xlsx_media() -> Vec<u8> {
+    let workbook = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" "#,
+        r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+        r#"<sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+    );
+    let workbook_rels = xlsx_rels(&[("rId1", "worksheet", "worksheets/sheet1.xml")]);
+    let content_types = format!(
+        concat!(
+            "{}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">",
+            "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>",
+            "<Default Extension=\"xml\" ContentType=\"application/xml\"/>",
+            "<Default Extension=\"emf\" ContentType=\"image/x-emf\"/>",
+            "<Default Extension=\"png\" ContentType=\"image/png\"/>",
+            "<Override PartName=\"/xl/workbook.xml\" ContentType=\"{}\"/>",
+            "<Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"{}\"/>",
+            "<Override PartName=\"/xl/drawings/drawing1.xml\" ContentType=\"{}\"/>",
+            "<Override PartName=\"/xl/charts/chart1.xml\" ContentType=\"{}\"/>",
+            "</Types>",
+        ),
+        DECLARATION, XLSX_MAIN_TYPE, XLSX_WORKSHEET_TYPE, XLSX_DRAWING_TYPE, XLSX_CHART_TYPE,
+    );
+    let sheet = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" "#,
+        r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+        r#"<sheetData>"#,
+        r#"<row r="1"><c r="A1" t="inlineStr"><is><t>Media</t></is></c></row>"#,
+        r#"<row r="2"><c r="A2" t="inlineStr"><is><t>beside</t></is></c></row>"#,
+        r#"</sheetData>"#,
+        r#"<drawing r:id="rId1"/>"#,
+        r#"<oleObjects><oleObject progId="Package" shapeId="1025" r:id="rId2"/></oleObjects>"#,
+        r#"</worksheet>"#,
+    );
+    let sheet_rels = xlsx_rels(&[
+        ("rId1", "drawing", "../drawings/drawing1.xml"),
+        ("rId2", "oleObject", "../embeddings/oleObject1.bin"),
+    ]);
+    let drawing_rels = xlsx_rels(&[
+        ("rId1", "image", "../media/image1.emf"),
+        ("rId2", "image", "../media/vector.emf"),
+        ("rId3", "image", "../media/gone.png"),
+        ("rId4", "image", "../media/broken.png"),
+        ("rId5", "image", "../media/missing.emf"),
+        ("rId6", "chart", "../charts/gone.xml"),
+        ("rId7", "diagramData", "../diagrams/data1.xml"),
+    ]);
+    let drawing = format!(
+        "{DECLARATION}<xdr:wsDr {XLSX_DRAWING_NAMESPACES}>{}{}{}{}{}{}{}</xdr:wsDr>",
+        xlsx_anchor(1, 1, XLSX_OBJECT_FRAME),
+        xlsx_anchor(2, 2, &xlsx_anchor_picture(2, "Vector", "rId2")),
+        xlsx_anchor(3, 3, &xlsx_anchor_picture(3, "Missing", "rId3")),
+        xlsx_anchor(4, 4, &xlsx_anchor_picture(4, "Broken", "rId4")),
+        xlsx_anchor(5, 5, &xlsx_anchor_picture(5, "Absent", "rId5")),
+        xlsx_anchor(6, 6, &xlsx_chart_frame(6, "rId6")),
+        xlsx_anchor(7, 7, &xlsx_diagram_frame(7, "rId7")),
+    );
+    let chart = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" "#,
+        r#"xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">"#,
+        r#"<c:chart><c:plotArea><c:barChart><c:barDir val="col"/>"#,
+        r#"<c:ser><c:idx val="0"/><c:order val="0"/>"#,
+        r#"<c:val><c:numRef><c:f>Data!$B$1</c:f>"#,
+        r#"<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="1"/>"#,
+        r#"<c:pt idx="0"><c:v>7</c:v></c:pt></c:numCache></c:numRef></c:val>"#,
+        r#"</c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>"#,
+    );
+    let broken = broken_png();
+    xlsx_package_around(
+        workbook,
+        &workbook_rels,
+        &content_types,
+        &[
+            ("xl/worksheets/sheet1.xml", sheet.as_bytes()),
+            ("xl/worksheets/_rels/sheet1.xml.rels", sheet_rels.as_bytes()),
+            ("xl/drawings/drawing1.xml", drawing.as_bytes()),
+            (
+                "xl/drawings/_rels/drawing1.xml.rels",
+                drawing_rels.as_bytes(),
+            ),
+            ("xl/embeddings/oleObject1.bin", b"an object's own bytes"),
+            ("xl/media/image1.emf", b"a preview's own bytes"),
+            ("xl/media/vector.emf", b"a vector drawing's own bytes"),
+            ("xl/media/broken.png", &broken),
+            ("xl/charts/chart1.xml", chart.as_bytes()),
+        ],
+    )
+}
+
+/// A workbook whose one column is stated wider than its page, holding a long integer right-aligned
+/// past the page's own edge, and — on the next page, where the column after it is banded — a long
+/// text in an ordinary column, drawn whole and so past the page's right edge. The column's own line
+/// names the value it cuts; the value a column of ordinary width cuts is the page's gap.
+#[must_use]
+pub fn xlsx_wide() -> Vec<u8> {
+    let workbook = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" "#,
+        r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+        r#"<sheets><sheet name="Wide" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+    );
+    let workbook_rels = xlsx_rels(&[("rId1", "worksheet", "worksheets/sheet1.xml")]);
+    let content_types = xlsx_content_types(&[("/xl/worksheets/sheet1.xml", XLSX_WORKSHEET_TYPE)]);
+    let sheet = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#,
+        r#"<cols><col min="1" max="1" width="120" customWidth="1"/></cols>"#,
+        r#"<sheetData>"#,
+        r#"<row r="1"><c r="A1"><v>1234567890123456789012345678901234567890</v></c>"#,
+        r#"<c r="B1" t="inlineStr"><is><t>a value an ordinary column draws whole and so past the "#,
+        r#"page's own right edge, however much room the page leaves for it</t></is></c></row>"#,
+        r#"</sheetData></worksheet>"#,
+    );
+    xlsx_package_around(
+        workbook,
+        &workbook_rels,
+        &content_types,
+        &[("xl/worksheets/sheet1.xml", sheet.as_bytes())],
+    )
+}
+
+/// A workbook naming more sheets than a render draws, each an empty worksheet and all visible: the
+/// sheets past the bound are named rather than drawn — as many names as one report line lists, and a
+/// count of the rest — and no cell is needed to reach them.
+#[must_use]
+pub fn xlsx_many_sheets() -> Vec<u8> {
+    let count = crate::vocabulary::vocabulary().render.pages_max
+        + crate::vocabulary::vocabulary().render.report_names_max
+        + 3;
+    let mut workbook = String::from(concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" "#,
+        r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+        r#"<sheets>"#,
+    ));
+    let mut rels: Vec<(String, String)> = Vec::new();
+    let mut overrides: Vec<(String, &str)> = Vec::new();
+    let mut parts: Vec<(String, Vec<u8>)> = Vec::new();
+    for index in 0..count {
+        let number = index + 1;
+        workbook.push_str(&format!(
+            r#"<sheet name="S{index}" sheetId="{number}" r:id="rId{number}"/>"#
+        ));
+        rels.push((
+            format!("rId{number}"),
+            format!("worksheets/sheet{number}.xml"),
+        ));
+        overrides.push((
+            format!("/xl/worksheets/sheet{number}.xml"),
+            XLSX_WORKSHEET_TYPE,
+        ));
+        parts.push((
+            format!("xl/worksheets/sheet{number}.xml"),
+            XLSX_EMPTY_SHEET.as_bytes().to_vec(),
+        ));
+    }
+    workbook.push_str("</sheets></workbook>");
+    let rel_entries: Vec<(&str, &str, &str)> = rels
+        .iter()
+        .map(|(id, target)| (id.as_str(), "worksheet", target.as_str()))
+        .collect();
+    let workbook_rels = xlsx_rels(&rel_entries);
+    let content_type_entries: Vec<(&str, &str)> = overrides
+        .iter()
+        .map(|(part, kind)| (part.as_str(), *kind))
+        .collect();
+    let content_types = xlsx_content_types(&content_type_entries);
+    let part_entries: Vec<(&str, &[u8])> = parts
+        .iter()
+        .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+        .collect();
+    xlsx_package_around(&workbook, &workbook_rels, &content_types, &part_entries)
+}
+
+/// A `p:grpSp` whose own extent is a millionth of the extent its children are drawn in, around
+/// `inner`: two of them nested compose to a scale of one in a million million.
+fn pptx_collapsed_group(inner: &str) -> String {
+    format!(
+        concat!(
+            r#"<p:grpSp><p:grpSpPr><a:xfrm><a:off x="0" y="0"/>"#,
+            r#"<a:ext cx="12700" cy="12700"/><a:chOff x="0" y="0"/>"#,
+            r#"<a:chExt cx="12700000000" cy="12700000000"/></a:xfrm></p:grpSpPr>{inner}"#,
+            r#"</p:grpSp>"#,
+        ),
+        inner = inner,
+    )
+}
+
+/// A `p:sp` stating its own frame and one eighteen-point run: the shape a collapsed group scales to
+/// a size below the tolerance a page places anything to.
+fn pptx_framed_text_shape(id: u32, name: &str, text: &str) -> String {
+    format!(
+        concat!(
+            r#"<p:sp><p:nvSpPr><p:cNvPr id="{id}" name="{name}"/>"#,
+            r#"<p:cNvSpPr/><p:nvPr/></p:nvSpPr>"#,
+            r#"<p:spPr><a:xfrm><a:off x="914400" y="914400"/>"#,
+            r#"<a:ext cx="3657600" cy="914400"/></a:xfrm></p:spPr>"#,
+            r#"<p:txBody><a:bodyPr/><a:lstStyle/>"#,
+            r#"<a:p><a:r><a:rPr lang="en-US" sz="1800"/><a:t>{text}</a:t></a:r></a:p>"#,
+            r#"</p:txBody></p:sp>"#,
+        ),
+        id = id,
+        name = name,
+        text = escape(text),
+    )
+}
+
+/// A deck whose one slide holds a text shape inside two nested groups that each shrink their
+/// children a millionfold: the run is drawn at eighteen million-millionths of a point, so the page
+/// states the run it scaled to nothing rather than drawing it.
+#[must_use]
+pub fn pptx_collapsed() -> Vec<u8> {
+    let shapes = pptx_collapsed_group(&pptx_collapsed_group(&pptx_framed_text_shape(
+        2,
+        "Collapsed",
+        "Collapsed",
+    )));
+    let slide = PptxSlide::new(pptx_slide(&shapes));
+    pptx_deck(&[slide], "", "", &[])
+}
+
+/// A deck whose presentation states a slide width and no height: the width is honoured and the
+/// height is drawn at the default page's, and the report names the axis the deck left out.
+#[must_use]
+pub fn pptx_partial_size() -> Vec<u8> {
+    let slides = [pptx_framed_text_shape(2, "Half a size", "Half a size")];
+    let presentation = pptx_presentation_of(
+        r#"<p:sldId id="256" r:id="rId3"/>"#,
+        None,
+        r#"<p:sldSz cx="9144000"/>"#,
+    );
+    let presentation_rels = pptx_presentation_rels_of(&["slides/slide1.xml"], false);
+    let types = pptx_deck_types(
+        PPTX_PRESENTATION_TYPE,
+        PPTX_SLIDE_TYPE,
+        &["ppt/slides/slide1.xml"],
+        true,
+        false,
+        &[],
+    );
+    let mut parts = pptx_shell_parts(true);
+    parts.push(("ppt/presentation.xml".to_owned(), presentation.into_bytes()));
+    parts.push((
+        "ppt/_rels/presentation.xml.rels".to_owned(),
+        presentation_rels.into_bytes(),
+    ));
+    pptx_push_slides(&mut parts, &slides, &pptx_slide_rels_with(false, ""));
+    pptx_package_of(Some(&types), parts)
+}
+
+/// A Word body of three pages: one paragraph, an explicit page break, and so on, so each page's
+/// header and footer can be told from the others'.
+const DOCX_THREE_PAGES: &str = concat!(
+    r#"<w:p><w:r><w:t xml:space="preserve">First page body</w:t></w:r></w:p>"#,
+    r#"<w:p><w:r><w:br w:type="page"/></w:r></w:p>"#,
+    r#"<w:p><w:r><w:t xml:space="preserve">Second page body</w:t></w:r></w:p>"#,
+    r#"<w:p><w:r><w:br w:type="page"/></w:r></w:p>"#,
+    r#"<w:p><w:r><w:t xml:space="preserve">Third page body</w:t></w:r></w:p>"#,
+);
+
+/// The section that states a different first page and references only the body's header and footer:
+/// with `<w:evenAndOddHeaders/>` beside it, the first and the second page draw neither part.
+const DOCX_HEADER_KINDS_SECTION: &str = concat!(
+    r#"<w:sectPr><w:titlePg/>"#,
+    r#"<w:headerReference w:type="default" r:id="rId2"/>"#,
+    r#"<w:footerReference w:type="default" r:id="rId3"/>"#,
+    r#"<w:pgSz w:w="11906" w:h="16838"/>"#,
+    r#"<w:pgMar w:top="1418" w:right="1418" w:bottom="1418" w:left="1418" "#,
+    r#"w:header="709" w:footer="709" w:gutter="0"/></w:sectPr>"#,
+);
+
+/// A Word document whose section states a first page of its own and whose settings draw the even
+/// pages differently, while only the body's header and footer are referenced: the first page and
+/// the even page draw neither, and the third page draws both.
+#[must_use]
+pub fn docx_header_kinds() -> Vec<u8> {
+    let rels = docx_rels(&[
+        ("rId1", "styles", "styles.xml"),
+        ("rId2", "header", "header1.xml"),
+        ("rId3", "footer", "footer1.xml"),
+        ("rId4", "settings", "settings.xml"),
+    ]);
+    let content_types = docx_content_types(
+        &[],
+        &[
+            ("/word/styles.xml", DOCX_STYLES_TYPE),
+            ("/word/header1.xml", DOCX_HEADER_TYPE),
+            ("/word/footer1.xml", DOCX_FOOTER_TYPE),
+            ("/word/settings.xml", DOCX_SETTINGS_TYPE),
+        ],
+    );
+    let header = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Body header</w:t></w:r></w:p></w:hdr>"#,
+    );
+    let footer = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">"#,
+        r#"<w:p><w:r><w:t xml:space="preserve">Body footer</w:t></w:r></w:p></w:ftr>"#,
+    );
+    let settings = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">"#,
+        r#"<w:evenAndOddHeaders/></w:settings>"#,
+    );
+    docx_package_around(
+        &format!("{DOCX_THREE_PAGES}{DOCX_HEADER_KINDS_SECTION}"),
+        DOCX_NAMESPACES,
+        &rels,
+        &content_types,
+        &[
+            ("word/styles.xml", DOCX_STYLES.as_bytes()),
+            ("word/header1.xml", header.as_bytes()),
+            ("word/footer1.xml", footer.as_bytes()),
+            ("word/settings.xml", settings.as_bytes()),
+        ],
     )
 }
 

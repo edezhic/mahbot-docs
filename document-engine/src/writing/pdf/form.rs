@@ -22,7 +22,7 @@ use lopdf::{Dictionary, Object, ObjectId};
 use super::graph::{self, Document};
 
 use super::draw;
-use super::font::{Face, Subset};
+use super::font::{self, Face, Subset};
 use super::page;
 use super::{Produced, editable};
 use crate::operation::{Failure, Request};
@@ -1589,11 +1589,7 @@ fn text_appearance(
     font: ObjectId,
     subset: &Subset,
 ) -> ObjectId {
-    let mut content = format!(
-        "q BT 0 g /{} {} Tf",
-        draw::FONT_BASE,
-        draw::number(layout.size)
-    );
+    let mut content = format!("q BT 0 g /{} {} Tf", font::NAME, draw::number(layout.size));
     for line in &layout.lines {
         let _ = write!(
             content,
@@ -1604,7 +1600,7 @@ fn text_appearance(
         );
     }
     content.push_str(" ET Q\n");
-    let fonts = Dictionary::from_iter([(draw::FONT_BASE, Object::Reference(font))]);
+    let fonts = Dictionary::from_iter([(font::NAME, Object::Reference(font))]);
     let stream_dict = Dictionary::from_iter([
         ("Type", draw::name("XObject")),
         ("Subtype", draw::name("Form")),

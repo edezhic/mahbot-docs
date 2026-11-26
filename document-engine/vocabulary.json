@@ -499,6 +499,85 @@
     "scan_look_bytes_max": 512,
     "stated_columns_max": 1000
   },
+  "render": {
+    "pages_max": 1000,
+    "page_pt_max": 14400.0,
+    "items_max_per_page": 131072,
+    "line_band_pt": 4.0,
+    "picture_bytes_max": 268435456,
+    "picture_part_bytes_max": 268435456,
+    "line_gap_pt": 1.0,
+    "min_picture_pt": 1.0,
+    "package_bytes_max": 268435456,
+    "part_elements_max": 1000000,
+    "tabs_max": 64,
+    "report_names_max": 8
+  },
+  "page": {
+    "width_pt": 595.28,
+    "height_pt": 841.89,
+    "margin_pt": 72.0,
+    "column_width_twips": 960,
+    "row_height_twips": 300,
+    "a4_codes": [
+      9,
+      10
+    ],
+    "sizes": [
+      [
+        1,
+        612,
+        792
+      ],
+      [
+        3,
+        792,
+        1224
+      ],
+      [
+        4,
+        1224,
+        792
+      ],
+      [
+        5,
+        612,
+        1008
+      ],
+      [
+        6,
+        396,
+        612
+      ],
+      [
+        7,
+        522,
+        756
+      ],
+      [
+        8,
+        841.89,
+        1190.55
+      ],
+      [
+        11,
+        419.53,
+        595.28
+      ],
+      [
+        12,
+        728.5,
+        1031.8
+      ],
+      [
+        13,
+        515.9,
+        728.5
+      ]
+    ],
+    "header_pt": 35.4,
+    "footer_pt": 35.4
+  },
   "create": {
     "heading_size_points": [
       22,
@@ -510,7 +589,9 @@
       "footer": "a running footer",
       "footnote": "a paragraph's footnote",
       "block": "a {type} block"
-    }
+    },
+    "pdf_page_width_pt": 595.28,
+    "pdf_page_height_pt": 841.89
   },
   "marks": {
     "block_annotations": {
@@ -1479,10 +1560,11 @@
     "render_unreadable": {
       "text": "the file could not be read",
       "printed_by": [
-        "reading"
+        "reading",
+        "rendering"
       ]
     },
-    "render_not_pdf": {
+    "picture_not_pdf": {
       "text": "its bytes do not form a PDF this engine can read",
       "printed_by": [
         "reading"
@@ -1491,28 +1573,29 @@
     "render_password_protected": {
       "text": "it is password-protected",
       "printed_by": [
-        "reading"
+        "reading",
+        "rendering"
       ]
     },
-    "render_no_such_page": {
+    "picture_no_such_page": {
       "text": "it has no such page (it has {pages})",
       "printed_by": [
         "reading"
       ]
     },
-    "render_no_pixels": {
+    "picture_no_pixels": {
       "text": "the page produced no pixels",
       "printed_by": [
         "reading"
       ]
     },
-    "render_failed": {
+    "picture_failed": {
       "text": "the page could not be rendered",
       "printed_by": [
         "reading"
       ]
     },
-    "render_invalid_size": {
+    "picture_invalid_size": {
       "text": "the requested page size is not a positive, finite number",
       "printed_by": [
         "reading"
@@ -1707,13 +1790,15 @@
     "xlsx_boolean_false": {
       "text": "FALSE",
       "printed_by": [
-        "reading"
+        "reading",
+        "rendering"
       ]
     },
     "xlsx_boolean_true": {
       "text": "TRUE",
       "printed_by": [
-        "reading"
+        "reading",
+        "rendering"
       ]
     },
     "xlsx_cell": {
@@ -3918,6 +4003,378 @@
       "printed_by": [
         "writing"
       ]
+    },
+    "render_unsupported": {
+      "text": "the engine has no page renderer for this kind of file",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_no_pages": {
+      "text": "the document states no page to draw",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_legacy": {
+      "text": "the legacy binary format is read but not rendered: reading it loses the structure its pages would be drawn from",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_page_size": {
+      "text": "the document states a page of {width} by {height} points, past the {max} points a page may be",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_part_too_large": {
+      "text": "the part {name} expands past the {max} bytes one part may hold",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_package_too_large": {
+      "text": "the package's parts together expand past the {max} bytes one render may hold",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_pages_max": {
+      "text": "the document states {count} pages, past the {max} a render may produce",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_pages_truncated": {
+      "text": "the document's pages past the first {max} were not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_items_truncated": {
+      "text": "{count} things on a page were not drawn, past the {max} a page may hold",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_face_substituted": {
+      "text": "the document names {face}; its pages are drawn in the engine's own face",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_face_default": {
+      "text": "the document names no face; its pages are drawn in the engine's own face",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_picture_not_drawn": {
+      "text": "page {n}'s picture was not drawn: it would take the render past the {max} bytes its pictures may hold",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_sheet_hidden": {
+      "text": "the workbook hides sheet \"{name}\"; it was not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_paper_unknown": {
+      "text": "the workbook states paper size {code}, which this renderer does not know; the page is drawn at its default size",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_print_titles": {
+      "text": "the workbook repeats its row and column titles on every page; they were not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_columns": {
+      "text": "the section states {count} columns; its text is drawn as one",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_anchor_unresolved": {
+      "text": "an anchored picture's anchor could not be resolved; it is drawn where it stands in the text",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_unshown_audio": {
+      "text": "{count} embedded audio file{s} not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_unshown_chart": {
+      "text": "{count} chart{s} not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_unshown_chart_sheet": {
+      "text": "{count} chart sheet{s} not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_unshown_diagram": {
+      "text": "{count} diagram{s} not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_unshown_media": {
+      "text": "{count} embedded media file{s} not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_unshown_object": {
+      "text": "{count} embedded object part{s} not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_unshown_drawing": {
+      "text": "{count} embedded drawing{s} not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_unshown_missing_part": {
+      "text": "{count} frame{s} whose part is not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_unshown_equation": {
+      "text": "{count} equation{s} not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_unshown_shape": {
+      "text": "{count} unsupported shape{s} not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_unshown_picture": {
+      "text": "{count} picture{s} not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_unshown_formula": {
+      "text": "{count} formula value{s} not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_placeholder_default": {
+      "text": "{count} placeholder{s} whose frame no part states, drawn in its kind's default area",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_unshown_link": {
+      "text": "{count} linked video or audio part{s} not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_unshown_attachment": {
+      "text": "{count} attached file{s} not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_unshown_media_annotation": {
+      "text": "{count} media annotation{s} not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_unshown_crop": {
+      "text": "{count} picture crop{s} not applied",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_unshown_rendered_page": {
+      "text": "{count} page{s} not produced",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_wide_column": {
+      "text": "{count} run{s} in a column wider than the printable area, past the page's edge",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_past_edge": {
+      "text": "{count} run{s} placed past the page's edge",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_scaled_away": {
+      "text": "{count} run{s} scaled to nothing, not drawn: {runs}",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_sheet_hidden_columns": {
+      "text": "the sheet hides {count} column{s}; {columns} {are} not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_merges_truncated": {
+      "text": "the sheet states more merged ranges than its drawing can check; the remaining ranges are not merged",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_sheet_hidden_rows": {
+      "text": "the sheet hides {count} row{s}; {rows} {are} not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_page_empty": {
+      "text": "the document states a page of {width} by {height} points, which is no page at all",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_sheet_missing": {
+      "text": "sheet \"{name}\" is not drawn: the package holds no readable part for it",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_slide_unlisted": {
+      "text": "the deck holds a slide part `{part}` its own list does not name; it is not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_slide_hidden": {
+      "text": "slide {n} is hidden; it is not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_sections": {
+      "text": "the document states {count} sections; they are drawn on the last section's page",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_slide_missing": {
+      "text": "slide {n} is not drawn: the package holds no readable part for it",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_unshown_video": {
+      "text": "{count} embedded video{s} not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_part_too_deep": {
+      "text": "the part {name} nests past the {max} levels a part may hold",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_part_too_many": {
+      "text": "the part {name} holds more elements than the {max} a part may hold",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_page_declined": {
+      "text": "page {n} is not drawn: the file names it and it could not be produced",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_slide_source": {
+      "text": "slide {n}",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_sheet_source": {
+      "text": "sheet \"{name}\", page {n}",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_margins_refused": {
+      "text": "the margins the sheet states leave no room on its page; the page's own margins are drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_justified": {
+      "text": "the document justifies its text; its pages draw it left-aligned",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_size_clamped": {
+      "text": "a run states a size taller than its page; it is drawn at {pt} points",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_tabs_truncated": {
+      "text": "a paragraph states more than the {max} tabs it may hold; the rest are not drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_page_size_ignored": {
+      "text": "the document states a page size that is no finite number of points; the default page is drawn",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_slide_size_partial": {
+      "text": "the deck states a slide {stated} of {stated_pt} points but no {absent}; the {absent} is drawn at the default page's {default_pt} points",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_slide_size_ignored": {
+      "text": "the deck states a slide {axis} that is no finite number of points; the {axis} is drawn at the default page's {default_pt} points",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_sheets_truncated": {
+      "text": "the workbook's sheets past the first {max} were not drawn: {sheets}",
+      "printed_by": [
+        "rendering"
+      ]
+    },
+    "render_names_more": {
+      "text": ", and {count} more",
+      "printed_by": [
+        "rendering"
+      ]
     }
   },
   "derived_marks": {
@@ -3967,13 +4424,15 @@
       "reading"
     ],
     "raster_long_side_px": [
-      "reading"
+      "reading",
+      "rendering"
     ],
     "raster_long_side_max_px": [
       "caller"
     ],
     "raster_max_scale": [
-      "reading"
+      "reading",
+      "rendering"
     ],
     "raster_jpeg_quality": [
       "reading"
@@ -3985,13 +4444,16 @@
       "reading"
     ],
     "raster_decode_max_dimension_px": [
-      "reading"
+      "reading",
+      "rendering"
     ],
     "zip_entry_max_bytes": [
-      "reading"
+      "reading",
+      "rendering"
     ],
     "xml_element_depth_max": [
-      "reading"
+      "reading",
+      "rendering"
     ],
     "docx_table_columns_max": [
       "reading"
@@ -4006,7 +4468,8 @@
       "reading"
     ],
     "xlsx_range_probes_max": [
-      "reading"
+      "reading",
+      "rendering"
     ],
     "chart_parts_max": [
       "reading"
@@ -4083,6 +4546,42 @@
     "rules": [
       "writing",
       "caller"
+    ],
+    "pages_max": [
+      "rendering"
+    ],
+    "page_pt_max": [
+      "rendering"
+    ],
+    "items_max_per_page": [
+      "rendering"
+    ],
+    "picture_bytes_max": [
+      "rendering"
+    ],
+    "line_gap_pt": [
+      "rendering"
+    ],
+    "min_picture_pt": [
+      "rendering"
+    ],
+    "line_band_pt": [
+      "rendering"
+    ],
+    "package_bytes_max": [
+      "rendering"
+    ],
+    "part_elements_max": [
+      "rendering"
+    ],
+    "tabs_max": [
+      "rendering"
+    ],
+    "picture_part_bytes_max": [
+      "rendering"
+    ],
+    "report_names_max": [
+      "rendering"
     ]
   }
 }

@@ -1,5 +1,6 @@
-//! The small helpers the readers share: path and name handling, text flattening, entity decoding
-//! and the extension tables a package's media parts are classified by.
+//! The small helpers both halves share: path and name handling, text flattening, entity decoding,
+//! the extension tables a package's media parts are classified by, the one reader of a cell address
+//! and a plain reader of a vocabulary mark.
 //!
 //! A name taken from a document is untrusted, so [`neutralized_name`] is what every artifact name
 //! is built from. A line break in a document's text is flattened by [`one_line`] before it reaches
@@ -14,11 +15,44 @@ pub(crate) const VIDEO_EXTENSIONS: &[&str] = &[
     "vob", "rm", "rmvb", "asf", "f4v", "divx", "m2ts",
 ];
 
+/// The zero-based column index of a cell reference (`"B12"` -> `1`), or `None` when it does
+/// not start with a column letter — the inverse of [`column_letters`]. Both halves address
+/// cells, so the one reader of an address is stated here rather than in either of them.
+pub(crate) fn column_index(reference: &str) -> Option<u32> {
+    let mut index = 0u32;
+    let mut seen = false;
+    for byte in reference.bytes() {
+        if !byte.is_ascii_alphabetic() {
+            break;
+        }
+        // An address past `u32` is clamped rather than worth a panic.
+        index = index
+            .saturating_mul(26)
+            .saturating_add(u32::from(byte.to_ascii_uppercase() - b'A') + 1);
+        seen = true;
+    }
+    // `then_some` would evaluate the subtraction even when no letter was seen,
+    // which is a panic on a reference that starts with anything else (`1`, `$A1`).
+    seen.then(|| index - 1)
+}
+
+/// One vocabulary mark's text, for a caller that prints a fixed sentence with no values to fill.
+/// A mark with placeholders is read through [`crate::vocabulary::Marks::format`] instead.
+pub(crate) fn mark(key: &str) -> &'static str {
+    crate::vocabulary::vocabulary().marks.get(key)
+}
+
 /// Whether `path`'s extension, case-insensitively, is one of `table`.
 pub(crate) fn has_extension(path: &std::path::Path, table: &[&str]) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| table.contains(&ext.to_ascii_lowercase().as_str()))
+}
+
+/// Whether a part's name states XML: the one extension a package's parts are read as markup rather
+/// than as bytes, and the test every pass that walks a package's parts asks.
+pub(crate) fn is_xml(name: &str) -> bool {
+    has_extension(std::path::Path::new(name), &["xml"])
 }
 
 /// Whether a media part's name is a video's.
@@ -141,20 +175,6 @@ pub(crate) fn suffixed_name(name: &str, n: u32) -> String {
         format!("{stem}_{n}")
     };
     format!("{numbered}{ext}")
-}
-
-/// The most memory one embedded image may claim before it is decoded.
-pub(crate) fn raster_decode_max_alloc_bytes() -> u64 {
-    crate::vocabulary::vocabulary()
-        .reading
-        .raster_decode_max_alloc_bytes
-}
-
-/// The largest width or height one embedded image may claim before it is decoded.
-pub(crate) fn raster_decode_max_dimension_px() -> u32 {
-    crate::vocabulary::vocabulary()
-        .reading
-        .raster_decode_max_dimension_px
 }
 
 /// The five HTML entities the readers decode back to characters, in the order that makes

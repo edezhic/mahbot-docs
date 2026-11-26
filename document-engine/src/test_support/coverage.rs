@@ -1,6 +1,7 @@
 //! The coverage ledger: for every mark a reading prints, the corpus document whose recorded
-//! reading contains it; and, for every mark a writing operation prints, the corpus case whose
-//! recorded answer contains it.
+//! reading contains it; for every mark a writing operation prints, the corpus case whose recorded
+//! answer contains it; and for every mark a render prints, the corpus document whose render carries
+//! it.
 //!
 //! The key list is the vocabulary's own — every `marks` entry whose `printed_by` names the
 //! reading or the writing, together with the marks the `rules` section states and `derived_marks`
@@ -9,26 +10,30 @@
 //! and the concrete rendering that document's reading carries; each [`WritingWitness`] names the
 //! mark, the corpus case's slug and the rendering that case's answer carries; each
 //! [`Unproducible`] / [`Unreached`] names a mark a synthesized document or a generated request
-//! genuinely cannot raise and says why.
+//! genuinely cannot raise and says why; a rendering mark no corpus document raises is named the
+//! same way.
 //!
 //! This module is a reviewed statement, not a test: it holds no assertion and reads nothing at run
 //! time. The documents it names are built by [`super::build`] and listed by
 //! [`super::reader_documents`], so a witness is checkable against the very bytes the harness
 //! records.
 
-/// One reading mark and the corpus document whose recorded reading renders it.
+/// One mark and the corpus document whose reading, answer or render states it.
 pub struct Witness {
     /// The vocabulary key, as it appears under `marks`.
     pub mark: &'static str,
-    /// The corpus document's name, as [`super::reader_documents`] lists it.
+    /// The corpus document's name, as [`super::document`] lists it: a reading document or one the
+    /// writing half's cases build.
     pub document: &'static str,
-    /// The mark rendered with concrete values, as the document's reading prints it.
+    /// The mark rendered with concrete values, as that document's reading, answer or render
+    /// prints it.
     pub witness: &'static str,
 }
 
-/// The reading marks no synthesized document can carry, and why.
+/// The marks no synthesized document or corpus request can carry, and why: a reading's, a writing
+/// operation's or a render's. One table serves all three ledgers.
 pub struct Unproducible {
-    /// Why a generated document cannot raise them, in one sentence.
+    /// Why nothing the corpus generates can raise them, in one sentence.
     pub reason: &'static str,
     /// The vocabulary keys, as they appear under `marks`.
     pub marks: &'static [&'static str],
@@ -1236,12 +1241,12 @@ pub const UNPRODUCIBLE: &[Unproducible] = &[
         reason: "the reading's page-render refusals answer a caller that renders a page; the corpus records readings, and no recorded reading renders one",
         marks: &[
             "render_unreadable",
-            "render_not_pdf",
+            "picture_not_pdf",
             "render_password_protected",
-            "render_no_such_page",
-            "render_no_pixels",
-            "render_failed",
-            "render_invalid_size",
+            "picture_no_such_page",
+            "picture_no_pixels",
+            "picture_failed",
+            "picture_invalid_size",
         ],
     },
 ];
@@ -2744,5 +2749,322 @@ pub const WRITING_UNREACHED: &[Unreached] = &[
     Unreached {
         reason: "a package sent down the Word or presentation path whose workbook part is left to the workbook filler — in practice one that declares a workbook content type but holds no workbook part, and a hybrid package holding both a Word and a workbook part, since the scan keeps every family and the last match wins: the library reads the content types and answers its own module sentence, while the workbook path finds its parts by name and produces the package. No generated sample has either shape, so no case reaches it",
         marks: &["fill_xlsx_needs_module"],
+    },
+];
+
+// ── the rendering marks ─────────────────────────────────────────────────────────────────────────
+
+/// Every rendering mark a corpus document witnesses, and the rendering it carries.
+///
+/// The witnesses are checked by rendering the named document through the public entry point and
+/// finding the rendering in its answer — a page's report, the document's report, its notes, or the
+/// reason it was refused. A mark whose witness is not found fails that check, so this table cannot
+/// drift into a list of test names.
+pub const RENDER_WITNESSES: &[Witness] = &[
+    Witness {
+        mark: "render_unreadable",
+        document: "truncated.pdf",
+        witness: "the file could not be read",
+    },
+    Witness {
+        mark: "render_unsupported",
+        document: "plain.txt",
+        witness: "the engine has no page renderer for this kind of file",
+    },
+    Witness {
+        mark: "render_password_protected",
+        document: "encrypted.pdf",
+        witness: "it is password-protected",
+    },
+    Witness {
+        mark: "render_no_pages",
+        document: "no-sheets.xlsx",
+        witness: "the document states no page to draw",
+    },
+    Witness {
+        mark: "render_legacy",
+        document: "legacy.doc",
+        witness: "the legacy binary format is read but not rendered",
+    },
+    Witness {
+        mark: "render_face_substituted",
+        document: "basic.docx",
+        witness: "the document names Calibri; its pages are drawn in the engine's own face",
+    },
+    Witness {
+        mark: "render_face_default",
+        document: "basic.pptx",
+        witness: "the document names no face; its pages are drawn in the engine's own face",
+    },
+    Witness {
+        mark: "render_unshown_chart",
+        document: "chart.docx",
+        witness: "1 chart not drawn",
+    },
+    Witness {
+        mark: "render_unshown_formula",
+        document: "rich.xlsx",
+        witness: "1 formula value not drawn",
+    },
+    Witness {
+        mark: "render_placeholder_default",
+        document: "basic.pptx",
+        witness: "placeholders whose frame no part states, drawn in its kind's default area",
+    },
+    Witness {
+        mark: "render_slide_hidden",
+        document: "rich.pptx",
+        witness: "slide 3 is hidden; it is not drawn",
+    },
+    Witness {
+        mark: "render_sheet_hidden",
+        document: "rich.xlsx",
+        witness: "the workbook hides sheet \"Hidden\"; it was not drawn",
+    },
+    Witness {
+        mark: "render_sheet_hidden_columns",
+        document: "rich.xlsx",
+        witness: "the sheet hides 2 columns; C:D are not drawn",
+    },
+    Witness {
+        mark: "render_sheet_hidden_rows",
+        document: "rich.xlsx",
+        witness: "the sheet hides 1 row; 3 is not drawn",
+    },
+    Witness {
+        mark: "render_pages_truncated",
+        document: "range-budget.xlsx",
+        witness: "the document's pages past the first 1000 were not drawn",
+    },
+    Witness {
+        mark: "render_sections",
+        document: "edit.docx",
+        witness: "the document states 2 sections; they are drawn on the last section's page",
+    },
+    Witness {
+        mark: "render_slide_missing",
+        document: "broken-deck.pptx",
+        witness: "slide 1 is not drawn: the package holds no readable part for it",
+    },
+    Witness {
+        mark: "render_slide_unlisted",
+        document: "list-disagrees.pptx",
+        witness: "the deck holds a slide part `ppt/slides/slide4.xml` its own list does not name",
+    },
+    Witness {
+        mark: "render_slide_source",
+        document: "basic.pptx",
+        witness: "slide 1",
+    },
+    Witness {
+        mark: "render_sheet_source",
+        document: "basic.xlsx",
+        witness: "sheet \"First\", page 1",
+    },
+    Witness {
+        mark: "render_justified",
+        document: "justified.docx",
+        witness: "the document justifies its text; its pages draw it left-aligned",
+    },
+    Witness {
+        mark: "render_size_clamped",
+        document: "giant-font.docx",
+        witness: "a run states a size taller than its page",
+    },
+    Witness {
+        mark: "render_tabs_truncated",
+        document: "many-tabs.docx",
+        witness: "tabs it may hold",
+    },
+    Witness {
+        mark: "render_margins_refused",
+        document: "absurd-margins.xlsx",
+        witness: "the margins the sheet states leave no room on its page",
+    },
+    Witness {
+        mark: "render_sheet_missing",
+        document: "broken-parts.xlsx",
+        witness: "sheet \"Broken\" is not drawn: the package holds no readable part for it",
+    },
+    Witness {
+        mark: "render_unshown_audio",
+        document: "all-media.docx",
+        witness: "1 embedded audio file not drawn",
+    },
+    Witness {
+        mark: "render_unshown_media",
+        document: "all-media.docx",
+        witness: "1 embedded media file not drawn",
+    },
+    Witness {
+        mark: "render_unshown_video",
+        document: "all-media.docx",
+        witness: "2 embedded videos not drawn",
+    },
+    Witness {
+        mark: "render_unshown_diagram",
+        document: "all-media.docx",
+        witness: "1 diagram not drawn",
+    },
+    Witness {
+        mark: "render_unshown_drawing",
+        document: "all-media.docx",
+        witness: "1 embedded drawing not drawn",
+    },
+    Witness {
+        mark: "render_unshown_object",
+        document: "all-media.docx",
+        witness: "1 embedded object part not drawn",
+    },
+    Witness {
+        mark: "render_unshown_missing_part",
+        document: "media.xlsx",
+        witness: "3 frames whose part is not drawn",
+    },
+    Witness {
+        mark: "render_page_declined",
+        document: "page-tree-names-itself.pdf",
+        witness: "page 1 is not drawn: the file names it and it could not be produced",
+    },
+    Witness {
+        mark: "render_picture_not_drawn",
+        document: "range-budget.xlsx",
+        witness: "page 100's picture was not drawn",
+    },
+    Witness {
+        mark: "render_unshown_picture",
+        document: "media.xlsx",
+        witness: "2 pictures not drawn",
+    },
+    Witness {
+        mark: "render_wide_column",
+        document: "wide.xlsx",
+        witness: "1 run in a column wider than the printable area",
+    },
+    Witness {
+        mark: "render_past_edge",
+        document: "wide.xlsx",
+        witness: "1 run placed past the page's edge",
+    },
+    Witness {
+        mark: "render_scaled_away",
+        document: "collapsed.pptx",
+        witness: "1 run scaled to nothing, not drawn: Collapsed",
+    },
+    Witness {
+        mark: "render_sheets_truncated",
+        document: "many-sheets.xlsx",
+        witness: "the workbook's sheets past the first 1000 were not drawn: S1000",
+    },
+    Witness {
+        mark: "render_names_more",
+        document: "many-sheets.xlsx",
+        witness: ", and 3 more",
+    },
+    Witness {
+        mark: "render_unshown_chart_sheet",
+        document: "rich.xlsx",
+        witness: "1 chart sheet not drawn",
+    },
+    Witness {
+        mark: "render_unshown_shape",
+        document: "fill-macro.pptm",
+        witness: "1 unsupported shape not drawn",
+    },
+    Witness {
+        mark: "render_unshown_link",
+        document: "linked-video.docx",
+        witness: "1 linked video or audio part not drawn",
+    },
+    Witness {
+        mark: "render_unshown_attachment",
+        document: "attached-file.pdf",
+        witness: "1 attached file not drawn",
+    },
+    Witness {
+        mark: "render_unshown_media_annotation",
+        document: "media-annotation.pdf",
+        witness: "1 media annotation not drawn",
+    },
+    Witness {
+        mark: "render_slide_size_partial",
+        document: "partial-size.pptx",
+        witness: "the deck states a slide width of 720 points but no height",
+    },
+];
+
+/// The rendering marks no corpus document can raise, and why.
+pub const UNRENDERED: &[Unproducible] = &[
+    Unproducible {
+        reason: "a page past the size a render may draw is refused by the surface test's own hand-built document; no reading corpus document states one",
+        marks: &["render_page_size"],
+    },
+    Unproducible {
+        reason: "a package would have to expand past the bytes one render may hold; the package reader's own unit test reaches both bounds with numbers small enough to test, and no corpus document comes near",
+        marks: &["render_package_too_large", "render_part_too_large"],
+    },
+    Unproducible {
+        reason: "a part would have to nest past the depth bound; the Word arm's own test nests a body that deep, and no corpus document does",
+        marks: &["render_part_too_deep"],
+    },
+    Unproducible {
+        reason: "a part would have to hold more elements than the element bound; the tree's own unit test states that many empty elements, and no corpus document comes near",
+        marks: &["render_part_too_many"],
+    },
+    Unproducible {
+        reason: "a document would have to state a page size that is no finite number of points; the Word arm's own test states one, and no corpus document does",
+        marks: &["render_page_size_ignored"],
+    },
+    Unproducible {
+        reason: "a deck would have to state a slide axis that is no finite number of points; the presentation arm's own test states one, and no corpus deck does",
+        marks: &["render_slide_size_ignored"],
+    },
+    Unproducible {
+        reason: "a workbook stating a boolean cell is drawn by the workbook arm's own test; no reading workbook states one",
+        marks: &["xlsx_boolean_true", "xlsx_boolean_false"],
+    },
+    Unproducible {
+        reason: "a stated page count past the bound is refused by the surface test's own hand-built document; no reading corpus document states one",
+        marks: &["render_pages_max"],
+    },
+    Unproducible {
+        reason: "a page would have to hold more than 131072 things to reach it; the page's own `push` reads the bound, and no generated document comes near it",
+        marks: &["render_items_truncated"],
+    },
+    Unproducible {
+        reason: "the workbook arm's own test states a paper code its table does not know; no reading workbook states one",
+        marks: &["render_paper_unknown"],
+    },
+    Unproducible {
+        reason: "the workbook arm's own test states repeated print titles; no reading workbook states them",
+        marks: &["render_print_titles"],
+    },
+    Unproducible {
+        reason: "the Word arm's own test states a section of two columns; no reading document does",
+        marks: &["render_columns"],
+    },
+    Unproducible {
+        reason: "the Word arm's own test states an anchor this flow cannot measure; no reading document does",
+        marks: &["render_anchor_unresolved"],
+    },
+    Unproducible {
+        reason: "a page whose own drawing the rasteriser refuses: no generated document draws one it fails on",
+        marks: &["render_unshown_rendered_page"],
+    },
+    Unproducible {
+        reason: "a document stating a page of no size is refused by the surface test's own hand-built document; no reading corpus document states one",
+        marks: &["render_page_empty"],
+    },
+    Unproducible {
+        reason: "a workbook would have to state more merged ranges than the probe budget covers before any cell is drawn; no generated document comes near it, and one that did would cost the budget's whole 16 million range tests",
+        marks: &["render_merges_truncated"],
+    },
+    Unproducible {
+        reason: "the engine's writer emits no equation, so no generated document carries one",
+        marks: &["render_unshown_equation"],
+    },
+    Unproducible {
+        reason: "the presentation arm's own test states a picture crop; no reading deck does",
+        marks: &["render_unshown_crop"],
     },
 ];

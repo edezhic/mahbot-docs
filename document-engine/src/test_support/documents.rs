@@ -1718,6 +1718,115 @@ pub const PICTURE_OVERSIZE: Document = Document {
     build: build::oversize_png,
 };
 
+/// The corpus document with this name, when the corpus declares one: a reading document, one the
+/// writing half's own cases build, or one the renderer's own tests render.
+#[must_use]
+pub fn document(name: &str) -> Option<Document> {
+    reader_documents()
+        .into_iter()
+        .chain(writer_documents())
+        .chain(render_documents())
+        .find(|document| document.name == name)
+}
+
+// ── the renderer's own documents, whose readings are deliberately not recorded ───────────────
+
+/// A Word document whose paragraph is justified: the renderer draws it left-aligned and says so.
+pub const DOCX_JUSTIFIED: Document = Document {
+    name: "justified.docx",
+    build: build::docx_justified,
+};
+
+/// A Word document stating a run taller than any page.
+pub const DOCX_GIANT_FONT: Document = Document {
+    name: "giant-font.docx",
+    build: build::docx_giant_font,
+};
+
+/// A Word document stating more tabs than one paragraph may hold.
+pub const DOCX_MANY_TABS: Document = Document {
+    name: "many-tabs.docx",
+    build: build::docx_many_tabs,
+};
+
+/// A workbook stating a margin wider than any page.
+pub const XLSX_ABSURD_MARGINS: Document = Document {
+    name: "absurd-margins.xlsx",
+    build: build::xlsx_absurd_margins,
+};
+
+/// A workbook whose one sheet draws an embedded object's own frame beside its EMF preview, a vector
+/// drawing, a vector part the package lacks, a raster part the package lacks and a raster part it
+/// holds but no decoder can read, a chart frame and a diagram frame whose parts the package lacks,
+/// and which holds a chart part no drawing names.
+pub const MEDIA_XLSX: Document = Document {
+    name: "media.xlsx",
+    build: build::xlsx_media,
+};
+
+/// A workbook whose one column is stated wider than its page and whose one cell holds a long
+/// integer, so the value is drawn past the page's own edge.
+pub const WIDE_XLSX: Document = Document {
+    name: "wide.xlsx",
+    build: build::xlsx_wide,
+};
+
+/// A deck whose one slide holds a text shape inside two nested groups that each shrink their
+/// children a millionfold: the run is scaled to nothing.
+pub const COLLAPSED_PPTX: Document = Document {
+    name: "collapsed.pptx",
+    build: build::pptx_collapsed,
+};
+
+/// A deck whose presentation states a slide width and no height.
+pub const PARTIAL_SIZE_PPTX: Document = Document {
+    name: "partial-size.pptx",
+    build: build::pptx_partial_size,
+};
+
+/// A workbook naming more sheets than a render draws, each an empty worksheet and all visible: the
+/// sheets past the bound are named, as many as one report line lists and a count of the rest.
+pub const MANY_SHEETS_XLSX: Document = Document {
+    name: "many-sheets.xlsx",
+    build: build::xlsx_many_sheets,
+};
+
+/// A Word document stating a different first page and even pages that differ, while referencing
+/// only the body's header and footer.
+pub const HEADER_KINDS_DOCX: Document = Document {
+    name: "header-kinds.docx",
+    build: build::docx_header_kinds,
+};
+
+/// A Word document stating a video it links to rather than embeds, beside a picture: the link names
+/// a file outside the package, so the page that states it names the video, and the still picture the
+/// same frame carries is a part of its own, drawn as the picture it is.
+pub const LINKED_VIDEO_DOCX: Document = Document {
+    name: "linked-video.docx",
+    build: build::docx_linked_video,
+};
+
+/// The documents the renderer's own tests render and no recorded reading names: the shapes a render
+/// reports — a loss, a header or footer kind the section references none for, a note about the page's
+/// own size — that no reading corpus document carries. They are kept out of the reader's list so the
+/// recorded readings and the gate's baseline stay as recorded.
+#[must_use]
+pub fn render_documents() -> Vec<Document> {
+    vec![
+        DOCX_JUSTIFIED,
+        DOCX_GIANT_FONT,
+        DOCX_MANY_TABS,
+        XLSX_ABSURD_MARGINS,
+        MEDIA_XLSX,
+        WIDE_XLSX,
+        COLLAPSED_PPTX,
+        PARTIAL_SIZE_PPTX,
+        MANY_SHEETS_XLSX,
+        HEADER_KINDS_DOCX,
+        LINKED_VIDEO_DOCX,
+    ]
+}
+
 /// Every document the reader reference is recorded on, in the order it is recorded: the original
 /// corpus first, the deeper-reading documents after it, and the fixed mutations last.
 #[must_use]

@@ -11,15 +11,11 @@ use lopdf::{Dictionary, Object, ObjectId, Stream};
 use super::graph::{self, Document};
 use serde_json::Value;
 
-use super::font::{Face, Subset};
+use super::font::{self, Face, Subset};
 use super::page;
 use crate::operation::Failure;
 use crate::vocabulary::{self, vocabulary};
 use crate::writing::js_number;
-
-/// The base name a resource entry is given: the font and a placed picture are named from it, with a
-/// number appended when the page already states that name.
-pub(super) const FONT_BASE: &str = "NotoSans-Regular";
 
 /// The margin the reference gives a page: a streaming layout starts and ends its text column at it,
 /// and a default placement is inset by it, kept to a quarter of a small page by [`inset`].
@@ -63,7 +59,7 @@ pub(super) fn lines_of(text: &str) -> Vec<String> {
 /// digits in place of the exponent form JavaScript's `String()` prints, which the library expands by
 /// rescaling — `6.123233995736766e-17` becomes `0.00000000000000006123233995736767` — and the same
 /// expansion for a magnitude at or above `1e21`. Everything else is `String()`.
-pub(super) fn number(value: f64) -> String {
+pub(crate) fn number(value: f64) -> String {
     let text = js_number(value);
     let Some((_, exponent)) = text.split_once('e') else {
         return text;
@@ -123,7 +119,7 @@ impl Unsupported {
 
 /// One line as the two-byte codes the embedded font draws it with: a character the subset does not
 /// carry draws glyph 0, which a reader shows as the font's own blank box.
-pub(super) fn encode(subset: &Subset, line: &str) -> String {
+pub(crate) fn encode(subset: &Subset, line: &str) -> String {
     let mut codes = String::with_capacity(line.len() * 4);
     for character in line.chars() {
         let code = subset.codes.get(&character).copied().unwrap_or(0);
@@ -155,7 +151,7 @@ pub(super) fn name(value: &str) -> Object {
 }
 
 /// The subset font embedded as a Type0 CID font, as the object a page's `/Font` entry names.
-pub(super) fn embed_font(document: &mut Document, subset: &Subset, face: &Face) -> ObjectId {
+pub(crate) fn embed_font(document: &mut Document, subset: &Subset, face: &Face) -> ObjectId {
     let program = stream(
         document,
         Dictionary::from_iter([("Length1", Object::Integer(width_of(subset.program.len())))]),
@@ -165,7 +161,7 @@ pub(super) fn embed_font(document: &mut Document, subset: &Subset, face: &Face) 
     let [x0, y0, x1, y1] = face.font_bbox();
     let descriptor = document.add_object(Object::Dictionary(Dictionary::from_iter([
         ("Type", name("FontDescriptor")),
-        ("FontName", name(FONT_BASE)),
+        ("FontName", name(font::NAME)),
         ("Flags", Object::Integer(4)),
         ("ItalicAngle", Object::Integer(0)),
         ("StemV", Object::Integer(0)),
@@ -212,7 +208,7 @@ pub(super) fn embed_font(document: &mut Document, subset: &Subset, face: &Face) 
     let descendant = document.add_object(Object::Dictionary(Dictionary::from_iter([
         ("Type", name("Font")),
         ("Subtype", name("CIDFontType2")),
-        ("BaseFont", name(FONT_BASE)),
+        ("BaseFont", name(font::NAME)),
         ("CIDToGIDMap", name("Identity")),
         ("FontDescriptor", Object::Reference(descriptor)),
         ("CIDSystemInfo", Object::Dictionary(system)),
@@ -240,7 +236,7 @@ pub(super) fn embed_font(document: &mut Document, subset: &Subset, face: &Face) 
     document.add_object(Object::Dictionary(Dictionary::from_iter([
         ("Type", name("Font")),
         ("Subtype", name("Type0")),
-        ("BaseFont", name(FONT_BASE)),
+        ("BaseFont", name(font::NAME)),
         ("Encoding", name("Identity-H")),
         (
             "DescendantFonts",
@@ -276,7 +272,7 @@ pub(super) fn graphics_state(document: &mut Document, fill: f64, stroke: Option<
 /// unique against the entries already there. A `/Resources` or category entry the reference's typed
 /// lookup refuses — a value that is neither a dictionary, a null nor a dangling reference — is the
 /// engine's own failure, as it is the reference's.
-pub(super) fn add_resource(
+pub(crate) fn add_resource(
     document: &mut Document,
     page: ObjectId,
     category: &str,
@@ -359,7 +355,7 @@ fn resolved_dictionary(
 /// Append a content stream after the page's own content, wrapping that content in `q`/`Q` first as
 /// the reference's own content push does, so an unbalanced state in the page cannot reach the new
 /// drawing.
-pub(super) fn push_content(
+pub(crate) fn push_content(
     document: &mut Document,
     page: ObjectId,
     content: &[u8],

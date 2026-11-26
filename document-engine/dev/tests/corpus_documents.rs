@@ -353,6 +353,24 @@ fn every_writer_case_document_is_in_the_corpus() {
 }
 
 #[test]
+fn every_writer_document_is_built_by_a_case() {
+    // The other direction of `every_writer_case_document_is_in_the_corpus`: the list states the
+    // inputs a writer case builds, so a document only a render test names belongs to
+    // `render_documents()` and each of the two lists keeps one meaning.
+    let built: std::collections::BTreeSet<&'static str> = crate::corpus::writer_cases()
+        .iter()
+        .flat_map(|case| case.documents.iter().map(|document| document.name))
+        .collect();
+    for document in crate::corpus::writer_documents() {
+        assert!(
+            built.contains(document.name),
+            "{} is in `writer_documents()` but no writer case builds it",
+            document.name
+        );
+    }
+}
+
+#[test]
 fn a_builder_returns_the_same_bytes_every_time() {
     // A baseline records a reading of the document a builder produced; a builder that varied
     // between runs would make every later comparison a difference in the corpus rather than in

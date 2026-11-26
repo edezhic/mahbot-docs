@@ -13,14 +13,14 @@
 //! escape `out_dir`.
 
 use crate::reading::output::{
-    Unshown, UnshownKind, note, slide_comments_header, slide_header, slide_notes_header,
-    text_block, text_lines,
+    note, slide_comments_header, slide_header, slide_notes_header, text_block, text_lines,
 };
 use crate::reading::{
     DELIVERABLE_IMAGE_EXTENSIONS, DRAWING_EXTENSIONS, DocOutcome, SkipReason, SkippedImages,
     ensure_out_dir, write_picture,
 };
 use crate::support::one_line;
+use crate::unshown::{Unshown, UnshownKind};
 use crate::vocabulary::ppt_marks;
 use quick_xml::Reader;
 use quick_xml::events::{BytesRef, BytesStart, Event};
@@ -33,9 +33,9 @@ mod chart;
 mod docx;
 pub(crate) use docx::{DOCX_BODY_PART, convert_docx};
 /// Excel's number formats, shared by the sheet and chart readers.
-mod numfmt;
+pub(crate) mod numfmt;
 mod xlsx;
-pub(crate) use xlsx::{SHARED_STRINGS_PART, WORKBOOK_PART, convert_xlsx};
+pub(crate) use xlsx::{SHARED_STRINGS_PART, WORKBOOK_PART, convert_xlsx, is_true};
 
 /// Maximum bytes decompressed from a single ZIP entry, so a lying size header cannot
 /// inflate the temp dir. Deliberately not an aggregate bound: the entry count is open.
@@ -996,7 +996,7 @@ fn slide_block(
 /// What a package's media part is as far as its file name says: a picture this pipeline
 /// converts or does not, or one of the kinds the report names. Calling a video or drawing
 /// an unconvertible image would report a loss the file does not hold.
-enum PackageMedia {
+pub(crate) enum PackageMedia {
     /// A picture this pipeline does not convert: counted with its reason in
     /// [`SkippedImages`] rather than named by kind of its own, because that is what
     /// it is. The formats the pipeline does convert never reach here —
@@ -1009,7 +1009,7 @@ enum PackageMedia {
 /// [`PackageMedia`] for one media part's file name. A name of no recognized kind
 /// is `Media` rather than an image: a package calling an unknown thing a media
 /// part says no more about it than that, and the report repeats no more.
-fn package_media(file_name: &str) -> PackageMedia {
+pub(crate) fn package_media(file_name: &str) -> PackageMedia {
     let path = Path::new(file_name);
     if crate::support::is_image_extension(path)
         || crate::support::has_extension(path, EMBEDDED_EXTRA_IMAGE_EXTENSIONS)
@@ -1093,13 +1093,13 @@ fn count_chart_parts<R: Read + Seek>(
 
 /// Whether `name` is a chart part one predicate for both the census and the scan for a
 /// chart's companion parts, so the two cannot disagree.
-fn is_chart_part(name: &str, prefix: &str) -> bool {
+pub(crate) fn is_chart_part(name: &str, prefix: &str) -> bool {
     is_numbered_part(name, prefix, "chart") || is_numbered_part(name, prefix, "chartEx")
 }
 
 /// Whether `name` is a `<stem><N>.xml` part — numbered parts a reading names by count.
 /// A non-numeric remainder (`charts/colors1.xml`) is another kind of part.
-fn is_numbered_part(name: &str, prefix: &str, stem: &str) -> bool {
+pub(crate) fn is_numbered_part(name: &str, prefix: &str, stem: &str) -> bool {
     name.strip_prefix(prefix)
         .and_then(|rest| rest.strip_suffix(".xml"))
         .and_then(|rest| rest.strip_prefix(stem))
@@ -1350,19 +1350,28 @@ fn rel_id(event: &BytesStart<'_>) -> Option<String> {
         })
 }
 
-/// The value of the attribute whose local name is `name` (after any prefix), unescaped.
-fn attr(event: &BytesStart<'_>, name: &[u8]) -> Option<String> {
-    event
-        .attributes()
-        .with_checks(false)
-        .flatten()
-        .find(|attribute| attribute.key.local_name().as_ref() == name)
-        .and_then(|attribute| {
-            attribute
-                .unescape_value()
-                .ok()
-                .map(std::borrow::Cow::into_owned)
+/// The value of an attribute, unescaped, by the name the part's own vocabulary gives it: a name
+/// written as the part writes it matches as written, and a name that states no prefix matches the
+/// attribute's own name with its namespace prefix ignored. One rule for every reader of a part — the
+/// streaming one here and the tree [`crate::render::xml`] builds — so the same attribute is asked for
+/// the same way whichever reads it.
+pub(crate) fn attr(event: &BytesStart<'_>, name: &[u8]) -> Option<String> {
+    let attributes: Vec<_> = event.attributes().with_checks(false).flatten().collect();
+    let exact = attributes
+        .iter()
+        .find(|attribute| attribute.key.as_ref() == name);
+    let found = if name.contains(&b':') {
+        exact
+    } else {
+        exact.or_else(|| {
+            attributes
+                .iter()
+                .find(|attribute| attribute.key.local_name().as_ref() == name)
         })
+    };
+    found
+        .and_then(|attribute| attribute.unescape_value().ok())
+        .map(std::borrow::Cow::into_owned)
 }
 
 fn scan_elements<T>(

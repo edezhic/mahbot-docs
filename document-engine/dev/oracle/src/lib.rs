@@ -1,25 +1,26 @@
 //! The development oracle: what the outside references show for the documents the engine's own
 //! writer produces.
 //!
-//! The gate judges files. It cannot say what a page of a document this system produces
-//! looks like, and the engine has no page renderer for Word, PowerPoint or Excel. This target has
-//! two parts, both explicit and both development only:
+//! The gate judges files. It cannot say what a page of a document this system produces looks like.
+//! This target has two parts, both explicit and both development only:
 //!
 //! - the **record** ([`record`], [`run`]) captures what LibreOffice lays out for every Office
-//!   document the engine writes, so the shape exists before a renderer does;
-//! - the **comparison** ([`compare`]) judges the one page the engine can draw — a page of a PDF —
-//!   against PDFium, an independent rasteriser, and reports every other family as not compared.
+//!   document the engine writes;
+//! - the **comparison** ([`compare`]) judges the engine's own pages against two outside opinions:
+//!   the Office pages against that record, on content, and a page of a PDF against PDFium, an
+//!   independent rasteriser, on pixels.
 //!
 //! The JavaScript document kit has retired, so here the reference is the **outside programs**:
-//! LibreOffice for the record, PDFium for the comparison (the workspace's `INVENTORY.md` defines
-//! the word). They are a *second opinion*, never the truth: LibreOffice rounds line heights to whole
-//! twips, and PDFium and the engine round a page's edges differently. What is recorded and what is
-//! compared is what they show.
+//! LibreOffice for the record, PDFium for the PDF half of the comparison (the workspace's
+//! `INVENTORY.md` defines the word). They are a *second opinion*, never the truth: LibreOffice
+//! rounds line heights to whole twips, and PDFium and the engine round a page's edges differently.
+//! What is recorded and what is compared is what they show.
 //!
 //! This is a **report, not a gate**. It disagrees visibly, and a disagreement is reviewed by a
-//! person rather than by an exit code. It is the only external opinion the tree has left: after the
-//! kit retired, what is compared is the engine's drawing of a PDF page against PDFium, and what is
-//! recorded is the Office pages — which nothing compares against yet.
+//! person rather than by an exit code. It is the only external opinion the tree has left: the record
+//! is what the outside reference laid out, the baseline is what "unchanged" means, and the
+//! comparison judges the engine's own renderer against both — the Office pages on content, a PDF
+//! page on pixels.
 //!
 //! # What a record is
 //!
@@ -29,10 +30,11 @@
 //! - `produced.pdf`, the document the outside reference produced, kept as produced because the
 //!   pages must be rasterisable later;
 //! - `document.json`, the canonical description of its pages and the identity it was produced
-//!   under: every page's size in points and text line by line, the faces every page drew a glyph
-//!   in, which pages carry no ink and why, the digest of the engine's own output it was produced
-//!   from, what the reference does not show, and which numbers the document prints from the engine's
-//!   layout pass rather than from the reference.
+//!   under: every page's size in points, every line of text with where it sits and how big it is,
+//!   every picture with its box, the faces every page drew a glyph in, which pages carry no ink and
+//!   why, the digest of the engine's own output it was produced from, what the reference does not
+//!   show, and which numbers the document prints from the engine's layout pass rather than from the
+//!   reference.
 //!
 //! `record/identity.json` states the reference once for the whole record — its version and build,
 //! the conversion options, the pinned locale and paper, and the font set it was given, with the
@@ -54,24 +56,28 @@
 //!
 //! A PDF is what the record holds for a Word, PowerPoint or Excel document, because that is what the
 //! reference produces for those families. A PDF *input* is not recorded: it is compared against an
-//! independent rasteriser by [`compare`], which judges the engine's own PDF output and reports the
-//! Office families as not compared, with the reason.
+//! independent rasteriser by [`compare`], which judges the engine's own PDF output. The Office
+//! documents the record covers are compared against it, page by page.
 //!
 //! # What the comparison is
 //!
-//! [`compare`] compares the engine's own PDF pages against PDFium: the page count, the page's pixel
-//! dimensions, and the drawn page, at a fixed long side and with a per-content-class threshold. Text,
-//! faces and the page's size in points are not compared, and the report says why. It is a report,
-//! not a gate: a divergence does not fail it, and only a failed mechanism does. It proves the
-//! drawing of the engine's own output; it proves nothing about the Office families, and it is not a
-//! check on arbitrary user PDFs. `compare/README.md` states the whole contract.
+//! [`compare`] has two halves. The Office half compares the engine's own renderer against the
+//! committed record — the page count, each page's size in points, every line's text, position and
+//! size, every picture's box, and whether a page drew text — and needs no outside software
+//! at compare time, so it runs on every machine. The PDF half compares the engine's own PDF pages
+//! against PDFium: the page count, the page's pixel dimensions, and the drawn page, at a fixed long
+//! side and with a per-content-class threshold. It is a report, not a gate: a divergence does not
+//! fail it, and only a failed mechanism does. It proves the engine's own output against both outside
+//! opinions; it is not a check on arbitrary user documents. `compare/README.md` states the whole
+//! contract.
 //!
 //! # Running it
 //!
 //! The two parts are hidden modes of the crate's `oracle` test target, and each mode's own arguments
 //! follow its `--`. `verify` checks the committed record against the reference installed on this
-//! machine; `record` deliberately re-records it. `compare` compares the fixed PDF set and writes its
-//! report and evidence; `measure` prints the numbers a deliberate re-calibration is written from.
+//! machine; `record` deliberately re-records it. `compare` compares the engine's Office pages against
+//! the record and its PDF pages against PDFium, and writes its report and evidence; `measure` prints
+//! the numbers a deliberate re-calibration is written from.
 //! `dev/oracle/README.md` states the invocations. All are explicit, `#[ignore]`d modes: an ordinary
 //! `cargo test` run never reaches one, and one that does not see the outside program says what is
 //! missing and passes rather than failing the suite. Nothing here is part of the engine's build or
@@ -87,6 +93,7 @@ pub mod ink;
 pub mod modes;
 pub mod pages;
 pub mod pdfium;
+pub mod positions;
 pub mod record;
 pub mod reference;
 pub mod run;
@@ -99,6 +106,29 @@ pub const RECORDED_BY: &str = "page-oracle 0.1.0";
 /// The locale the reference is pinned to. It decides a workbook's default paper as well as the
 /// number and date spellings a page shows, and a created workbook states no page setup of its own.
 pub const LOCALE: &str = "en-US";
+
+/// The tool that reads a produced PDF's page text and positions, as a record states it. The reading
+/// is this target's own walk of the page's content streams ([`positions`]), not an outside crate, so
+/// the record names the walk and the digest of the two sources that decide every recorded
+/// coordinate: the walk, then the page it walks ([`pages`]), which rounds a page's box, selects its
+/// content streams, dereferences its objects and finds its forms. A change to either moves the
+/// identity and makes the record stale until it is re-recorded.
+#[must_use]
+pub fn page_text_extractor() -> String {
+    use sha2::{Digest as _, Sha256};
+    let mut digest = Sha256::new();
+    // The stated order: the walk that reads a coordinate, then the page it reads it from.
+    digest.update(include_str!("positions.rs").as_bytes());
+    digest.update(include_str!("pages.rs").as_bytes());
+    let digest = digest.finalize();
+    format!("page-oracle positions 1 ({})", &format!("{digest:x}")[..16])
+}
+
+/// How deep a form `XObject` may be nested. A form that reaches itself, directly or through another
+/// form, is a cycle rather than a page, and a page nested deeper than this is refused rather than
+/// guessed at. Both readings of a page — its lines and pictures, and its ink — walk the same forms,
+/// so the bound has one home.
+pub const FORM_DEPTH: usize = 8;
 
 /// A string as XML text spells it, for the configuration files this target writes.
 pub(crate) fn escape(text: &str) -> String {
@@ -116,10 +146,13 @@ pub(crate) fn escape(text: &str) -> String {
     out
 }
 
-/// How far a page's recorded width or height may move and still be the same page, in points. Half a
-/// point is an order of magnitude above the reference's own rounding unit — a twentieth of a point
-/// for Writer and Calc, a hundredth of a millimetre for Impress — and far below a line of text.
-pub const PAGE_SIZE_TOLERANCE_PT: f64 = 0.5;
+/// How far a page's recorded width or height may move between two surveys of the same document and
+/// still be the same page, in points. Half a point is an order of magnitude above the reference's
+/// own rounding unit — a twentieth of a point for Writer and Calc, a hundredth of a millimetre for
+/// Impress — and far below a line of text. It is the record's own number, so it is named once, as
+/// `identity.json`'s `re_record_tolerance_pt`; the comparison's page-size tolerance is a different
+/// value with its own home in `calibration.json`.
+pub const RE_RECORD_TOLERANCE_PT: f64 = 0.5;
 
 /// One of the three Office families the record covers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

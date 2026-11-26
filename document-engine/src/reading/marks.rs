@@ -19,9 +19,11 @@
 //! - **One object is one entry.** Identity is the dictionary's own bytes, so a mark listed on two
 //!   pages is one mark while two dictionaries written into one array stay two.
 
-use crate::reading::output::{Unshown, UnshownKind, lines_of, mark, note, text_lines};
+use crate::reading::output::{lines_of, note, text_lines};
 use crate::support::decode_html_entities;
+use crate::support::mark;
 use crate::support::one_line;
+use crate::unshown::{Unshown, UnshownKind};
 use hayro_current::hayro_syntax::Pdf;
 use hayro_current::hayro_syntax::object::dict::Dict;
 use hayro_current::hayro_syntax::object::{Array, DateTime, Name, Object, String as PdfString};
@@ -94,6 +96,14 @@ pub(crate) struct Marks {
 #[must_use]
 pub(crate) fn read(pdf: &Pdf) -> Marks {
     crate::contained::contain_panics(|| read_inner(pdf)).unwrap_or_default()
+}
+
+/// The content the marks themselves carry and the reading does not show — the file an attachment
+/// holds, the media a sound or movie annotation plays — from the annotation walk, without building
+/// the description or the form fields a render does not read.
+#[must_use]
+pub(crate) fn unshown(pdf: &Pdf) -> Unshown {
+    crate::contained::contain_panics(|| read_annotations(pdf).unshown).unwrap_or_default()
 }
 
 fn read_inner(pdf: &Pdf) -> Marks {

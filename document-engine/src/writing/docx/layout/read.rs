@@ -19,15 +19,48 @@ use crate::operation::Failure;
 /// One page's geometry, in points: the page's own size, its margins, and where its header and footer
 /// stand from the page's top and bottom edges.
 #[derive(Clone, Copy)]
-pub(super) struct Page {
-    pub(super) width: f64,
-    pub(super) height: f64,
-    pub(super) top: f64,
-    pub(super) right: f64,
-    pub(super) bottom: f64,
-    pub(super) left: f64,
-    pub(super) header: f64,
-    pub(super) footer: f64,
+pub(crate) struct Page {
+    pub(crate) width: f64,
+    pub(crate) height: f64,
+    pub(crate) top: f64,
+    pub(crate) right: f64,
+    pub(crate) bottom: f64,
+    pub(crate) left: f64,
+    pub(crate) header: f64,
+    pub(crate) footer: f64,
+}
+
+impl Page {
+    /// The page a section that states none of its own is laid out as: the library's
+    /// `sectionPageSizeDefaults` and `sectionMarginDefaults` — A4, an inch of margin and 708 twips
+    /// of header and footer room — which is what the literals below are. A created document always
+    /// states its section, so these are unreachable from the create path; the derivation command
+    /// reads the layout bundle, and these defaults live in the writer bundle beside it, so it does
+    /// not ship them. The renderer starts from the vocabulary's canvas instead.
+    pub(crate) fn defaults() -> Self {
+        // The library's own defaults, in the twips it states them in: A4's 11 906 by 16 838, an
+        // inch of margin and 708 twips of header and footer room. They are the writer's and must
+        // not follow the renderer's canvas, so they are stated here rather than read from it.
+        Self {
+            width: points(11_906.0),
+            height: points(16_838.0),
+            top: points(1_440.0),
+            right: points(1_440.0),
+            bottom: points(1_440.0),
+            left: points(1_440.0),
+            header: points(708.0),
+            footer: points(708.0),
+        }
+    }
+}
+
+/// The element access a section's geometry is read through: the writer's own tree and the
+/// renderer's are different types reading the same attributes, and one reader serves both.
+pub(crate) trait Geometry {
+    /// An attribute's value, by its qualified name.
+    fn attribute(&self, name: &str) -> Option<&str>;
+    /// The first child of this name.
+    fn child(&self, name: &str) -> Option<&Self>;
 }
 
 /// A run of text: its characters, and the font they are measured in.
@@ -343,6 +376,16 @@ struct Node {
     text: String,
 }
 
+impl Geometry for Node {
+    fn attribute(&self, name: &str) -> Option<&str> {
+        Node::attribute(self, name)
+    }
+
+    fn child(&self, name: &str) -> Option<&Self> {
+        Node::child(self, name)
+    }
+}
+
 impl Node {
     fn attribute(&self, name: &str) -> Option<&str> {
         self.attributes
@@ -430,19 +473,19 @@ fn element<'a>(
 
 /// A length in twips as points: the unit a part states its lengths in, and the unit the page record
 /// states them in.
-pub(super) fn points(twips: f64) -> f64 {
+pub(crate) fn points(twips: f64) -> f64 {
     twips / 20.0
 }
-
-/// A length in points, from a twips attribute.
-fn twips(value: Option<&str>) -> Option<f64> {
+/// A length in points, from a twips attribute. A value that is not a finite number is not stated at
+/// all, so an infinity a part carries never reaches a page or a page count.
+pub(crate) fn twips(value: Option<&str>) -> Option<f64> {
     value
         .and_then(|value| value.trim().parse::<f64>().ok())
+        .filter(|points| points.is_finite())
         .map(points)
 }
-
 /// Whether an `ST_OnOff` attribute states on.
-fn on(value: Option<&str>) -> Option<bool> {
+pub(crate) fn on(value: Option<&str>) -> Option<bool> {
     value.map(|value| !matches!(value, "false" | "0" | "off"))
 }
 
@@ -809,28 +852,23 @@ fn line_spacing(spacing: &Node) -> Option<LineSpacing> {
     }
 }
 
-/// The page a document's section states, in points.
+/// The page a document's section states, in points, and how many columns it states.
 ///
-/// A section that states none of its own is laid out as the library's `sectionPageSizeDefaults` and
-/// `sectionMarginDefaults` state it — A4, an inch of margin and 708 twips of header and footer room —
-/// which is what the literals below are. A created document always states its section, so they are
-/// unreachable from the create path; the derivation command reads the layout bundle, and these
-/// defaults live in the writer bundle beside it, so it does not ship them.
-fn page_of(section: Option<&Node>) -> Page {
-    let mut page = Page {
-        width: 595.3,
-        height: 841.9,
-        top: 72.0,
-        right: 72.0,
-        bottom: 72.0,
-        left: 72.0,
-        header: 35.4,
-        footer: 35.4,
-    };
+/// A section that states no geometry of its own is laid out as `defaults`. Both halves read the same
+/// attributes through [`Geometry`], so one reader serves the writer's own tree and the renderer's.
+pub(crate) fn page_of<N: Geometry>(section: Option<&N>, defaults: Page) -> (Page, usize) {
+    let mut page = defaults;
+    let mut columns = 1;
     if let Some(section) = section {
         if let Some(size) = section.child("w:pgSz") {
             page.width = twips(size.attribute("w:w")).unwrap_or(page.width);
             page.height = twips(size.attribute("w:h")).unwrap_or(page.height);
+        }
+        if let Some(stated) = section.child("w:cols") {
+            columns = stated
+                .attribute("w:num")
+                .and_then(|value| value.trim().parse::<usize>().ok())
+                .unwrap_or(1);
         }
         if let Some(margins) = section.child("w:pgMar") {
             page.top = twips(margins.attribute("w:top")).unwrap_or(page.top);
@@ -841,7 +879,7 @@ fn page_of(section: Option<&Node>) -> Page {
             page.footer = twips(margins.attribute("w:footer")).unwrap_or(page.footer);
         }
     }
-    page
+    (page, columns)
 }
 
 /// The body's blocks, and the page its section states.
@@ -852,7 +890,7 @@ fn read_body(
 ) -> Result<(Vec<Block>, Page), Failure> {
     let root = tree(bytes)?;
     let body = root.child("w:body").ok_or_else(Failure::engine)?;
-    let page = page_of(body.child("w:sectPr"));
+    let (page, _) = page_of(body.child("w:sectPr"), Page::defaults());
     Ok((
         read_blocks_of(body, styles, counters, &mut Fields::default())?,
         page,

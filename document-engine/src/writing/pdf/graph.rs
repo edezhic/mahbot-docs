@@ -29,7 +29,7 @@ use lopdf::{Dictionary, Object, ObjectId, Stream};
 
 /// A document whose object graph is dismantled iteratively when it is dropped. Everything else about it
 /// is the object model's own, reached through [`Deref`](std::ops::Deref).
-pub(super) struct Document {
+pub(crate) struct Document {
     pub(super) inner: lopdf::Document,
     /// Every object number a reference the input states names. A number handed to a new object is one
     /// this set does not hold, so a reference the input leaves dangling keeps naming nothing and a

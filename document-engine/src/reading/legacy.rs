@@ -6,7 +6,7 @@
 //! them into the same text shapes the OOXML arms use, so a model reads an old file and a new one
 //! the same way. The pictures the pipeline converts are written into `out_dir`; every picture it
 //! does not is named — a vector metafile as a drawing in the shared report
-//! ([`crate::reading::output::Unshown`]), any other format in the same "cannot convert" note a
+//! ([`crate::unshown::Unshown`]), any other format in the same "cannot convert" note a
 //! modern package's picture gets. The report also holds a `.ppt`'s objects counted by what they
 //! are (an OLE object the deck only links is counted not at all, since the file holds the link
 //! and not what it points at) and each `.xls` chart sheet, so nothing the crate hands over
@@ -30,14 +30,15 @@
 //!   created is a delivered picture inside the caller's `out_dir`.
 
 use crate::reading::output::{
-    Unshown, UnshownKind, column_letters, mark, note, sheet_header, slide_header,
-    slide_notes_header, text_block, text_lines,
+    column_letters, note, sheet_header, slide_header, slide_notes_header, text_block, text_lines,
 };
 use crate::reading::{
     DELIVERABLE_IMAGE_EXTENSIONS, DRAWING_EXTENSIONS, DocOutcome, SkipReason, SkippedImages,
     ensure_out_dir, write_picture,
 };
+use crate::support::mark;
 use crate::support::one_line;
+use crate::unshown::{Unshown, UnshownKind};
 use office_oxide::cfb::blip::BlipImage;
 use office_oxide::doc::{DocDocument, DocError, SubDocumentKind};
 use office_oxide::ir::SheetKind;
@@ -1217,7 +1218,7 @@ mod tests {
     use crate::support::test::noisy_png;
 
     /// The report line an arm gives one embedded object — pinned as a literal so a wording drift
-    /// in [`crate::reading::output::Unshown`] fails a test.
+    /// in [`crate::unshown::Unshown`] fails a test.
     const UNSHOWN_OBJECT: &str = "1 embedded object part(s) not shown";
 
     /// The `.doc` text: the body alone, every sub-document as its own labelled block.

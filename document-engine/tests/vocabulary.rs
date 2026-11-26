@@ -68,14 +68,50 @@ fn numbers(value: &Value, out: &mut BTreeSet<u64>) {
 /// enforce from the vocabulary; a caller-enforced entry (the prefix it peeks, the size it refuses,
 /// the pictures it delivers, the text it spills) has no crate-side consumer, so only the scan, not
 /// the bound-read test, holds it.
+///
+/// The `render` section's one-point thresholds are not bounds: they are the smallest gap or box
+/// that counts, and a literal repeating one of those is not a second statement of a limit. They are
+/// named in [`NOT_A_BOUND`] with their reason. The section's other entries are bounds and are
+/// scanned: the pages one call may produce, the largest page a document may state, the things one
+/// page may hold, the bytes its page rasters and its picture parts may reach, the bytes a package
+/// may expand to, and the part element and tab bounds. The canvas a document stating none is drawn
+/// on is not in `render` at all: it is the `page` section, the rendering half's own.
 fn all_bounds() -> Vec<f64> {
     let mut bits = BTreeSet::new();
     let json = document_engine::vocabulary::json();
     for section in ["reading", "limits", "engine"] {
         numbers(&json[section], &mut bits);
     }
+    let mut render = json["render"].clone();
+    if let Some(entries) = render.as_object_mut() {
+        for (name, _) in NOT_A_BOUND {
+            entries.remove(*name);
+        }
+    }
+    numbers(&render, &mut bits);
     bits.into_iter().map(f64::from_bits).collect()
 }
+
+/// The `render` entries the restatement scan leaves out, with why: the three thresholds a line or a
+/// picture is grouped by. `enforced` answers who applies a value; this list answers what the scan
+/// treats as a cap an input must stay under, and a threshold is not one — a literal repeating a
+/// threshold is a second statement of it, not of a limit. The page a document stating none is drawn
+/// on is not here because it is not in `render` at all: it is the `page` section, the rendering
+/// half's own, and it states no bound.
+const NOT_A_BOUND: &[(&str, &str)] = &[
+    (
+        "line_band_pt",
+        "how far apart two baselines still belong to one line",
+    ),
+    (
+        "line_gap_pt",
+        "the smallest gap between two runs that counts as a space",
+    ),
+    (
+        "min_picture_pt",
+        "the smallest box that counts as a picture",
+    ),
+];
 
 /// The values one `derived_marks` section prints: the entry's own example, kind or key, located
 /// by its own field so a reordering of the rules does not move a mark.
@@ -143,7 +179,7 @@ fn all_marks() -> Vec<String> {
             .expect("a mark states who prints it");
         if printed_by
             .iter()
-            .any(|producer| matches!(producer.as_str(), Some("reading" | "writing")))
+            .any(|producer| matches!(producer.as_str(), Some("reading" | "writing" | "rendering")))
         {
             marks.push(
                 mark["text"]
@@ -199,6 +235,37 @@ const FORMAT_NAMES: &[(&str, &[(&str, &str)])] = &[
         &[(
             "null",
             "the keyword the format states for a null object, format knowledge rather than a printed word",
+        )],
+    ),
+    (
+        "src/render/xlsx.rs",
+        &[(
+            "row",
+            "the `<row>` element's local name, format knowledge rather than a printed word",
+        )],
+    ),
+    (
+        "src/render/docx.rs",
+        &[
+            (
+                "page",
+                "a `wp:positionH`/`wp:positionV` reference, format knowledge rather than a printed word",
+            ),
+            (
+                "column",
+                "a `wp:positionH` reference, format knowledge rather than a printed word",
+            ),
+            (
+                "line",
+                "a `wp:positionV` reference, format knowledge rather than a printed word",
+            ),
+        ],
+    ),
+    (
+        "src/render/pptx.rs",
+        &[(
+            "title",
+            "a `p:ph` placeholder type, format knowledge rather than a printed word",
         )],
     ),
     (
@@ -1250,9 +1317,10 @@ const EXEMPTIONS: &[Exemption] = &[
     Exemption {
         file: "src/reading/ooxml/numfmt.rs",
         value: 3.0,
-        count: 9,
+        count: 12,
         quantity: "",
-        reason: "BIFF built-in format code 3, the third section of a three-part format and the civil-date month shift",
+        reason: "BIFF built-in format code 3, the third section of a three-part format, the civil-date \
+         month shift, and the run of three a stated date's year or month name is written at",
     },
     Exemption {
         file: "src/reading/ooxml/numfmt.rs",
@@ -1306,9 +1374,10 @@ const EXEMPTIONS: &[Exemption] = &[
     Exemption {
         file: "src/reading/ooxml/numfmt.rs",
         value: 100.0,
-        count: 4,
+        count: 5,
         quantity: "",
-        reason: "a percentage's scale factor and the civil-date century divisor",
+        reason: "a percentage's scale factor, the civil-date century divisor and the two-digit year a \
+         stated date's `yy` run names",
     },
     Exemption {
         file: "src/reading/ooxml/numfmt.rs",
@@ -1333,10 +1402,10 @@ const EXEMPTIONS: &[Exemption] = &[
     },
     Exemption {
         file: "src/vocabulary.rs",
-        value: 3.0,
+        value: 4.0,
         count: 1,
         quantity: "",
-        reason: "the three producers in `Producer::ALL`",
+        reason: "the four producers in `Producer::ALL`",
     },
     Exemption {
         file: "src/vocabulary.rs",
@@ -1344,6 +1413,20 @@ const EXEMPTIONS: &[Exemption] = &[
         count: 1,
         quantity: "",
         reason: "the four families in `Family::ALL`",
+    },
+    Exemption {
+        file: "src/render/page.rs",
+        value: 3.0,
+        count: 1,
+        quantity: "the channels a colour states",
+        reason: "red, green and blue, the channels a colour is stated in",
+    },
+    Exemption {
+        file: "src/render/page.rs",
+        value: 16.0,
+        count: 1,
+        quantity: "the base a colour's digits are counted in",
+        reason: "hexadecimal, the base a colour is written in",
     },
     Exemption {
         file: "src/writing/xlsx/mod.rs",
@@ -1440,6 +1523,36 @@ const EXEMPTIONS: &[Exemption] = &[
         quantity: "",
         reason: "the reference searches at most fifty neighbouring section tags for the one a closing tag \
          matches",
+    },
+    Exemption {
+        file: "src/render/finish.rs",
+        value: 3.0,
+        count: 1,
+        quantity: "the copies of a PNG's samples a page holds at its peak",
+        reason: "the image's own samples, the stream's copy of them and the built document's bytes: \
+         what `held`'s doc counts",
+    },
+    Exemption {
+        file: "src/render/finish.rs",
+        value: 4.0,
+        count: 2,
+        quantity: "",
+        reason: "the four bytes of an RGBA pixel, in a page's own raster and in each picture it embeds",
+    },
+    Exemption {
+        file: "src/render/xlsx.rs",
+        value: 16_384.0,
+        count: 1,
+        quantity: "",
+        reason: "Excel's own last column, the grid the part was written for",
+    },
+    Exemption {
+        file: "src/render/xlsx.rs",
+        value: 10.0,
+        count: 1,
+        quantity: "",
+        reason: "the smallest percentage a `pageSetup` scale may state: the format's own range, not a \
+         bound this engine enforces",
     },
 ];
 
@@ -2064,7 +2177,7 @@ fn every_bound_is_classified_by_a_known_producer() {
         .collect();
 
     let mut expected = BTreeSet::new();
-    for section in ["reading", "limits", "engine"] {
+    for section in ["reading", "limits", "engine", "render"] {
         for key in json[section]
             .as_object()
             .unwrap_or_else(|| panic!("the vocabulary states `{section}`"))
@@ -2129,49 +2242,138 @@ fn every_mark_names_a_producer() {
     }
 }
 
-/// The crate's own source, comments and literals removed and whitespace stripped, so a typed field
-/// access can be searched for across a line break and prose or a string cannot satisfy it.
-fn crate_source() -> String {
+#[test]
+fn every_mark_the_renderer_prints_is_declared_as_rendered() {
+    // A mark the rendering half names is a mark it prints, so its `printed_by` must say so. The rule
+    // is mechanical rather than per-mark: the arm's sources are read for every vocabulary key, and a
+    // key a renderer names but the vocabulary declares for another half is the defect this catches —
+    // it would escape the render ledger and the sentence review.
+    let vocabulary = vocabulary();
+    let render = root().join("src").join("render");
     let mut source = String::new();
-    for path in sources() {
+    for path in common::rust_files(&render) {
         let text = std::fs::read_to_string(&path).expect("a source");
-        source.push_str(&lex(&text[..test_module_start(&text)]).0);
+        source.push_str(&text[..test_module_start(&text)]);
     }
-    source.chars().filter(|c| !c.is_whitespace()).collect()
+    let json = document_engine::vocabulary::json();
+    let mut findings = Vec::new();
+    for key in json["marks"]
+        .as_object()
+        .expect("the vocabulary states its marks")
+        .keys()
+    {
+        if source.contains(&format!("\"{key}\""))
+            && !vocabulary
+                .marks
+                .printed_by(key)
+                .contains(&Producer::Rendering)
+        {
+            findings.push(format!(
+                "the rendering half names `{key}` but `printed_by` does not state `rendering`"
+            ));
+        }
+    }
+    assert!(findings.is_empty(), "{}", findings.join("\n"));
 }
 
 #[test]
 fn every_bound_the_crate_enforces_is_read_from_the_vocabulary() {
-    // Every entry the `enforced` map assigns to one of the crate's own halves is named by a typed
-    // field access in the crate's code. That the enclosing statement consumes the value is a review
-    // question; the typed accessor makes the vocabulary the only way to obtain it. A
-    // caller-enforced entry has no crate-side consumer and is held by the restatement scan instead.
-    // The sections iterated are the ones a bound is read from by section and name; `rules` is read
-    // through the `rule_view!` accessors instead, so it is not listed here.
-    let source = crate_source();
-    let json = document_engine::vocabulary::json();
+    // The map's forward direction: a half the map names is a half whose own sources read the entry.
+    // A bound read anywhere but the vocabulary is a second statement of it, and a map entry naming a
+    // half that never reads it is a false claim about who enforces it.
     let enforced = &vocabulary().enforced;
-    for (section, half) in [
-        ("reading", Producer::Reading),
-        ("limits", Producer::Reading),
-        ("limits", Producer::Writing),
-        ("engine", Producer::Writing),
-    ] {
-        for entry in json[section]
-            .as_object()
-            .unwrap_or_else(|| panic!("the vocabulary states `{section}`"))
-            .keys()
-        {
-            if !enforced.enforces(entry, half) {
-                continue;
+    let mut findings = Vec::new();
+    for (half, source) in half_sources() {
+        for section in BOUND_SECTIONS {
+            for entry in entries(section) {
+                if enforced.enforces(&entry, half)
+                    && !source.contains(&format!("{section}.{entry}"))
+                {
+                    findings.push(format!(
+                        "the {half:?} half enforces `{entry}` but never reads `{section}.{entry}` \
+                         from the vocabulary"
+                    ));
+                }
             }
-            assert!(
-                source.contains(&format!("{section}.{entry}")),
-                "the {half:?} half enforces `{entry}` but never reads `{section}.{entry}` from the \
-                 vocabulary"
-            );
         }
     }
+    assert!(findings.is_empty(), "{}", findings.join("\n"));
+}
+
+#[test]
+fn no_half_enforces_a_bound_the_map_does_not_name_it_for() {
+    // The other direction: a half whose own sources read `section.entry` is an enforcer of it, and
+    // the map must say so. A shared helper outside the three halves (the crate's `support` and
+    // `vocabulary` modules) reads for whoever calls it, so it is not one.
+    let enforced = &vocabulary().enforced;
+    let mut findings = Vec::new();
+    for (half, source) in half_sources() {
+        for section in BOUND_SECTIONS {
+            for entry in entries(section) {
+                if source.contains(&format!("{section}.{entry}"))
+                    && !enforced.enforces(&entry, half)
+                {
+                    findings.push(format!(
+                        "{half:?} reads `{section}.{entry}` but `enforced` does not name it"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(findings.is_empty(), "{}", findings.join("\n"));
+}
+
+/// The sections a bound is read from by section and name. `rules` is read through the `rule_view!`
+/// accessors instead, and `page` and `create` are stated data rather than bounds.
+const BOUND_SECTIONS: [&str; 4] = ["reading", "limits", "engine", "render"];
+
+/// One bound section's entry names.
+fn entries(section: &str) -> Vec<String> {
+    document_engine::vocabulary::json()[section]
+        .as_object()
+        .unwrap_or_else(|| panic!("the vocabulary states `{section}`"))
+        .keys()
+        .cloned()
+        .collect()
+}
+
+/// The crate's own sources per half, comments and test modules removed and whitespace stripped, so a
+/// typed field access can be searched for across a line break.
+fn half_sources() -> Vec<(Producer, String)> {
+    let mut halves = Vec::new();
+    for (half, directory) in [
+        (Producer::Reading, "reading"),
+        (Producer::Writing, "writing"),
+        (Producer::Rendering, "render"),
+    ] {
+        let mut own: Vec<PathBuf> = sources()
+            .into_iter()
+            .filter(|path| {
+                let own = [directory.to_string(), format!("{directory}.rs")];
+                path.strip_prefix(root().join("src")).is_ok_and(|rest| {
+                    rest.components().next().is_some_and(|first| {
+                        own.iter().any(|name| first.as_os_str() == name.as_str())
+                    })
+                })
+            })
+            .collect();
+        assert!(!own.is_empty(), "the {half:?} half has sources");
+        // The producing half's dispatch is `operation`, which states the request caps a caller can
+        // fix; it is the writing half's own entry point, so it counts as the writing half's sources.
+        if half == Producer::Writing {
+            own.push(root().join("src").join("operation.rs"));
+        }
+        let mut source = String::new();
+        for path in &own {
+            let text = std::fs::read_to_string(path).expect("a source");
+            source.push_str(&lex(&text[..test_module_start(&text)]).0);
+        }
+        halves.push((
+            half,
+            source.chars().filter(|c| !c.is_whitespace()).collect(),
+        ));
+    }
+    halves
 }
 
 #[test]
@@ -2321,7 +2523,7 @@ fn bounds_with_keys() -> Vec<(String, f64)> {
     }
     let json = document_engine::vocabulary::json();
     let mut out = Vec::new();
-    for section in ["reading", "limits", "engine"] {
+    for section in ["reading", "limits", "engine", "render"] {
         walk(section, &json[section], &mut out);
     }
     out

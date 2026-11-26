@@ -8,7 +8,7 @@
 //! - **A value is shown the way Excel shows it, or not at all.** A cell's number format
 //!   decides what is printed ([`numfmt`]); a format this reader cannot read, reproduce or
 //!   display prints the stored value under its stored-value mark
-//!   ([`mark`](crate::reading::output::mark) `number_stored_mark`) — a raw number is never
+//!   ([`mark`](crate::support::mark) `number_stored_mark`) — a raw number is never
 //!   passed off as the display, and a wrong one is never invented. The one exception, stated
 //!   rather than marked: a `t="d"` cell holds ISO text and is shown as the workbook wrote it.
 //! - **A part the package left incomplete is never passed off as a whole one.** A cut
@@ -28,12 +28,10 @@ use super::{
     read_relationships, read_zip_entry, rel_id, relationship_targets, rels_part_of, resolve_part,
     scan_elements, unopened_parts, unreadable, write_media_parts,
 };
-use crate::reading::output::{
-    Unshown, UnshownKind, column_index, column_letters, mark, note, sheet_header, text_block,
-    text_lines,
-};
+use crate::reading::output::{column_letters, note, sheet_header, text_block, text_lines};
 use crate::reading::{DocOutcome, SkippedImages, ensure_out_dir};
-use crate::support::one_line;
+use crate::support::{column_index, mark, one_line};
+use crate::unshown::{Unshown, UnshownKind};
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
 use std::cmp::Reverse;
@@ -429,8 +427,9 @@ fn sheet_entry(event: &BytesStart<'_>) -> SheetEntry {
     }
 }
 
-/// Whether an XML boolean attribute is true: `1` or `true`, as Excel writes it.
-fn is_true(value: &str) -> bool {
+/// Whether an XML boolean attribute is true: `1` or `true`, as Excel writes it. One spelling for the
+/// reading and the renderer, so a part that states a flag true states it true on both sides.
+pub(crate) fn is_true(value: &str) -> bool {
     value == "1" || value.eq_ignore_ascii_case("true")
 }
 
@@ -1710,7 +1709,7 @@ struct Shown {
     text: String,
     /// Whether `text` is the value as the cell stores it rather than a display of
     /// it, which is what makes the line carry the stored-value mark
-    /// ([`mark`](crate::reading::output::mark) `number_stored_mark`).
+    /// ([`mark`](crate::support::mark) `number_stored_mark`).
     stored: bool,
 }
 

@@ -24,6 +24,10 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+/// The name the bundled face is known by: the resource name a page draws it under, the base name a
+/// PDF states for it, and the name a render reports it as.
+pub(crate) const NAME: &str = "NotoSans-Regular";
+
 /// The bytes of one sfnt table record: tag, checksum, offset and length.
 const RECORD: usize = 16;
 /// Tables and glyphs are aligned to this many bytes.
@@ -52,7 +56,7 @@ const HAVE_X_AND_Y_SCALE: u16 = 0x0040;
 const HAVE_TWO_BY_TWO: u16 = 0x0080;
 
 /// The bundled PDF face, parsed once.
-pub(super) struct Face {
+pub(crate) struct Face {
     /// `head`, as copied into a subset.
     head: &'static [u8],
     /// `hhea`, as copied into a subset.
@@ -95,7 +99,7 @@ impl Face {
     /// The bundled font, parsed once. Panicking on the embedded asset is an engine defect, which
     /// the operation boundary contains; the asset is a build-time constant and its parse is tested.
     #[must_use]
-    pub(super) fn bundled() -> &'static Face {
+    pub(crate) fn bundled() -> &'static Face {
         static FACE: LazyLock<Face> = LazyLock::new(|| {
             Face::parse(crate::vocabulary::FONT)
                 .unwrap_or_else(|reason| panic!("the bundled font: {reason}"))
@@ -157,29 +161,29 @@ impl Face {
 
     /// The glyph a character maps to, or 0 when the font has no glyph for it.
     #[must_use]
-    pub(super) fn glyph(&self, character: char) -> u16 {
+    pub(crate) fn glyph(&self, character: char) -> u16 {
         let glyph = self.cmap.lookup(u32::from(character));
         if glyph < self.num_glyphs { glyph } else { 0 }
     }
 
     /// The advance width of a glyph, in font units.
     #[must_use]
-    pub(super) fn advance(&self, glyph: u16) -> u16 {
+    pub(crate) fn advance(&self, glyph: u16) -> u16 {
         self.metric(glyph).advance
     }
 
     #[must_use]
-    pub(super) fn units_per_em(&self) -> u16 {
+    pub(crate) fn units_per_em(&self) -> u16 {
         self.units_per_em
     }
 
     #[must_use]
-    pub(super) fn ascender(&self) -> i16 {
+    pub(crate) fn ascender(&self) -> i16 {
         self.ascender
     }
 
     #[must_use]
-    pub(super) fn descender(&self) -> i16 {
+    pub(crate) fn descender(&self) -> i16 {
         self.descender
     }
 
@@ -201,20 +205,20 @@ impl Face {
     /// `sum(advance(glyph(c)) for c in text) * size / units_per_em`. No kerning: pdf-lib's
     /// widthOfTextAtSize applies none for this font (verified against the reference).
     #[must_use]
-    pub(super) fn width(&self, text: &str, size: f64) -> f64 {
+    pub(crate) fn width(&self, text: &str, size: f64) -> f64 {
         let units = text.chars().map(|character| self.units(character)).sum();
         self.scaled(units, size)
     }
 
     /// The font units one character advances, which is what [`Face::width`] sums.
     #[must_use]
-    pub(super) fn units(&self, character: char) -> u64 {
+    pub(crate) fn units(&self, character: char) -> u64 {
         u64::from(self.advance(self.glyph(character)))
     }
 
     /// The width `units` font units take at `size`, exactly as [`Face::width`] scales a sum of them.
     #[must_use]
-    pub(super) fn scaled(&self, units: u64, size: f64) -> f64 {
+    pub(crate) fn scaled(&self, units: u64, size: f64) -> f64 {
         let units = f64::from(u32::try_from(units).unwrap_or(u32::MAX));
         units * size / f64::from(self.units_per_em())
     }
@@ -222,20 +226,20 @@ impl Face {
     /// The face's ascent at `size`: the part of the em above the baseline, which a single-line
     /// appearance centres.
     #[must_use]
-    pub(super) fn ascent(&self, size: f64) -> f64 {
+    pub(crate) fn ascent(&self, size: f64) -> f64 {
         f64::from(self.ascender) * size / f64::from(self.units_per_em())
     }
 
     /// One line's height at `size`: `(ascender - descender) * size / units_per_em`.
     #[must_use]
-    pub(super) fn height(&self, size: f64) -> f64 {
+    pub(crate) fn height(&self, size: f64) -> f64 {
         let em = f64::from(self.units_per_em());
         f64::from(self.ascender) * size / em - f64::from(self.descender) * size / em
     }
 
     /// The subset carrying every non-zero glyph `characters` name, in first-use order.
     #[must_use]
-    pub(super) fn subset(&self, characters: &[char]) -> Subset {
+    pub(crate) fn subset(&self, characters: &[char]) -> Subset {
         let mut remap = Remapper::new();
         let mut codes = HashMap::new();
         // The first character each CID was requested for, in CID order: glyph 0 has none, and
@@ -368,7 +372,7 @@ impl Face {
 }
 
 /// One subset font and the CID mapping its caller draws with.
-pub(super) struct Subset {
+pub(crate) struct Subset {
     /// The FontFile2 program.
     pub(super) program: Vec<u8>,
     /// The CID for a character: 0 when the font cannot draw it, otherwise the remapped glyph id.
@@ -377,6 +381,13 @@ pub(super) struct Subset {
     pub(super) widths: Vec<u16>,
     /// The character each non-zero CID draws, in CID order: the `/ToUnicode` map.
     pub(super) unicode: Vec<(u16, char)>,
+}
+
+impl Subset {
+    /// Whether the subset carries a glyph for `character`.
+    pub(crate) fn draws(&self, character: char) -> bool {
+        self.codes.contains_key(&character)
+    }
 }
 
 /// A glyph's advance in the 1000-unit glyph space a PDF states widths in.

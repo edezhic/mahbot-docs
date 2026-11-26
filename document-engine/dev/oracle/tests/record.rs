@@ -7,12 +7,13 @@
 //! another version, locale, paper, tolerance or font set refuses rather than judging a page, and a
 //! kept document that is not the one its entry describes refuses when the record is read.
 
-use crate::oracle::PAGE_SIZE_TOLERANCE_PT;
+use crate::oracle::RE_RECORD_TOLERANCE_PT;
 use crate::oracle::canonical;
 use crate::oracle::corpus;
 use crate::oracle::record::{
-    BlankPageRecord, DocumentRecord, FaceReport, FontIdentity, Identity, Invocation, PageRecord,
-    Pages, Paper, Produced, Record, ReferenceIdentity, Source, Visibility,
+    BlankPageRecord, DocumentRecord, FaceReport, FontIdentity, Identity, Invocation, LineRecord,
+    PageRecord, Pages, Paper, PictureRecord, Produced, Record, ReferenceIdentity, Source,
+    Visibility,
 };
 
 /// A document record holding one page of the stated size and text.
@@ -37,7 +38,17 @@ fn document(size: (f64, f64), lines: &[&str], source: &str) -> DocumentRecord {
                 width_pt: size.0,
                 height_pt: size.1,
                 faces: vec!["LiberationSerif".to_string()],
-                lines: lines.iter().map(|line| (*line).to_string()).collect(),
+                lines: lines
+                    .iter()
+                    .enumerate()
+                    .map(|(index, line)| LineRecord {
+                        text: (*line).to_string(),
+                        x_pt: 72.0,
+                        y_pt: 100.0 + index as f64 * 12.0,
+                        size_pt: 10.0,
+                    })
+                    .collect(),
+                pictures: Vec::<PictureRecord>::new(),
             }],
         },
         faces: FaceReport {
@@ -58,7 +69,14 @@ fn identity(version: &str, locale: &str, paper: (f64, f64), face: &str) -> Ident
     Identity {
         schema: crate::oracle::record::SCHEMA,
         recorded_by: "page-oracle 0.1.0".to_string(),
-        page_text_extractor: "pdf-extract 0.12.1".to_string(),
+        page_text_extractor: crate::oracle::page_text_extractor(),
+        line_band_pt: document_engine::vocabulary::vocabulary()
+            .render
+            .line_band_pt,
+        line_gap_pt: document_engine::vocabulary::vocabulary().render.line_gap_pt,
+        min_picture_pt: document_engine::vocabulary::vocabulary()
+            .render
+            .min_picture_pt,
         reference: ReferenceIdentity {
             program: "LibreOffice".to_string(),
             version: version.to_string(),
@@ -78,7 +96,7 @@ fn identity(version: &str, locale: &str, paper: (f64, f64), face: &str) -> Ident
             height_pt: paper.1,
             observed_from: "xlsx/workbook".to_string(),
         },
-        page_size_tolerance_pt: PAGE_SIZE_TOLERANCE_PT,
+        re_record_tolerance_pt: RE_RECORD_TOLERANCE_PT,
         fonts: FontIdentity {
             config_digest: "sha256-config".to_string(),
             directories: vec!["/System/Library/Fonts".to_string()],
@@ -101,15 +119,15 @@ fn a_page_that_moved_within_the_tolerance_is_the_same_page() {
     let recorded = document((595.304, 841.89), &["text"], "sha256-source");
     let moved = document(
         (
-            595.304 + PAGE_SIZE_TOLERANCE_PT / 2.0,
-            841.89 - PAGE_SIZE_TOLERANCE_PT / 2.0,
+            595.304 + RE_RECORD_TOLERANCE_PT / 2.0,
+            841.89 - RE_RECORD_TOLERANCE_PT / 2.0,
         ),
         &["text"],
         "sha256-source",
     );
     assert!(
         recorded
-            .differences(&moved, PAGE_SIZE_TOLERANCE_PT)
+            .differences(&moved, RE_RECORD_TOLERANCE_PT)
             .is_empty()
     );
 }
@@ -118,11 +136,11 @@ fn a_page_that_moved_within_the_tolerance_is_the_same_page() {
 fn a_page_that_moved_past_the_tolerance_is_another_page() {
     let recorded = document((595.304, 841.89), &["text"], "sha256-source");
     let moved = document(
-        (595.304 + PAGE_SIZE_TOLERANCE_PT * 2.0, 841.89),
+        (595.304 + RE_RECORD_TOLERANCE_PT * 2.0, 841.89),
         &["text"],
         "sha256-source",
     );
-    let differences = recorded.differences(&moved, PAGE_SIZE_TOLERANCE_PT);
+    let differences = recorded.differences(&moved, RE_RECORD_TOLERANCE_PT);
     assert_eq!(differences.len(), 1);
     assert!(differences[0].contains("page 1 is now"), "{differences:?}");
 }
@@ -131,13 +149,13 @@ fn a_page_that_moved_past_the_tolerance_is_another_page() {
 fn the_tolerance_the_comparison_uses_is_the_one_it_is_given() {
     let recorded = document((595.304, 841.89), &["text"], "sha256-source");
     let moved = document(
-        (595.304 + PAGE_SIZE_TOLERANCE_PT * 2.0, 841.89),
+        (595.304 + RE_RECORD_TOLERANCE_PT * 2.0, 841.89),
         &["text"],
         "sha256-source",
     );
     assert!(
         recorded
-            .differences(&moved, PAGE_SIZE_TOLERANCE_PT * 4.0)
+            .differences(&moved, RE_RECORD_TOLERANCE_PT * 4.0)
             .is_empty()
     );
 }
@@ -146,8 +164,8 @@ fn the_tolerance_the_comparison_uses_is_the_one_it_is_given() {
 fn a_changed_line_is_a_changed_page() {
     let recorded = document((595.304, 841.89), &["one", "two"], "sha256-source");
     let moved = document((595.304, 841.89), &["one", "two words"], "sha256-source");
-    let differences = recorded.differences(&moved, PAGE_SIZE_TOLERANCE_PT);
-    assert_eq!(differences, ["page 1's text has changed"]);
+    let differences = recorded.differences(&moved, RE_RECORD_TOLERANCE_PT);
+    assert_eq!(differences, ["page 1's text or its position has changed"]);
 }
 
 #[test]
@@ -159,7 +177,7 @@ fn a_page_that_is_empty_for_another_reason_names_the_reason() {
     }];
     let mut current = recorded.clone();
     current.pages.blank[0].reason = "one page break and an empty paragraph".to_string();
-    let differences = recorded.differences(&current, PAGE_SIZE_TOLERANCE_PT);
+    let differences = recorded.differences(&current, RE_RECORD_TOLERANCE_PT);
     assert_eq!(
         differences,
         [
@@ -169,7 +187,7 @@ fn a_page_that_is_empty_for_another_reason_names_the_reason() {
     // The pages themselves are unchanged, so the reason is the only difference named.
     let mut other_page = recorded.clone();
     other_page.pages.blank[0].page = 2;
-    let differences = recorded.differences(&other_page, PAGE_SIZE_TOLERANCE_PT);
+    let differences = recorded.differences(&other_page, RE_RECORD_TOLERANCE_PT);
     assert_eq!(
         differences,
         ["the pages that carry no ink are now 2 (the record states 1)"]
@@ -180,7 +198,7 @@ fn a_page_that_is_empty_for_another_reason_names_the_reason() {
 fn an_engine_output_that_changed_makes_the_entry_stale() {
     let recorded = document((595.304, 841.89), &["text"], "sha256-before");
     let current = document((595.304, 841.89), &["text"], "sha256-after");
-    let differences = recorded.differences(&current, PAGE_SIZE_TOLERANCE_PT);
+    let differences = recorded.differences(&current, RE_RECORD_TOLERANCE_PT);
     assert_eq!(differences.len(), 1);
     assert!(differences[0].contains("sha256-before"), "{differences:?}");
     assert!(differences[0].contains("sha256-after"), "{differences:?}");
@@ -232,18 +250,18 @@ fn an_identity_that_differs_in_any_compared_part_refuses() {
         (
             {
                 let mut other = identity("26.8.2.2", "en-US", (612.0, 792.0), "sha256-face");
-                other.page_text_extractor = "pdf-extract 0.13.0".to_string();
+                other.page_text_extractor = "page-oracle positions 2".to_string();
                 other
             },
-            "the page text was read by pdf-extract 0.13.0",
+            "the page text was read by page-oracle positions 2",
         ),
         (
             {
                 let mut other = identity("26.8.2.2", "en-US", (612.0, 792.0), "sha256-face");
-                other.page_size_tolerance_pt = PAGE_SIZE_TOLERANCE_PT * 2.0;
+                other.re_record_tolerance_pt = RE_RECORD_TOLERANCE_PT * 2.0;
                 other
             },
-            "the page-size tolerance is",
+            "the re-record tolerance is",
         ),
     ] {
         let differences = recorded.differences(&current);
@@ -349,6 +367,93 @@ fn pdf(text: &str) -> Vec<u8> {
     let mut bytes = Vec::new();
     document.save_to(&mut bytes).expect("a sample PDF");
     bytes
+}
+
+/// A PDF holding one page with an image drawn at a known box, as the reference places one.
+fn pdf_with_image() -> Vec<u8> {
+    use lopdf::{Dictionary, Document, Object, Stream, dictionary};
+    let mut document = Document::with_version("1.5");
+    let pages_id = document.new_object_id();
+    let image = document.add_object(Stream::new(
+        dictionary! {
+            "Type" => "XObject",
+            "Subtype" => "Image",
+            "Width" => 4,
+            "Height" => 4,
+            "ColorSpace" => "DeviceRGB",
+            "BitsPerComponent" => 8,
+        },
+        vec![0_u8; 4 * 4 * 3],
+    ));
+    let resources = document.add_object(dictionary! {
+        "XObject" => dictionary! { "Im1" => image },
+    });
+    let content = document.add_object(Stream::new(
+        Dictionary::new(),
+        b"q 100 0 0 50 72 700 cm /Im1 Do Q".to_vec(),
+    ));
+    let page = document.add_object(dictionary! {
+        "Type" => "Page",
+        "Parent" => pages_id,
+        "Resources" => resources,
+        "Contents" => content,
+        "MediaBox" => vec![
+            Object::Integer(0),
+            Object::Integer(0),
+            Object::Integer(595),
+            Object::Integer(842),
+        ],
+    });
+    document.set_object(
+        pages_id,
+        dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![Object::Reference(page)],
+            "Count" => 1,
+        },
+    );
+    let catalog = document.add_object(dictionary! {
+        "Type" => "Catalog",
+        "Pages" => pages_id,
+    });
+    document.trailer.set("Root", catalog);
+    let mut bytes = Vec::new();
+    document.save_to(&mut bytes).expect("a sample PDF");
+    bytes
+}
+
+#[test]
+fn a_shown_string_is_recorded_where_its_text_matrix_puts_it() {
+    let pages = crate::oracle::pages::describe(&pdf("Hi"))
+        .expect("a sample PDF must be described")
+        .pages;
+    assert_eq!(
+        pages[0].lines,
+        [LineRecord {
+            text: "Hi".to_string(),
+            x_pt: 10.0,
+            y_pt: 832.0,
+            size_pt: 12.0,
+        }]
+    );
+    assert!(pages[0].pictures.is_empty());
+}
+
+#[test]
+fn a_drawn_image_is_recorded_at_the_box_the_transform_gives_it() {
+    let pages = crate::oracle::pages::describe(&pdf_with_image())
+        .expect("a sample PDF must be described")
+        .pages;
+    assert!(pages[0].lines.is_empty());
+    assert_eq!(
+        pages[0].pictures,
+        [PictureRecord {
+            x_pt: 72.0,
+            y_pt: 92.0,
+            width_pt: 100.0,
+            height_pt: 50.0,
+        }]
+    );
 }
 
 /// A directory under the operating system's temporary area, removed when it drops.
@@ -582,7 +687,12 @@ fn a_record_of_another_shape_refuses() {
 fn a_record_entry_that_does_not_describe_its_kept_document_refuses() {
     let area = area("description");
     let mut document = write_record(area.path(), &pdf("first"));
-    document.pages.pages[0].lines = vec!["another line".to_string()];
+    document.pages.pages[0].lines = vec![LineRecord {
+        text: "another line".to_string(),
+        x_pt: 72.0,
+        y_pt: 100.0,
+        size_pt: 10.0,
+    }];
     std::fs::write(
         area.path().join("documents/docx/sample/document.json"),
         serde_json::to_vec_pretty(&document).expect("an entry"),
@@ -594,7 +704,10 @@ fn a_record_entry_that_does_not_describe_its_kept_document_refuses() {
         message.contains("does not describe the kept document"),
         "{message}"
     );
-    assert!(message.contains("page 1's text has changed"), "{message}");
+    assert!(
+        message.contains("page 1's text or its position has changed"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -643,7 +756,12 @@ fn a_re_record_that_changes_no_description_keeps_the_kept_document() {
 
     // A changed description is written whole, and its document with it.
     let mut changed = first;
-    changed.pages.pages[0].lines = vec!["another line".to_string()];
+    changed.pages.pages[0].lines = vec![LineRecord {
+        text: "another line".to_string(),
+        x_pt: 72.0,
+        y_pt: 100.0,
+        size_pt: 10.0,
+    }];
     let replacement = pdf("second");
     Record::write(
         area.path(),
@@ -672,7 +790,12 @@ fn a_kept_document_its_entry_no_longer_describes_is_not_kept() {
     // cannot see it: only re-describing the kept document can, and the file is rewritten because of
     // it.
     let mut edited = first;
-    edited.pages.pages[0].lines = vec!["another line".to_string()];
+    edited.pages.pages[0].lines = vec![LineRecord {
+        text: "another line".to_string(),
+        x_pt: 72.0,
+        y_pt: 100.0,
+        size_pt: 10.0,
+    }];
     std::fs::write(
         directory.join("document.json"),
         serde_json::to_vec_pretty(&edited).expect("an entry"),

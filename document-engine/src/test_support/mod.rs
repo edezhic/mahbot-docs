@@ -24,6 +24,7 @@ pub mod coverage;
 pub mod documents;
 pub mod docx_fixture;
 pub mod legacy_formats;
+pub mod marks;
 
 pub use crate::writing::docx::layout::disposition::{Disposition, Row};
 pub use crate::writing::docx::layout::{Estimate, Layout, Summary};
