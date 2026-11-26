@@ -1,15 +1,17 @@
 //! The gate, as a command: run the corpus against an engine, compare with the recorded baseline,
 //! and report every verdict. Exits non-zero when anything fails.
 //!
-//! Exit codes: `0` the run passed; `1` a verdict failed; `2` the invocation or the harness is
-//! wrong; `3` the run was cut short — by a signal or by its own budget. A cut-short run prints no
-//! aggregate summary, so it can never read as a short, complete run.
+//! Exit codes: `0` the run passed; `1` a verdict, a replay reading or a stale declaration failed;
+//! `2` the invocation or the harness is wrong; `3` the run was cut short — by a signal or by its own
+//! budget. A cut-short run prints no aggregate summary, so it can never read as a short,
+//! complete run.
 //!
 //! The gate is supervised: one child process per case, of the same test binary in its hidden child
 //! mode. A case that exhausts memory, writes without limit or hangs costs that case, and every
 //! verdict already decided survives the run's own death.
 
 use crate::baseline::Baseline;
+use crate::declared::DeclaredReadings;
 use crate::engine::{Reader, Writer};
 use crate::harness::{
     Harness, Judgement, NO_CASE_JUDGED, PairReport, ReadingVerdict, Verdict, VerdictSink,
@@ -61,11 +63,13 @@ impl Options {
 const USAGE: &str = "\
 usage: gate [--engine crate|noop|helper:<path>] [--baseline <path>] [--quiet]
 Runs every corpus case and reading in a child process of its own, compares them with the recorded
-baseline, and checks every declared effect. `crate` pairs the engine crate's own writer and reader;
-`noop` is the negative control. A (operation, family) pair the writer has not landed yet is reported
-as SKIP; the summary counts judged and unjudged cases per pair. Exit codes: 0 pass, 1 failed verdict,
-2 bad invocation, 3 cut short (by a signal or by the run's budget). `--engine helper:<path>` is for
-the harness's own tests.";
+baseline, and checks every declared effect. `crate` pairs the engine crate's own writer and reader
+and also replays every reading through the product reader, forgiving only the differences declared
+beside the record (`dev/baseline/declared-readings.json` for the committed one); `noop` is the
+negative control. A (operation, family) pair the writer has not landed yet is reported as SKIP; the
+summary counts judged and unjudged cases per pair. Exit codes: 0 pass, 1 a verdict, a replay reading
+or a stale declaration failed, 2 bad invocation, 3 cut short (by a signal or by the run's budget).
+`--engine helper:<path>` is for the harness's own tests.";
 
 pub fn run(args: &[String]) -> i32 {
     // The hidden child mode is selected before the ordinary argument loop, which rejects unknown
@@ -139,11 +143,19 @@ fn run_gate(options: &Options) -> anyhow::Result<i32> {
         },
     };
     let harness = Harness::new_with(|_| engines(kind))?;
+    // Read and check the declarations before the corpus runs: a malformed file is an invocation
+    // error, and it must not cost a full run to discover.
+    let declared = if kind == EngineKind::Crate {
+        Some(DeclaredReadings::beside(&options.baseline)?)
+    } else {
+        None
+    };
     let (writer, reader) = harness.identities();
     out(&format!("engine   writer {}", identity_line(&writer)));
     out(&format!("engine   reader {}", identity_line(&reader)));
     // The product reader's identity is provenance for the one live check that the engine reads as
-    // the product does; the baseline records the engine's own identity for both roles.
+    // the product does, apart from the differences the declared reading divergences name; the
+    // baseline records the engine's own identity for both roles.
     out(&format!(
         "product reader {}",
         identity_line(&crate::reference::ReferenceReader.identity())
@@ -202,6 +214,23 @@ fn run_gate(options: &Options) -> anyhow::Result<i32> {
     if report.judged() == 0 {
         out(&format!("FAIL {NO_CASE_JUDGED}"));
     }
+    // The product-reader replay: the same record read again through the product's own reader, under
+    // the declared reading divergences. It belongs to the crate run, the one whose reader the record
+    // holds; a control run must not be padded with a second opinion that passes.
+    let replay = match &declared {
+        Some(declared) => {
+            let replay = crate::declared::replay(&baseline, declared)?;
+            if let Some(reason) = replay.cut_short {
+                err(&format!("gate: cut short: {}", reason.reason()));
+                return Ok(3);
+            }
+            for line in replay.lines() {
+                out(&line);
+            }
+            Some(replay)
+        }
+        None => None,
+    };
     let judged = report.judged();
     let unjudged = report.unjudged();
     let failed = report.failed();
@@ -231,7 +260,15 @@ fn run_gate(options: &Options) -> anyhow::Result<i32> {
             "matches the baseline"
         }
     ));
-    Ok(if report.passed() { 0 } else { 1 })
+    if let Some(replay) = &replay {
+        out(&replay.summary());
+    }
+    let replay_passed = replay.as_ref().is_none_or(crate::declared::Replay::passed);
+    Ok(if report.passed() && replay_passed {
+        0
+    } else {
+        1
+    })
 }
 
 fn current_exe() -> anyhow::Result<PathBuf> {
@@ -275,15 +312,8 @@ impl VerdictSink for Printer {
     }
 
     fn reading(&mut self, verdict: &ReadingVerdict) {
-        if verdict.passed {
-            if !self.quiet {
-                self.line(&format!("PASS reading {}", verdict.document));
-            }
-            return;
-        }
-        self.line(&format!("FAIL reading {}", verdict.document));
-        for problem in &verdict.problems {
-            self.line(&format!("     {problem}"));
+        for line in verdict.lines(self.quiet) {
+            self.line(&line);
         }
     }
 }

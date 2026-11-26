@@ -1,7 +1,7 @@
 # The gate
 
 The instrument that judges the document engine against **what was recorded last time**. It runs a
-corpus generated in code — 850 writer cases and 92 readings — through the engine's own writer and
+corpus generated in code — 850 writer cases and 93 readings — through the engine's own writer and
 reader, compares each transcript with `dev/baseline/baseline.json` by a declared canonical model per
 format, and checks each case's declared effect.
 
@@ -16,9 +16,11 @@ pages against PDFium. The baseline says what "unchanged" means; the oracle says 
 programs show.
 
 The product's own reader sources stay here as byte-for-byte copies under `dev/reference_sources/`,
-compiled in; one test replays every recorded reading through them, so the engine is still held to
-reading as the product does. The words this folder uses — **the kit**, **the product reader** and
-**the reference** — are defined once in `../../INVENTORY.md` and used here as defined there.
+compiled in; one test — and the gate command's own crate run — replays every recorded reading
+through them, so the engine is still held to reading as the product does, apart from the differences
+a declared reading divergence names (§"Declared reading divergences"). The words this folder uses —
+**the kit**, **the product reader**, **a declared reading divergence** and **the reference** — are
+defined once in `../../INVENTORY.md` and used here as defined there.
 
 Nothing here is part of the product. The product's tool layer — the model-facing description, the
 argument schema, refusal wording, answer rendering, registration — is deliberately absent: the
@@ -65,8 +67,9 @@ outside program at compare time, so an ordinary run compares all four families; 
 skipped, with a stated reason, on a machine without PDFium. It is a report, not a gate.
 
 The harness needs no external runtime: it drives the crate's own writer and reader, and the
-product's reader sources compiled in. A full pass — 850 cases and 92 readings — is bounded by the run
-budget below, a backstop rather than a target. The whole test suite runs the corpus several times
+product's reader sources compiled in. A pass — 850 cases and 93 readings — is bounded by the run
+budget below, a backstop rather than a target; a crate run makes two passes, the engine's own and the
+product-reader replay's, each with its own budget. The whole test suite runs the corpus several times
 (once per determinism check, once for the gate test, once per bound test), so it is much slower than
 a single pass.
 
@@ -83,9 +86,10 @@ ordinary `cargo build` digests no source, reads no lockfile and spawns no compil
 the crate pays nothing for the identity. The product reader's own identity is printed beside a run
 as provenance too; the baseline records the engine's identity for both roles.
 
-The gate exits `0` when the run passes, `1` when a verdict fails, `2` when the invocation or the
-harness is wrong, and `3` when the run was cut short — by a signal or by its own budget. A cut-short
-run prints no aggregate summary: the absence of that line is what makes it visibly cut short.
+The gate exits `0` when the run passes, `1` when a case verdict or a replay reading fails or a
+declaration is stale, `2` when the invocation or the harness is wrong, and `3` when the run was cut
+short — by a signal or by its own budget. A cut-short run prints no aggregate summary: the absence of
+that line is what makes it visibly cut short.
 
 `gate --engine noop` runs the same corpus against the do-nothing engine. That engine exists only
 to prove the gate rejects it: a case passes only if its transcript matches the baseline **and** its
@@ -101,7 +105,7 @@ every run and recorded in the baseline; a difference is a `note`, never a `FAIL`
 |---|---|
 | `dev/engine.rs` | The boundary: `Writer` and `Reader` traits, `Key`, `EngineIdentity`, and the result shapes, which are the engine crate's own (`WriterOutcome`, `Failure`, `Reading`, `ImageArtifact`, `Family`). Nothing else knows which engine is behind them. |
 | `dev/contract.rs` | What the product's reader prints and parses, exposed so a test can prove the engine crate's vocabulary is the same data, plus the three caps whose only source was the producing kit's own source text, frozen: `pdf_catalogue_max`, `pdf_catalogue_chars_max` and `edit_work_max_code_units`. Their values survive as data and nothing re-derives them, so the frozen table is what holds the engine to them. |
-| `dev/reference/reader.rs` | The product's reader: `document::convert_document_file`, the one bounded entry point every product read passes through, plus the product converter's own detection verdict built from its `pub(crate)` primitives. Nothing in the gate's verdicts drives it; the test that replays the recorded readings through it does. |
+| `dev/reference/reader.rs` | The product's reader: `document::convert_document_file`, the one bounded entry point every product read passes through, plus the product converter's own detection verdict built from its `pub(crate)` primitives. Nothing in the gate's verdicts drives it; the product-reader replay does, from the gate command and from its test. |
 | `dev/reference/crate_reader.rs` | The engine crate's reader: `document_engine::reading::{detect, read}`, whose shapes are already the harness's. This is the default reader. |
 | `dev/reference/crate_writer.rs` | The engine crate's writer: `document_engine::operation::execute`, bridged from the product's request shape to the crate's `Request`/`Destination`. The crate's writer carries out the (operation, family) pairs the engine's own statement names, and the harness judges only those; the rest are unjudged rather than failed. |
 | `dev/reference/noop.rs` | The negative control. |
@@ -113,7 +117,7 @@ every run and recorded in the baseline; a difference is a `note`, never a `FAIL`
 | `dev/pptx_capture.rs`, `dev/docx_capture.rs`, `dev/notices.rs` | The created deck's and created Word document's frozen parts: the archive readers the tests use, the sets the crate ships, and the one home of the licence notices' names, which the crate's identity and the archive comparison both read so they cannot disagree about what is a part. |
 | `dev/crate_identity.rs`, `dev/codecs.rs` | The one rule that digests a build: the engine's own identity over `src/`, `vocabulary.json`, the font, the captured parts and the layout data, the product reader's over its sources and the host, and the codec list read from the lockfile. Computed when a target runs, so an ordinary build digests nothing. |
 | `dev/modes.rs` | How a hidden mode is reached — the argument prefix and the re-invocation command — shared by this target and the oracle's, plus the opt-in the two destructive modes require. |
-| `dev/harness.rs` | Runs a corpus against an engine, compares, and produces verdicts. `run()` is the in-process path (the recorder and the fake-engine tests); `supervise()` is the gate's, one child per case. |
+| `dev/harness.rs` | Runs a corpus against an engine, compares, and produces verdicts. `run()` is the in-process path (the recorder and the fake-engine tests); `readings()` is the readings-only path the product-reader replay uses; `supervise()` is the gate's, one child per case. |
 | `dev/supervisor.rs` | The supervised seam: the child protocol, the per-case bounds and their defaults, the poller, the descendant walk and its teardown, the signal flag, the claim that proves a root's owner alive, and the leftover-root sweep. `dev/README.md` is the one statement of what is bounded and what is not. |
 | `dev/cli.rs` | The gate, and the same test binary's hidden `child` mode. |
 | `dev/helper.rs` | The harness's helper child: the same protocol, with a runaway (writer or reading), a spike that finishes above a lowered ceiling, a hanging case with an own-group descendant, a path-bearing failure, an oversized transcript, two deaths outside any bound, and the three disk-bound shapes, each selected per case from the environment the supervisor hands the child. The bound and interrupt tests in `dev/tests/supervision.rs` and the gate test that judges nothing use it. |
@@ -123,10 +127,12 @@ every run and recorded in the baseline; a difference is a `note`, never a `FAIL`
 | `dev/tests/engine_contract.rs` | The engine crate's contract, proved from here: its vocabulary is the product reader's data, its result shapes carry every recorded field, its closed operation set holds every corpus operation and edit, the product reader copies are byte-for-byte the product's, and the host's media tables are the product's own. |
 | `dev/tests/coverage.rs` | The corpus's depth: every reading mark is witnessed by a recorded reading or recorded as unproducible with its reason, every mark only the writing half prints is witnessed by a recorded case's answer or recorded unreached with its reason, neither ledger's "not produced" side names a mark a recorded answer really prints, every per-family failure verdict is witnessed, and every corpus document is in the baseline. |
 | `dev/tests/teeth.rs` | The comparison has teeth: a reading or a produced case altered in a field its sample populates — a picture dropped, a note or a loss reworded, an output renamed, a produced file's content changed, a status flipped — fails it, and so does a detection answer changed for one input. |
+| `dev/tests/declared.rs` | The declared reading divergences: a difference a declaration names passes and is listed with its reason and its field-level difference, a difference outside the named fields fails, a detection difference and a reader failure are never forgiven, the engine's own comparison forgives nothing, a declared document is compared past the difference cap, a declaration whose readings agree, whose document the record does not hold or whose document the corpus no longer reads is stale, and the committed file is checked and held to the corpus. |
 | `dev/tests/pptx_create_parts.rs`, `dev/tests/pptx_create.rs` | What the model cannot see about a created deck: the shipped parts are pinned by digest and are exactly the crate's captured set, the core properties carry fixed strings, two stamps and the library's revision, the application properties state the frozen slide count, notes count, titles and format string, the archive states exactly the frozen entry set, a `.jpg` and a `.jpeg` source both arrive as a `.jpeg` media part, and a created deck is one the crate's own editor can open. Permanent and outside the baseline. |
 | `dev/tests/docx_create_parts.rs`, `dev/tests/docx_create_entries.rs`, `dev/tests/docx_assets_identity.rs` | What the model cannot see about a created Word document: the shipped parts and fragments are pinned by digest, the archive states exactly the frozen entry list as a set — folder entries included — and the crate's identity covers the captured parts and the layout data but leaves out the notices, the README and the probes. Permanent and outside the baseline. |
 | `dev/tests/pdf_create_shapes.rs` | What the PDF model cannot see about a created document: the description entries it drops — `/Producer`, `/Creator`, the two dates, a key the rules do not name, a date it does not validate and an entry cleared with an empty string — pinned as frozen values. The mark-by-mark drawing comparison retired with the kit; the graphics state a painted path is drawn under is pinned by the engine's own `tests/pdf_text_drawing.rs` instead. Permanent and outside the baseline. |
 | `dev/baseline/baseline.json` | The recorded engine baseline (canonical documents, tens of megabytes — it grows with the corpus). |
+| `dev/declared.rs`, `dev/baseline/declared-readings.json` | The declared reading divergences: the differences between the record and the product reader's answer that a person has declared deliberate, the field each lies in and the reason, and the replay that judges the readings under them. |
 | `dev/cli.rs`, `dev/record.rs` | The gate, and the deliberate recorder that prints the diff before it writes. |
 | `tests/docx_layout_modules.rs` (in the engine crate) | The layout's disposition table against the committed module list, walked in both directions in the isolated copy where the pinned package does not exist, with every row that is not a full port naming a probe the crate ships. |
 
@@ -514,10 +520,13 @@ The reader corpus is the same generated documents plus the negative and depth ca
 - a page whose picture is defined only on the page tree's own `/Resources`, not on the page's: the
   product reader merges the inherited resources, and the crate reads it because its newer structure
   reader stopped carrying them, so the engine's own page-tree walk supplies what the page inherits.
-  It is a corpus case because both readers can read it; the shapes that cannot be corpus cases — a
-  page tree nested thousands of levels deep, a page whose dictionary nests past the reader's bound,
-  and a page the tree names twice — are witnessed by
-  `document-engine/tests/pdf_page_tree.rs` instead;
+  It is a corpus case because both readers can read it, and so is the one page shape the two answer
+  differently — a page stated inline beside a reference, which the product reader draws one of and
+  the engine draws both — because a declared reading divergence names the difference (§"Declared
+  reading divergences"). The shapes no recorded reading is one of — among them a page tree nested
+  thousands of levels deep, which the product reader overflows on, and a page whose dictionary nests
+  past the reader's bound, which it reads — are witnessed by `document-engine/tests/pdf_page_tree.rs`
+  instead;
 - the negative side: a truncated package and PDF, an empty file, an empty package, a renamed file,
   a package under a name claiming another family, a package under a name claiming none, a ZIP that
   is not an Office package, and an encrypted package;
@@ -535,6 +544,89 @@ the baseline, in both directions: a mark recorded as not produced must not be on
 prints. A writing mark both halves print (a Word mark, a chart label) is witnessed by the
 reading ledger, which reads the same vocabulary entry.
 
+## Declared reading divergences
+
+The record holds the engine's own reading, and the product-reader replay holds the product reader to
+it. The engine is meant to read more than the product, so requiring the two to agree everywhere would
+leave only two ways out of a difference: abandon the gain, or leave the replay failing for good.
+Neither is acceptable. A difference is therefore **declared**: the document, the fields it lies in and
+the reason are data beside the record, and the replay forgives exactly those fields on exactly that
+document.
+
+`dev/baseline/declared-readings.json` holds them, with a schema version, so a file written for
+another shape is refused rather than read as this one. It is a sibling of the record, so
+`--baseline <path>` names another record with its own declarations beside it, and a record with none
+beside it has none — the strict reading, which forgives nothing. One entry per document:
+
+```json
+{ "document": "page-dictionary-inline-beside-a-reference.pdf",
+  "fields": ["[\"reading\"][\"images\"]", "[\"reading\"][\"notes\"]"],
+  "reason": "…" }
+```
+
+A field is a path in the comparison's own spelling — the path a failed comparison prints, so a person
+copies it out of the replay's output rather than translating it. A field must name something inside
+the reading, and a field covers every difference at or under it: `["reading"]["images"]` covers
+`["reading"]["images"].length` and `["reading"]["images"][0]["sha256"]`, and never
+`["reading"]["imagesX"]`. The reading as a whole is refused as a field, because a declaration that
+forgives the whole reading is a document-level claim — the one thing this mechanism exists to
+prevent. The narrower the field, the tighter the pin: within a declared field any difference is
+forgiven, which is what naming the field means, so a difference that moves elsewhere on the
+document, into a field no declaration names, fails.
+
+A difference between two successful readings is the ordinary case, and the most valuable one is
+declarable the same way: a document the product reader answers as unreadable while the engine reads it
+differs in almost every field of the reading, so a declaration lists the fields the two answers differ
+in — the outcome, the reason one side states, the text, pictures, notes and report the other states,
+and both flags — and the reason says what the engine delivers. What a declaration may never forgive:
+
+- a difference in what the document is detected as — detection is compared beside the reading and is
+  an instrument question, not a reading gain;
+- a reading that produced no transcript, a record that does not hold the document, and a reader that
+  failed or timed out: those are failures of the instrument, and the verdict names them;
+- anything on another document, or in another field of the same one.
+
+The replay runs in the gate command's crate run and in `the_product_reader_answers_what_the_record_says`;
+both print every declared divergence with its reason and a bounded list of the field-level differences
+it forgave, with a count of those past the bound, under a `product reader:` header so its lines cannot
+be mistaken for the crate run's, and the summary states how many readings the record holds, how many
+were replayed, what agreed, what was declared, what failed and how many declarations are stale. A
+reading that agrees is counted, not printed, so the report is the divergences and nothing else.
+
+Re-recording and declaring are two deliberate acts, in that order: the record moves first, the replay
+then prints the field-level difference the change left, and a declaration forgives it. A declaration
+written before the record moves names the difference the old record had, so it is likely to be
+reported stale once the record is the engine's new answer.
+
+The replay runs in process, as the recorder does: its inputs are the corpus's own generated
+documents, and each reading is bounded by the harness's reading timeout on a thread of its own, so a
+reading that hangs is that reading's own verdict. What that leaves open is stated with the other
+in-process limits §"Supervision and the bounds".
+
+A declaration that no longer corresponds to a real difference is **stale**, and staleness fails the
+run as it does in the oracle's comparison. Three shapes are stale:
+
+- a declared field no longer differs — with every field, the two readings agree;
+- the record does not hold the document;
+- the document is one the corpus no longer reads, which is what keeps a gain from being dropped by
+  removing its document from the corpus.
+
+The summary counts stale declarations per document: one declaration with two fields that both stopped
+differing is one stale declaration, and each stale field is printed.
+
+A declaration is a statement about a difference, not a claim that the engine is better: a difference
+where the engine delivers less is declarable too, with a reason that says why, which is how a known
+loss stays named instead of being recorded away.
+
+The policy applies to the product-reader replay alone. The crate's own reading against the record and
+the no-op control compare with no declarations at all: a control that can be forgiven forgives
+nothing. `dev/declared.rs` holds the shape the file must have, the matching rule and the replay; the
+readings that agree with the product stay byte-identical, and the one that does not is the corpus
+document `page-dictionary-inline-beside-a-reference.pdf`, whose page tree states a page inline beside a
+reference: the product reader's text pass knows only the referenced page and draws it alone, while the
+engine draws both pages from the tree's own entries and notes that the text's numbering is not the
+tree's. That note is the mark `note_pages_unaligned`, which the reading ledger witnesses from this
+document because the corpus can now hold a shape the product reader answers differently.
 
 ## The canonical model
 
@@ -577,12 +669,15 @@ case must differ from the base file it is compared with, so a case whose constru
 fails rather than passes.
 
 A comparison that cannot decide whether two documents differ says so instead of passing
-(`Comparison::undecidable`), and a document the model cannot canonicalise is a failure ("cannot
+(`Comparison::undecided`), and a document the model cannot canonicalise is a failure ("cannot
 canonicalise an output"), never an empty value — an unreadable file must not read as a pass. The
 comparison itself can only fail to decide on a tree deeper than the walk bound it states; a document
 the model cannot read is the failure above, not a pass. Each model states what it refuses, and every
 bound that cuts a list short rather than refusing is stated there as a limit of comparison, with its
-test.
+test. The one bound that cuts the walk itself short is the difference cap: `compare` stops after it,
+so `Comparison::truncated` says the differences beyond it were never looked for. A reading a
+declaration could forgive is compared in full (`compare_all`) instead, so a declaration never covers
+a difference the walk did not reach.
 
 The model's own tests are in `dev/tests/ooxml_model.rs` and `dev/tests/pdf_canonical.rs`: unchanged
 documents compare equal, every field a table names is shown sensitive or shown ignored, and a
@@ -655,6 +750,12 @@ product prints around it is not the harness's business. A reason declared as a t
 third-party library's message as `{{variable}}`, so a different message inside the same engine words
 is the same reason.
 
+The aggregate line states the verdict counts, the readings, the stale entries and whether the
+identity matches. A crate run also states the product-reader replay's counts on a line of its own
+(§"Declared reading divergences"). The replay is a second comparison of the same record rather than a
+second set of cases, so its readings are counted apart from the crate reader's and its agreeing
+readings are not printed; a failure or a stale declaration anywhere fails the run with exit `1`.
+
 `dev/baseline/baseline.json` is recorded from the engine's own writer and reader and kept with
 their identity: one build digest over every Rust source in `document-engine/src`, its
 `vocabulary.json`, its font, the parts a created deck is captured from (`assets/pptx-create/`), the
@@ -677,7 +778,9 @@ every compared digest. A codec that cannot decide a compared byte — a hasher (
 `siphasher`) or a casting helper (`bytemuck`) — is not recorded, because a bump there cannot move a
 digest the comparison reads. A difference is therefore attributable to a build, not merely observed.
 The gate always prints both identities and states whether they match; a difference is a printed
-`note`, never a verdict failure, and passing means every verdict matches the baseline. The product
+`note`, never a verdict failure, and passing means every case verdict and every reading matches the
+baseline and the product-reader replay has no undeclared difference and no stale declaration. The
+product
 reader is still compiled from `dev/reference_sources/` and its own identity is still built from those
 copies, but the baseline records the engine, so a run asks whether the engine still behaves as it did
 last time rather than whether it is another implementation.
@@ -734,10 +837,10 @@ its own and not the parent's. The child writes its raw transcript to a directory
 a sweep considers — it is not named like one, so reclamation cannot take it before the parent reads
 it, and the directory and entry bounds do not count it — and the parent reads it back under a cap.
 
-The bounds are configuration with the defaults stated here, because a bound that cannot be set
-small cannot be tested. A test lowers one bound for one named case through `Supervision::override_for`,
-so the rest of the corpus runs under these defaults and only the target can be failed by the lowered
-limit.
+The supervisor's bounds are configuration with the defaults stated here, because a bound that cannot
+be set small cannot be tested. A test lowers one bound for one named case through
+`Supervision::override_for`, so the rest of the corpus runs under these defaults and only the target
+can be failed by the lowered limit.
 
 | Bound | Default | Enforced by |
 |---|---|---|
@@ -858,8 +961,9 @@ sweep may take one; a double-forked descendant escapes a parent-walk; a case chi
 own leaves its descendants reparented and unidentifiable, so a root whose owner died while its
 children still live is reclaimed once the grace has passed rather than waiting for them; a write
 through an already-existing memory mapping is not caught by `RLIMIT_FSIZE`, though extending the
-file is; and the recording mode and the parent's own corpus enumeration stay in process, unbounded
-in memory and on disk — the recorder is run deliberately and rarely, and is named here rather than
+file is; and the recording mode, the parent's own corpus enumeration and the product-reader replay
+stay in process, unbounded in memory and on disk — the recorder is run deliberately and rarely, and
+the replay's inputs are the corpus's own generated documents; all three are named here rather than
 implied to be covered.
 
 A leftover root is reclaimed only when it carries the harness's own `.document-gate-root` marker,
@@ -874,7 +978,8 @@ it always was. A platform without advisory locking cannot test a claim, so it ne
 at all rather than guess; a claim that cannot be opened, a marker that does not parse and a probe
 that cannot decide also leave the root for a later run. Each reclamation is reported on standard
 error once the root is gone, so a root that disappears leaves evidence of what took it. The sweep
-runs once, in the parent, at the start of a run, never in a child. The harness's own root and every
+runs in the parent at the start of each pass and again before the readings, never in a child. The
+harness's own root and every
 case's child root carry the owner's start time before the nonce, so the normaliser strips the root
 it is given and the child's and the parent's texts agree; `dev/tests/supervision.rs` compares an
 in-process and a supervised transcript for a path-bearing failure.
@@ -893,26 +998,29 @@ a transcript that parses is normalised against the case's root alone.
 
 The whole run is bounded by a budget of 3600 s, a backstop rather than a target: a pass measures a
 fraction of it, so reaching the budget means something is wrong — a case spending its full per-case
-bound over and over — not that the machine was busy. A spent budget cuts the run short: it prints no
-aggregate summary, reports the entries it did not reach as absent rather than failed, and exits 3,
-the same cut-short exit a signal produces. A case nobody ran is not a case that failed, and a case
-that is genuinely wrong or genuinely over its own bound still fails on its own verdict. The budget
-is checked between entries, so a run that reaches it overshoots by at most one case's own bound
-before it stops: it is a backstop on the run, not a hard ceiling on the case in flight, which its
-own bound decides. The recorder refuses a cut-short run, so a baseline can never be missing an entry
-nobody judged. Inside the budget each case has its own bound: the in-process path runs a writer
+bound over and over — not that the machine was busy. A crate run makes two passes, the engine's own
+and the product-reader replay's, and each is bounded by its own budget. A spent budget cuts the run
+short: it prints no aggregate summary, reports the entries it did not reach as absent rather than
+failed, and exits 3, the same cut-short exit a signal produces. A case nobody ran is not a case that
+failed, and a case that is genuinely wrong or over its own bound still fails on its own verdict. The
+budget is checked between entries, so a run that reaches it overshoots by at most one case's own
+bound before it stops: it is a backstop on the run, not a hard ceiling on the case in flight, which
+its own bound decides. The recorder refuses a cut-short run, so a baseline can never be missing an
+entry nobody judged. Inside the budget each case has its own bound: the in-process path runs a writer
 under a 120 s timeout and a reading under one too, and the supervised path gives a writer case 240 s
 (the engine's 120 s, fixture construction and canonicalisation) and a reading 330 s (the two bounded
-engine calls and the fixture and canonicalisation). An engine that hangs on every case or every document is cut short in bounded time
-rather than once per call. A case or reading that does not finish within its bound is that entry's
-own problem — a timeout recorded as its outcome — and the rest of the corpus still runs; the
-recorder refuses to bake such a run into the baseline, because a timeout measures the machine rather
-than the bytes. The in-process path — the recorder and the fake-engine tests — still abandons a
-timed-out writer thread, which may keep writing into that case's directory after the verdict is
-decided, and still has the product's two conversion permits held by an abandoned reading thread, so
-two hung readings there make every later reading time out (each still with its own verdict). The
-gate's supervised path has neither limit: each case is a process, and per-case reclamation bounds
-what is live. The recording mode is the one unbounded phase, in memory and on disk.
+engine calls and the fixture and canonicalisation). An engine that hangs on every case or every
+document is cut short in bounded time rather than once per call. A case or reading that does not
+finish within its bound is that entry's own problem — a timeout recorded as its outcome — and the
+rest of the corpus still runs; the recorder refuses to bake such a run into the baseline, because a
+timeout measures the machine rather than the bytes. The in-process path — the recorder, the
+fake-engine tests and the product-reader replay — still abandons a timed-out writer thread, which may
+keep writing into that case's directory after the verdict is decided, and an abandoned reading thread
+still holds one of the product's two conversion permits, so two hung readings there make every later
+reading time out (each still with its own verdict). The replay reads and never writes, so only the
+second hazard is its own. The gate's supervised path has neither limit: each case is a process, and
+per-case reclamation bounds what is live. The recorder and the product-reader replay are the two
+phases the supervisor does not bound, in memory and on disk.
 
 The writer engine runs with its case's own directory under its case root as its working directory —
 never a workspace. On Unix it leads a process group of its own, so anything it starts is killed with
@@ -938,10 +1046,11 @@ data-segment limits cannot be set to a useful value here — the process's virtu
 hundreds of gigabytes of shared cache and reservations — and the resident-set limit is an advisory
 hint, not a boundary.
 
-The harness's own tests hold at most two supervised runs in flight at once **per test binary**: each
-test that spawns the gate takes one of two permits from `dev/tests/common/mod.rs`, so the cap holds under
-any `cargo test` invocation — from `document-engine/` or from the workspace root — and an operator's
-`RUST_TEST_THREADS` is left alone. `cargo test` runs the test binaries one after another, so a suite
-run holds at most two; two concurrent `cargo test` invocations hold two each. The cap is in the tests
-because supervision multiplies process spawning and several tests spawn the whole gate, while the
-crate's own suite is not throttled.
+The harness's own tests hold at most two heavy runs in flight at once **per test binary**: each test
+that spawns the gate — and the replay test, which does not — takes one of two permits from
+`dev/tests/common/mod.rs`, so the cap holds under any `cargo test` invocation — from
+`document-engine/` or from the workspace root — and an operator's `RUST_TEST_THREADS` is left alone.
+`cargo test` runs the test binaries one after another, so a suite run holds at most two; two
+concurrent `cargo test` invocations hold two each. The cap is in the tests because supervision
+multiplies process spawning and several tests spawn the whole gate, while the crate's own suite is not
+throttled.

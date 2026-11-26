@@ -8,6 +8,7 @@ mod common;
 mod corpus_cases;
 mod corpus_documents;
 mod coverage;
+mod declared;
 mod docx_assets_identity;
 mod docx_create_entries;
 mod docx_create_parts;

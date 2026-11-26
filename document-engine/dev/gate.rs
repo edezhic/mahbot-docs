@@ -4,7 +4,10 @@
 //! transcript with a recorded baseline by a declared canonical model per format. The producing kit
 //! that the writer was once compared against has retired, so a green run now means "agrees with the
 //! record" rather than "agrees with another implementation": the gate detects change, and a
-//! behaviour change is accepted by re-recording the baseline and reviewing the difference.
+//! behaviour change is accepted by re-recording the baseline and reviewing the difference. The
+//! product-reader replay is the second comparison of the same record: the engine is held to reading
+//! as the product does, apart from the differences a declared reading divergence names
+//! ([`declared`]).
 //!
 //! This file is the test target's root, so it also carries the hidden modes: one supervised case
 //! (`child`), the harness's own helper engine (`helper_child`), the gate as a command (`cli`) and
@@ -51,6 +54,7 @@ pub mod codecs;
 pub mod contract;
 pub mod corpus;
 pub mod crate_identity;
+pub mod declared;
 pub mod docx_capture;
 pub mod engine;
 pub mod harness;

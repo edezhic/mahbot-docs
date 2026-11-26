@@ -11,7 +11,7 @@
 //! prose and never to what a document says.
 //!
 //! What an undecidable comparison and a document the model cannot canonicalise mean is the README's
-//! rule; [`Comparison::undecidable`] and [`canonicalize`] are where it is applied.
+//! rule; [`Comparison::undecided`] and [`canonicalize`] are where it is applied.
 
 pub mod ooxml;
 pub mod pdf;
@@ -57,12 +57,32 @@ pub struct Comparison {
     pub differences: Vec<Diff>,
     /// The places the model could not decide whether the two sides differ. Never a pass.
     pub undecidable: Vec<String>,
+    /// Whether the walk stopped at its difference cap.
+    stopped_early: bool,
 }
 
 impl Comparison {
+    /// A comparison the model could not make, with the reason: never a pass, and never truncated,
+    /// because nothing was walked.
+    #[must_use]
+    pub fn undecided(why: String) -> Self {
+        Self {
+            undecidable: vec![why],
+            ..Self::default()
+        }
+    }
+
     #[must_use]
     pub fn is_same(&self) -> bool {
         self.differences.is_empty() && self.undecidable.is_empty()
+    }
+
+    /// Whether the walk stopped at its difference cap. A comparison that stopped did not decide the
+    /// differences past it, so a caller that judges on the difference set cannot read what it did not
+    /// reach as agreement.
+    #[must_use]
+    pub fn truncated(&self) -> bool {
+        self.stopped_early
     }
 
     /// The comparison as report lines, bounded to `limit` differences.
@@ -84,14 +104,27 @@ impl Comparison {
     }
 }
 
-/// Compare two canonical values.
+/// Compare two canonical values, reporting at most [`MAX_DIFFERENCES`] differences.
 #[must_use]
 pub fn compare(expected: &Value, actual: &Value) -> Comparison {
+    compare_within(expected, actual, MAX_DIFFERENCES)
+}
+
+/// Compare two canonical values in full, every difference reported: a caller that judges on the
+/// difference set — the declared reading divergences — must be able to see a difference outside what
+/// it covers, however many there are before it.
+#[must_use]
+pub fn compare_all(expected: &Value, actual: &Value) -> Comparison {
+    compare_within(expected, actual, usize::MAX)
+}
+
+fn compare_within(expected: &Value, actual: &Value, cap: usize) -> Comparison {
     let mut comparison = Comparison::default();
-    walk(expected, actual, "", &mut comparison, 0);
+    walk(expected, actual, "", &mut comparison, 0, cap);
     comparison
 }
 
+/// The most differences [`compare`] reports, and the point past which it stops walking.
 const MAX_DIFFERENCES: usize = 40;
 const PREVIEW_CHARS: usize = 160;
 /// The deepest nesting the comparison descends into. The canonical tree nests two JSON levels per
@@ -101,8 +134,18 @@ const PREVIEW_CHARS: usize = 160;
 /// rather than walked, because a stack overflow is not a verdict.
 const MAX_DEPTH: usize = 2 * ooxml::MAX_XML_DEPTH + 16;
 
-fn walk(expected: &Value, actual: &Value, path: &str, out: &mut Comparison, depth: usize) {
-    if out.differences.len() >= MAX_DIFFERENCES {
+fn walk(
+    expected: &Value,
+    actual: &Value,
+    path: &str,
+    out: &mut Comparison,
+    depth: usize,
+    cap: usize,
+) {
+    if out.differences.len() >= cap {
+        // Entering with work left is what makes the comparison truncated: a walk that returns
+        // without passing here looked at everything.
+        out.stopped_early = true;
         return;
     }
     if depth > MAX_DEPTH {
@@ -117,7 +160,7 @@ fn walk(expected: &Value, actual: &Value, path: &str, out: &mut Comparison, dept
             for (key, value) in left {
                 let child = format!("{path}[{key:?}]");
                 match right.get(key) {
-                    Some(other) => walk(value, other, &child, out, depth + 1),
+                    Some(other) => walk(value, other, &child, out, depth + 1, cap),
                     None => out.differences.push(Diff {
                         path: child,
                         expected: preview(value),
@@ -144,7 +187,14 @@ fn walk(expected: &Value, actual: &Value, path: &str, out: &mut Comparison, dept
                 });
             }
             for (index, (value, other)) in left.iter().zip(right).enumerate() {
-                walk(value, other, &format!("{path}[{index}]"), out, depth + 1);
+                walk(
+                    value,
+                    other,
+                    &format!("{path}[{index}]"),
+                    out,
+                    depth + 1,
+                    cap,
+                );
             }
         }
         (left, right) if left == right => {}
@@ -181,6 +231,40 @@ mod tests {
             value = json!({ "children": [value] });
         }
         value
+    }
+
+    #[test]
+    fn a_comparison_that_reaches_the_difference_cap_says_it_did_not_decide_the_rest() {
+        // One difference more than the cap: the walk fills the cap and then stops with work left.
+        let left: Vec<usize> = (0..=MAX_DIFFERENCES).collect();
+        let right: Vec<usize> = left.iter().map(|value| value + 1).collect();
+        let comparison = compare(&json!(left), &json!(right));
+        assert_eq!(comparison.differences.len(), MAX_DIFFERENCES);
+        assert!(
+            comparison.truncated(),
+            "the walk stopped before it looked at the last difference"
+        );
+        // Exactly the cap, and nothing left to walk: the comparison decided every difference.
+        let left: Vec<usize> = (0..MAX_DIFFERENCES).collect();
+        let right: Vec<usize> = left.iter().map(|value| value + 1).collect();
+        let comparison = compare(&json!(left), &json!(right));
+        assert_eq!(comparison.differences.len(), MAX_DIFFERENCES);
+        assert!(
+            !comparison.truncated(),
+            "the walk looked at every difference"
+        );
+        assert!(!compare(&json!([1]), &json!([2])).truncated());
+    }
+
+    #[test]
+    fn a_comparison_in_full_reports_every_difference() {
+        // The cap is what a report is bounded to, not what the comparison can decide: a caller that
+        // judges on the difference set asks for all of them.
+        let left: Vec<usize> = (0..=MAX_DIFFERENCES).collect();
+        let right: Vec<usize> = left.iter().map(|value| value + 1).collect();
+        let comparison = compare_all(&json!(left), &json!(right));
+        assert_eq!(comparison.differences.len(), MAX_DIFFERENCES + 1);
+        assert!(!comparison.truncated());
     }
 
     #[test]

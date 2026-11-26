@@ -5,43 +5,13 @@
 //! [`Run::report`] the gate uses, so a transcript field the comparison stopped looking at fails
 //! here. The samples leave the refusal and unsupported fields empty, so no case alters those.
 
+use super::common;
 use crate::baseline::Baseline;
 use crate::engine::{EngineIdentity, Family, Key, Kind};
 use crate::harness::{CaseOutcome, Judgement, ReadingOutcome, Run};
 use crate::transcript::{CaseTranscript, ReadingTranscript, Status};
-use document_engine::reading::{ImageArtifact, Reading};
+use document_engine::reading::Reading;
 use std::collections::BTreeMap;
-
-/// One reading with every compared field populated: text, two pictures, two notes, two report
-/// lines, both flags and a detection.
-fn sample() -> ReadingTranscript {
-    ReadingTranscript {
-        document: "sample.pdf".to_string(),
-        reading: Reading::Text {
-            text: "Page 1:\nfirst page\nPage 2:\nsecond page".to_string(),
-            images: vec![
-                ImageArtifact {
-                    name: "page_1_img_1.jpg".to_string(),
-                    sha256: "a".repeat(64),
-                    len: 1_024,
-                },
-                ImageArtifact {
-                    name: "page_2.jpg".to_string(),
-                    sha256: "b".repeat(64),
-                    len: 2_048,
-                },
-            ],
-            notes: vec![
-                "page 2 has no text layer".to_string(),
-                "a second note".to_string(),
-            ],
-            unshown: vec!["annotations: 1".to_string(), "attachments: 1".to_string()],
-            all_page_text_lost: false,
-            page_text: true,
-        },
-        detection: Some(Kind::Pdf),
-    }
-}
 
 /// Compare one reading against the recorded baseline, exactly as the gate does, and answer its
 /// verdict.
@@ -51,7 +21,7 @@ fn sample() -> ReadingTranscript {
 fn compare(transcript: ReadingTranscript) -> crate::harness::ReadingVerdict {
     let mut baseline = Baseline::load(&Baseline::default_path())
         .expect("the baseline is recorded: run `DOCUMENT_ENGINE_RECORD=1 cargo test -p document-engine --test gate -- --ignored --exact record_baseline` deliberately");
-    let recorded = sample();
+    let recorded = common::reading_sample();
     baseline
         .readings
         .insert(recorded.document.clone(), recorded);
@@ -123,7 +93,7 @@ impl Alter {
 
 #[test]
 fn the_unaltered_reading_passes() {
-    let mut transcript = sample();
+    let mut transcript = common::reading_sample();
     Alter::None.apply(&mut transcript);
     let verdict = compare(transcript);
     assert!(verdict.passed, "{:?}", verdict.problems);
@@ -144,7 +114,7 @@ fn every_single_altered_field_fails_the_reading() {
         Alter::FlipAllTextLost,
         Alter::ChangeDetection,
     ] {
-        let mut transcript = sample();
+        let mut transcript = common::reading_sample();
         alter.apply(&mut transcript);
         let verdict = compare(transcript);
         assert!(
@@ -168,7 +138,7 @@ fn every_single_altered_field_fails_the_reading() {
 fn a_changed_detection_is_reported_on_its_own() {
     // A detection disagreement is named as such, not left to read as a difference somewhere inside
     // a reading that is otherwise identical.
-    let mut transcript = sample();
+    let mut transcript = common::reading_sample();
     Alter::ChangeDetection.apply(&mut transcript);
     let verdict = compare(transcript);
     assert_eq!(

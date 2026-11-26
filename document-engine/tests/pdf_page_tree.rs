@@ -3,16 +3,17 @@
 //! a raster — a tree that states a hostile page count, `/Kids` entries the file does not resolve or
 //! that are not dictionaries at all, and a picture defined on an ancestor node.
 //!
-//! The shapes here cannot be corpus cases. The reference's recursive page-tree walk overflows the
-//! stack on the first, and the reference reads the others differently — a twice-named page is
+//! Two documents this module reads are corpus readings. `inherited-image.pdf` is read the same by
+//! both sides. `page-dictionary-inline-beside-a-reference.pdf` is read differently: the product
+//! reader's text pass knows only the referenced page and draws it alone, while the engine draws both
+//! pages from the tree's own entries, so the corpus holds that one as a declared reading divergence.
+//! The other shapes are witnessed here alone, on a thread with the two mebibytes a product conversion
+//! runs on: the reference's recursive page-tree walk overflows the stack on the first, which is a
+//! reader failure no declaration forgives, and reads the others differently — a twice-named page is
 //! delivered twice, a page nested past the bound is parsed, a dangling entry is skipped, and a page
-//! it declines is numbered where the engine reports it — so no recorded reading could be compared
-//! with them. They are witnessed here instead, on a thread with the two mebibytes a product
-//! conversion runs on; the two public page-render answers they decide are witnessed beside them.
-//!
-//! The inherited picture is the one shape both sides read: `inherited-image.pdf` is a corpus
-//! reading, and its recorded picture digest is the byte-level witness. The test here is the
-//! crate's own, so `cargo test -p document-engine` alone still catches the picture being lost.
+//! it declines is numbered where the engine reports it. The two public page-render answers they
+//! decide are witnessed beside them, and each test here is the crate's own, so
+//! `cargo test -p document-engine` alone still catches a picture being lost.
 
 use document_engine::reading::{Reading, RenderError, read, render_page};
 use document_engine::test_support::{Document, documents};

@@ -13,8 +13,8 @@
 //! thread of its own under `WRITE_TIMEOUT`, and a reader under `READ_TIMEOUT`. An in-process
 //! writer cannot be interrupted: the abandoned thread may keep writing into that case's directory
 //! after the timeout. That is why the verdict is decided at the timeout and the run does not wait —
-//! the directory is per case, and a later case never reads it. The recording mode and the tests that
-//! drive fake engines use this path.
+//! the directory is per case, and a later case never reads it. The recording mode, the tests that
+//! drive fake engines and [`Harness::readings`] — the product-reader replay — use this path.
 //!
 //! [`Harness::supervise`] is the gate's path: one child process per case, with the harness's own
 //! per-case body inside it. It is the path that bounds memory and disk, on the platforms that can
@@ -25,6 +25,7 @@
 use crate::baseline::Baseline;
 use crate::canonical::{self, Comparison};
 use crate::corpus::{Case, Document, Expect, Reason};
+use crate::declared::DeclaredReadings;
 use crate::engine::{Coverage, EngineIdentity, Family, Key, Kind, Reader, Reading, Writer};
 use crate::shutdown::panic_message;
 use crate::supervisor::{self, ChildTarget, Supervision};
@@ -175,20 +176,10 @@ impl Harness {
 
     /// Run every writer case and every reading.
     pub fn run(&self) -> Run {
-        // The sweep runs once, in the parent, before any case: a child would sweep its siblings.
-        supervisor::sweep(&self.root, &supervisor::Bounds::default());
-        let cases = crate::corpus::writer_cases();
-        let documents = crate::corpus::reader_documents();
         let started = Instant::now();
-        let (outcomes, cut_short) =
-            self.collect(&cases, started, |case| match self.classify(case) {
-                Some(outcome) => outcome,
-                None => self.run_case(case),
-            });
+        let (outcomes, cut_short) = self.write_every_case(started);
         let (readings, cut_short) = if cut_short.is_none() {
-            self.collect(&documents, started, |document| {
-                self.read_document(*document)
-            })
+            self.readings_since(started)
         } else {
             (Vec::new(), cut_short)
         };
@@ -199,6 +190,31 @@ impl Harness {
             readings,
             cut_short,
         }
+    }
+
+    /// Run every writer case, and no reading.
+    fn write_every_case(&self, started: Instant) -> (Vec<CaseOutcome>, Option<CutShort>) {
+        // The sweep runs once, in the parent, before any case: a child would sweep its siblings.
+        supervisor::sweep(&self.root, &supervisor::Bounds::default());
+        let cases = crate::corpus::writer_cases();
+        self.collect(&cases, started, |case| match self.classify(case) {
+            Some(outcome) => outcome,
+            None => self.run_case(case),
+        })
+    }
+
+    /// Run every reading, and no writer case: what the product-reader replay compares. The replay is
+    /// a pass of its own, so its budget starts here.
+    pub fn readings(&self) -> (Vec<ReadingOutcome>, Option<CutShort>) {
+        self.readings_since(Instant::now())
+    }
+
+    fn readings_since(&self, started: Instant) -> (Vec<ReadingOutcome>, Option<CutShort>) {
+        supervisor::sweep(&self.root, &supervisor::Bounds::default());
+        let documents = crate::corpus::reader_documents();
+        self.collect(&documents, started, |document| {
+            self.read_document(*document)
+        })
     }
 
     /// A case's outcome when it is decided without running the engine: a corpus defect or a case the
@@ -338,7 +354,10 @@ impl Harness {
                             break;
                         }
                     };
-                let verdict = compare_reading(&outcome, baseline);
+                // The engine's own comparison forgives nothing: a declared reading divergence
+                // belongs to the product-reader replay alone, and a control that can be forgiven
+                // forgives nothing.
+                let verdict = compare_reading(&outcome, baseline, None);
                 if supervision.collect {
                     reading_outcomes.push(outcome);
                 }
@@ -1519,11 +1538,61 @@ impl Verdict {
     }
 }
 
+/// The differences one verdict prints: enough to write a declaration from or to check one against,
+/// not a dump of a gain larger than that.
+const REPORTED_DIFFERENCES: usize = 12;
+
 /// The gate's answer for one reading.
 pub struct ReadingVerdict {
     pub document: String,
     pub passed: bool,
+    /// The reason of the declaration that made this reading pass, when one did.
+    pub declared: Option<String>,
+    /// The declared fields that forgave at least one difference, whether or not the reading passed.
+    /// Staleness is decided from these: a declared field that forgave nothing no longer names a
+    /// difference.
+    pub forgiven: Vec<String>,
+    /// The differences a declaration forgave, as the report prints them.
+    pub differences: Vec<String>,
     pub problems: Vec<String>,
+}
+
+impl ReadingVerdict {
+    /// The lines this verdict prints: `DECLARED reading … — reason` with the differences a
+    /// declaration forgave, `PASS reading …` unless `quiet`, or `FAIL reading …` with its problems.
+    #[must_use]
+    pub fn lines(&self, quiet: bool) -> Vec<String> {
+        if let Some(reason) = &self.declared {
+            let mut lines = vec![format!("DECLARED reading {} — {reason}", self.document)];
+            lines.extend(
+                self.differences
+                    .iter()
+                    .take(REPORTED_DIFFERENCES)
+                    .map(|difference| format!("     {difference}")),
+            );
+            if self.differences.len() > REPORTED_DIFFERENCES {
+                lines.push(format!(
+                    "     … and {} more difference(s)",
+                    self.differences.len() - REPORTED_DIFFERENCES
+                ));
+            }
+            return lines;
+        }
+        if self.passed {
+            return if quiet {
+                Vec::new()
+            } else {
+                vec![format!("PASS reading {}", self.document)]
+            };
+        }
+        let mut lines = vec![format!("FAIL reading {}", self.document)];
+        lines.extend(
+            self.problems
+                .iter()
+                .map(|problem| format!("     {problem}")),
+        );
+        lines
+    }
 }
 
 /// One (operation, family) pair's cases, as one run judged them.
@@ -1666,7 +1735,9 @@ impl Run {
         }
         let mut readings = Vec::with_capacity(self.readings.len());
         for reading in &self.readings {
-            readings.push(compare_reading(reading, baseline));
+            // The collected report is the engine's own comparison; the product-reader replay is
+            // [`crate::declared::replay`], the one comparison a declaration is applied to.
+            readings.push(compare_reading(reading, baseline, None));
         }
         // Staleness is a fact about the corpus, not about what this engine can judge: every case
         // the run reached produced an outcome, judged or not, so an entry the corpus still holds is
@@ -1735,7 +1806,7 @@ fn judge(outcome: &CaseOutcome, case: Option<&Case>, baseline: &Baseline) -> Ver
                     compare_transcript(recorded, transcript, "the case produced no transcript");
                 problems.extend(
                     comparison
-                        .lines(12)
+                        .lines(REPORTED_DIFFERENCES)
                         .into_iter()
                         .map(|line| format!("baseline {line}")),
                 );
@@ -1757,19 +1828,13 @@ fn compare_transcript<T: serde::Serialize>(
     missing: &str,
 ) -> Comparison {
     let Some(actual) = actual else {
-        return undecidable(missing);
+        return Comparison::undecided(missing.to_string());
     };
     match (serde_json::to_value(recorded), serde_json::to_value(actual)) {
         (Ok(expected), Ok(actual)) => canonical::compare(&expected, &actual),
-        _ => undecidable("the transcripts could not be serialised for comparison"),
-    }
-}
-
-/// A comparison the harness could not make. Never a pass.
-fn undecidable(why: &str) -> Comparison {
-    Comparison {
-        differences: Vec::new(),
-        undecidable: vec![why.to_string()],
+        _ => Comparison::undecided(
+            "the transcripts could not be serialised for comparison".to_string(),
+        ),
     }
 }
 
@@ -1844,11 +1909,21 @@ fn reason_problem(expect: &Reason, reason: &str) -> Option<String> {
     }
 }
 
-fn compare_reading(outcome: &ReadingOutcome, baseline: &Baseline) -> ReadingVerdict {
+/// Judge one reading against the record. A difference the comparison finds is a problem unless
+/// `declared` names its field on this document; a detection difference, a missing transcript, a
+/// missing record and a reader failure are never forgiven.
+pub(crate) fn compare_reading(
+    outcome: &ReadingOutcome,
+    baseline: &Baseline,
+    declared: Option<&DeclaredReadings>,
+) -> ReadingVerdict {
     let mut problems = Vec::new();
+    let mut forgiven = BTreeSet::new();
+    let mut forgiven_differences = Vec::new();
     if let Some(problem) = &outcome.problem {
         problems.push(problem.clone());
     }
+    let declaration = declared.and_then(|declared| declared.for_document(&outcome.document));
     match baseline.readings.get(&outcome.document) {
         None => problems.push("no baseline reading: record the baseline deliberately".to_string()),
         Some(recorded) => {
@@ -1856,16 +1931,40 @@ fn compare_reading(outcome: &ReadingOutcome, baseline: &Baseline) -> ReadingVerd
             // add "cannot decide: no transcript" beneath that reason.
             if outcome.problem.is_none() || outcome.transcript.is_some() {
                 // The reading body and the detection are compared separately, so a disagreement
-                // about what the document is reads as such rather than as a diff somewhere inside
-                // a reading.
+                // about what the document is reads as such rather than as a diff somewhere inside a
+                // reading. A declared document is compared in full, so a gain larger than the
+                // difference cap is still declarable and a difference past the cap is still found;
+                // only a reading with no declaration can stop at the cap.
                 let comparison = compare_reading_body(
                     recorded,
                     outcome.transcript.as_ref(),
                     "the reading produced no transcript",
+                    declaration.is_some(),
                 );
+                let mut undeclared = Comparison::default();
+                let truncated = comparison.truncated();
+                for difference in comparison.differences {
+                    let covering = declaration
+                        .map(|declaration| declaration.fields_covering(&difference.path))
+                        .unwrap_or_default();
+                    if covering.is_empty() {
+                        undeclared.differences.push(difference);
+                    } else {
+                        forgiven.extend(covering);
+                        forgiven_differences.push(format!("baseline {}", difference.line()));
+                    }
+                }
+                undeclared.undecidable = comparison.undecidable;
+                if truncated {
+                    undeclared.undecidable.push(
+                        "the comparison stopped at its difference cap, so the differences past it \
+                         were not decided"
+                            .to_string(),
+                    );
+                }
                 problems.extend(
-                    comparison
-                        .lines(12)
+                    undeclared
+                        .lines(REPORTED_DIFFERENCES)
                         .into_iter()
                         .map(|line| format!("baseline {line}")),
                 );
@@ -1887,22 +1986,32 @@ fn compare_reading(outcome: &ReadingOutcome, baseline: &Baseline) -> ReadingVerd
             }
         }
     }
+    let passed = problems.is_empty();
+    let declared = if passed && !forgiven.is_empty() {
+        declaration.map(|declaration| declaration.reason.clone())
+    } else {
+        None
+    };
     ReadingVerdict {
         document: outcome.document.clone(),
-        passed: problems.is_empty(),
+        passed,
+        declared,
+        forgiven: forgiven.into_iter().map(str::to_string).collect(),
+        differences: forgiven_differences,
         problems,
     }
 }
 
 /// Compare two reading transcripts without their detection, which [`compare_reading`] reports on
-/// its own.
+/// its own. `complete` compares in full rather than stopping at the difference cap.
 fn compare_reading_body(
     recorded: &ReadingTranscript,
     actual: Option<&ReadingTranscript>,
     missing: &str,
+    complete: bool,
 ) -> Comparison {
     let Some(actual) = actual else {
-        return undecidable(missing);
+        return Comparison::undecided(missing.to_string());
     };
     match (serde_json::to_value(recorded), serde_json::to_value(actual)) {
         (Ok(mut expected), Ok(mut got)) => {
@@ -1911,9 +2020,15 @@ fn compare_reading_body(
                     object.remove("detection");
                 }
             }
-            canonical::compare(&expected, &got)
+            if complete {
+                canonical::compare_all(&expected, &got)
+            } else {
+                canonical::compare(&expected, &got)
+            }
         }
-        _ => undecidable("the transcripts could not be serialised for comparison"),
+        _ => Comparison::undecided(
+            "the transcripts could not be serialised for comparison".to_string(),
+        ),
     }
 }
 

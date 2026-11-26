@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "readings": [
+    {
+      "document": "page-dictionary-inline-beside-a-reference.pdf",
+      "fields": [
+        "[\"reading\"][\"images\"]",
+        "[\"reading\"][\"notes\"]"
+      ],
+      "reason": "The page tree states one page inline beside a reference. The product reader's text pass knows only the referenced page, so it draws that page alone and says nothing about the other; the engine draws both pages from the tree's own entries and notes that the text's numbering is not the tree's."
+    }
+  ]
+}

@@ -2,9 +2,43 @@
 
 use crate::engine::{Writer, WriterOutcome};
 use crate::harness::{ReadingVerdict, Verdict, VerdictSink};
+use crate::transcript::ReadingTranscript;
+use document_engine::reading::{ImageArtifact, Kind, Reading};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex};
+
+/// One reading with every compared field populated: text, two pictures, two notes, two report lines,
+/// both flags and a detection. The comparison's teeth and the declared reading divergences are
+/// tested on it, so neither can stop looking at a field the other still compares.
+pub fn reading_sample() -> ReadingTranscript {
+    ReadingTranscript {
+        document: "sample.pdf".to_string(),
+        reading: Reading::Text {
+            text: "Page 1:\nfirst page\nPage 2:\nsecond page".to_string(),
+            images: vec![
+                ImageArtifact {
+                    name: "page_1_img_1.jpg".to_string(),
+                    sha256: "a".repeat(64),
+                    len: 1_024,
+                },
+                ImageArtifact {
+                    name: "page_2.jpg".to_string(),
+                    sha256: "b".repeat(64),
+                    len: 2_048,
+                },
+            ],
+            notes: vec![
+                "page 2 has no text layer".to_string(),
+                "a second note".to_string(),
+            ],
+            unshown: vec!["annotations: 1".to_string(), "attachments: 1".to_string()],
+            all_page_text_lost: false,
+            page_text: true,
+        },
+        detection: Some(Kind::Pdf),
+    }
+}
 
 /// Every string in a JSON value, at any depth.
 pub fn strings(value: &Value, out: &mut Vec<String>) {

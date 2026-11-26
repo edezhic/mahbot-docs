@@ -9,6 +9,7 @@
 use super::common;
 
 use crate::baseline::Baseline;
+use crate::declared::DeclaredReadings;
 use crate::engine::{
     Coverage, EngineIdentity, Family, Key, Kind, Reader, Reading, Writer, WriterOutcome,
 };
@@ -476,56 +477,41 @@ fn the_product_reader_answers_what_the_record_says() {
     // The product reader is the product's own reader sources, copied byte for byte and compiled
     // here. The recorded readings were recorded from the engine's own reader, and this is the live
     // check that the product's reader still answers the same way — the one check that the engine
-    // reads as the product does. A difference is a change in one of the two, reported with the
-    // product reader's identity, rather than a silent drift. The writer is the no-op control —
-    // this test is about readings, and running the corpus's cases again would prove nothing new.
+    // reads as the product does, apart from the differences a declared reading divergence names. A
+    // difference is a change in one of the two, reported with the product reader's identity and the
+    // field it lies in, rather than a silent drift; a declaration the readings no longer bear out
+    // is stale and fails too.
     let _permit = common::permit();
     let baseline = Baseline::load(&Baseline::default_path())
         .expect("the baseline is recorded before the gate is used");
-    let harness = Harness::new_with(|_| {
-        Ok((
-            Box::new(NoOpWriter) as Box<dyn Writer>,
-            Box::new(ReferenceReader) as Box<dyn Reader>,
-        ))
-    })
-    .expect("a harness root");
-    let run = harness.run();
-    assert!(run.cut_short.is_none(), "the run completed");
-    let mut problems = Vec::new();
-    for outcome in &run.readings {
-        let Some(transcript) = &outcome.transcript else {
-            problems.push(format!(
-                "reading {}: {}",
-                outcome.document,
-                outcome.problem.clone().unwrap_or_default()
-            ));
-            continue;
-        };
-        match baseline.readings.get(&outcome.document) {
-            None => problems.push(format!(
-                "reading {}: the record does not hold it",
-                outcome.document
-            )),
-            Some(recorded) if recorded != transcript => problems.push(format!(
-                "reading {}: the product's reader answers differently",
-                outcome.document
-            )),
-            Some(_) => {}
-        }
-    }
+    let declared = DeclaredReadings::beside(&Baseline::default_path())
+        .expect("the committed declared reading divergences are readable");
+    let replay = crate::declared::replay(&baseline, &declared).expect("a harness root");
+    assert!(replay.cut_short.is_none(), "the replay completed");
     assert_eq!(
-        run.readings.len(),
+        replay.verdicts.len(),
         baseline.readings.len(),
         "every recorded reading is read again"
     );
     assert!(
-        problems.is_empty(),
-        "{} of {} readings differ from the record; the product's reader is {}:\n{}",
-        problems.len(),
+        replay.passed(),
+        "{} of {} readings differ from the record; the product's reader is {}:\n{}\n{}",
+        replay.failed(),
         baseline.readings.len(),
         identity_line(&ReferenceReader.identity()),
-        problems.join("\n")
+        replay.lines().join("\n"),
+        replay.summary()
     );
+    assert_eq!(
+        replay.declared(),
+        declared.readings.len(),
+        "every declaration is a divergence the replay meets: {:?}",
+        replay.stale
+    );
+    for line in replay.lines() {
+        crate::modes::out(&line);
+    }
+    crate::modes::out(&replay.summary());
 }
 
 #[test]
@@ -1296,9 +1282,27 @@ fn a_writer_that_implements_nothing_judges_nothing() {
             verdict.key
         );
     }
+    // The readings are not this run's subject: the parent compares the product reader's own reading
+    // against the record, with no declarations. The one difference is the declared reading divergence
+    // the replay forgives, and no other reading may differ.
+    let declared = DeclaredReadings::beside(&Baseline::default_path())
+        .expect("the committed declared reading divergences are readable");
+    assert_eq!(
+        report.readings.len(),
+        baseline.readings.len(),
+        "every recorded reading was read"
+    );
+    let differing: Vec<&str> = report
+        .readings
+        .iter()
+        .filter(|reading| !reading.passed)
+        .map(|reading| reading.document.as_str())
+        .collect();
     assert!(
-        report.readings.iter().all(|reading| reading.passed),
-        "the readings are the product reader's, so only the empty writer is at issue"
+        differing
+            .iter()
+            .all(|document| declared.for_document(document).is_some()),
+        "only a declared reading divergence differs: {differing:?}"
     );
     assert!(
         !report.passed(),

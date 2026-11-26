@@ -94,8 +94,9 @@ pub fn crate_identity() -> &'static Identity {
 /// `reference_sources/`, the minimal host beside them, the vocabulary they print from, and the
 /// adapter that answers detection.
 ///
-/// It is provenance for the one live check that the engine reads as the product does; the baseline
-/// records the engine's own identity for both roles, so this one is printed rather than recorded.
+/// It is provenance for the one live check that the engine reads as the product does, apart from the
+/// differences a declared reading divergence names; the baseline records the engine's own identity
+/// for both roles, so this one is printed rather than recorded.
 #[allow(
     dead_code,
     reason = "the oracle target names only the engine's identity; the gate names both"

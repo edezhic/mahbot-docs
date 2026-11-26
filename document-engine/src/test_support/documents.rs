@@ -1879,6 +1879,7 @@ pub fn reader_documents() -> Vec<Document> {
         BROKEN_DECK_PPTX,
         MANY_IMAGES_PDF,
         INHERITED_IMAGE_PDF,
+        PAGE_DICTIONARY_INLINE_BESIDE_A_REFERENCE_PDF,
         LONG_TEXT_PDF,
         LARGE_IMAGE_PDF,
         OVER_FIFTY_MEGABYTES_PDF,

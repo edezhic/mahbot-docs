@@ -625,6 +625,12 @@ pub const WITNESSES: &[Witness] = &[
         witness: "the text of page 1 could not be read in full (1 of 1 pages)",
     },
     Witness {
+        mark: "note_pages_unaligned",
+        document: "page-dictionary-inline-beside-a-reference.pdf",
+        witness: "the page tree and the text reader name different pages, so page text and page \
+                  pictures may be numbered differently",
+    },
+    Witness {
         mark: "note_pdf_annotations_truncated",
         document: "every-annotation.pdf",
         witness: "only the first 1000 annotations were read",
@@ -1226,16 +1232,12 @@ pub const UNPRODUCIBLE: &[Unproducible] = &[
         marks: &["engine_failed"],
     },
     Unproducible {
-        reason: "a page the tree names is delivered or reported, and the shapes that make it reported — a page named twice, a dictionary nested past the reader's bound, a `/Kids` entry the file does not resolve, a subtree stating a hostile `/Count` — are ones the reference reads differently, so no synthesized corpus document can print it; the failed raster it also covers is an environmental write failure a synthesized document cannot force either.",
+        reason: "a page the tree names is delivered or reported, and the shapes that make it reported — a page named twice, a dictionary nested past the reader's bound, a `/Kids` entry the file does not resolve, a subtree stating a hostile `/Count` — are ones the product reader answers differently, so a corpus document that printed it would be a declared reading divergence, and none is recorded; the failed raster it also covers is an environmental write failure a synthesized document cannot force either.",
         marks: &["unshown_page"],
     },
     Unproducible {
-        reason: "the reading prints it for a document whose pages the structure reader resolved none of and whose text and marks are empty. That shape is a page tree the reference either overflows on or reads as pages, so it cannot be a corpus case; `tests/pdf_page_tree.rs` witnesses it on a conversion's two-mebibyte stack.",
+        reason: "the reading prints it for a document whose pages the structure reader resolved none of and whose text and marks are empty. That shape is a page tree the product reader either overflows on — which no declaration forgives — or reads as pages, and no recorded reading is one of them; `tests/pdf_page_tree.rs` witnesses it on a conversion's two-mebibyte stack.",
         marks: &["reason_pages_could_not_be_read"],
-    },
-    Unproducible {
-        reason: "the reading prints it when the text pass's page and the page tree's name different pages at the same position — a page tree the two parsers number differently, a page declined between two the text pass reads. Every corpus document pairs position for position, and the shapes that do not are damaged page trees the reference reads by position; `tests/pdf_page_tree.rs` covers the pairing rule.",
-        marks: &["note_pages_unaligned"],
     },
     Unproducible {
         reason: "the reading's page-render refusals answer a caller that renders a page; the corpus records readings, and no recorded reading renders one",

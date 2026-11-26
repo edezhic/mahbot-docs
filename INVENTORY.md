@@ -12,14 +12,19 @@ was not modified.
 
 ## The words this folder uses
 
-Three words recur, and they are defined here rather than in each document that uses them:
+Four words recur, and they are defined here rather than in each document that uses them:
 
 - **the kit** — the JavaScript document kit that produced the writer's output until it retired. It is
   gone from this folder; a sentence that names it says what it did or what its numbers were, never
   that it is alive or that a build drives it.
 - **the product reader** — the product's own reader sources, copied byte for byte under
   `document-engine/dev/reference_sources/` and compiled into the gate, so the engine is still held to
-  reading as the product does.
+  reading as the product does, apart from the differences a **declared reading divergence** names.
+- **a declared reading divergence** — a difference between the record and the product reader's answer
+  that a person has declared deliberate, named by its document, the fields it lies in and its reason
+  in `document-engine/dev/baseline/declared-readings.json`. The product-reader replay forgives
+  exactly those fields and fails every other difference, and a declaration the readings no longer
+  bear out is stale and fails the run. It is data beside the record, never a code change.
 - **the reference** — the behaviour the engine is held to, wherever it is read from: the product's
   document code under `src/` and the retired kit's writer, whose answers the engine reproduces and
   which `document-engine/PARSER.md` and `document-engine/VOCABULARY.md` state; and, for the oracle,
@@ -115,15 +120,19 @@ compile them and the crate's isolated copy leaves them out; they are never binar
 never reaches them, and their dependencies are dev-dependencies.
 
 The **gate** judges the engine against what was recorded last time. It runs a corpus generated in
-code — 850 writer cases and 92 readings — in a child process of its own per entry, compares each
-transcript with `dev/baseline/baseline.json` by a declared canonical model per format, and checks each
-case's declared effect. It used to judge the engine against the JavaScript kit; the kit retired, so
-"correct" now means "agrees with the record", and a behaviour change is accepted by re-recording and
-reviewing the difference rather than by agreeing with another implementation. That is a deliberate
-trade: the gate detects *change*, not divergence from an outside implementation, and a green gate is
-not a statement of correctness. The product's own reader sources stay as byte-for-byte copies under
-`dev/reference_sources/`, compiled there, and one test replays the recorded readings through them, so
-the engine is still held to reading as the product does.
+code — 850 writer cases and 93 readings — in a child process of its own per entry, the product-reader
+replay beside it being the one pass that runs in process, compares each transcript with
+`dev/baseline/baseline.json` by a declared canonical model per format, and checks each case's declared
+effect. It used to judge the engine against the JavaScript kit; the kit retired, so "correct" now
+means "agrees with the record", and a behaviour change is accepted by re-recording and reviewing the
+difference rather than by agreeing with another implementation. That is a deliberate trade: the gate
+detects *change*, not divergence from an outside implementation, and a green gate is not a statement
+of correctness. The product's own reader sources stay as byte-for-byte copies under
+`dev/reference_sources/`, compiled there, and the gate command's crate run and one test replay the
+recorded readings through them, so the engine is still held to reading as the product does, apart
+from the differences `dev/baseline/declared-readings.json` declares — each with its document, the
+fields it lies in and its reason — and a declaration the readings no longer bear out fails the run
+as stale.
 
 A case that writes without limit, hangs or exhausts memory costs that case: `dev/supervisor.rs` bounds
 each child (memory footprint where the platform reports it, file size, directory entries, wall time)

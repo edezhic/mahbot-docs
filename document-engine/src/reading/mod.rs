@@ -41,7 +41,9 @@
 //!
 //! # Divergences from the reference
 //!
-//! The reading half answers these shapes differently on purpose; no corpus reading is one of them.
+//! The reading half answers these shapes differently on purpose. A corpus reading that is one of
+//! them is a declared reading divergence: the gate names the field that differs and the reason, so
+//! the gain stays visible instead of being recorded away as a difference nobody looked at.
 //!
 //! - **A page the page tree names twice.** The reference lists it twice: its reading carries the
 //!   page's text twice and, for a page without usable text, two rasters of it. The structure reader
