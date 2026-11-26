@@ -358,7 +358,27 @@ What it cannot see, and why that is recorded rather than fixed:
 crate's files — no product sources, no development-only target, no workspace — so "the crate stands
 alone" is a build, not a textual claim. The copy drops the delimited block of development-only
 targets from the manifest, because their sources are not copied: that is the one stated exception to
-"the crate builds and tests with nothing but its own files". `tests/vocabulary.rs` adds the textual
-half: no code path, manifest or `include!` path names a product source, the development-only tree or
-a runtime, while prose may name them; `tests/common` names the forbidden references once.
+"the crate builds and tests with nothing but its own files", and it is why a path stated there is
+out of the check's scope — it never participates in the copy's build.
+
+Before building the copy, the test asks one question of the manifest the copy is built with: does
+every path it names land inside the copy? A `path` key counts, whatever table states it — a
+dependency of any kind, a patch, a replacement, a workspace dependency, a target — as does a
+`workspace` key naming a workspace root, a `build` script, and the manifest's own workspace
+`members`, `exclude` and `default-members`. A path is resolved rather than matched as text, so it
+does not matter whether it is absolute or relative, how it is quoted, or that it leaves and comes
+back; a path that lands outside fails before the build starts, naming the key, the path as written
+and where it landed. The same statement is applied to the `include!`, `include_str!` and
+`include_bytes!` paths the copied sources spell. `tests/common` holds it once, as `reaching_outside`.
+
+What that does not cover is stated beside it: a build script that reads a file, a
+`.cargo/config.toml` above the copy, an `include!` whose argument is not a string literal, and
+`cargo package`'s metadata — `include`, `exclude`, `readme`, `license-file` — which names files for
+packaging rather than for a build. The claim is that the paths this manifest names land inside the
+copy, not that the crate cannot reach outside.
+
+`tests/vocabulary.rs` keeps the other half over the crate's own `src/`: no code path names a product
+source, the development-only tree or a runtime, while prose may name them; `tests/common` names the
+forbidden references once, and `tests/standalone.rs` applies the same scan to the copy's `src/` and
+`tests/`.
 

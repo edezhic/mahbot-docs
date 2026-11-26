@@ -271,7 +271,9 @@ unreached with its reason.
 
 The document builders live in the crate's `test_support`, the one home shared by the crate's tests
 and the gate. `tests/standalone.rs` builds and tests the crate in a temporary copy with no
-product sources present. `document-engine/VOCABULARY.md` states the vocabulary's boundary, who
+product sources present, after resolving every path the copy's manifest names — and every
+`include!` path its sources spell — and failing on one that lands outside the copy.
+`document-engine/VOCABULARY.md` states the vocabulary's boundary, who
 enforces each bound, and the restatement scan's reviewed lists and blind spots, and
 `document-engine/PARSER.md` enumerates the retired kit's PDF library's parser tolerance, one shape
 per entry, with what each side does about it.

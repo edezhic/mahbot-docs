@@ -2419,38 +2419,20 @@ fn the_stand_alone_scan_catches_a_planted_reference() {
 
 #[test]
 fn the_crate_stands_alone() {
-    let manifest = std::fs::read_to_string(root().join("Cargo.toml")).expect("the manifest");
-    // The development-only target block names `dev/`, which the crate's ordinary sources and tests
-    // must never reach into; the block is the one place the name belongs, so it is removed before
-    // the scan.
-    let manifest = common::without_development_only(&manifest);
-    for forbidden in common::FORBIDDEN_REFERENCES {
-        assert!(
-            !manifest.contains(forbidden),
-            "the manifest must not name {forbidden:?}"
-        );
-    }
     let crate_root = root().canonicalize().expect("the crate root");
-    let mut found = Vec::new();
-    for path in common::rust_files(&root().join("src")) {
-        let text = std::fs::read_to_string(&path).expect("a source file");
-        for finding in common::forbidden_references(&text, common::Scan::Source) {
-            found.push(format!("{}: {finding}", path.display()));
-        }
-        for include in common::include_paths(&text) {
-            let target = path.parent().expect("a file has a parent").join(&include);
-            let target = target.canonicalize().unwrap_or(target);
-            assert!(
-                target.starts_with(&crate_root),
-                "{}: `include!` path {include:?} leaves the crate",
-                path.display()
-            );
-        }
-    }
+    let (found, named) = common::scan_sources(&crate_root.join("src"), common::Scan::Source);
     assert!(
         found.is_empty(),
         "the crate must not reference product sources or a runtime:\n{}",
         found.join("\n")
+    );
+    // The manifest half of this claim is `tests/standalone.rs`'s: it resolves the paths the copy's
+    // manifest names, which is a statement about the copy rather than about this tree.
+    let outside = common::reaching_outside(&crate_root, &named);
+    assert!(
+        outside.is_empty(),
+        "the crate must not reach outside itself:\n{}",
+        outside.join("\n")
     );
 }
 

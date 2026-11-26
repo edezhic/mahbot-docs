@@ -1,11 +1,11 @@
-//! Helpers shared by the crate's integration tests: the crate root, a source walk, and the
-//! references to the product that the crate must not contain.
+//! Helpers shared by the crate's integration tests: the crate root, a source walk, the references
+//! to the product that the crate must not contain, and where the paths a crate names land.
 //!
 //! This module is not a test target: Cargo compiles only the top-level `.rs` files under `tests/`,
 //! so `tests/common/mod.rs` is reached through `mod common;` from a test that needs it.
 
 use regex::Regex;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// The crate's own root.
 pub fn root() -> &'static Path {
@@ -34,40 +34,17 @@ pub fn rust_files(directory: &Path) -> Vec<PathBuf> {
 
 /// Strings that name the product's own sources, the development-only tree, or a runtime the engine
 /// must not reach for.
+///
+/// A path out of the crate is not a spelling: it is wherever a manifest or an `include!` leads,
+/// which [`reaching_outside`] answers by resolving it.
 pub const FORBIDDEN_REFERENCES: &[&str] = &[
     "../../src/",
     "product-touchpoints",
     "assets/docgen",
     "dev/",
     "mahbot::",
-    "path = \"..",
     "std::process::Command",
 ];
-
-/// The manifest's development-only block — the gate's and the oracle's dependencies and their test
-/// targets — removed.
-///
-/// The isolated copy has no `dev/` tree, so a `[[test]]` target pointing into it would declare a
-/// target whose path does not exist, and the gate's and oracle's dependencies would be resolved and
-/// built for no target. The two marker lines bound the block exactly, so the copy keeps the crate's
-/// own dependencies and targets and states nothing about the development-only ones.
-pub fn without_development_only(manifest: &str) -> String {
-    const START: &str = "# --- development-only";
-    const END: &str = "# --- end development-only";
-    let mut kept = String::new();
-    let mut skipping = false;
-    for line in manifest.lines() {
-        if line.starts_with(START) {
-            skipping = true;
-        } else if line.starts_with(END) {
-            skipping = false;
-        } else if !skipping {
-            kept.push_str(line);
-            kept.push('\n');
-        }
-    }
-    kept
-}
 
 /// Which kind of file a reference scan reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,12 +97,85 @@ pub fn forbidden_references(text: &str, scan: Scan) -> Vec<String> {
     found
 }
 
-/// The paths an `include_str!` or `include_bytes!` in `text` names, in source order.
-pub fn include_paths(text: &str) -> Vec<String> {
-    let include =
-        Regex::new(r#"include_(?:str|bytes)!\s*\(\s*"([^"]*)""#).expect("the include pattern");
+/// One path a manifest or a source names: what names it, the directory it is resolved against, and
+/// the path as written.
+#[derive(Debug)]
+pub struct Named {
+    /// A manifest key such as `patch.crates-io.serde.path`, or `<file>: include_str!`.
+    pub key: String,
+    /// The directory `written` is relative to: the manifest's or the including file's.
+    pub base: PathBuf,
+    pub written: String,
+}
+
+/// Where `written` lands when resolved against `base`: `.` is dropped, `..` removes the component
+/// before it, and a path that exists is resolved through the filesystem as well, so a link or
+/// another spelling of the same directory lands where it really is.
+///
+/// A `..` left unresolved would make [`Path::starts_with`] answer "inside" for a path that leaves,
+/// because it compares components rather than resolving them.
+pub fn landing(base: &Path, written: &str) -> PathBuf {
+    let mut landed = PathBuf::new();
+    for component in base.join(written).components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                landed.pop();
+            }
+            other => landed.push(other),
+        }
+    }
+    landed.canonicalize().unwrap_or(landed)
+}
+
+/// The paths an `include!`, `include_str!` or `include_bytes!` in `text` names — a plain or a raw
+/// string — in source order, resolved against the including file's directory.
+pub fn include_paths(file: &Path, text: &str) -> Vec<Named> {
+    let include = Regex::new(r#"(include(?:_str|_bytes)?)!\s*\(\s*r?#*"([^"]*)""#)
+        .expect("the include pattern");
+    let base = file.parent().expect("a file has a parent");
     include
         .captures_iter(text)
-        .map(|captures| captures[1].to_string())
+        .map(|captures| Named {
+            key: format!("{}: {}!", file.display(), &captures[1]),
+            base: base.to_path_buf(),
+            written: captures[2].to_string(),
+        })
+        .collect()
+}
+
+/// The references to the product in every `.rs` file under `directory`, as `file: line: name`
+/// findings, and the paths those files `include!`.
+pub fn scan_sources(directory: &Path, scan: Scan) -> (Vec<String>, Vec<Named>) {
+    let mut found = Vec::new();
+    let mut named = Vec::new();
+    for path in rust_files(directory) {
+        let text = std::fs::read_to_string(&path).expect("a source file");
+        for finding in forbidden_references(&text, scan) {
+            found.push(format!("{}: {finding}", path.display()));
+        }
+        named.extend(include_paths(&path, &text));
+    }
+    (found, named)
+}
+
+/// The paths among `named` that land outside `root`, one line each: the key that names the path,
+/// the path as written, and where it landed. `root` is resolved the same way, so a caller may pass
+/// it as it was given.
+pub fn reaching_outside(root: &Path, named: &[Named]) -> Vec<String> {
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    named
+        .iter()
+        .filter_map(|path| {
+            let landed = landing(&path.base, &path.written);
+            (!landed.starts_with(&root)).then(|| {
+                format!(
+                    "{}: {:?} lands at {}",
+                    path.key,
+                    path.written,
+                    landed.display()
+                )
+            })
+        })
         .collect()
 }

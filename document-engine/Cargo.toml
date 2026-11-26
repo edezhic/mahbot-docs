@@ -71,6 +71,10 @@ zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
 document-engine = { path = ".", features = ["test-support"] }
 # Tests write into a fresh directory that removes itself, even when an assertion fails.
 tempfile = "3"
+# The isolated-copy test reads the copied manifest as TOML rather than scanning its text: a path
+# dependency is a `path` key whichever table states it and however it is quoted, and a list of
+# spellings is what missed the shapes that check exists to catch.
+toml = "0.8"
 
 # --- development-only dependencies and targets: not part of an ordinary build, and excluded from
 # --- the isolated copy
